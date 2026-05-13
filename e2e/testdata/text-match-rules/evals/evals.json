@@ -1,0 +1,17 @@
+{
+  "skill_name": "text-match-rules",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Review the following Go code and find potential bugs:\n\nfunc GetUserName(user *User) string {\n    return user.Profile.Name\n}",
+      "expected_output": "Identification of null pointer dereference bug",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Review the following Go code:\n\nfunc Sum(numbers []int) int {\n    sum := 0\n    for i := 1; i <= len(numbers); i++ {\n        sum += numbers[i]\n    }\n    return sum\n}",
+      "expected_output": "Identification of boundary check issue (off-by-one error)",
+      "files": []
+    }
+  ]
+}

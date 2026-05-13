@@ -1,0 +1,20 @@
+id: exit-code-mismatch
+title: Exit code mismatch — expect failure scenario
+description: >
+  The agent returns exit_code=1 (not the expected 0);
+  expect.exit_code check fails and the Judge must not be called.
+tag: functional_test
+input:
+  prompt: "Calculate the result of 100 / 0"
+constraints:
+  timeout_seconds: 30
+  max_turns: 1
+expect:
+  exit_code: 0
+  files_exist: ["output.txt"]
+judge:
+  type: rule_based
+  success:
+    - output_contains:
+        all: ["calculation result"]
+    - exit_code: 0

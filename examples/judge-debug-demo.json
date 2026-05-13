@@ -1,0 +1,27 @@
+{
+  "case_id": "demo-code-review",
+  "final_message": "Found a null pointer bug at line 42 — suggest adding a nil check: if p == nil { return }",
+  "exit_code": 0,
+  "turns_executed": 2,
+  "turns_total": 2,
+  "transcript": [
+    {"role": "user", "content": "Please review the process function in main.go", "turn": 1},
+    {"role": "tool_call", "turn": 1, "tool_call": {"id": "call_001", "name": "read_file", "arguments": {"path": "main.go"}}},
+    {"role": "tool_result", "turn": 1, "tool_result": {"call_id": "call_001", "status": "success", "content": "func process(p *User) { fmt.Println(p.Name) }"}},
+    {"role": "assistant", "content": "Found a null pointer bug at line 42 — suggest adding a nil check: if p == nil { return }", "turn": 1}
+  ],
+  "expect": {
+    "must_contain": ["bug"],
+    "exit_code": 0
+  },
+  "judge": {
+    "type": "rule_based",
+    "success": [
+      {"output_contains": {"all": ["null", "bug"], "not": ["LGTM"]}},
+      {"tool_called": {"name": "read_file"}}
+    ],
+    "failure": [
+      {"output_contains": {"any": ["LGTM", "no issues", "looks good"]}}
+    ]
+  }
+}

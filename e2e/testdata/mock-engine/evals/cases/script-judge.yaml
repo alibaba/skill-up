@@ -1,0 +1,10 @@
+id: script-judge
+title: Script judge should evaluate using custom script
+
+input:
+  prompt: |
+    Find the null pointer bug.
+
+judge:
+  type: script
+  script_path: evals/fixtures/scripts/check-null.sh

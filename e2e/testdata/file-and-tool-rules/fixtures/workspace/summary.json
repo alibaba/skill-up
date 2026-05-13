@@ -1,0 +1,11 @@
+{
+  "project_name": "sample-project",
+  "total_files": 2,
+  "languages": ["go"],
+  "has_tests": false,
+  "has_ci": false,
+  "files": [
+    {"path": "src/main.go", "lines": 15},
+    {"path": "src/handler.go", "lines": 22}
+  ]
+}

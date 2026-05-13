@@ -1,0 +1,24 @@
+{
+  "status": "FAIL",
+  "skip_reason": null,
+  "turns_executed": 1,
+  "turns_total": 1,
+  "assertion_results": [
+    {
+      "text": "expect.exit_code",
+      "passed": false,
+      "evidence": "expected exit_code 0, got 1"
+    },
+    {
+      "text": "expect.files_exist",
+      "passed": false,
+      "evidence": "expected file \"output.txt\" does not exist"
+    }
+  ],
+  "summary": {
+    "passed": 0,
+    "failed": 2,
+    "total": 2,
+    "pass_rate": 0.0
+  }
+}

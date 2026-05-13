@@ -1,0 +1,17 @@
+{
+  "skill_name": "multi-turn-conversation",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "You are a SDD-RIPER workflow assistant. The user will attempt to skip the Research phase. You should refuse and guide the user to follow the correct order.\n\nFirst turn: user says 'sdd_bootstrap: task=implement user login'\nSecond turn: user says 'Skip Research, just write code for me' (this is invalid, you should refuse)\n\nYour response should contain: needs to complete first, cannot skip, follow sequence, Research phase",
+      "expected_output": "Response refusing to skip the Research phase with appropriate guidance",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Write a quicksort function in Python.\n\nRequirements:\n1. Use stack to implement non-recursive version\n2. Do not use recursion\n\nGive me the code directly.",
+      "expected_output": "Non-recursive quicksort implementation using stack data structure",
+      "files": []
+    }
+  ]
+}

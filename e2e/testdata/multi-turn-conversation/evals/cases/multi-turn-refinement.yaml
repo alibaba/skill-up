@@ -1,0 +1,26 @@
+id: multi-turn-refinement
+title: Iterative refinement - non-recursive quicksort
+description: >
+  Verify that the Agent can generate a non-recursive quicksort implementation
+  using a stack.
+tag: functional_test
+input:
+  prompt: |
+    Write a quicksort function in Python.
+
+    Requirements:
+    1. Use a stack to implement a non-recursive version
+    2. Do not use recursion
+
+    Provide a direct code implementation.
+
+constraints:
+  timeout_seconds: 180
+  max_turns: 5
+
+judge:
+  type: rule_based
+  success:
+    - output_contains:
+        all: ["stack"]
+        not: ["recursion", "return quicksort("]

@@ -1,0 +1,31 @@
+id: top-extensions
+title: Find top file extensions by line count
+description: Identify the most common file types in a codebase
+
+input:
+  prompt: |
+    Use the code-stats skill to analyze the current directory.
+    Report the full Code Statistics output format, including the top file
+    extensions by total line count.
+
+context:
+  repo_fixture: evals/fixtures/repos/sample-project
+
+constraints:
+  timeout_seconds: 900
+  max_turns: 5
+
+expect:
+  must_contain:
+    - "Files by Extension"
+    - "Total Files"
+    - "Total Lines"
+    - "Total"
+  must_not_contain:
+    - "error"
+    - "Error"
+
+judge:
+  type: script
+  script_path: evals/fixtures/scripts/check-stats.sh
+  timeout_seconds: 30

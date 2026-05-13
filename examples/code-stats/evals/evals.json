@@ -1,0 +1,39 @@
+{
+  "skill_name": "code-stats",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Analyze the current directory using the code-stats requirements. Report the statistics in the full Code Statistics format with Summary, Files by Extension, Top File Extensions, and Largest Files sections.",
+      "expected_output": "A markdown table showing files by extension with line counts, and summary totals",
+      "files": [],
+      "expectations": [
+        "Output contains 'Files by Extension' section",
+        "Output contains a markdown table with extension counts",
+        "Output contains 'Total Files' count greater than 0",
+        "Output contains 'Total Lines' count greater than 0"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Use the code-stats skill to analyze the current directory. Report the full Code Statistics output format, including the top file extensions by total line count.",
+      "expected_output": "A code statistics report for the current workspace with top file extensions by total line count",
+      "files": [],
+      "expectations": [
+        "Output contains the full Code Statistics format with Summary and Files by Extension sections",
+        "Output shows line counts for each extension",
+        "Output identifies the top file extensions by total line count"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Run code-stats to analyze the current directory. Include Summary, Files by Extension, Top 5 File Extensions by Line Count, and Largest Files sections.",
+      "expected_output": "Code statistics for the current workspace with extension breakdown",
+      "files": [],
+      "expectations": [
+        "Output follows the exact format with Summary and Files by Extension sections",
+        "Contains file extension counts",
+        "Markdown table format is used"
+      ]
+    }
+  ]
+}

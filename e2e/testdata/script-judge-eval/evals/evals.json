@@ -1,0 +1,11 @@
+{
+  "skill_name": "script-judge-eval",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Please convert the input.csv file in the working directory to JSON format. Output to output.json. The CSV first row is field names, each row of data converts to a JSON object, final output is a JSON array.",
+      "expected_output": "JSON array output in output.json file",
+      "files": ["fixtures/workspace/input.csv"]
+    }
+  ]
+}

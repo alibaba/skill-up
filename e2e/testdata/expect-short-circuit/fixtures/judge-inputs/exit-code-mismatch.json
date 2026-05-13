@@ -1,0 +1,32 @@
+{
+  "case_id": "exit-code-mismatch",
+  "transcript": [
+    {
+      "role": "user",
+      "content": "Calculate the result of 100 / 0",
+      "turn": 1
+    },
+    {
+      "role": "assistant",
+      "content": "Division by zero is an undefined mathematical operation and cannot be computed.",
+      "turn": 1
+    }
+  ],
+  "final_message": "Division by zero is an undefined mathematical operation and cannot be computed.",
+  "exit_code": 1,
+  "workspace_path": "__WORKSPACE__",
+  "workspace_diff": "",
+  "generated_files": [],
+  "turns_executed": 1,
+  "turns_total": 1,
+  "expect": {
+    "exit_code": 0,
+    "files_exist": ["output.txt"]
+  },
+  "judge": {
+    "type": "rule_based",
+    "success": [
+      {"exit_code": 0}
+    ]
+  }
+}

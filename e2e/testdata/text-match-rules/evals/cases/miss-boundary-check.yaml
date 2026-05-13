@@ -1,0 +1,49 @@
+id: miss-boundary-check
+title: Missed boundary condition check
+description: >
+  Agent reviews a code snippet but does not mention null or bug-related content
+  in the output, causing the output_contains.all rule to fail → FAIL.
+tag: functional_test
+input:
+  prompt: |
+    Please review the following Go code:
+
+    ```go
+    func Sum(nums []int) int {
+        total := 0
+        for _, n := range nums {
+            total += n
+        }
+        return total
+    }
+    ```
+
+    What issues does this code have?
+context:
+  files:
+    src/math.go: |
+      package math
+
+      func Sum(nums []int) int {
+          total := 0
+          for _, n := range nums {
+              total += n
+          }
+          return total
+      }
+constraints:
+  timeout_seconds: 60
+  max_turns: 3
+expect:
+  exit_code: 0
+judge:
+  type: rule_based
+  success:
+    - output_contains:
+        all: ["null", "bug"]
+    - output_contains:
+        any: ["severe", "critical", "high-risk"]
+    - exit_code: 0
+  failure:
+    - output_contains:
+        not: ["I don't know", "unable to analyze", "cannot analyze"]

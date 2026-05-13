@@ -1,0 +1,28 @@
+{
+  "status": "FAIL",
+  "turns_executed": 1,
+  "turns_total": 1,
+  "assertion_results": [
+    {
+      "text": "output_contains.all: \"null\"",
+      "passed": false,
+      "evidence": "output does not contain required keyword \"null\""
+    },
+    {
+      "text": "output_contains.any: [severe critical high-risk]",
+      "passed": false,
+      "evidence": "output does not contain any of [severe critical high-risk]"
+    },
+    {
+      "text": "exit_code: 0",
+      "passed": true,
+      "evidence": "exit_code is 0 as expected"
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "failed": 2,
+    "total": 3,
+    "pass_rate": 0.3333333333333333
+  }
+}

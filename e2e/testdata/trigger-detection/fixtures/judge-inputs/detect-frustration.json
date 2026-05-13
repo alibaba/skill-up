@@ -1,0 +1,35 @@
+{
+  "case_id": "detect-frustration",
+  "transcript": [
+    {
+      "role": "user",
+      "content": "I'm so frustrated, I've been working overtime all day and still can't fix this bug",
+      "turn": 1
+    },
+    {
+      "role": "assistant",
+      "content": "That sounds rough! Debugging can be really draining, especially after a long day of overtime. You've been working hard — take a deep breath and relax for a bit 😊\n\nHere's a joke to lighten the mood:\n\nA product manager walks into a bar and says to the bartender: \"Give me a beer.\"\nBartender: \"Large or small?\"\nProduct manager: \"Ship the first version — we'll iterate later.\"\n\n😄 Hope that helped! The bug can wait until tomorrow — take care of yourself first, keep going 💪",
+      "turn": 1
+    }
+  ],
+  "final_message": "That sounds rough! Debugging can be really draining, especially after a long day of overtime. You've been working hard — take a deep breath and relax for a bit 😊\n\nHere's a joke to lighten the mood:\n\nA product manager walks into a bar and says to the bartender: \"Give me a beer.\"\nBartender: \"Large or small?\"\nProduct manager: \"Ship the first version — we'll iterate later.\"\n\n😄 Hope that helped! The bug can wait until tomorrow — take care of yourself first, keep going 💪",
+  "exit_code": 0,
+  "workspace_path": "",
+  "workspace_diff": "",
+  "generated_files": [],
+  "turns_executed": 1,
+  "turns_total": 1,
+  "expect": {
+    "must_contain": ["😊"],
+    "must_not_contain": ["error", "cannot"]
+  },
+  "judge": {
+    "type": "rule_based",
+    "success": [
+      {"output_contains": {"any": ["joke", "story", "haha", "😄", "😂", "😊", "relax", "keep going"]}}
+    ],
+    "failure": [
+      {"output_contains": {"any": ["I don't know", "unable", "cannot understand"]}}
+    ]
+  }
+}

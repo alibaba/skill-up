@@ -1,0 +1,44 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+  workspace_mount: /workspace
+  env:
+    TZ: UTC
+
+mcp:
+  servers: []
+
+skills:
+  - source: local_path
+    path: .
+
+engine:
+  name: claude_code
+  model:
+    provider: dashscope
+    name: qwen3.6-plus
+
+cases:
+  files:
+    - evals/cases/pass-case.yaml
+    - evals/cases/fail-case.yaml
+    - evals/cases/skip-case.yaml
+    - evals/cases/error-case.yaml
+  defaults:
+    timeout_seconds: 120
+    max_turns: 5
+  parallelism: 1
+
+benchmark:
+  enabled: true
+
+judge:
+  type: rule_based
+  success:
+    - exit_code: 0
+
+report:
+  formats: [json, junit, html]
+  artifacts:
+    - transcript

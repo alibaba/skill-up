@@ -1,0 +1,283 @@
+# CLI Reference
+
+skill-up provides the following commands, covering the full evaluation lifecycle: validate → run → list cases → generate reports → import legacy formats.
+
+---
+
+## skill-up run
+
+Run evaluation cases and produce reports.
+
+```bash
+skill-up run [path] [flags]
+```
+
+### Argument
+
+| Argument | Description                                                           |
+| :------: | :-------------------------------------------------------------------: |
+| `path`   | Path to `eval.yaml`. Defaults to `evals/eval.yaml` in the current dir |
+
+### Flags
+
+| Flag                   | Default                       | Description                                                                                                                                                |
+| :--------------------: | :---------------------------: | :--------------------------------------------------------------------------------------------------------------------------------------------------------: |
+| `--auto`               | `false`                       | Auto-detect the `evals/` directory; can directly consume an Anthropic `evals.json`                                                                          |
+| `--include-case-name`  | —                             | Run only matching cases (glob; can be repeated)                                                                                                            |
+| `--exclude-case-name`  | —                             | Exclude matching cases (glob; can be repeated)                                                                                                             |
+| `--format`             | —                             | Extra report formats: `junit` / `html` (repeatable). `result.json` is always written; `--format junit` produces `report.xml`, `--format html` produces `report.html`; `--format json` is a no-op |
+| `--output-dir`         | Same dir as `eval.yaml`        | Output directory for reports and artifacts                                                                                                                  |
+| `--iteration`          | `1`                           | Total run count. Each iteration writes to `iteration-1/` … `iteration-N/`                                                                                  |
+| `--engine`             | From config                   | Override engine name                                                                                                                                       |
+| `--model`              | From config                   | Override model (format: `provider/name`)                                                                                                                   |
+| `--parallelism`        | From config                   | Override `cases.parallelism`. Allowed range: 1–256                                                                                                          |
+| `--api-key`            | —                             | Pass an API key (higher precedence than env vars)                                                                                                          |
+| `-v, --verbose`        | `0`                           | Increase log verbosity. Default `info`; `-v` / `--verbose` / `--verbose=true` → `debug`; `-vv` / `--verbose=2` → `trace`; `--verbose=false` disables extra detail |
+
+### Examples
+
+```bash
+# Run all cases
+skill-up run ./evals/eval.yaml
+
+# Run a subset
+skill-up run ./evals/eval.yaml --include-case-name "basic-*"
+
+# Exclude cases
+skill-up run ./evals/eval.yaml --exclude-case-name "*-old" --exclude-case-name "*-deprecated"
+
+# Override engine and model
+skill-up run ./evals/eval.yaml --engine codex --model openai/gpt-4
+
+# Temporarily override case parallelism
+skill-up run ./evals/eval.yaml --parallelism 4
+
+# Multiple report formats
+skill-up run ./evals/eval.yaml --format json --format html --format junit
+
+# Three iterations, one folder per run
+skill-up run ./evals/eval.yaml --iteration 3
+
+# Auto-detect mode (consumes Anthropic evals.json directly)
+skill-up run --auto
+skill-up run --auto --engine codex
+skill-up run ./my-skill/ --auto
+```
+
+### Exit codes
+
+| Exit code | Meaning                       |
+| :-------: | :---------------------------: |
+| `0`       | All cases passed              |
+| `1`       | At least one case failed/errored |
+
+> Use the exit code in CI to determine whether the evaluation succeeded.
+
+### OTLP trace export
+
+Telemetry is disabled by default. After standard OpenTelemetry env vars are set, `skill-up run` exports run traces over OTLP and decorates verbose slog logs with `trace_id` / `span_id`:
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+export OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+export OTEL_METRICS_EXPORTER=otlp
+export OTEL_RESOURCE_ATTRIBUTES=deployment.environment=local,service.namespace=skill-up
+skill-up run ./evals/eval.yaml -v
+```
+
+You can also use trace-specific overrides like `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL`. Currently `grpc` and `http/protobuf` are supported.
+
+`OTEL_METRICS_EXPORTER=otlp` enables low-cardinality metrics (counters and durations for run/case/runtime exec). `OTEL_METRICS_EXPORTER=console` is also available for local debugging. `OTEL_RESOURCE_ATTRIBUTES` is forwarded as resource attributes. Set `OTEL_METRICS_EXPORTER=none` to explicitly disable metrics.
+
+---
+
+## skill-up validate
+
+Validate the eval config files. Run this before `run` to catch issues early.
+
+```bash
+skill-up validate [path to eval.yaml]
+```
+
+### Examples
+
+```bash
+skill-up validate
+skill-up validate ./evals/eval.yaml
+```
+
+On success:
+
+```text
+✓ eval.yaml is valid (loaded 3 case(s))
+```
+
+The validator checks that:
+
+- `eval.yaml` and every referenced case file exist and parse correctly
+- All required fields are present
+- Field values are within the allowed range
+
+---
+
+## skill-up list-cases
+
+List every case referenced by an eval config — handy for quickly inspecting your suite.
+
+```bash
+skill-up list-cases [path to eval.yaml]
+```
+
+### Examples
+
+```bash
+skill-up list-cases
+skill-up list-cases ./evals/eval.yaml
+```
+
+Sample output:
+
+```text
+ID                    Title                           Tag              Prompt
+basic-success         Agent should find null bug      functional_test  Review the current diff and report ...
+edge-case-empty       Handle empty input gracefully   functional_test  Review an empty repository with no ...
+regression-001        Fix: no longer misreports       functional_test  Review the payment processor code ...
+```
+
+---
+
+## skill-up report
+
+Regenerate reports from an existing result file without re-running the evaluation.
+
+```bash
+skill-up report <path to result.json> [flags]
+```
+
+### Flags
+
+| Flag           | Default                       | Description                                                       |
+| :------------: | :---------------------------: | :---------------------------------------------------------------: |
+| `--format`     | `json`                        | Report format: `json` / `junit` / `html` (repeatable)              |
+| `--output-dir` | Same dir as `result.json`      | Output directory; created if missing                                |
+
+### Examples
+
+```bash
+# Generate an HTML report from existing results
+skill-up report result.json --format html
+
+# Multiple formats at once
+skill-up report result.json --format json --format junit --format html
+
+# Pin the output directory
+skill-up report result.json --format html --output-dir ./reports
+```
+
+### Report formats
+
+| Format  | File           | Use case                                                          |
+| :-----: | :------------: | :---------------------------------------------------------------: |
+| `json`  | `report.json`  | Machine-readable structured data; consumable by downstream tools   |
+| `junit` | `report.xml`   | JUnit XML; parseable by CI systems (Jenkins, GitHub Actions, …)    |
+| `html`  | `report.html`  | Human-readable visualization; open in a browser                    |
+
+---
+
+## skill-up import
+
+One-shot conversion of an Anthropic `evals.json` into skill-up's native YAML format.
+
+```bash
+skill-up import <path to evals.json> [flags]
+```
+
+### Flags
+
+| Flag       | Default                       | Description       |
+| :--------: | :---------------------------: | :---------------: |
+| `--output` | Same dir as `evals.json`       | Output directory  |
+
+### Examples
+
+```bash
+# Convert in place
+skill-up import ./evals/evals.json
+
+# Custom output directory
+skill-up import ./evals/evals.json --output ./new-evals
+```
+
+The import produces:
+
+- `eval.yaml` — entrypoint config (with sensible defaults; review before running)
+- `cases/*.yaml` — one case file per `evals.json` entry
+
+> **`import` vs `--auto`:** `import` is a one-time format conversion — afterwards you maintain YAML files. `run --auto` consumes `evals.json` at runtime without producing intermediate files. See [Migrating from Anthropic](./migration).
+
+---
+
+## Output layout
+
+After a run, the output directory looks like:
+
+```text
+<skill-name>-workspace/
+  iteration-1/                    # First iteration
+    benchmark.json                # Aggregated stats
+    <case-id>/
+      with_skill/                 # Run with the Skill installed
+        outputs/                  # Files generated by the Agent
+        grading.json              # Grading result
+      without_skill/              # Baseline (only when benchmark.enabled=true)
+        outputs/
+        grading.json
+```
+
+### grading.json
+
+Per-case grading result (Anthropic-compatible):
+
+```json
+{
+  "expectations": [
+    {
+      "text": "Output contains the keyword `null`",
+      "passed": true,
+      "evidence": "final_message contains 'null pointer at line 42'"
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "failed": 0,
+    "total": 1,
+    "pass_rate": 1.0
+  }
+}
+```
+
+> **Note:** the `grading.json` under the workspace uses the Anthropic-compatible shape — only `expectations` and `summary` at the top level. The full evaluation status (`status`, `turns_executed`, `turns_total`, `assertion_results`) lives under `case_results[].grading` inside `result.json`.
+
+The `grading` object inside `result.json` carries the full status:
+
+- **PASS** — all assertions passed
+- **FAIL** — at least one assertion failed
+- **ERROR** — execution exception (timeout, engine crash, etc.)
+
+### benchmark.json
+
+Aggregated statistics across all cases:
+
+```json
+{
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": { "mean": 0.83 },
+      "time_seconds": { "mean": 45.0 },
+      "tokens": { "mean": 3800 }
+    },
+    "without_skill": null,
+    "delta": null
+  }
+}
+```

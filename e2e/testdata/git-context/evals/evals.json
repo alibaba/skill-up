@@ -1,0 +1,17 @@
+{
+  "skill_name": "git-context",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Run git status --short and show the output",
+      "expected_output": "Git status output showing repository state",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Review the following code:\n\npackage main\ntype User struct {\n    Name string\n}\nfunc GetName(u *User) string {\n    return u.Name\n\nIdentify any bugs and explain them.",
+      "expected_output": "Identification of nil pointer dereference bug",
+      "files": []
+    }
+  ]
+}

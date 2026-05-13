@@ -1,0 +1,32 @@
+id: current-directory-format
+title: Verify code-stats report format for current directory
+description: Verify that code-stats produces the full report format for the current workspace
+
+input:
+  prompt: |
+    Use the code-stats requirements to analyze the current directory.
+    Run the needed local read-only commands directly; do not ask for interactive
+    permission or human approval.
+    Include Summary, Files by Extension, Top 5 File Extensions by Line Count,
+    and Largest Files sections.
+
+context:
+  repo_fixture: evals/fixtures/repos/sample-project
+
+constraints:
+  timeout_seconds: 900
+  max_turns: 5
+
+expect:
+  must_contain:
+    - "Summary"
+    - "Files by Extension"
+    - "Total"
+  must_not_contain:
+    - "error"
+    - "Error"
+
+judge:
+  type: script
+  script_path: evals/fixtures/scripts/check-stats.sh
+  timeout_seconds: 30

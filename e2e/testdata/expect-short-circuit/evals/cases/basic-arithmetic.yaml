@@ -1,0 +1,22 @@
+id: basic-arithmetic
+title: Basic arithmetic — expect failure scenario
+description: >
+  The agent output is missing the "calculation result" keyword, causing expect.must_contain to fail.
+  The output also contains the forbidden word "error" from must_not_contain.
+  The expect layer should return FAIL directly; the Judge must not be called.
+tag: functional_test
+input:
+  prompt: "Help me calculate 15 + 27"
+constraints:
+  timeout_seconds: 30
+  max_turns: 1
+expect:
+  must_contain: ["calculation result"]
+  must_not_contain: ["error"]
+  exit_code: 0
+judge:
+  type: rule_based
+  success:
+    - output_contains:
+        all: ["calculation result"]
+    - exit_code: 0

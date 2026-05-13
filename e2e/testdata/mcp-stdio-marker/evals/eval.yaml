@@ -1,0 +1,104 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+
+mcp:
+  servers:
+    - name: marker
+      mode: real
+      transport: stdio
+      command: node
+      args:
+        - -e
+        - |
+          const marker = "skill-up-mcp-fixture-marker";
+          let buffer = Buffer.alloc(0);
+
+          function send(id, result, framed) {
+            const payload = Buffer.from(JSON.stringify({ jsonrpc: "2.0", id, result }));
+            if (framed) {
+              process.stdout.write(`Content-Type: application/json\r\nContent-Length: ${payload.length}\r\n\r\n`);
+              process.stdout.write(payload);
+            } else {
+              process.stdout.write(payload.toString("utf8") + "\n");
+            }
+          }
+
+          function handle(msg, framed) {
+            if (!msg || msg.id === undefined || msg.id === null) return;
+            if (msg.method === "initialize") {
+              send(msg.id, {
+                protocolVersion: "2024-11-05",
+                capabilities: { tools: {} },
+                serverInfo: { name: "skill-up-marker", version: "1.0.0" },
+              }, framed);
+            } else if (msg.method === "tools/list") {
+              send(msg.id, {
+                tools: [{
+                  name: "echo_marker",
+                  description: "Return the hidden skill-up MCP marker.",
+                  inputSchema: { type: "object", properties: {}, additionalProperties: false },
+                }],
+              }, framed);
+            } else if (msg.method === "tools/call") {
+              send(msg.id, { content: [{ type: "text", text: marker }] }, framed);
+            } else {
+              send(msg.id, {}, framed);
+            }
+          }
+
+          function drain() {
+            while (buffer.length > 0) {
+              if (buffer[0] === 0x7b) {
+                const end = buffer.indexOf(0x0a);
+                if (end < 0) return;
+                const line = buffer.slice(0, end).toString("utf8").trim();
+                buffer = buffer.slice(end + 1);
+                if (line) handle(JSON.parse(line), false);
+                continue;
+              }
+
+              let sep = buffer.indexOf("\r\n\r\n");
+              let sepLen = 4;
+              if (sep < 0) {
+                sep = buffer.indexOf("\n\n");
+                sepLen = 2;
+              }
+              if (sep < 0) return;
+
+              const headers = buffer.slice(0, sep).toString("utf8").split(/\r?\n/);
+              const lengthHeader = headers.find((line) => line.toLowerCase().startsWith("content-length:"));
+              const length = lengthHeader ? Number(lengthHeader.split(":")[1].trim()) : 0;
+              if (!length || buffer.length < sep + sepLen + length) return;
+              const body = buffer.slice(sep + sepLen, sep + sepLen + length).toString("utf8");
+              buffer = buffer.slice(sep + sepLen + length);
+              handle(JSON.parse(body), true);
+            }
+          }
+
+          process.stdin.on("data", (chunk) => {
+            buffer = Buffer.concat([buffer, chunk]);
+            drain();
+          });
+
+skills: []
+
+engine:
+  name: claude_code
+  model:
+    provider: dashscope
+    name: qwen3.6-plus
+
+cases:
+  files:
+    - evals/cases/smoke.yaml
+  defaults:
+    timeout_seconds: 180
+    max_turns: 1
+  parallelism: 1
+
+report:
+  formats: [json]
+  artifacts:
+    - transcript

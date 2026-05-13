@@ -1,0 +1,11 @@
+{
+  "skill_name": "file-and-tool-rules",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Please help organize this project. Analyze the directory structure and generate a project report.\nRequirements:\n1. Use read_file to read source files in src/\n2. Generate report.md with project analysis\n3. Generate summary.json with structured summary\n4. Do not generate temporary files",
+      "expected_output": "Two files created: report.md and summary.json",
+      "files": ["fixtures/workspace/"]
+    }
+  ]
+}

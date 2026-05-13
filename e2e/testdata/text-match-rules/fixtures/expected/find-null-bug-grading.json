@@ -1,0 +1,28 @@
+{
+  "status": "PASS",
+  "turns_executed": 1,
+  "turns_total": 1,
+  "assertion_results": [
+    {
+      "text": "output_contains{all:[null bug]}",
+      "passed": true,
+      "evidence": "all output_contains checks passed"
+    },
+    {
+      "text": "output_contains{any:[severe critical high-risk]}",
+      "passed": true,
+      "evidence": "all output_contains checks passed"
+    },
+    {
+      "text": "exit_code: 0",
+      "passed": true,
+      "evidence": "exit_code is 0 as expected"
+    }
+  ],
+  "summary": {
+    "passed": 3,
+    "failed": 0,
+    "total": 3,
+    "pass_rate": 1.0
+  }
+}

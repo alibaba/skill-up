@@ -1,0 +1,30 @@
+# CODEOWNERS for skill-up
+#
+# This file routes PR review requests to the appropriate maintainers.
+# See: https://docs.github.com/articles/about-code-owners
+#
+# Syntax notes:
+#   - Patterns follow .gitignore-style rules; the LAST matching pattern wins.
+#   - Owners must be real GitHub usernames (@user) or teams (@org/team)
+#     that have read access to the repository, otherwise the rule is ignored.
+#   - Multiple owners can be listed, separated by spaces.
+#
+# Recommended Branch Protection (Settings -> Branches -> Add rule):
+#   - Require a pull request before merging
+#   - Require review from Code Owners
+#   - Require status checks to pass (select `build` and `lint` jobs from CI)
+
+# Global fallback: every file is owned by the maintainers by default.
+*                           @hittyt @libinfs
+
+# Public API surface: changes here require extra care.
+/pkg/                       @hittyt @libinfs
+
+# CI / release configuration.
+/.github/                   @hittyt @libinfs
+/Makefile                   @hittyt @libinfs
+/.goreleaser.yaml           @hittyt @libinfs
+
+# Core runner & agent logic.
+/internal/runner/           @hittyt @libinfs
+/internal/agent/            @hittyt @libinfs

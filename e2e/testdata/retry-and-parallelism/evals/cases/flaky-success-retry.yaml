@@ -1,0 +1,25 @@
+id: flaky-success-retry
+title: Transient failure then success via retry
+description: >
+  Verify the retry capability of cases.retry_policy. By setting MOCK_FAIL_COUNT=1,
+  the mock engine returns an error (exit 1) on the first call and a normal result
+  on the second call. With retry_policy.max_retries=2, the runner should automatically
+  retry after the first error and ultimately PASS.
+  If the runner does not implement retries, this case will FAIL, exposing the missing feature.
+tag: functional_test
+input:
+  prompt: "What is 2 + 2?"
+
+constraints:
+  timeout_seconds: 60
+  max_turns: 3
+
+expect:
+  must_contain:
+    - "4"
+
+judge:
+  type: rule_based
+  success:
+    - output_contains:
+        any: ["4", "four"]

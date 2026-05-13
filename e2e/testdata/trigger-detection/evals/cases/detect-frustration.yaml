@@ -1,0 +1,19 @@
+id: detect-frustration
+title: Detect frustration and trigger comfort + joke
+description: >
+  User expresses strong frustration. Agent should first comfort the user then tell a joke.
+  This is a trigger test that verifies the skill's behavior differences at different
+  emotional intensities.
+tag: trigger_test
+input:
+  prompt: "I'm so frustrated, I've been working overtime all day and still can't fix this bug"
+constraints:
+  timeout_seconds: 30
+  max_turns: 1
+expect:
+  must_not_contain: ["error", "cannot"]
+judge:
+  type: rule_based
+  success:
+    - output_contains:
+        any: ["joke", "story", "haha", "😄", "😂", "😊", "happy", "relax", "keep going"]

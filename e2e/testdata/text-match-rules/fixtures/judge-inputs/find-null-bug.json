@@ -1,0 +1,58 @@
+{
+  "case_id": "find-null-bug",
+  "transcript": [
+    {
+      "role": "user",
+      "content": "Please review the following Go code and identify potential bugs:\n\n```go\nfunc GetUserName(user *User) string {\n    return user.Profile.Name\n}\n```\n\nUnder what circumstances would this code fail? Please provide a detailed analysis.",
+      "turn": 1
+    },
+    {
+      "role": "tool_call",
+      "turn": 1,
+      "tool_call": {
+        "id": "call_001",
+        "name": "read_file",
+        "arguments": {
+          "path": "src/handler.go"
+        }
+      }
+    },
+    {
+      "role": "tool_result",
+      "turn": 1,
+      "tool_result": {
+        "call_id": "call_001",
+        "status": "success",
+        "content": "package handler\n\ntype User struct {\n    Profile *Profile\n}\n\ntype Profile struct {\n    Name string\n}\n\nfunc GetUserName(user *User) string {\n    return user.Profile.Name\n}",
+        "duration_ms": 15
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "## Review Summary\n\nFound 1 critical bug: `GetUserName` has a null pointer dereference risk.\n\n## Detailed Findings\n\n### Bug #1: null pointer dereference (critical)\n\n- **Location**: `src/handler.go:12`\n- **Description**: `user.Profile.Name` will panic when `user.Profile` is nil\n- **Scenario**: When the Profile field of the User object is not initialized, directly accessing `.Name` causes a runtime crash\n- **Fix suggestion**: add nil check\n\n```go\nfunc GetUserName(user *User) string {\n    if user == nil || user.Profile == nil {\n        return \"\"\n    }\n    return user.Profile.Name\n}\n```\n\n## Overall Assessment\n\nThis is a critical-level issue that could cause service crashes in production. Always apply defensive checks on pointer-type fields.",
+      "turn": 1
+    }
+  ],
+  "final_message": "## Review Summary\n\nFound 1 critical bug: `GetUserName` has a null pointer dereference risk.\n\n## Detailed Findings\n\n### Bug #1: null pointer dereference (critical)\n\n- **Location**: `src/handler.go:12`\n- **Description**: `user.Profile.Name` will panic when `user.Profile` is nil\n- **Scenario**: When the Profile field of the User object is not initialized, directly accessing `.Name` causes a runtime crash\n- **Fix suggestion**: add nil check\n\n```go\nfunc GetUserName(user *User) string {\n    if user == nil || user.Profile == nil {\n        return \"\"\n    }\n    return user.Profile.Name\n}\n```\n\n## Overall Assessment\n\nThis is a critical-level issue that could cause service crashes in production. Always apply defensive checks on pointer-type fields.",
+  "exit_code": 0,
+  "workspace_path": "",
+  "workspace_diff": "",
+  "generated_files": [],
+  "turns_executed": 1,
+  "turns_total": 1,
+  "expect": {
+    "must_contain": ["null"],
+    "exit_code": 0
+  },
+  "judge": {
+    "type": "rule_based",
+    "success": [
+      {"output_contains": {"all": ["null", "bug"]}},
+      {"output_contains": {"any": ["severe", "critical", "high-risk"]}},
+      {"exit_code": 0}
+    ],
+    "failure": [
+      {"output_contains": {"any": ["I don't know", "unable to analyze", "cannot analyze"]}}
+    ]
+  }
+}

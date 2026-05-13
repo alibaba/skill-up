@@ -1,0 +1,105 @@
+{
+  "skill_name": "code-quality-analyzer",
+  "schema_version": "v1alpha1",
+  "engine_name": "claude_code",
+  "model_name": "anthropic/claude-sonnet-4-20250514",
+  "start_time": "2026-04-13T10:00:00Z",
+  "end_time": "2026-04-13T10:06:48Z",
+  "total_tokens": 12500,
+  "case_results": [
+    {
+      "case_id": "identify-null-deref",
+      "title": "Successfully identified null pointer dereference",
+      "status": "PASS",
+      "duration_ms": 45200,
+      "turns": 3,
+      "error": "",
+      "grading": {
+        "status": "PASS",
+        "skip_reason": null,
+        "turns_executed": 3,
+        "turns_total": 3,
+        "assertion_results": [
+          {
+            "text": "output_contains{all:[analysis]}",
+            "passed": true,
+            "evidence": "all output_contains checks passed"
+          },
+          {
+            "text": "exit_code: 0",
+            "passed": true,
+            "evidence": "exit_code is 0 as expected"
+          }
+        ],
+        "summary": {
+          "passed": 2,
+          "failed": 0,
+          "total": 2,
+          "pass_rate": 1.0
+        }
+      }
+    },
+    {
+      "case_id": "miss-sql-injection",
+      "title": "Missed SQL injection vulnerability",
+      "status": "FAIL",
+      "duration_ms": 38700,
+      "turns": 3,
+      "error": "",
+      "grading": {
+        "status": "FAIL",
+        "skip_reason": null,
+        "turns_executed": 3,
+        "turns_total": 3,
+        "assertion_results": [
+          {
+            "text": "output_contains{all:[SQL injection]}",
+            "passed": false,
+            "evidence": "output does not contain required keyword \"SQL injection\""
+          },
+          {
+            "text": "exit_code: 0",
+            "passed": true,
+            "evidence": "exit_code is 0 as expected"
+          }
+        ],
+        "summary": {
+          "passed": 1,
+          "failed": 1,
+          "total": 2,
+          "pass_rate": 0.5
+        }
+      }
+    },
+    {
+      "case_id": "skip-no-go-files",
+      "title": "Precondition not met — skip",
+      "status": "SKIP",
+      "duration_ms": 1200,
+      "turns": 0,
+      "error": "",
+      "grading": {
+        "status": "SKIP",
+        "skip_reason": "post_condition not met: no Go source files found in workspace",
+        "turns_executed": 0,
+        "turns_total": 1,
+        "assertion_results": [],
+        "summary": {
+          "passed": 0,
+          "failed": 0,
+          "total": 0,
+          "pass_rate": 0
+        }
+      }
+    },
+    {
+      "case_id": "engine-timeout",
+      "title": "Engine execution timed out — error",
+      "status": "ERROR",
+      "duration_ms": 5000,
+      "turns": 0,
+      "error": "engine execution timed out after 5s",
+      "grading": null
+    }
+  ]
+}

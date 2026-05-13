@@ -1,0 +1,8 @@
+transport: http
+# Replace the endpoint with the real Sandbox MCP URL in your environment; kept as a placeholder in OSS.
+endpoint: https://mcp.example.com/agent-sandbox/mcp?token=${OPENSANDBOX_API_KEY}
+required_env:
+  - OPENSANDBOX_API_KEY
+  - SANDBOX_MCP_TOKEN
+headers:
+  PRIVATE-TOKEN: ${SANDBOX_MCP_TOKEN}

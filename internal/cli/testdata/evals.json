@@ -1,0 +1,19 @@
+{
+  "skill_name": "test-skill",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Test prompt 1",
+      "expected_output": "Expected output 1",
+      "files": ["file1.txt"],
+      "expectations": ["Expect 1"]
+    },
+    {
+      "id": 2,
+      "prompt": "Test prompt 2",
+      "expected_output": "Expected output 2",
+      "files": [],
+      "expectations": ["Expect 2", "Expect 3"]
+    }
+  ]
+}

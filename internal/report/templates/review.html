@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Skill Review: {{.SkillName}}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; background: #f5f5f5; color: #333; }
+  .header { background: #1a1a2e; color: #fff; padding: 1.5rem 2rem; }
+  .header h1 { font-size: 1.5rem; font-weight: 600; }
+  .header .meta { font-size: 0.85rem; opacity: 0.8; margin-top: 0.25rem; }
+  .summary-bar { display: flex; gap: 1.5rem; padding: 1rem 2rem; background: #fff; border-bottom: 1px solid #e0e0e0; flex-wrap: wrap; }
+  .summary-card { text-align: center; min-width: 100px; }
+  .summary-card .label { font-size: 0.75rem; color: #666; text-transform: uppercase; letter-spacing: 0.05em; }
+  .summary-card .value { font-size: 1.5rem; font-weight: bold; margin-top: 0.15rem; }
+  .pass { color: #16a34a; }
+  .fail { color: #dc2626; }
+  .container { max-width: 1400px; margin: 1.5rem auto; padding: 0 1rem; }
+  .case-card { background: #fff; border-radius: 8px; margin-bottom: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow: hidden; }
+  .case-header { padding: 1rem 1.5rem; background: #fafafa; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+  .case-header h2 { font-size: 1.1rem; font-weight: 600; }
+  .case-header .badge { font-size: 0.75rem; padding: 0.2rem 0.6rem; border-radius: 4px; font-weight: 500; }
+  .badge-pass { background: #dcfce7; color: #16a34a; }
+  .badge-fail { background: #fee2e2; color: #dc2626; }
+  .case-prompt { padding: 0.75rem 1.5rem; background: #f8fafc; border-bottom: 1px solid #eee; font-size: 0.9rem; color: #555; }
+  .case-prompt strong { color: #333; }
+  .comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+  .comparison.single-col { grid-template-columns: 1fr; }
+  .config-col { padding: 1rem 1.5rem; }
+  .config-col:first-child { border-right: 1px solid #eee; }
+  .config-col h3 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: #666; margin-bottom: 0.75rem; }
+  .config-col h3 .rate { font-weight: bold; margin-left: 0.5rem; }
+  .expectations { list-style: none; margin-bottom: 1rem; }
+  .expectations li { padding: 0.4rem 0; font-size: 0.85rem; display: flex; gap: 0.5rem; align-items: flex-start; }
+  .expectations .icon { flex-shrink: 0; }
+  .expectations .text { flex: 1; }
+  .expectations .evidence { color: #888; font-style: italic; }
+  .response-box { background: #f8f8f8; border: 1px solid #e8e8e8; border-radius: 6px; padding: 0.75rem 1rem; font-size: 0.85rem; white-space: pre-wrap; word-wrap: break-word; max-height: 300px; overflow-y: auto; }
+  footer { text-align: center; padding: 2rem; font-size: 0.8rem; color: #999; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>{{.SkillName}} — Evaluation Review</h1>
+  <div class="meta">{{.Timestamp}}</div>
+</div>
+
+<div class="summary-bar">
+  <div class="summary-card">
+    <div class="label">With Skill</div>
+    <div class="value pass">{{fmtPercent .Summary.WithSkillPassRate}}</div>
+  </div>
+  {{if notNil .Summary.WithoutSkillPassRate}}
+  <div class="summary-card">
+    <div class="label">Without Skill</div>
+    <div class="value fail">{{fmtPercent (derefFloat .Summary.WithoutSkillPassRate)}}</div>
+  </div>
+  {{end}}
+  {{if notNil .Summary.Delta}}
+  <div class="summary-card">
+    <div class="label">Delta</div>
+    <div class="value pass">{{fmtPercentSigned (derefFloat .Summary.Delta)}}</div>
+  </div>
+  {{end}}
+  <div class="summary-card">
+    <div class="label">Cases</div>
+    <div class="value">{{len .Cases}}</div>
+  </div>
+</div>
+
+<div class="container">
+{{range .Cases}}
+<div class="case-card">
+  <div class="case-header">
+    <h2>{{.CaseID}}{{if .CaseName}} — {{.CaseName}}{{end}}</h2>
+    <span class="badge {{if eq .WithSkill.Summary.PassRate 1.0}}badge-pass{{else}}badge-fail{{end}}">
+      {{fmtPercent .WithSkill.Summary.PassRate}}
+    </span>
+  </div>
+  <div class="case-prompt"><strong>Prompt:</strong> {{.Prompt}}</div>
+
+  <div class="comparison{{if not .WithoutSkill}} single-col{{end}}">
+    <div class="config-col">
+      <h3>With Skill <span class="rate pass">{{fmtPercent .WithSkill.Summary.PassRate}}</span></h3>
+      <ul class="expectations">
+        {{range .WithSkill.Expectations}}
+        <li>
+          <span class="icon">{{passFailIcon .Passed}}</span>
+          <span class="text">{{.Text}}{{if .Evidence}} <span class="evidence">— {{.Evidence}}</span>{{end}}</span>
+        </li>
+        {{end}}
+      </ul>
+      {{if .WithSkill.Response}}
+      <div class="response-box">{{.WithSkill.Response}}</div>
+      {{end}}
+    </div>
+
+    {{if .WithoutSkill}}
+    <div class="config-col">
+      <h3>Without Skill <span class="rate fail">{{fmtPercent .WithoutSkill.Summary.PassRate}}</span></h3>
+      <ul class="expectations">
+        {{range .WithoutSkill.Expectations}}
+        <li>
+          <span class="icon">{{passFailIcon .Passed}}</span>
+          <span class="text">{{.Text}}{{if .Evidence}} <span class="evidence">— {{.Evidence}}</span>{{end}}</span>
+        </li>
+        {{end}}
+      </ul>
+      {{if .WithoutSkill.Response}}
+      <div class="response-box">{{.WithoutSkill.Response}}</div>
+      {{end}}
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}
+</div>
+
+<footer>Generated by skill-up</footer>
+</body>
+</html>

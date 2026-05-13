@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="code-quality-analyzer" tests="4" failures="1" errors="1" skipped="1" time="408.000" timestamp="2026-04-13T10:00:00Z">
+    <testcase name="identify-null-deref" classname="code-quality-analyzer" time="45.200"></testcase>
+    <testcase name="miss-sql-injection" classname="code-quality-analyzer" time="38.700">
+      <failure message="case miss-sql-injection failed" type="AssertionFailure">- output_contains{all:[SQL injection]}: output does not contain required keyword &#34;SQL injection&#34;</failure>
+    </testcase>
+    <testcase name="skip-no-go-files" classname="code-quality-analyzer" time="1.200">
+      <skipped message="post_condition not met: no Go source files found in workspace"></skipped>
+    </testcase>
+    <testcase name="engine-timeout" classname="code-quality-analyzer" time="5.000">
+      <error message="engine execution timed out after 5s" type="ExecutionError">engine execution timed out after 5s</error>
+    </testcase>
+  </testsuite>
+</testsuites>

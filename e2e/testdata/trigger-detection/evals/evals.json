@@ -1,0 +1,17 @@
+{
+  "skill_name": "mood-booster",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I'm so bored, I've been coding all day and my brain is about to explode",
+      "expected_output": "Empathize with the user's fatigue first, then tell a joke (preferably programmer-related), and end with an encouraging message",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I'm so frustrated, I've been working overtime all day and still can't fix this bug",
+      "expected_output": "First comfort the user's frustration (since the emotion is strong, offer more comfort), then naturally lead into a lighthearted joke, and finish with care and encouragement",
+      "files": []
+    }
+  ]
+}

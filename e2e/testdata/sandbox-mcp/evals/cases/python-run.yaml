@@ -1,0 +1,27 @@
+id: sandbox-python-run
+title: Sandbox MCP Python run
+
+input:
+  prompt: |
+    Use the agent-sandbox MCP tools to create a Python 3.12 sandbox.
+    In that sandbox, run Python code that prints the SHA-256 hex digest of this exact byte string:
+    skill-up-sandbox-mcp
+    After the code runs, shut down the sandbox.
+    Return only the execution output from the Python code.
+
+expect:
+  must_contain:
+    - 34e2dece81b97617cfc8773fa517ef134f09b4e47fa305560bbb966b70aa9136
+
+judge:
+  type: rule_based
+  success:
+    - output_contains:
+        all:
+          - 34e2dece81b97617cfc8773fa517ef134f09b4e47fa305560bbb966b70aa9136
+    - tool_called:
+        name: mcp__agent-sandbox__create_sandbox
+    - tool_called:
+        name: mcp__agent-sandbox__sandbox_run_code
+    - tool_called:
+        name: mcp__agent-sandbox__shutdown_sandbox

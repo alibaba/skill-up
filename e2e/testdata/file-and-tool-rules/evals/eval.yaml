@@ -1,0 +1,35 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+  workspace_mount: /workspace
+  env:
+    TZ: UTC
+
+mcp:
+  servers:
+    - name: filesystem
+      mode: mocked
+
+skills:
+  - source: local_path
+    path: .
+
+engine:
+  name: claude_code
+  model:
+    provider: dashscope
+    name: qwen3.6-plus
+
+cases:
+  files:
+    - evals/cases/organize-project.yaml
+  defaults:
+    timeout_seconds: 120
+    max_turns: 5
+  parallelism: 1
+
+report:
+  formats: [json, html]
+  artifacts:
+    - transcript

@@ -1,0 +1,211 @@
+version: "2"
+
+linters:
+  default: all
+  exclusions:
+    paths:
+      - "journey/journey-context/context-test/evals/fixtures"
+    rules:
+      # Legacy coupling waivers: depguard's config-no-runtime / runner-no-ui rules had
+      # two known historical violations at the time they were introduced (see baseline
+      # report under audit/). The rules are kept to prevent further spread; the existing
+      # files are temporarily waived until refactoring (introducing a boundary DTO /
+      # progress callbacks) is completed.
+      - linters:
+          - depguard
+        path: ^internal/config/schema\.go$
+        text: internal/config should map to runtime through a boundary DTO
+      - linters:
+          - depguard
+        path: ^internal/runner/runner\.go$
+        text: internal/runner should report progress through callbacks or events
+  disable:
+    # tagliatelle: JSON/YAML struct tags must use snake_case to match external API
+    # response formats (GitLab and other upstream services); changing them would
+    # break serialization.
+    - tagliatelle
+    # tagalign: enforces struct tag alignment and ordering. Behavior of this linter
+    # differs across golangci-lint v2.x minor versions (CI v2.5.0 vs local v2.0.2
+    # behave inconsistently). We use a single space to separate tags (no column
+    # alignment) to fundamentally avoid version-specific differences.
+    - tagalign
+    # exhaustruct: requires every struct field to be initialized. Go's zero-value
+    # semantics make this both unnecessary and overly verbose, especially for
+    # standard library types like http.Response and cobra.Command.
+    - exhaustruct
+    # wrapcheck: requires every error from external packages to be wrapped with
+    # fmt.Errorf(%w). For a CLI app, returning user-facing error messages directly
+    # is often clearer.
+    - wrapcheck
+    # varnamelen: enforces a minimum variable name length. Short names like i, r,
+    # err are recognized idioms in the Go community; see Go Code Review Comments.
+    - varnamelen
+    # err113: requires every error to be a sentinel or wrapped error. For
+    # user-facing CLI messages (e.g. "not logged in"), errors.New is more direct.
+    - err113
+    # wsl/wsl_v5: enforces blank-line formatting rules (cuddling, block spacing,
+    # etc.) that conflict with common Go patterns (such as defer right after an
+    # assignment, or append right after a value). The codebase already uses
+    # gofumpt for unified formatting. (46 issues)
+    - wsl
+    - wsl_v5
+    # testpackage: requires test files to use the _test package name. Tests in
+    # this project intentionally use the same package name to test unexported
+    # internal logic.
+    - testpackage
+    # gochecknoglobals: the Cobra/Viper CLI framework's standard pattern needs
+    # package-level variables for the command tree, configuration binding, and
+    # version information.
+    - gochecknoglobals
+    # ireturn: forbids functions returning interface types. The linkctx package
+    # implements polymorphic resource handling through the LinkableResource
+    # interface; returning an interface is a deliberate design choice.
+    - ireturn
+    # nilnil: returning (nil, nil) is an idiomatic Go pattern meaning "not found,
+    # no error" (e.g. store.GetActive returns nil when no resource is linked).
+    - nilnil
+    # lll: line length limit. gofumpt already handles formatting; long lines are
+    # typically struct literals or string constants that should not be forcibly
+    # split.
+    - lll
+    # gochecknoinits: init() in cmd/root.go is the Cobra framework's standard
+    # pattern, used for cobra.OnInitialize binding.
+    - gochecknoinits
+    # gosmopolitan: Chinese-language strings appear in error messages for
+    # bilingual (EN/ZH) support; gosmopolitan would produce false positives.
+    - gosmopolitan
+    # noinlineerr: forbids the inline `if err := f(); err != nil` form. This form
+    # is the idiomatic pattern recommended by the Go standard library and
+    # official documentation.
+    - noinlineerr
+    # godox: detects TODO/BUG/FIXME comments. These comments are intentional
+    # work-item markers.
+    - godox
+    # paralleltest: requires every test to call t.Parallel(). Parallel tests
+    # require careful handling of shared state; forcing it everywhere can
+    # introduce races and should be enabled on demand instead.
+    - paralleltest
+    # mnd: detects "magic numbers". Port numbers, HTTP status codes, array
+    # indices and similar context-clear numeric constants in test cases are not
+    # truly magic numbers.
+    - mnd
+    # nlreturn: requires a blank line before every return. gofumpt already
+    # handles formatting; forced blank lines reduce readability in short
+    # functions.
+    - nlreturn
+    # godoclint: lints godoc formatting. Project comments are already covered by
+    # revive's exported rule, and an additional godoc formatting constraint is
+    # not needed.
+    - godoclint
+    # prealloc: suggests pre-allocating slice capacity. The compiler already
+    # optimizes most cases, and pre-allocation hurts readability; only meaningful
+    # in performance hot spots.
+    - prealloc
+    # funcorder: requires functions to be sorted in a specific order. The
+    # project organizes functions by logical grouping rather than by strict
+    # type order.
+    - funcorder
+    # exhaustive: requires switch statements to enumerate every enum value. For
+    # string-typed constants and externally defined enums, a default branch is
+    # sufficient.
+    - exhaustive
+    # nolintlint: when local and MegaLinter linter sets differ, legitimate
+    # //nolint comments targeting specific linters (e.g. gosec) can be misjudged
+    # as unused. These explanatory comments record false-positive context and
+    # are safer kept than forcibly removed.
+    - nolintlint
+    # nonamedreturns: conflicts with the revive confusing-results rule, which
+    # requires named returns when multiple return values share the same type for
+    # readability. The two cannot be satisfied simultaneously; revive wins.
+    - nonamedreturns
+
+  settings:
+    depguard:
+      rules:
+        main:
+          # Dependency guard: allow the standard library, internal packages, and
+          # declared third-party dependencies; the extra `deny` entries express
+          # architectural layering constraints.
+          list-mode: lax
+          files:
+            - "$all"
+          allow:
+            - "$gostd"
+            - github.com/google/uuid
+            - github.com/joho/godotenv
+            - github.com/alibaba/skill-up
+            - github.com/spf13/cobra
+            - github.com/spf13/pflag
+            - gopkg.in/yaml.v3
+        config-no-runtime:
+          # The config layer must not depend on the runtime layer; the existing
+          # coupling is recorded in the baseline report, and any new dependency
+          # of this kind should be blocked from spreading before refactoring.
+          list-mode: lax
+          files:
+            - "**/internal/config/*.go"
+          deny:
+            - pkg: github.com/alibaba/skill-up/internal/runtime
+              desc: internal/config should map to runtime through a boundary DTO.
+        runner-no-ui:
+          # The orchestration layer must not directly depend on UI output; the
+          # existing coupling is recorded in the baseline report.
+          list-mode: lax
+          files:
+            - "**/internal/runner/*.go"
+          deny:
+            - pkg: github.com/alibaba/skill-up/internal/ui
+              desc: internal/runner should report progress through callbacks or events.
+    cyclop:
+      # Cyclomatic complexity threshold: functions exceeding 15 need to be split
+      # or include an explicit waiver explanation.
+      max-complexity: 15
+    dupl:
+      # Duplicate code threshold: clones of 100+ tokens enter the governance
+      # baseline.
+      threshold: 100
+    funlen:
+      # Function length threshold: exceeding 80 lines usually indicates too many
+      # responsibilities.
+      lines: 80
+      statements: 50
+    goconst:
+      # Suggest extracting a constant when a string literal repeats 4+ times.
+      min-occurrences: 4
+    gocyclo:
+      # Kept consistent with cyclop, for compatibility with toolchains that only
+      # consume gocyclo.
+      min-complexity: 16
+    gocognit:
+      min-complexity: 35
+    maintidx:
+      # Functions with a maintainability index below 20 require attention.
+      under: 20
+    nestif:
+      # Nested if depth exceeding 4 should consider early returns or extracting
+      # functions.
+      min-complexity: 5
+    revive:
+      rules:
+        - name: package-comments
+          disabled: true
+    gosec:
+      excludes:
+        # G204: a CLI tool legitimately spawns subprocesses (e.g. opening a
+        # browser).
+        - G204
+        # G301: a CLI tool creates directories with 0755 (standard umask).
+        - G301
+        # G304: a CLI tool reads file paths supplied or computed from user input.
+        - G304
+
+formatters:
+  enable:
+    - gofumpt
+    - gci
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/alibaba/skill-up)

@@ -1,0 +1,23 @@
+id: second-case-parallel
+title: Second case runs in parallel with first
+description: >
+  Runs in parallel with flaky-success-retry to verify the parallelism=2 config.
+  This case does not trigger a retry, ensuring that parallel execution is not
+  affected by another case's retry behavior.
+tag: functional_test
+input:
+  prompt: "Find the null pointer bug in this code"
+
+constraints:
+  timeout_seconds: 60
+  max_turns: 2
+
+expect:
+  must_contain:
+    - "null"
+
+judge:
+  type: rule_based
+  success:
+    - output_contains:
+        any: ["null", "NullPointer"]

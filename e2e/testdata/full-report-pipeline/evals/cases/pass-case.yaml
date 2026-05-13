@@ -1,0 +1,24 @@
+id: identify-null-deref
+title: Successfully identified null pointer dereference
+description: >
+  Agent correctly identified the null pointer dereference bug in the code.
+  Output contains all required keywords and all assertions pass → PASS.
+tag: functional_test
+input:
+  prompt: "Analyze the following code for quality issues and potential problems"
+context:
+  files:
+    main.go: |
+      package main
+      func GetName(u *User) string { return u.Name }
+constraints:
+  timeout_seconds: 60
+  max_turns: 3
+expect:
+  exit_code: 0
+judge:
+  type: rule_based
+  success:
+    - output_contains:
+        all: ["analysis"]
+    - exit_code: 0

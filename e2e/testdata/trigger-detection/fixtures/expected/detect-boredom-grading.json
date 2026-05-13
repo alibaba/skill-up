@@ -1,0 +1,19 @@
+{
+  "status": "PASS",
+  "skip_reason": null,
+  "turns_executed": 1,
+  "turns_total": 1,
+  "assertion_results": [
+    {
+      "text": "output_contains",
+      "passed": true,
+      "evidence": "all output_contains checks passed"
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "failed": 0,
+    "total": 1,
+    "pass_rate": 1.0
+  }
+}

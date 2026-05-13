@@ -1,0 +1,32 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+  workspace_mount: /workspace
+
+mcp:
+  servers: []
+
+skills:
+  - source: local_path
+    path: .
+
+engine:
+  name: claude_code
+  model:
+    provider: dashscope
+    name: qwen3.6-plus
+
+cases:
+  files:
+    - evals/cases/check-remote-url.yaml
+    - evals/cases/apply-diff-and-review.yaml
+  defaults:
+    timeout_seconds: 120
+    max_turns: 5
+  parallelism: 1
+
+report:
+  formats: [json, html]
+  artifacts:
+    - transcript

@@ -1,0 +1,31 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+
+mcp:
+  servers:
+    - name: agent-sandbox
+      mode: real
+      config_ref: evals/fixtures/mcp/agent-sandbox.yaml
+
+skills: []
+
+engine:
+  name: claude_code
+  model:
+    provider: anthropic
+    name: qwen3.6-plus
+
+cases:
+  files:
+    - evals/cases/python-run.yaml
+  defaults:
+    timeout_seconds: 300
+    max_turns: 1
+  parallelism: 1
+
+report:
+  formats: [json]
+  artifacts:
+    - transcript

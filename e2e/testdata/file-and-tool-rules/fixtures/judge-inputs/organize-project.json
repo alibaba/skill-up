@@ -1,0 +1,101 @@
+{
+  "case_id": "organize-project",
+  "transcript": [
+    {
+      "role": "user",
+      "content": "Please help me organize this project, analyze the directory structure, and generate a project report.",
+      "turn": 1
+    },
+    {
+      "role": "tool_call",
+      "turn": 1,
+      "tool_call": {
+        "id": "call_101",
+        "name": "list_directory",
+        "arguments": {
+          "path": "."
+        }
+      }
+    },
+    {
+      "role": "tool_result",
+      "turn": 1,
+      "tool_result": {
+        "call_id": "call_101",
+        "status": "success",
+        "content": "src/\n  main.go\n  handler.go",
+        "duration_ms": 10
+      }
+    },
+    {
+      "role": "tool_call",
+      "turn": 1,
+      "tool_call": {
+        "id": "call_102",
+        "name": "read_file",
+        "arguments": {
+          "path": "src/",
+          "recursive": true
+        }
+      }
+    },
+    {
+      "role": "tool_result",
+      "turn": 1,
+      "tool_result": {
+        "call_id": "call_102",
+        "status": "success",
+        "content": "package main\n\nimport \"net/http\"\n\nfunc main() {\n    http.HandleFunc(\"/\", handleRoot)\n    http.ListenAndServe(\":8080\", nil)\n}",
+        "duration_ms": 12
+      }
+    },
+    {
+      "role": "tool_call",
+      "turn": 1,
+      "tool_call": {
+        "id": "call_103",
+        "name": "write_file",
+        "arguments": {
+          "path": "report.md",
+          "content": "# Project Analysis Report\n\n## Overview\n\nThis is a Go project containing basic HTTP request handling logic."
+        }
+      }
+    },
+    {
+      "role": "tool_result",
+      "turn": 1,
+      "tool_result": {
+        "call_id": "call_103",
+        "status": "success",
+        "content": "File written successfully",
+        "duration_ms": 5
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "# Project Analysis Report\n\n## Overview\n\nThis is a Go project containing basic HTTP request handling logic.\n\n## Directory Structure\n\n```\nsrc/\n├── main.go\n└── handler.go\n```\n\n## Key Files\n\n- `src/main.go`: Entry point, starts the HTTP server\n- `src/handler.go`: Request handler functions\n\n## Findings and Suggestions\n\n1. Project structure is clean and well-suited for small services\n2. Recommend adding unit tests\n3. Recommend adding a CI/CD configuration",
+      "turn": 1
+    }
+  ],
+  "final_message": "# Project Analysis Report\n\n## Overview\n\nThis is a Go project containing basic HTTP request handling logic.\n\n## Directory Structure\n\n```\nsrc/\n├── main.go\n└── handler.go\n```\n\n## Key Files\n\n- `src/main.go`: Entry point, starts the HTTP server\n- `src/handler.go`: Request handler functions\n\n## Findings and Suggestions\n\n1. Project structure is clean and well-suited for small services\n2. Recommend adding unit tests\n3. Recommend adding a CI/CD configuration",
+  "exit_code": 0,
+  "skill_dir": "__SKILL_DIR__",
+  "workspace_path": "__WORKSPACE__",
+  "workspace_diff": "",
+  "generated_files": ["report.md", "summary.json"],
+  "turns_executed": 1,
+  "turns_total": 1,
+  "expect": {
+    "files_exist": ["report.md", "summary.json"],
+    "files_not_exist": ["temp.log"],
+    "golden_file": "evals/fixtures/golden/expected-report.md"
+  },
+  "judge": {
+    "type": "rule_based",
+    "success": [
+      {"files_exist": ["report.md", "summary.json"]},
+      {"files_not_exist": ["temp.log", ".cache"]},
+      {"tool_called": {"name": "read_file", "args": {"path": "src/"}}}
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "eval_id": 1,
+  "eval_name": "identify-null-deref",
+  "prompt": "Analyze the following code for quality issues and potential problems",
+  "assertions": [
+    "output_contains{all:[analysis]}",
+    "exit_code: 0"
+  ]
+}

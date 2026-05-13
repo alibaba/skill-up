@@ -1,0 +1,20 @@
+id: detect-boredom
+title: Detect boredom and trigger joke skill
+description: >
+  User expresses "I'm so bored". Agent should detect the boredom emotion and
+  activate the mood-booster skill. Output should contain a joke or humorous content.
+  This is a trigger test that verifies the skill is activated in the correct context.
+tag: trigger_test
+input:
+  prompt: "I'm so bored, I've been coding all day and my brain is about to explode"
+constraints:
+  timeout_seconds: 30
+  max_turns: 1
+expect:
+  must_contain: ["😄"]
+  must_not_contain: ["error", "cannot"]
+judge:
+  type: rule_based
+  success:
+    - output_contains:
+        any: ["joke", "story", "haha", "😄", "😂", "😊", "happy"]

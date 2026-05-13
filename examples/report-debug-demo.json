@@ -1,0 +1,69 @@
+{
+  "skill_name": "code-review",
+  "schema_version": "v1alpha1",
+  "engine_name": "codex",
+  "model_name": "openai/gpt-5.4",
+  "start_time": "2026-04-07T10:00:00Z",
+  "end_time": "2026-04-07T10:04:05Z",
+  "case_results": [
+    {
+      "case_id": "basic-success",
+      "title": "Agent should identify a missing null check",
+      "status": "PASS",
+      "duration_ms": 45200,
+      "turns": 5,
+      "grading": {
+        "status": "PASS",
+        "skip_reason": null,
+        "turns_executed": 5,
+        "turns_total": 5,
+        "assertion_results": [
+          {"text": "output_contains{all:[null bug]}", "passed": true, "evidence": "all keywords found in output"},
+          {"text": "exit_code: 0", "passed": true, "evidence": "exit_code is 0 as expected"}
+        ],
+        "summary": {"passed": 2, "failed": 0, "total": 2, "pass_rate": 1.0}
+      }
+    },
+    {
+      "case_id": "edge-case-null",
+      "title": "Handle null input gracefully",
+      "status": "FAIL",
+      "duration_ms": 62100,
+      "turns": 8,
+      "grading": {
+        "status": "FAIL",
+        "skip_reason": null,
+        "turns_executed": 8,
+        "turns_total": 8,
+        "assertion_results": [
+          {"text": "output_contains: 'graceful'", "passed": false, "evidence": "output does not contain 'graceful'"},
+          {"text": "tool_called: fix_code", "passed": false, "evidence": "tool 'fix_code' was NOT called"}
+        ],
+        "summary": {"passed": 0, "failed": 2, "total": 2, "pass_rate": 0.0}
+      }
+    },
+    {
+      "case_id": "skipped-case",
+      "title": "Skipped due to post_condition",
+      "status": "SKIP",
+      "duration_ms": 1000,
+      "turns": 1,
+      "grading": {
+        "status": "SKIP",
+        "skip_reason": "post_condition not met",
+        "turns_executed": 1,
+        "turns_total": 3,
+        "assertion_results": [],
+        "summary": {"passed": 0, "failed": 0, "total": 0, "pass_rate": 0}
+      }
+    },
+    {
+      "case_id": "error-case",
+      "title": "Engine timeout",
+      "status": "ERROR",
+      "duration_ms": 300000,
+      "turns": 0,
+      "error": "engine process killed after 300s"
+    }
+  ]
+}

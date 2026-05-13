@@ -1,0 +1,16 @@
+{
+  "skill_name": "agent-judge-criteria",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Review the following code and provide a detailed quality assessment:\n\nfunc process(u *User) {\n    fmt.Println(u.Name)\n}\n\nProvide your review in the following format:\n## Strengths\n## Issues\n## Assessment",
+      "expected_output": "A detailed code review identifying the null pointer dereference bug, with specific fix suggestions and structured output format",
+      "files": [],
+      "expectations": [
+        "Output identifies null pointer dereference (u may be nil)",
+        "Output provides specific nil check fix suggestion",
+        "Output contains Strengths/Issues/Assessment sections"
+      ]
+    }
+  ]
+}

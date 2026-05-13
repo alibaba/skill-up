@@ -1,0 +1,19 @@
+id: engine-timeout
+title: Engine execution timed out — error
+description: >
+  The agent engine timed out and crashed during execution.
+  Unable to produce valid output → ERROR (Grading is nil).
+tag: functional_test
+input:
+  prompt: "Analyze all source files in this very large project"
+constraints:
+  timeout_seconds: 5
+  max_turns: 1
+expect:
+  exit_code: 0
+judge:
+  type: rule_based
+  success:
+    - output_contains:
+        all: ["analysis"]
+    - exit_code: 0

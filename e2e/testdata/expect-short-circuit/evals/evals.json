@@ -1,0 +1,17 @@
+{
+  "skill_name": "expect-short-circuit",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Calculate 15 + 27",
+      "expected_output": "Result containing 'calculation result'",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Calculate the result of 100 / 0",
+      "expected_output": "Output explaining division by zero error",
+      "files": []
+    }
+  ]
+}

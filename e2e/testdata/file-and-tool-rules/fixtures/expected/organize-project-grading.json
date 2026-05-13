@@ -1,0 +1,29 @@
+{
+  "status": "PASS",
+  "skip_reason": null,
+  "turns_executed": 1,
+  "turns_total": 1,
+  "assertion_results": [
+    {
+      "text": "files_exist: [report.md summary.json]",
+      "passed": true,
+      "evidence": "all required files exist"
+    },
+    {
+      "text": "files_not_exist: [temp.log .cache]",
+      "passed": true,
+      "evidence": "none of the forbidden files exist"
+    },
+    {
+      "text": "tool_called: read_file (with args)",
+      "passed": true,
+      "evidence": "tool \"read_file\" was called with matching args"
+    }
+  ],
+  "summary": {
+    "passed": 3,
+    "failed": 0,
+    "total": 3,
+    "pass_rate": 1.0
+  }
+}

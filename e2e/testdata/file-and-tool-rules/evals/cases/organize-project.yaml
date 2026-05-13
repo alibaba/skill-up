@@ -1,0 +1,24 @@
+id: organize-project
+title: Organize project and generate report
+description: >
+  Agent uses MCP tools to analyze the project directory and read key files,
+  then generates two output files: report.md and summary.json.
+  Verifies file generation, tool calls, and content correctness.
+tag: functional_test
+input:
+  prompt: |
+    Please help me organize this project, analyze the directory structure, and generate a project report.
+    Requirements:
+    1. First use read_file to read source files under src/
+    2. Generate report.md with project analysis
+    3. Generate summary.json with a structured summary
+    4. Do not generate any temporary files
+context:
+  repo_fixture: evals/fixtures/workspace
+constraints:
+  timeout_seconds: 90
+  max_turns: 5
+expect:
+  files_exist: ["report.md", "summary.json"]
+  files_not_exist: ["temp.log"]
+  golden_file: evals/fixtures/golden/expected-report.md

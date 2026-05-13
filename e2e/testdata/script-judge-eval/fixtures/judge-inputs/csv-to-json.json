@@ -1,0 +1,73 @@
+{
+  "case_id": "csv-to-json",
+  "transcript": [
+    {
+      "role": "user",
+      "content": "Please convert the input.csv file in the working directory to JSON format and output it to output.json.",
+      "turn": 1
+    },
+    {
+      "role": "tool_call",
+      "turn": 1,
+      "tool_call": {
+        "id": "call_201",
+        "name": "read_file",
+        "arguments": {
+          "path": "input.csv"
+        }
+      }
+    },
+    {
+      "role": "tool_result",
+      "turn": 1,
+      "tool_result": {
+        "call_id": "call_201",
+        "status": "success",
+        "content": "name,age,city,email\nAlice,30,Beijing,alice@example.com\nBob,25,Shanghai,bob@example.com\nCharlie,35,Shenzhen,charlie@example.com",
+        "duration_ms": 8
+      }
+    },
+    {
+      "role": "tool_call",
+      "turn": 1,
+      "tool_call": {
+        "id": "call_202",
+        "name": "write_file",
+        "arguments": {
+          "path": "output.json",
+          "content": "[\n  {\"name\": \"Alice\", \"age\": 30, \"city\": \"Beijing\", \"email\": \"alice@example.com\"},\n  {\"name\": \"Bob\", \"age\": 25, \"city\": \"Shanghai\", \"email\": \"bob@example.com\"},\n  {\"name\": \"Charlie\", \"age\": 35, \"city\": \"Shenzhen\", \"email\": \"charlie@example.com\"}\n]"
+        }
+      }
+    },
+    {
+      "role": "tool_result",
+      "turn": 1,
+      "tool_result": {
+        "call_id": "call_202",
+        "status": "success",
+        "content": "File written successfully",
+        "duration_ms": 5
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "Converted input.csv to JSON format and wrote output.json. Converted 3 records, each containing name, age, city, and email fields.",
+      "turn": 1
+    }
+  ],
+  "final_message": "Converted input.csv to JSON format and wrote output.json. Converted 3 records, each containing name, age, city, and email fields.",
+  "exit_code": 0,
+  "workspace_path": "__WORKSPACE__",
+  "workspace_diff": "",
+  "generated_files": ["output.json"],
+  "turns_executed": 1,
+  "turns_total": 1,
+  "expect": {
+    "files_exist": ["output.json"],
+    "exit_code": 0
+  },
+  "judge": {
+    "type": "script",
+    "script_path": "evals/fixtures/scripts/check-transform.sh"
+  }
+}

@@ -1,0 +1,46 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+  workspace_mount: /workspace
+  env:
+    TZ: UTC
+
+mcp:
+  servers: []
+
+skills:
+  - source: local_path
+    path: .
+
+engine:
+  name: qodercli
+  model:
+    name: auto
+
+cases:
+  files:
+    - evals/cases/analyze-directory.yaml
+    - evals/cases/top-extensions.yaml
+    - evals/cases/current-directory-format.yaml
+  defaults:
+    timeout_seconds: 900
+    max_turns: 5
+  parallelism: 2
+  retry_policy:
+    max_retries: 2
+    retry_on:
+      - error
+
+benchmark:
+  enabled: true
+
+judge:
+  type: script
+  script_path: evals/fixtures/scripts/check-stats.sh
+  timeout_seconds: 30
+
+report:
+  formats: [json, html]
+  artifacts:
+    - transcript

@@ -1,0 +1,23 @@
+id: csv-to-json
+title: CSV to JSON format conversion
+description: >
+  Agent reads input.csv, converts it to JSON format, and writes it to output.json.
+  A script judge verifies the existence of the output file, JSON validity, and field correctness.
+tag: functional_test
+input:
+  prompt: |
+    Please convert the input.csv file in the working directory to JSON format
+    and output it to output.json.
+    The first row of the CSV contains field names; each row of data is converted
+    to a JSON object. The final output is a JSON array.
+context:
+  repo_fixture: evals/fixtures/workspace
+constraints:
+  timeout_seconds: 60
+  max_turns: 3
+expect:
+  files_exist: ["output.json"]
+  exit_code: 0
+judge:
+  type: script
+  script_path: evals/fixtures/scripts/check-transform.sh

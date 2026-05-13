@@ -1,0 +1,34 @@
+{
+  "case_id": "basic-arithmetic",
+  "transcript": [
+    {
+      "role": "user",
+      "content": "Help me calculate 15 + 27",
+      "turn": 1
+    },
+    {
+      "role": "assistant",
+      "content": "15 + 27 = 42\n\nThe answer is 42. This is a simple addition.\n\nIf there is an error please let me know and I can recalculate.",
+      "turn": 1
+    }
+  ],
+  "final_message": "15 + 27 = 42\n\nThe answer is 42. This is a simple addition.\n\nIf there is an error please let me know and I can recalculate.",
+  "exit_code": 0,
+  "workspace_path": "",
+  "workspace_diff": "",
+  "generated_files": [],
+  "turns_executed": 1,
+  "turns_total": 1,
+  "expect": {
+    "must_contain": ["calculation result"],
+    "must_not_contain": ["error"],
+    "exit_code": 0
+  },
+  "judge": {
+    "type": "rule_based",
+    "success": [
+      {"output_contains": {"all": ["calculation result"]}},
+      {"exit_code": 0}
+    ]
+  }
+}

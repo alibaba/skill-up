@@ -1,0 +1,26 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+  workspace_mount: /workspace
+  env: {}
+
+mcp:
+  servers: []
+
+skills: []
+
+engine:
+  name: claude_code
+  model: {}
+
+cases:
+  files: []
+  defaults:
+    timeout_seconds: 300
+    max_turns: 10
+  parallelism: 1
+
+report:
+  formats: [json]
+  artifacts: []

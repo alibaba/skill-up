@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>skill-up Report: {{.SkillName}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f7f8fa; --surface: #ffffff; --border: #e5e7eb;
+      --text: #0f172a; --text-muted: #94a3b8;
+      --accent: #1051fe; --accent-hover: #0d42d4;
+      --green: #10b981; --green-bg: #d1fae5;
+      --red: #dc2626; --red-bg: #fee2e2;
+      --skip: #ca8a04; --skip-bg: #fef9c3;
+      --error-color: #ea580c; --error-bg: #fff7ed;
+      --header-bg: #0f172a; --header-text: #ffffff;
+      --radius: 6px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+
+    .header { background: var(--header-bg); color: var(--header-text); padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+    .header-brand { display: flex; align-items: center; gap: 0.75rem; }
+    .header-brand .logo { width: 48px; height: 48px; border-radius: 10px; flex-shrink: 0; object-fit: contain; }
+    .header-brand .title-block { display: flex; flex-direction: column; }
+    .header h1 { font-family: 'Inter', system-ui, -apple-system, sans-serif; font-size: 1.25rem; font-weight: 600; line-height: 1.2; }
+    .header .meta { font-size: 0.8rem; opacity: 0.7; margin-top: 0.25rem; }
+    .header .progress { font-size: 0.875rem; opacity: 0.8; text-align: right; }
+
+    .summary-bar { display: flex; gap: 1rem; padding: 0.75rem 2rem; background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap; flex-shrink: 0; }
+    .summary-card { text-align: center; min-width: 80px; }
+    .summary-card .label { font-family: 'Inter', system-ui, -apple-system, sans-serif; font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .summary-card .value { font-size: 1.25rem; font-weight: bold; margin-top: 0.1rem; }
+    .clr-pass { color: var(--green); } .clr-fail { color: var(--red); }
+    .clr-skip { color: var(--skip); } .clr-error { color: var(--error-color); }
+
+    .view-tabs { display: flex; gap: 0; padding: 0 2rem; background: var(--bg); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+    .view-tab { font-family: 'Inter', system-ui, -apple-system, sans-serif; padding: 0.625rem 1.25rem; font-size: 0.8125rem; font-weight: 500; cursor: pointer; border: none; background: none; color: var(--text-muted); border-bottom: 2px solid transparent; transition: all 0.15s; }
+    .view-tab:hover { color: var(--text); }
+    .view-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .view-panel { display: none; }
+    .view-panel.active { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+
+    .cases-layout { display: flex; flex: 1; overflow: hidden; min-height: 0; }
+    .cases-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+
+    .case-sidebar { width: 280px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; transition: width 0.2s ease, min-width 0.2s ease; }
+    .case-sidebar.collapsed { width: 40px; min-width: 40px; }
+    .case-sidebar.collapsed .sidebar-header-title,
+    .case-sidebar.collapsed .case-list { display: none; }
+    .sidebar-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); background: var(--bg); flex-shrink: 0; }
+    .sidebar-header-title { font-family: 'Inter', system-ui, -apple-system, sans-serif; font-size: 0.75rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); display: flex; align-items: center; gap: 0.5rem; flex: 1; min-width: 0; }
+    .sidebar-header-title .count { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 0.05rem 0.4rem; border-radius: 9999px; font-size: 0.65rem; font-weight: 600; }
+    .sidebar-toggle { background: none; border: 1px solid var(--border); color: var(--text-muted); width: 22px; height: 22px; border-radius: 4px; cursor: pointer; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; }
+    .sidebar-toggle:hover { color: var(--text); border-color: var(--text-muted); background: var(--surface); }
+    .case-sidebar.collapsed .sidebar-header { padding: 0.75rem 0.25rem; justify-content: center; }
+    .case-list { flex: 1; overflow-y: auto; padding: 0.5rem 0; }
+    .case-item { display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem 1rem; cursor: pointer; border-left: 3px solid transparent; font-size: 0.8125rem; transition: background 0.12s; }
+    .case-item:hover { background: var(--bg); }
+    .case-item.active { background: var(--bg); border-left-color: var(--accent); }
+    .case-item .case-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--text-muted); }
+    .case-item .case-dot.dot-pass { background: var(--green); }
+    .case-item .case-dot.dot-fail { background: var(--red); }
+    .case-item .case-dot.dot-skip { background: var(--skip); }
+    .case-item .case-dot.dot-error { background: var(--error-color); }
+    .case-item .case-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+    .case-item .case-index { font-family: 'Inter', system-ui, -apple-system, sans-serif; font-size: 0.7rem; color: var(--text-muted); flex-shrink: 0; }
+
+    .main { flex: 1; overflow-y: auto; padding: 1.5rem 2rem; display: flex; flex-direction: column; gap: 1.25rem; }
+    .section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); flex-shrink: 0; }
+    .section-header { font-family: 'Inter', system-ui, -apple-system, sans-serif; padding: 0.75rem 1rem; font-size: 0.75rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); border-bottom: 1px solid var(--border); background: var(--bg); display: flex; align-items: center; gap: 0.75rem; }
+    .section-body { padding: 1rem; }
+
+    .status-badge { display: inline-block; padding: 0.2rem 0.625rem; border-radius: 9999px; font-family: 'Inter', system-ui, -apple-system, sans-serif; font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+    .status-badge.sb-pass { background: var(--green-bg); color: var(--green); }
+    .status-badge.sb-fail { background: var(--red-bg); color: var(--red); }
+    .status-badge.sb-skip { background: var(--skip-bg); color: var(--skip); }
+    .status-badge.sb-error { background: var(--error-bg); color: var(--error-color); }
+
+    .case-info { display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap; font-size: 0.875rem; }
+    .case-info .info-item { display: flex; align-items: center; gap: 0.25rem; }
+    .case-info .info-label { color: var(--text-muted); font-size: 0.75rem; }
+
+    .error-box { background: var(--error-bg); border: 1px solid var(--error-color); border-radius: 4px; padding: 0.75rem; color: var(--error-color); font-size: 0.875rem; white-space: pre-wrap; }
+
+    .grades-toggle { display: flex; align-items: center; cursor: pointer; user-select: none; }
+    .grades-toggle:hover { color: var(--accent); }
+    .grades-toggle .arrow { margin-right: 0.5rem; transition: transform 0.15s; font-size: 0.75rem; }
+    .grades-toggle .arrow.open { transform: rotate(90deg); }
+    .grades-content { display: none; margin-top: 0.75rem; }
+    .grades-content.open { display: block; }
+    .grades-summary { font-size: 0.875rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem; }
+    .grade-badge { display: inline-block; padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }
+    .grade-pass { background: var(--green-bg); color: var(--green); }
+    .grade-fail { background: var(--red-bg); color: var(--red); }
+    .assertion-list { list-style: none; }
+    .assertion-item { padding: 0.625rem 0; border-bottom: 1px solid var(--border); font-size: 0.8125rem; }
+    .assertion-item:last-child { border-bottom: none; }
+    .assertion-status { font-weight: 600; margin-right: 0.5rem; }
+    .assertion-status.a-pass { color: var(--green); }
+    .assertion-status.a-fail { color: var(--red); }
+    .assertion-evidence { color: var(--text-muted); font-size: 0.75rem; margin-top: 0.25rem; padding-left: 1.5rem; }
+
+    .prompt-box { background: #f8fafc; border: 1px solid var(--border); border-radius: 4px; padding: 0.75rem 1rem; font-size: 0.875rem; color: #555; margin-bottom: 0.5rem; }
+    .prompt-box strong { color: var(--text); }
+    .response-box { background: #f8f8f8; border: 1px solid #e8e8e8; border-radius: 6px; padding: 0.75rem 1rem; font-size: 0.85rem; white-space: pre-wrap; word-wrap: break-word; max-height: 300px; overflow-y: auto; }
+    .comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+    .config-col { padding: 1rem; }
+    .config-col:first-child { border-right: 1px solid var(--border); }
+    .config-col h3 { font-family: 'Inter', system-ui, -apple-system, sans-serif; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 0.75rem; }
+    .config-col h3 .rate { font-weight: bold; margin-left: 0.5rem; }
+
+    .feedback-textarea { width: 100%; min-height: 100px; padding: 0.75rem; border: 1px solid var(--border); border-radius: 4px; font-family: inherit; font-size: 0.9375rem; line-height: 1.5; resize: vertical; color: var(--text); }
+    .feedback-textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+    .feedback-status { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem; min-height: 1.1em; }
+
+    .benchmark-view { padding: 1.5rem 2rem; overflow-y: auto; flex: 1; }
+    .benchmark-table { border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); font-size: 0.8125rem; width: 100%; margin-bottom: 1.5rem; }
+    .benchmark-table th, .benchmark-table td { padding: 0.625rem 0.75rem; text-align: left; border: 1px solid var(--border); }
+    .benchmark-table th { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: var(--header-bg); color: var(--header-text); font-weight: 500; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .bm-pos { color: var(--green); font-weight: 600; }
+    .bm-neg { color: var(--red); font-weight: 600; }
+    .benchmark-empty { color: var(--text-muted); font-style: italic; text-align: center; padding: 3rem; }
+
+    .nav { display: flex; justify-content: space-between; align-items: center; padding: 1rem 2rem; border-top: 1px solid var(--border); background: var(--surface); flex-shrink: 0; }
+    .nav-btn { font-family: 'Inter', system-ui, -apple-system, sans-serif; padding: 0.5rem 1.25rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); cursor: pointer; font-size: 0.875rem; font-weight: 500; color: var(--text); transition: all 0.15s; }
+    .nav-btn:hover:not(:disabled) { background: var(--bg); border-color: var(--text-muted); }
+    .nav-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .done-btn { font-family: 'Inter', system-ui, -apple-system, sans-serif; padding: 0.5rem 1.5rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); cursor: pointer; font-size: 0.875rem; font-weight: 500; transition: all 0.15s; }
+    .done-btn:hover { background: var(--bg); border-color: var(--text-muted); }
+    .done-btn.ready { border: none; background: var(--accent); color: white; font-weight: 600; }
+    .done-btn.ready:hover { background: var(--accent-hover); }
+
+    .done-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; justify-content: center; align-items: center; }
+    .done-overlay.visible { display: flex; }
+    .done-card { background: var(--surface); border-radius: 12px; padding: 2rem 3rem; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,0.3); max-width: 500px; }
+    .done-card h2 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .done-card p { color: var(--text-muted); margin-bottom: 1.5rem; line-height: 1.5; }
+    .done-card button { padding: 0.5rem 1.25rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); cursor: pointer; font-size: 0.875rem; }
+    .done-card button:hover { background: var(--bg); }
+
+    .toast { position: fixed; bottom: 5rem; left: 50%; transform: translateX(-50%); background: var(--header-bg); color: var(--header-text); padding: 0.625rem 1.25rem; border-radius: var(--radius); font-size: 0.875rem; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 200; }
+    .toast.visible { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div id="app" style="height:100vh; display:flex; flex-direction:column;">
+    <div class="header">
+      <div class="header-brand">
+        <img class="logo" src="{{.LogoDataURI}}" alt="skill-up logo">
+        <div class="title-block">
+          <h1>Eval Report: <span id="skill-name"></span></h1>
+          <div class="meta" id="header-meta"></div>
+        </div>
+      </div>
+      <div class="progress" id="progress"></div>
+    </div>
+
+    <div class="summary-bar" id="summary-bar"></div>
+
+    <div class="view-tabs" id="view-tabs" style="display:none;">
+      <button class="view-tab active" data-view="cases" onclick="switchView('cases')">Cases</button>
+      <button class="view-tab" data-view="benchmark" onclick="switchView('benchmark')">Benchmark</button>
+    </div>
+
+    <div class="view-panel active" id="panel-cases">
+      <div class="cases-layout">
+        <aside class="case-sidebar" id="case-sidebar">
+          <div class="sidebar-header">
+            <div class="sidebar-header-title">
+              <span>Cases</span>
+              <span class="count" id="case-count">0</span>
+            </div>
+            <button type="button" class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar">&#9664;</button>
+          </div>
+          <div class="case-list" id="case-list"></div>
+        </aside>
+        <div class="cases-main">
+      <div class="main">
+        <div class="section">
+          <div class="section-header">Case <span class="status-badge" id="case-badge"></span></div>
+          <div class="section-body"><div class="case-info" id="case-info"></div></div>
+        </div>
+        <div class="section" id="prompt-section" style="display:none;">
+          <div class="section-header">Prompt</div>
+          <div class="section-body"><div class="prompt-box" id="prompt-text"></div></div>
+        </div>
+        <div class="section" id="error-section" style="display:none;">
+          <div class="section-header">Error</div>
+          <div class="section-body"><div class="error-box" id="error-text"></div></div>
+        </div>
+        <div class="section" id="response-section" style="display:none;">
+          <div class="section-header">Response</div>
+          <div class="section-body" id="response-body"></div>
+        </div>
+        <div class="section" id="grades-section" style="display:none;">
+          <div class="section-header">
+            <div class="grades-toggle" onclick="toggleGrades()">
+              <span class="arrow" id="grades-arrow">&#9654;</span> Formal Grades
+            </div>
+          </div>
+          <div class="grades-content" id="grades-content"></div>
+        </div>
+        <div class="section">
+          <div class="section-header">Your Feedback</div>
+          <div class="section-body">
+            <textarea class="feedback-textarea" id="feedback" placeholder="What do you think of this result? Any issues, suggestions, or things that look great?"></textarea>
+            <div class="feedback-status" id="feedback-status"></div>
+          </div>
+        </div>
+      </div>
+      <div class="nav">
+        <button class="nav-btn" id="prev-btn" onclick="navigate(-1)">&#8592; Previous</button>
+        <button class="done-btn" id="done-btn" onclick="showDoneDialog()">Submit All Reviews</button>
+        <button class="nav-btn" id="next-btn" onclick="navigate(1)">Next &#8594;</button>
+      </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="view-panel" id="panel-benchmark">
+      <div class="benchmark-view" id="benchmark-content">
+        <div class="benchmark-empty">No benchmark data available.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="done-overlay" id="done-overlay">
+    <div class="done-card">
+      <h2>Review Complete</h2>
+      <p>Your feedback has been saved.</p>
+      <div><button onclick="closeDoneDialog()">OK</button></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    var DATA = {{.EmbeddedDataJSON}};
+    var feedbackMap = {};
+    var currentIndex = 0;
+    var visitedCases = {};
+
+    function init() {
+      document.getElementById("skill-name").textContent = DATA.skill_name;
+      var meta = "Engine: " + DATA.engine_name + " | Model: " + DATA.model_name +
+        " | Started: " + DATA.start_time + " | Duration: " + DATA.duration;
+      if (DATA.total_tokens) meta += " | Tokens: " + DATA.total_tokens;
+      document.getElementById("header-meta").textContent = meta;
+
+      var sb = document.getElementById("summary-bar");
+      var s = DATA.summary;
+      sb.innerHTML = sumCard("Total", s.total, "") + sumCard("Passed", s.passed, "clr-pass") +
+        sumCard("Failed", s.failed, "clr-fail") + sumCard("Skipped", s.skipped, "clr-skip") +
+        sumCard("Errors", s.errors, "clr-error") + sumCard("Pass Rate", s.pass_rate, "");
+
+      if (DATA.benchmark) {
+        document.getElementById("view-tabs").style.display = "flex";
+        renderBenchmark();
+      }
+
+      renderCaseList();
+
+      try {
+        fetch("/api/feedback").then(function(r) { return r.json(); }).then(function(d) {
+          if (d.reviews) { for (var i = 0; i < d.reviews.length; i++) feedbackMap[d.reviews[i].run_id] = d.reviews[i].feedback; }
+          showCase(0);
+        }).catch(function() { showCase(0); });
+      } catch(e) { showCase(0); }
+
+      var ta = document.getElementById("feedback");
+      var timer = null;
+      ta.addEventListener("input", function() {
+        clearTimeout(timer);
+        document.getElementById("feedback-status").textContent = "";
+        timer = setTimeout(function() { saveCurrentFeedback(); }, 800);
+      });
+    }
+
+    function sumCard(label, value, cls) {
+      return '<div class="summary-card"><div class="label">' + label + '</div><div class="value ' + cls + '">' + value + '</div></div>';
+    }
+
+    function renderCaseList() {
+      var list = document.getElementById("case-list");
+      var count = document.getElementById("case-count");
+      if (!list || !DATA.cases) return;
+      count.textContent = DATA.cases.length;
+      var html = "";
+      for (var i = 0; i < DATA.cases.length; i++) {
+        var c = DATA.cases[i];
+        var status = (c.status || "").toLowerCase();
+        var label = c.title || c.id || ("Case " + (i + 1));
+        html += '<div class="case-item" data-idx="' + i + '" onclick="showCase(' + i + ')" title="' + esc(label) + '">' +
+          '<span class="case-dot dot-' + status + '"></span>' +
+          '<span class="case-name">' + esc(label) + '</span>' +
+          '<span class="case-index">#' + (i + 1) + '</span>' +
+          '</div>';
+      }
+      list.innerHTML = html;
+    }
+
+    function updateCaseListActive() {
+      var items = document.querySelectorAll("#case-list .case-item");
+      for (var i = 0; i < items.length; i++) {
+        if (parseInt(items[i].getAttribute("data-idx"), 10) === currentIndex) {
+          items[i].classList.add("active");
+          if (items[i].scrollIntoView) items[i].scrollIntoView({ block: "nearest" });
+        } else {
+          items[i].classList.remove("active");
+        }
+      }
+    }
+
+    function toggleSidebar() {
+      var sb = document.getElementById("case-sidebar");
+      var btn = document.getElementById("sidebar-toggle");
+      var collapsed = sb.classList.toggle("collapsed");
+      btn.innerHTML = collapsed ? "&#9654;" : "&#9664;";
+    }
+
+    function navigate(delta) {
+      var ni = currentIndex + delta;
+      if (ni >= 0 && ni < DATA.cases.length) showCase(ni);
+    }
+
+    function showCase(index) {
+      if (typeof index !== "number" || index < 0 || index >= DATA.cases.length) return;
+      if (index !== currentIndex) { try { saveCurrentFeedback(); } catch (e) {} }
+      currentIndex = index;
+      var c = DATA.cases[index];
+      document.getElementById("progress").textContent = (index + 1) + " of " + DATA.cases.length;
+
+      var badge = document.getElementById("case-badge");
+      badge.textContent = c.status;
+      badge.className = "status-badge sb-" + c.status.toLowerCase();
+
+      var info = '<div class="info-item"><span class="info-label">Case:</span> <strong>' + esc(c.id) + '</strong></div>';
+      if (c.title) info += '<div class="info-item"><span class="info-label">Title:</span> ' + esc(c.title) + '</div>';
+      info += '<div class="info-item"><span class="info-label">Duration:</span> ' + c.duration + '</div>';
+      info += '<div class="info-item"><span class="info-label">Turns:</span> ' + c.turns + '</div>';
+      document.getElementById("case-info").innerHTML = info;
+
+      var promptSec = document.getElementById("prompt-section");
+      if (c.prompt) { promptSec.style.display = "block"; document.getElementById("prompt-text").textContent = c.prompt; }
+      else { promptSec.style.display = "none"; }
+
+      var errSec = document.getElementById("error-section");
+      if (c.error) { errSec.style.display = "block"; document.getElementById("error-text").textContent = c.error; }
+      else { errSec.style.display = "none"; }
+
+      renderResponse(c);
+      renderGrades(c);
+
+      document.getElementById("feedback").value = feedbackMap[c.id] || "";
+      document.getElementById("feedback-status").textContent = "";
+      document.getElementById("prev-btn").disabled = index === 0;
+      document.getElementById("next-btn").disabled = index === DATA.cases.length - 1;
+
+      visitedCases[index] = true;
+      if (Object.keys(visitedCases).length >= DATA.cases.length) document.getElementById("done-btn").classList.add("ready");
+
+      updateCaseListActive();
+
+      var main = document.querySelector(".main");
+      if (main) main.scrollTop = 0;
+    }
+
+    function renderResponse(c) {
+      var section = document.getElementById("response-section");
+      var body = document.getElementById("response-body");
+      if (!c.response && !(c.baseline && c.baseline.response)) { section.style.display = "none"; return; }
+      section.style.display = "block";
+      if (c.baseline) {
+        var html = '<div class="comparison">';
+        html += '<div class="config-col"><h3>With Skill';
+        if (c.grading) html += ' <span class="rate clr-pass">' + Math.round(c.grading.summary.pass_rate * 100) + '%</span>';
+        html += '</h3>';
+        if (c.response) html += '<div class="response-box">' + esc(c.response) + '</div>';
+        html += '</div>';
+        html += '<div class="config-col"><h3>Without Skill';
+        if (c.baseline.grading) html += ' <span class="rate clr-fail">' + Math.round(c.baseline.grading.summary.pass_rate * 100) + '%</span>';
+        html += '</h3>';
+        if (c.baseline.response) html += '<div class="response-box">' + esc(c.baseline.response) + '</div>';
+        html += '</div></div>';
+        body.innerHTML = html;
+      } else {
+        body.innerHTML = '<div style="padding: 1rem;"><div class="response-box">' + esc(c.response) + '</div></div>';
+      }
+    }
+
+    function renderGrades(c) {
+      var section = document.getElementById("grades-section");
+      var content = document.getElementById("grades-content");
+      if (!c.grading && !(c.baseline && c.baseline.grading)) { section.style.display = "none"; return; }
+      section.style.display = "block";
+      content.classList.remove("open");
+      document.getElementById("grades-arrow").classList.remove("open");
+
+      var html = '<div style="padding: 1rem;">';
+      if (c.baseline) {
+        html += '<div class="comparison">';
+        html += '<div class="config-col"><h3>With Skill</h3>' + renderGradingBlock(c.grading) + '</div>';
+        html += '<div class="config-col"><h3>Without Skill</h3>' + renderGradingBlock(c.baseline.grading) + '</div>';
+        html += '</div>';
+      } else {
+        html += renderGradingBlock(c.grading);
+      }
+      html += '</div>';
+      content.innerHTML = html;
+    }
+
+    function renderGradingBlock(g) {
+      if (!g) return '<div style="color: var(--text-muted); font-style: italic;">No grading data</div>';
+      var s = g.summary;
+      var passRate = Math.round(s.pass_rate * 100) + "%";
+      var bc = s.pass_rate >= 0.8 ? "grade-pass" : s.pass_rate >= 0.5 ? "" : "grade-fail";
+      var html = '<div class="grades-summary"><span class="grade-badge ' + bc + '">' + passRate + '</span>';
+      html += '<span>' + s.passed + ' passed, ' + s.failed + ' failed of ' + s.total + '</span></div>';
+      html += '<ul class="assertion-list">';
+      for (var i = 0; i < g.expectations.length; i++) {
+        var exp = g.expectations[i];
+        var sc = exp.passed ? "a-pass" : "a-fail";
+        var icon = exp.passed ? "\u2713" : "\u2717";
+        html += '<li class="assertion-item"><span class="assertion-status ' + sc + '">' + icon + '</span>';
+        html += '<span>' + esc(exp.text) + '</span>';
+        if (exp.evidence) html += '<div class="assertion-evidence">' + esc(exp.evidence) + '</div>';
+        html += '</li>';
+      }
+      html += '</ul>';
+      return html;
+    }
+
+    function toggleGrades() {
+      document.getElementById("grades-content").classList.toggle("open");
+      document.getElementById("grades-arrow").classList.toggle("open");
+    }
+
+    function saveCurrentFeedback() {
+      var c = DATA.cases[currentIndex];
+      var text = document.getElementById("feedback").value;
+      if (text.trim() === "") { delete feedbackMap[c.id]; } else { feedbackMap[c.id] = text; }
+      var reviews = [];
+      for (var rid in feedbackMap) {
+        if (feedbackMap[rid].trim()) reviews.push({ run_id: rid, feedback: feedbackMap[rid], timestamp: new Date().toISOString() });
+      }
+      fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviews: reviews, status: "in_progress" })
+      }).then(function() { document.getElementById("feedback-status").textContent = "Saved"; })
+       .catch(function() { document.getElementById("feedback-status").textContent = "Will download on submit"; });
+    }
+
+    function showDoneDialog() {
+      var c = DATA.cases[currentIndex];
+      var text = document.getElementById("feedback").value;
+      if (text.trim() === "") { delete feedbackMap[c.id]; } else { feedbackMap[c.id] = text; }
+      var reviews = [], ts = new Date().toISOString();
+      for (var i = 0; i < DATA.cases.length; i++) {
+        reviews.push({ run_id: DATA.cases[i].id, feedback: feedbackMap[DATA.cases[i].id] || "", timestamp: ts });
+      }
+      var payload = JSON.stringify({ reviews: reviews, status: "complete" }, null, 2);
+      fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: payload })
+        .then(function() { document.getElementById("done-overlay").classList.add("visible"); })
+        .catch(function() {
+          var blob = new Blob([payload], { type: "application/json" });
+          var url = URL.createObjectURL(blob);
+          var a = document.createElement("a"); a.href = url; a.download = "feedback.json"; a.click();
+          URL.revokeObjectURL(url);
+          document.getElementById("done-overlay").classList.add("visible");
+        });
+    }
+
+    function closeDoneDialog() {
+      saveCurrentFeedback();
+      document.getElementById("done-overlay").classList.remove("visible");
+    }
+
+    function switchView(view) {
+      var tabs = document.querySelectorAll(".view-tab");
+      var panels = document.querySelectorAll(".view-panel");
+      for (var i = 0; i < tabs.length; i++) tabs[i].classList.remove("active");
+      for (var i = 0; i < panels.length; i++) panels[i].classList.remove("active");
+      document.querySelector('.view-tab[data-view="' + view + '"]').classList.add("active");
+      document.getElementById("panel-" + view).classList.add("active");
+    }
+
+    function renderBenchmark() {
+      var bm = DATA.benchmark;
+      if (!bm || !bm.run_summary) return;
+      var container = document.getElementById("benchmark-content");
+      var rs = bm.run_summary;
+      var html = "<h2 style='font-family: Inter, system-ui, -apple-system, sans-serif; margin-bottom: 1rem;'>Benchmark Summary</h2>";
+      html += '<table class="benchmark-table"><thead><tr><th>Metric</th><th>With Skill</th>';
+      if (rs.without_skill) html += '<th>Without Skill</th>';
+      if (rs.delta) html += '<th>Delta</th>';
+      html += '</tr></thead><tbody>';
+      html += bmRow("Pass Rate", rs.with_skill.pass_rate, rs.without_skill ? rs.without_skill.pass_rate : null, rs.delta ? rs.delta.pass_rate : null, true);
+      html += bmRow("Time (s)", rs.with_skill.time_seconds, rs.without_skill ? rs.without_skill.time_seconds : null, rs.delta ? rs.delta.time_seconds : null, false);
+      html += bmRow("Tokens", rs.with_skill.tokens, rs.without_skill ? rs.without_skill.tokens : null, rs.delta ? rs.delta.tokens : null, false);
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    }
+
+    function bmRow(label, ws, wos, delta, pct) {
+      var html = '<tr><td><strong>' + label + '</strong></td><td>' + fmtStat(ws, pct) + '</td>';
+      if (wos !== null) html += '<td>' + fmtStat(wos, pct) + '</td>';
+      if (delta !== null) html += '<td class="' + deltaClass(delta) + '">' + fmtDelta(delta, pct) + '</td>';
+      return html + '</tr>';
+    }
+
+    function fmtStat(sv, pct) {
+      if (!sv) return "\u2014";
+      var m = pct ? (sv.mean * 100).toFixed(0) + "%" : sv.mean.toFixed(1);
+      var s = pct ? (sv.stddev * 100).toFixed(0) + "%" : sv.stddev.toFixed(1);
+      return m + " \u00b1 " + s;
+    }
+
+    function fmtDelta(val, pct) {
+      if (val == null) return "\u2014";
+      if (pct) return (val >= 0 ? "+" : "") + (val * 100).toFixed(0) + "%";
+      return (val >= 0 ? "+" : "") + val.toFixed(1);
+    }
+
+    function deltaClass(val) {
+      if (val > 0) return "bm-pos";
+      if (val < 0) return "bm-neg";
+      return "";
+    }
+
+    function showToast(msg) {
+      var t = document.getElementById("toast");
+      t.textContent = msg; t.classList.add("visible");
+      setTimeout(function() { t.classList.remove("visible"); }, 2000);
+    }
+
+    function esc(text) {
+      var div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    document.addEventListener("keydown", function(e) {
+      if (e.target.tagName === "TEXTAREA") return;
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); navigate(-1); }
+      else if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); navigate(1); }
+    });
+
+    init();
+  </script>
+</body>
+</html>

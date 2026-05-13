@@ -1,0 +1,51 @@
+id: find-null-bug
+title: Identify null pointer bug
+description: >
+  Agent reviews a Go code snippet containing a null pointer dereference risk,
+  and should explicitly identify null/bug related issues in the output and
+  provide fix suggestions.
+tag: functional_test
+input:
+  prompt: |
+    Please review the following Go code and identify potential bugs:
+
+    ```go
+    func GetUserName(user *User) string {
+        return user.Profile.Name
+    }
+    ```
+
+    Under what circumstances would this code fail? Please provide a detailed analysis.
+context:
+  files:
+    src/handler.go: |
+      package handler
+
+      type User struct {
+          Profile *Profile
+      }
+
+      type Profile struct {
+          Name string
+      }
+
+      func GetUserName(user *User) string {
+          return user.Profile.Name
+      }
+constraints:
+  timeout_seconds: 60
+  max_turns: 3
+expect:
+  must_contain: ["null"]
+  exit_code: 0
+judge:
+  type: rule_based
+  success:
+    - output_contains:
+        all: ["null", "bug"]
+    - output_contains:
+        any: ["severe", "critical", "high-risk"]
+    - exit_code: 0
+  failure:
+    - output_contains:
+        not: ["I don't know", "unable to analyze", "cannot analyze"]

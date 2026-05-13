@@ -1,0 +1,58 @@
+{
+  "metadata": {
+    "skill_name": "code-quality-analyzer",
+    "engine": "claude_code",
+    "model": "anthropic/claude-sonnet-4-20250514",
+    "total_evals": 4,
+    "timestamp": "2026-04-13T10:06:48Z"
+  },
+  "runs": [
+    {
+      "eval_id": 1,
+      "eval_name": "identify-null-deref",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": "PASS",
+      "expectations": [
+        {"text": "output_contains{all:[analysis]}", "passed": true},
+        {"text": "exit_code: 0", "passed": true}
+      ]
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "miss-sql-injection",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": "FAIL",
+      "expectations": [
+        {"text": "output_contains{all:[SQL injection]}", "passed": false},
+        {"text": "exit_code: 0", "passed": true}
+      ]
+    },
+    {
+      "eval_id": 3,
+      "eval_name": "skip-no-go-files",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": "SKIP",
+      "expectations": []
+    },
+    {
+      "eval_id": 4,
+      "eval_name": "engine-timeout",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": "ERROR",
+      "expectations": []
+    }
+  ],
+  "run_summary": {
+    "total": 4,
+    "passed": 1,
+    "failed": 1,
+    "skipped": 1,
+    "errored": 1,
+    "pass_rate": 0.25
+  },
+  "notes": "Benchmark computed from 4 evaluation cases with mixed results."
+}

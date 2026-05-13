@@ -1,0 +1,37 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+  workspace_mount: /workspace
+
+mcp:
+  servers: []
+
+skills:
+  - source: local_path
+    path: .
+
+engine:
+  name: qoder-cli
+  model:
+    provider: qoder
+    name: auto
+
+cases:
+  files:
+    - evals/cases/flaky-success-retry.yaml
+    - evals/cases/second-case-parallel.yaml
+  defaults:
+    timeout_seconds: 60
+    max_turns: 3
+  parallelism: 2
+  retry_policy:
+    max_retries: 2
+    retry_on:
+      - timeout
+      - error
+
+report:
+  formats: [json]
+  artifacts:
+    - transcript

@@ -1,0 +1,20 @@
+{
+  "expectations": [
+    {
+      "text": "output_contains{all:[analysis]}",
+      "passed": true,
+      "evidence": "all output_contains checks passed"
+    },
+    {
+      "text": "exit_code: 0",
+      "passed": true,
+      "evidence": "exit_code is 0 as expected"
+    }
+  ],
+  "summary": {
+    "passed": 2,
+    "failed": 0,
+    "total": 2,
+    "pass_rate": 1.0
+  }
+}

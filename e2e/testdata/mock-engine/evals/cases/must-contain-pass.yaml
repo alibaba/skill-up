@@ -1,0 +1,13 @@
+id: must-contain-pass
+title: Expect must_contain should pass when output contains keywords
+
+input:
+  prompt: |
+    Find the null pointer bug in the code.
+
+expect:
+  must_contain:
+    - "null"
+    - "bug"
+  must_not_contain:
+    - "LGTM"

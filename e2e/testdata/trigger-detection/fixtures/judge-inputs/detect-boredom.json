@@ -1,0 +1,35 @@
+{
+  "case_id": "detect-boredom",
+  "transcript": [
+    {
+      "role": "user",
+      "content": "I'm so bored, I've been coding all day and my brain is about to explode",
+      "turn": 1
+    },
+    {
+      "role": "assistant",
+      "content": "Sounds like you've been coding all day — take a break! Here's a joke to cheer you up 😄\n\nProgrammer A: \"I had a dream last night that I was writing code.\"\nProgrammer B: \"And then what?\"\nProgrammer A: \"Then I woke up and realized I actually was writing code.\"\n\n😂 Hope that made you smile! Take a rest and then get back to it — keep going 💪",
+      "turn": 1
+    }
+  ],
+  "final_message": "Sounds like you've been coding all day — take a break! Here's a joke to cheer you up 😄\n\nProgrammer A: \"I had a dream last night that I was writing code.\"\nProgrammer B: \"And then what?\"\nProgrammer A: \"Then I woke up and realized I actually was writing code.\"\n\n😂 Hope that made you smile! Take a rest and then get back to it — keep going 💪",
+  "exit_code": 0,
+  "workspace_path": "",
+  "workspace_diff": "",
+  "generated_files": [],
+  "turns_executed": 1,
+  "turns_total": 1,
+  "expect": {
+    "must_contain": ["😄"],
+    "must_not_contain": ["error", "cannot"]
+  },
+  "judge": {
+    "type": "rule_based",
+    "success": [
+      {"output_contains": {"any": ["joke", "story", "haha", "😄", "😂", "😊", "happy"]}}
+    ],
+    "failure": [
+      {"output_contains": {"any": ["I don't know", "unable", "cannot understand"]}}
+    ]
+  }
+}

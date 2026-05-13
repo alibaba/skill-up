@@ -1,0 +1,10 @@
+id: must-contain-fail
+title: Expect must_contain should fail when keywords missing
+
+input:
+  prompt: |
+    Say hello to the user.
+
+expect:
+  must_contain:
+    - "nonexistent-keyword-xyz"

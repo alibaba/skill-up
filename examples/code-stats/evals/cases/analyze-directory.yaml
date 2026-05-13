@@ -1,0 +1,30 @@
+id: analyze-directory
+title: Analyze code stats for evals directory
+description: Run code-stats on the current workspace and verify output format
+
+input:
+  prompt: |
+    Analyze the current directory using the code-stats requirements.
+    Report the statistics in the full Code Statistics format with Summary,
+    Files by Extension, Top File Extensions, and Largest Files sections.
+
+context:
+  repo_fixture: evals/fixtures/repos/sample-project
+
+constraints:
+  timeout_seconds: 900
+  max_turns: 5
+
+expect:
+  must_contain:
+    - "Files by Extension"
+    - "Total Files"
+    - "Total Lines"
+  must_not_contain:
+    - "error"
+    - "Error"
+
+judge:
+  type: script
+  script_path: evals/fixtures/scripts/check-stats.sh
+  timeout_seconds: 30

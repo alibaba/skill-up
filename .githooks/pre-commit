@@ -1,0 +1,59 @@
+#!/bin/sh
+# Run mandatory pre-commit checks and block the commit on any failure.
+#
+# Policy: enforce formatting/vet/revive on the whole tree (cheap and stable),
+# but only run golangci-lint **incrementally** against the merge base so
+# unrelated pre-existing issues do not block new commits. CI runs the full
+# scan via `make quality-ci`.
+#
+# To run the full scan locally instead of the incremental one:
+#     SKILL_UP_PRECOMMIT_FULL=1 git commit ...
+# To bypass entirely (discouraged, last resort):
+#     git commit --no-verify ...
+
+set -e
+
+# Ensure Go and repo-local tools are in PATH for non-interactive shells.
+for go_path in /opt/homebrew/bin /usr/local/go/bin "$HOME/go/bin" "$HOME/.local/bin"; do
+	if [ -d "$go_path" ]; then
+		PATH="$go_path:$PATH"
+	fi
+done
+export PATH
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+PATH="$ROOT/.tools/bin:$PATH"
+export PATH
+
+if ! command -v make >/dev/null 2>&1; then
+	echo "error: make is required for pre-commit" >&2
+	exit 1
+fi
+
+if [ "${SKILL_UP_PRECOMMIT_FULL:-0}" = "1" ]; then
+	echo "[pre-commit] SKILL_UP_PRECOMMIT_FULL=1 -> running full 'make verify'"
+	make verify
+	exit 0
+fi
+
+# Always-on cheap checks (whole tree).
+make fmt-check
+make vet
+make revive
+
+# Incremental golangci-lint: only fail on issues introduced by this commit.
+# Pick a sensible base ref: prefer origin/master, fall back to master, then HEAD.
+BASE_REF="${QUALITY_BASE_REF:-}"
+if [ -z "$BASE_REF" ]; then
+	if git rev-parse --verify --quiet origin/master >/dev/null; then
+		BASE_REF="origin/master"
+	elif git rev-parse --verify --quiet master >/dev/null; then
+		BASE_REF="master"
+	else
+		BASE_REF="HEAD"
+	fi
+fi
+
+echo "[pre-commit] running incremental lint against ${BASE_REF}"
+QUALITY_BASE_REF="$BASE_REF" make lint-new

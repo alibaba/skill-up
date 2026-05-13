@@ -1,0 +1,65 @@
+# Binaries
+/skill-up
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Linters / caches
+.cache/
+.tools/
+__pycache__/
+*.py[cod]
+
+# Test / coverage
+*.test
+*.out
+coverage.html
+coverage.out
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Workspace artifacts
+-*/
+*-workspace/
+
+plan/*
+user-docs/*
+.gocache/
+.quality/
+.claude/
+.gopath/
+.tmp-*/
+.tmp-home/
+.tmp-repro/
+.qoder/
+user_test/
+test-skill/
+e2e/testdata/*/grading.json
+e2e/coverage-report.json
+
+# VitePress docs site
+node_modules/
+docs/.vitepress/cache/
+docs/.vitepress/dist/

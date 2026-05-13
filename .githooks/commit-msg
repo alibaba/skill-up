@@ -1,0 +1,38 @@
+#!/bin/sh
+# Enforce Conventional Commits on the subject line (first line).
+# https://www.conventionalcommits.org/
+
+set -e
+
+msg_file=$1
+first_line=$(head -n1 "$msg_file")
+
+# Merge / revert commits from Git and GitHub
+case "$first_line" in
+Merge\ *|"Revert "*)
+	exit 0
+	;;
+esac
+
+# Optional body may follow; subject must match.
+pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-zA-Z0-9._/-]+\))?: .+'
+
+if ! printf '%s\n' "$first_line" | grep -qE "$pattern"; then
+	cat <<-'EOF' >&2
+	error: commit message does not follow Conventional Commits.
+
+	Subject line (first line) must look like:
+
+	  <type>(<optional-scope>): <description>
+
+	Examples:
+	  feat(cli): add validate command
+	  fix(config): correct default timeout
+	  docs: update CONTRIBUTING
+
+	Allowed types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
+
+	See CONTRIBUTING.md for details.
+	EOF
+	exit 1
+fi

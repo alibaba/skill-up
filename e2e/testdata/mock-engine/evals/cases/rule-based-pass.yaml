@@ -1,0 +1,13 @@
+id: rule-based-pass
+title: Rule-based judge should pass with output_contains
+
+input:
+  prompt: |
+    Review the code for null pointer issues.
+
+judge:
+  type: rule_based
+  success:
+    - output_contains:
+        all: ["null", "bug"]
+        not: ["LGTM"]

@@ -1,0 +1,50 @@
+id: detailed-code-review
+title: Detailed code review with agent_judge criteria evaluation
+description: >
+  Verify multi-criteria evaluation using agent_judge mode.
+  The reviewer evaluates: bug identification accuracy, false positive rate,
+  actionability of suggestions, and output structure.
+  Each criterion requires evidence to be judged PASS.
+tag: functional_test
+input:
+  prompt: |
+    Review the following code and provide a detailed quality assessment:
+
+    func process(u *User) {
+        fmt.Println(u.Name)
+    }
+
+    Provide your review in the following format:
+    ## Strengths
+    ## Issues
+    ## Assessment
+
+context:
+  files:
+    main.go: |
+      package main
+      type User struct {
+          Name string
+      }
+      func process(u *User) {
+          fmt.Println(u.Name)
+      }
+
+constraints:
+  timeout_seconds: 180
+  max_turns: 8
+
+expect:
+  must_contain:
+    - "Strengths"
+    - "Issues"
+    - "Assessment"
+
+judge:
+  type: agent_judge
+  model: qwen3.6-plus
+  criteria:
+    - "identified the null pointer dereference issue (u may be nil)"
+    - "provided a specific fix suggestion (nil check)"
+    - "output contains Strengths/Issues/Assessment structure"
+  pass_threshold: 0.7

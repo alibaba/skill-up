@@ -1,0 +1,26 @@
+id: check-remote-url
+title: Check git remote URL
+description: >
+  Verify the context.git.init config and test whether the agent can execute
+  git remote -v in an initialized git repository.
+tag: functional_test
+input:
+  prompt: "Run git remote -v and show the output"
+
+context:
+  git:
+    init: true
+    remotes:
+      - name: origin
+        url: https://github.com/example/repo.git
+
+constraints:
+  timeout_seconds: 60
+  max_turns: 2
+
+judge:
+  type: rule_based
+  success:
+    - output_contains:
+        any: ["origin", "github.com/example/repo"]
+    - exit_code: 0

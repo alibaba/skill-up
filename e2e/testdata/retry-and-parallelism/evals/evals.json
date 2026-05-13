@@ -1,0 +1,17 @@
+{
+  "skill_name": "retry-and-parallelism",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "What is 2 + 2?",
+      "expected_output": "Fails on first attempt (MOCK_FAIL_COUNT=1), succeeds on retry with '4'",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Find the null pointer bug in this code",
+      "expected_output": "Mock engine returns null pointer analysis",
+      "files": []
+    }
+  ]
+}

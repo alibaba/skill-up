@@ -1,0 +1,414 @@
+package judge
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/alibaba/skill-up/internal/agent"
+	"github.com/alibaba/skill-up/internal/logging"
+	"github.com/alibaba/skill-up/internal/runtime"
+	"github.com/alibaba/skill-up/pkg/transcript"
+)
+
+// DefaultPassThreshold is the default minimum pass rate for agent_judge.
+const DefaultPassThreshold = 0.7
+
+// ---------------------------------------------------------------------------
+// Data types for agent_judge JSON parsing
+// ---------------------------------------------------------------------------
+
+// CriterionResult is the agent's assessment of a single criterion.
+type CriterionResult struct {
+	// Criterion is the original criterion text.
+	Criterion string `json:"criterion"`
+
+	// Passed indicates whether the criterion was met.
+	Passed bool `json:"passed"`
+
+	// Evidence is the concrete reason for the pass/fail determination.
+	// Required: the agent must provide evidence (design doc: "evidence is required").
+	Evidence string `json:"evidence"`
+}
+
+// judgeResponse is the expected JSON structure from the agent judge output.
+type judgeResponse struct {
+	Results []CriterionResult `json:"results"`
+}
+
+// ---------------------------------------------------------------------------
+// AgentJudge implementation
+// ---------------------------------------------------------------------------
+
+// AgentJudge uses an agent.Agent to grade outputs against criteria.
+//
+// The agent receives the judge prompt (transcript + workspace diff + criteria)
+// and returns a JSON response with per-criterion pass/fail and evidence.
+//
+// Design doc: "the judge agent emits pass/fail and concrete evidence for each
+// criterion; the overall result passes when passed_criteria / total_criteria
+// ≥ pass_threshold".
+type AgentJudge struct {
+	// Agent is the agent used for judge evaluation.
+	Agent agent.Agent
+
+	// Runtime is the runtime environment for the agent.
+	Runtime runtime.Runtime
+
+	// Model is the judge model identifier.
+	Model string
+
+	// Criteria are the evaluation standards.
+	Criteria []string
+
+	// PassThreshold is the minimum pass rate (default 0.7).
+	PassThreshold float64
+}
+
+// NewAgentJudge creates an AgentJudge with sensible defaults.
+func NewAgentJudge(ag agent.Agent, rt runtime.Runtime, model string, criteria []string, passThreshold *float64) *AgentJudge {
+	threshold := DefaultPassThreshold
+	if passThreshold != nil {
+		threshold = *passThreshold
+	}
+	return &AgentJudge{
+		Agent:         ag,
+		Runtime:       rt,
+		Model:         model,
+		Criteria:      criteria,
+		PassThreshold: threshold,
+	}
+}
+
+// Evaluate implements the Judge interface.
+func (j *AgentJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
+	if len(j.Criteria) == 0 {
+		return NewResult(nil, in.TurnsExecuted, in.TurnsTotal), nil
+	}
+
+	// Build the judge prompt.
+	prompt := buildJudgePrompt(ctx, j.Criteria, in.FinalMessage, in.WorkspaceDiff, in.Transcript)
+	messages := []transcript.Message{{Role: transcript.RoleUser, Content: prompt, Turn: 1}}
+
+	// Get criterion results via agent.Agent.
+	sessionResult, err := j.Agent.Run(ctx, j.Runtime, agent.ExecOptions{ArtifactDir: in.ArtifactDir}, messages)
+	if err != nil {
+		if !canRecoverAgentJudgeResult(err, sessionResult) {
+			return nil, &SessionResultError{
+				Err:     fmt.Errorf("agent_judge agent call failed: %w", err),
+				Session: sessionResult,
+			}
+		}
+		logging.WarnContextf(ctx, "agent_judge recovering judge output despite agent error: %v", err)
+	}
+
+	var resp judgeResponse
+	if err := extractJSON(sessionResult.FinalMessage, &resp); err != nil {
+		return nil, &SessionResultError{
+			Err:     fmt.Errorf("agent_judge failed to parse agent output: %w", err),
+			Session: sessionResult,
+		}
+	}
+	criterionResults := resp.Results
+
+	// Validate that the agent evaluated every criterion.
+	// A short response inflates pass_rate because NewResult uses the returned
+	// count as the denominator (e.g. 1-of-1 returned = 100% even if 3 were sent).
+	if len(criterionResults) != len(j.Criteria) {
+		return nil, &SessionResultError{
+			Err:     fmt.Errorf("agent_judge: expected %d criterion results, got %d", len(j.Criteria), len(criterionResults)),
+			Session: sessionResult,
+		}
+	}
+	// Validate evidence is non-empty for every result (required by prompt).
+	for i, cr := range criterionResults {
+		if strings.TrimSpace(cr.Evidence) == "" {
+			return nil, &SessionResultError{
+				Err:     fmt.Errorf("agent_judge: criterion %d %q has empty evidence", i+1, cr.Criterion),
+				Session: sessionResult,
+			}
+		}
+	}
+
+	// Convert to assertion results.
+	assertions := make([]AssertionResult, 0, len(criterionResults))
+	for _, cr := range criterionResults {
+		assertions = append(assertions, AssertionResult{
+			Text:     cr.Criterion,
+			Passed:   cr.Passed,
+			Evidence: cr.Evidence,
+		})
+	}
+
+	// Build result with threshold-based status determination.
+	result := NewResult(assertions, in.TurnsExecuted, in.TurnsTotal)
+	result.JudgeSession = sessionResult
+
+	// Agent judge uses pass_threshold to determine status, overriding
+	// the default all-or-nothing logic in NewResult.
+	if len(assertions) > 0 {
+		if result.Summary.PassRate >= j.PassThreshold {
+			result.Status = StatusPass
+		} else {
+			result.Status = StatusFail
+		}
+	}
+
+	return result, nil
+}
+
+// extractJSON finds and parses a JSON object from agent output text.
+// The agent may wrap the JSON in markdown code blocks or other text.
+func extractJSON(output string, v any) error {
+	candidates := []string{output}
+	if fenced := extractFencedJSON(output); fenced != "" {
+		candidates = append(candidates, fenced)
+	}
+
+	for _, candidate := range candidates {
+		if err := json.Unmarshal([]byte(candidate), v); err == nil {
+			return nil
+		}
+	}
+
+	for _, candidate := range findJSONObjectCandidates(output) {
+		if err := json.Unmarshal([]byte(candidate), v); err == nil {
+			return nil
+		}
+	}
+
+	// Last resort: LLMs sometimes emit unescaped double-quotes inside JSON
+	// string values (e.g. in evidence text). Try to repair and re-parse.
+	repaired := repairJSONQuotes(output)
+	if repaired != output {
+		for _, candidate := range findJSONObjectCandidates(repaired) {
+			if err := json.Unmarshal([]byte(candidate), v); err == nil {
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("no valid JSON found in agent output (length=%d)", len(output))
+}
+
+// repairJSONQuotes attempts to fix unescaped double-quotes inside JSON string
+// values. LLMs frequently produce evidence text like:
+//
+//	"evidence": "output contains \"hello\" which is wrong"
+//
+// but forget to escape the inner quotes, yielding invalid JSON. The heuristic:
+// while scanning inside a JSON string, a '"' that is NOT followed (after
+// optional whitespace) by a JSON structural character ( : , } ] ) is treated
+// as an inner quote and escaped with a backslash.
+func repairJSONQuotes(raw string) string {
+	var buf strings.Builder
+	buf.Grow(len(raw) + 64)
+
+	inString := false
+	for i := 0; i < len(raw); i++ {
+		ch := raw[i]
+
+		if !inString {
+			buf.WriteByte(ch)
+			if ch == '"' {
+				inString = true
+			}
+			continue
+		}
+
+		// Inside a JSON string value.
+		if ch == '\\' {
+			// Already-escaped sequence — pass through.
+			buf.WriteByte(ch)
+			i++
+			if i < len(raw) {
+				buf.WriteByte(raw[i])
+			}
+			continue
+		}
+
+		if ch == '"' {
+			// Decide whether this quote closes the string or is an
+			// unescaped inner quote.
+			rest := strings.TrimLeft(raw[i+1:], " \t\r\n")
+			if len(rest) == 0 || rest[0] == ':' || rest[0] == ',' || rest[0] == '}' || rest[0] == ']' {
+				// Looks like a structural boundary — close the string.
+				buf.WriteByte(ch)
+				inString = false
+			} else {
+				// Inner quote — escape it.
+				buf.WriteString(`\"`)
+			}
+			continue
+		}
+
+		buf.WriteByte(ch)
+	}
+
+	return buf.String()
+}
+
+func extractFencedJSON(output string) string {
+	idx := strings.Index(output, "```json")
+	if idx < 0 {
+		return ""
+	}
+
+	start := idx + len("```json")
+	end := strings.Index(output[start:], "```")
+	if end < 0 {
+		return ""
+	}
+
+	return strings.TrimSpace(output[start : start+end])
+}
+
+func findJSONObjectCandidates(output string) []string {
+	candidates := make([]string, 0)
+	start := strings.Index(output, "{")
+	for start >= 0 {
+		end, ok := findJSONObjectEnd(output, start)
+		if !ok {
+			break
+		}
+		candidates = append(candidates, output[start:end+1])
+
+		next := strings.Index(output[end+1:], "{")
+		if next < 0 {
+			break
+		}
+		start = end + 1 + next
+	}
+
+	return candidates
+}
+
+// findJSONObjectEnd finds the closing brace of a top-level JSON object embedded
+// in free-form model output.
+//
+// This is intentionally a small state machine instead of a regexp:
+// nested braces and escaped quotes make regexp matching brittle, and the
+// standard JSON decoder cannot help until we first isolate a candidate object.
+//
+// Single-quoted content is treated as "string-like" only for scanning. That
+// lets us skip over Python-style pseudo-JSON fragments while continuing to look
+// for a later valid JSON object. Single-quoted content is not accepted as valid
+// JSON by extractJSON; the final decode still uses encoding/json.
+func findJSONObjectEnd(output string, start int) (int, bool) {
+	depth := 0
+	inDoubleQuotedString := false
+	inSingleQuotedString := false
+
+	for i := start; i < len(output); i++ {
+		ch := output[i]
+		if inDoubleQuotedString || inSingleQuotedString {
+			if ch == '\\' {
+				i++
+				continue
+			}
+			if inDoubleQuotedString && ch == '"' {
+				inDoubleQuotedString = false
+			}
+			if inSingleQuotedString && ch == '\'' {
+				inSingleQuotedString = false
+			}
+			continue
+		}
+
+		switch ch {
+		case '"':
+			inDoubleQuotedString = true
+		case '\'':
+			inSingleQuotedString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i, true
+			}
+		}
+	}
+
+	return 0, false
+}
+
+func canRecoverAgentJudgeResult(err error, sessionResult *agent.SessionResult) bool {
+	if err == nil || sessionResult == nil {
+		return false
+	}
+	if strings.TrimSpace(sessionResult.FinalMessage) == "" {
+		return false
+	}
+	// Never recover from explicit cancellation.
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	return true
+}
+
+// ---------------------------------------------------------------------------
+// Prompt builder
+// ---------------------------------------------------------------------------
+
+// buildJudgePrompt constructs the system + user prompt for the judge agent.
+func buildJudgePrompt(ctx context.Context, criteria []string, finalMessage, workspaceDiff string, transcriptData transcript.Transcript) string {
+	var sb strings.Builder
+
+	sb.WriteString("You are an expert evaluator for an AI agent skill evaluation.\n")
+	sb.WriteString("You must assess the agent's output against the following criteria.\n")
+	sb.WriteString("For EACH criterion, you MUST provide:\n")
+	sb.WriteString("- \"passed\": true/false\n")
+	sb.WriteString("- \"evidence\": concrete evidence from the output supporting your judgment\n\n")
+	sb.WriteString("You MUST NOT pass a criterion without specific evidence.\n\n")
+	sb.WriteString("IMPORTANT: Your response MUST be valid JSON. If any string value contains double quotes, ")
+	sb.WriteString("you MUST escape them with a backslash (e.g. \\\"example\\\"). Do NOT use unescaped double quotes inside string values.\n\n")
+
+	sb.WriteString("## Criteria\n")
+	for i, c := range criteria {
+		fmt.Fprintf(&sb, "%d. %s\n", i+1, c)
+	}
+
+	sb.WriteString("\n## Agent Final Message\n")
+	sb.WriteString(finalMessage)
+	sb.WriteString("\n")
+
+	if workspaceDiff != "" {
+		sb.WriteString("\n## Workspace Diff\n```\n")
+		sb.WriteString(workspaceDiff)
+		sb.WriteString("\n```\n")
+	}
+
+	if transcriptData != nil {
+		transcriptJSON, err := json.Marshal(transcriptData)
+		if err != nil {
+			logging.WarnContextf(ctx, "agent_judge failed to marshal transcript for judge prompt: %v", err)
+		} else {
+			transcriptStr := string(transcriptJSON)
+			if transcriptStr != "" && transcriptStr != "null" {
+				sb.WriteString("\n## Full Transcript\n")
+				sb.WriteString(transcriptStr)
+				sb.WriteString("\n")
+			}
+		}
+	}
+
+	sb.WriteString("\n## Required Response Format (JSON)\n")
+	sb.WriteString("```json\n")
+	sb.WriteString("{\n")
+	sb.WriteString("  \"results\": [\n")
+	for i, c := range criteria {
+		fmt.Fprintf(&sb, "    {\"criterion\": %q, \"passed\": true|false, \"evidence\": \"...\"}", c)
+		if i < len(criteria)-1 {
+			sb.WriteString(",")
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString("  ]\n")
+	sb.WriteString("}\n")
+	sb.WriteString("```\n")
+
+	return sb.String()
+}

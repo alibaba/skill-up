@@ -1,0 +1,26 @@
+{
+  "case_id": "demo-agent-judge",
+  "final_message": "Found a null pointer bug at line 42 — suggest adding a nil check: if p == nil { return }",
+  "exit_code": 0,
+  "turns_executed": 2,
+  "turns_total": 2,
+  "transcript": [
+    {"role": "user", "content": "Please review the process function in main.go", "turn": 1},
+    {"role": "assistant", "content": "Found a null pointer bug at line 42 — suggest adding a nil check: if p == nil { return }", "turn": 1}
+  ],
+  "judge": {
+    "type": "agent_judge",
+    "model": "mock-model",
+    "criteria": [
+      "Whether the Agent correctly identified the bug in the code",
+      "Whether the Agent provided a specific fix suggestion",
+      "Whether the Agent's response is clear and professional"
+    ],
+    "pass_threshold": 0.7
+  },
+  "mock_results": [
+    {"criterion": "Whether the Agent correctly identified the bug in the code", "passed": true, "reason": "Correctly identified the null pointer issue"},
+    {"criterion": "Whether the Agent provided a specific fix suggestion", "passed": true, "reason": "Provided specific code for a nil check"},
+    {"criterion": "Whether the Agent's response is clear and professional", "passed": false, "reason": "Response is too brief and lacks contextual explanation"}
+  ]
+}

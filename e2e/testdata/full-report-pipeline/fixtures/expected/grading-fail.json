@@ -1,0 +1,20 @@
+{
+  "expectations": [
+    {
+      "text": "output_contains{all:[SQL injection]}",
+      "passed": false,
+      "evidence": "output does not contain required keyword \"SQL injection\""
+    },
+    {
+      "text": "exit_code: 0",
+      "passed": true,
+      "evidence": "exit_code is 0 as expected"
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "failed": 1,
+    "total": 2,
+    "pass_rate": 0.5
+  }
+}

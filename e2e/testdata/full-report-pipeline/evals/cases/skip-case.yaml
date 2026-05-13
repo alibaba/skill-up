@@ -1,0 +1,22 @@
+id: skip-no-go-files
+title: Precondition not met — skip
+description: >
+  The workspace contains no Go source files so the precondition is not met.
+  The case is skipped → SKIP (with skip_reason).
+tag: functional_test
+input:
+  prompt: "Analyze the Go code quality in this project"
+context:
+  files:
+    readme.txt: "This project has no Go files yet."
+constraints:
+  timeout_seconds: 30
+  max_turns: 1
+expect:
+  exit_code: 0
+judge:
+  type: rule_based
+  success:
+    - output_contains:
+        all: ["analysis"]
+    - exit_code: 0

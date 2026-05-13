@@ -1,0 +1,33 @@
+id: review-code-with-context
+title: Review code with context files
+description: >
+  Verify the context.files config and test whether the context files can be
+  read correctly.
+tag: functional_test
+input:
+  prompt: |
+    Review the following code:
+
+    package main
+    type User struct {
+        Name string
+    }
+    func GetName(u *User) string {
+        return u.Name
+    }
+
+    Identify any bugs and explain them.
+
+constraints:
+  timeout_seconds: 90
+  max_turns: 4
+
+expect:
+  exit_code: 0
+
+judge:
+  type: rule_based
+  success:
+    - output_contains:
+        any: ["bug", "null", "nil", "unchecked"]
+    - exit_code: 0

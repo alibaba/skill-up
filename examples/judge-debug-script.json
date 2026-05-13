@@ -1,0 +1,12 @@
+{
+  "case_id": "demo-script-judge",
+  "final_message": "Found a null pointer bug at line 42 — suggest adding a nil check",
+  "exit_code": 0,
+  "turns_executed": 1,
+  "turns_total": 1,
+  "judge": {
+    "type": "script",
+    "script_path": "examples/judge-debug-eval.sh",
+    "timeout_seconds": 10
+  }
+}

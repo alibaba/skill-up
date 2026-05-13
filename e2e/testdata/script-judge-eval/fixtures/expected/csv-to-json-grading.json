@@ -1,0 +1,19 @@
+{
+  "status": "PASS",
+  "skip_reason": null,
+  "turns_executed": 1,
+  "turns_total": 1,
+  "assertion_results": [
+    {
+      "text": "script: fixtures/scripts/check-transform.sh",
+      "passed": true,
+      "evidence": "All checks passed: output.json contains 3 valid records with all required fields"
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "failed": 0,
+    "total": 1,
+    "pass_rate": 1.0
+  }
+}

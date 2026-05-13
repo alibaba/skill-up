@@ -1,0 +1,32 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+  workspace_mount: /workspace
+
+mcp:
+  servers: []
+
+skills:
+  - source: local_path
+    path: .
+
+engine:
+  name: claude_code
+  model:
+    provider: dashscope
+    name: qwen3.6-plus
+
+cases:
+  files:
+    - evals/cases/phase-gate-skip-attempt.yaml
+    - evals/cases/multi-turn-refinement.yaml
+  defaults:
+    timeout_seconds: 180
+    max_turns: 10
+  parallelism: 1
+
+report:
+  formats: [json, html]
+  artifacts:
+    - transcript

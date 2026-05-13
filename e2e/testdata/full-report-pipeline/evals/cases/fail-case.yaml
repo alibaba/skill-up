@@ -1,0 +1,26 @@
+id: miss-sql-injection
+title: Missed SQL injection vulnerability
+description: >
+  Agent failed to identify the SQL injection risk in the code.
+  Output is missing critical security check information → FAIL.
+tag: functional_test
+input:
+  prompt: "Analyze the security of the following code"
+context:
+  files:
+    db.go: |
+      package db
+      func Query(name string) {
+          db.Exec("SELECT * FROM users WHERE name = '" + name + "'")
+      }
+constraints:
+  timeout_seconds: 60
+  max_turns: 3
+expect:
+  exit_code: 0
+judge:
+  type: rule_based
+  success:
+    - output_contains:
+        all: ["analysis"]
+    - exit_code: 0

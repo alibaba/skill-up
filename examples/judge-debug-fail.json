@@ -1,0 +1,16 @@
+{
+  "case_id": "demo-fail-case",
+  "final_message": "LGTM, code looks good to me",
+  "exit_code": 0,
+  "turns_executed": 1,
+  "turns_total": 1,
+  "judge": {
+    "type": "rule_based",
+    "success": [
+      {"output_contains": {"all": ["bug"]}}
+    ],
+    "failure": [
+      {"output_contains": {"any": ["LGTM", "looks good"]}}
+    ]
+  }
+}
