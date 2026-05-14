@@ -115,9 +115,14 @@ jobs:
         # SKILL_UP_FULL_E2E unlocks tests that drive a real model. DashScope's
         # Anthropic- and OpenAI-compatible endpoints back claude-code and codex
         # respectively; QODER_PERSONAL_ACCESS_TOKEN authenticates qodercli.
+        # SKILL_UP_E2E_ARTIFACT_DIR tells e2e tests to copy their workspace
+        # (stdout.json / response.md / transcript / result.json …) to a stable
+        # path before t.TempDir cleanup, so the upload-artifact step below can
+        # surface them for post-mortem.
         run: go test -tags e2e -timeout 1800s -count=1 -v ./e2e
         env:
           SKILL_UP_FULL_E2E: "1"
+          SKILL_UP_E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-artifacts
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           # claude_code + dashscope provider → routed through the Anthropic-compat endpoint.
           DASHSCOPE_BASE_URL: https://dashscope.aliyuncs.com/apps/anthropic
@@ -135,6 +140,15 @@ jobs:
           OPENAI_MODEL: qwen3.6-plus
           DASHSCOPE_MODEL: qwen3.6-plus
           QODER_PERSONAL_ACCESS_TOKEN: ${{ secrets.QODER_ACCESS_TOKEN }}
+
+      - name: Upload e2e workspace artifacts
+        if: always() && steps.secrets.outputs.available == 'true' && hashFiles('e2e-artifacts/**') != ''
+        uses: actions/upload-artifact@v5
+        with:
+          name: e2e-workspaces
+          path: e2e-artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
 
   lint:
     name: Lint

@@ -134,6 +134,57 @@ func projectRootFromTest() string {
 	return getProjectRoot()
 }
 
+// preserveWorkspaceArtifacts copies workspaceDir to
+// $SKILL_UP_E2E_ARTIFACT_DIR/<sanitized-test-name>/ before t.TempDir cleanup
+// removes the source. The copy is registered as a t.Cleanup so it runs in LIFO
+// order — i.e. before the earlier-registered t.TempDir cleanup wipes the
+// directory. No-op when the env var is unset, so local runs are unaffected.
+//
+// Intended for tests whose workspace lives under t.TempDir() and whose CI
+// run we want to inspect after the fact via actions/upload-artifact.
+func preserveWorkspaceArtifacts(t *testing.T, workspaceDir string) {
+	t.Helper()
+
+	root := os.Getenv("SKILL_UP_E2E_ARTIFACT_DIR")
+	if root == "" {
+		return
+	}
+
+	t.Cleanup(func() {
+		if _, err := os.Stat(workspaceDir); err != nil {
+			return
+		}
+		target := filepath.Join(root, sanitizeArtifactName(t.Name()))
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			t.Logf("preserveWorkspaceArtifacts: mkdir %s: %v", filepath.Dir(target), err)
+			return
+		}
+		// Use cp -a to preserve mode and traverse symlinks intelligently; the
+		// pure-Go alternative would duplicate a lot of stdlib for marginal
+		// benefit and CI always has cp.
+		cmd := exec.Command("cp", "-a", workspaceDir+string(filepath.Separator)+".", target)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Logf("preserveWorkspaceArtifacts: cp %s → %s failed: %v\n%s", workspaceDir, target, err, out)
+			return
+		}
+		t.Logf("preserveWorkspaceArtifacts: copied workspace to %s", target)
+	})
+}
+
+// sanitizeArtifactName replaces directory-unsafe characters in a test name so
+// the result is a valid single-segment directory entry. We keep '/' so
+// subtests land in nested dirs naturally.
+func sanitizeArtifactName(name string) string {
+	replacer := strings.NewReplacer(
+		" ", "_",
+		":", "_",
+		"*", "_",
+		"?", "_",
+		"\\", "_",
+	)
+	return replacer.Replace(name)
+}
+
 // writeFile creates path and all its parent directories, writing content.
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
