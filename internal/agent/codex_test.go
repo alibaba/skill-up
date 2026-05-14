@@ -243,8 +243,8 @@ func TestBuildCodexRunCmd_OpenAIWithBaseURL_EmitsSkillUpProviderFlags(t *testing
 		BaseURL:       "https://dashscope.aliyuncs.com/compatible-mode/v1",
 	})
 
-	cmd := buildCodexRunCmd("say hi", ag.effectiveModelName(context.Background()), ag.runProviderConfig(context.Background()), codexBypassSandbox)
-	want := `codex exec --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -c 'model_provider="skill-up-openai"' -c 'model_providers.skill-up-openai.name="skill-up-openai"' -c 'model_providers.skill-up-openai.base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"' -c 'model_providers.skill-up-openai.env_key="OPENAI_API_KEY"' -c 'model_providers.skill-up-openai.wire_api="chat"' -m 'qwen3.6-plus' 'say hi'`
+	cmd := buildCodexRunCmd("hello world", ag.effectiveModelName(context.Background()), ag.runProviderConfig(context.Background()), codexBypassSandbox)
+	want := `codex exec --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -c 'model_provider="skill-up-openai"' -c 'model_providers.skill-up-openai.name="skill-up-openai"' -c 'model_providers.skill-up-openai.base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"' -c 'model_providers.skill-up-openai.env_key="OPENAI_API_KEY"' -c 'model_providers.skill-up-openai.wire_api="chat"' -m 'qwen3.6-plus' 'hello world'`
 	if cmd != want {
 		t.Fatalf("unexpected command:\nwant: %s\ngot:  %s", want, cmd)
 	}
