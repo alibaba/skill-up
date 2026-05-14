@@ -633,6 +633,13 @@ report:
 		t.Fatalf("workspace directory not found at %s", workspaceDir)
 	}
 
+	// When codex itself errored, surface the run artifacts (stdout.json,
+	// response.md, transcript, result.json) into the test log so CI runs
+	// retain enough information to diagnose without re-running locally.
+	if result.ExitCode != 0 {
+		dumpAgentRunArtifacts(t, workspaceDir)
+	}
+
 	iterationDir := filepath.Join(workspaceDir, "iteration-1")
 	if _, err := os.Stat(iterationDir); os.IsNotExist(err) {
 		t.Fatalf("workspace iteration-1 not created")
@@ -1724,6 +1731,55 @@ func logDirTree(t *testing.T, root string) {
 		return
 	}
 	t.Logf("directory tree for %s:\n%s", root, strings.Join(lines, "\n"))
+}
+
+// dumpAgentRunArtifacts logs a directory tree of workspaceDir plus the
+// contents of a curated set of run artifacts (stdout.json, response.md,
+// transcript, result.json) when an agent run misbehaved. Each file's body is
+// truncated to keep CI logs reasonable. Intended for use inside test failure
+// paths so that a single failed CI job carries enough information to diagnose
+// the cause without re-running locally.
+func dumpAgentRunArtifacts(t *testing.T, workspaceDir string) {
+	t.Helper()
+
+	logDirTree(t, workspaceDir)
+
+	const maxBytes = 8 * 1024
+	var dumped int
+	walkErr := filepath.Walk(workspaceDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || info.IsDir() {
+			return nil
+		}
+		base := filepath.Base(path)
+		switch base {
+		case "stdout.json", "stderr.txt", "response.md", "result.json", "grading.json", "transcript.jsonl", "transcript.json":
+		default:
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Logf("artifact %s: read error: %v", path, readErr)
+			return nil
+		}
+		truncated := false
+		if len(data) > maxBytes {
+			data = data[:maxBytes]
+			truncated = true
+		}
+		suffix := ""
+		if truncated {
+			suffix = fmt.Sprintf("\n[truncated to %d bytes]", maxBytes)
+		}
+		t.Logf("artifact %s (%d bytes):\n%s%s", path, info.Size(), string(data), suffix)
+		dumped++
+		return nil
+	})
+	if walkErr != nil {
+		t.Logf("dumpAgentRunArtifacts walk error: %v", walkErr)
+	}
+	if dumped == 0 {
+		t.Logf("dumpAgentRunArtifacts: no recognised artifact files under %s", workspaceDir)
+	}
 }
 
 // TestAgent_ClaudeCode_NoneRuntime runs the claude-code engine end-to-end
