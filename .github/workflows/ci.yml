@@ -66,3 +66,36 @@ jobs:
         uses: golangci/golangci-lint-action@v8
         with:
           version: v2.11.4
+
+      - name: Install revive
+        run: go install github.com/mgechev/revive@v1.10.0
+
+      - name: revive
+        run: revive -config revive.toml ./...
+
+  release-dryrun:
+    name: GoReleaser Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      - name: GoReleaser check
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: check
+
+      - name: GoReleaser snapshot build
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --snapshot --clean --skip=publish
