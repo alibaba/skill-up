@@ -51,6 +51,23 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+  e2e:
+    name: E2E (quick)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      - name: Run e2e tests (quick mode)
+        run: go test -tags e2e -timeout 600s -count=1 ./e2e
+        env:
+          # Quick mode skips slow LLM-dependent tests (set to "1" to enable them).
+          SKILL_UP_FULL_E2E: ""
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
