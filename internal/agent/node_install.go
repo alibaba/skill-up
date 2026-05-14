@@ -54,7 +54,7 @@ func nodeBootstrapLines(nodeVersion string) []string {
 		"  nvm install " + shellQuote(nodeVersion),
 		"  nvm use " + shellQuote(nodeVersion),
 		"fi",
-		"if command -v nvm >/dev/null 2>&1; then nvm use " + shellQuote(nodeVersion) + "; fi",
+		"if [ \"$node_major\" -lt " + shellQuote(nodeVersion) + " ] && command -v nvm >/dev/null 2>&1; then nvm use " + shellQuote(nodeVersion) + "; fi",
 		`export npm_config_prefix="$agent_npm_prefix"`,
 		`mkdir -p "$npm_config_prefix/bin"`,
 		`export PATH="$npm_config_prefix/bin:$PATH"`,
@@ -62,8 +62,25 @@ func nodeBootstrapLines(nodeVersion string) []string {
 }
 
 func nodeRuntimeCommand(command string) string {
+	return nodeRuntimeCommandWithGuard("", command)
+}
+
+// nodeRuntimeCommandWithGuard wraps command with the Node/nvm bootstrap,
+// but skips the bootstrap entirely when cliBin is already on PATH. This lets
+// host-style runtimes (environment.type: none) reuse a locally-installed
+// claude / codex without forcing an nvm switch.
+func nodeRuntimeCommandWithGuard(cliBin, command string) string {
 	lines := []string{"set -e"}
-	lines = append(lines, nodeBootstrapLines(agentNodeDefaultVersion)...)
+	bootstrap := nodeBootstrapLines(agentNodeDefaultVersion)
+	if cliBin == "" {
+		lines = append(lines, bootstrap...)
+	} else {
+		lines = append(lines, "if ! command -v "+shellQuote(cliBin)+" >/dev/null 2>&1; then")
+		for _, l := range bootstrap {
+			lines = append(lines, "  "+l)
+		}
+		lines = append(lines, "fi")
+	}
 	lines = append(lines, command)
 	return strings.Join(lines, "\n")
 }

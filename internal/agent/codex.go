@@ -126,7 +126,7 @@ func buildCodexMCPInstallCmd(server runtime.MCPServerConfig) (string, error) {
 	default:
 		return "", fmt.Errorf("mcp server %q transport %q is not supported by codex", server.Name, server.Transport)
 	}
-	return nodeRuntimeCommand(cmd.String()), nil
+	return nodeRuntimeCommandWithGuard("codex", cmd.String()), nil
 }
 
 func buildCodexMCPRemoteInstallCmd(server runtime.MCPServerConfig) (string, error) {
@@ -161,7 +161,7 @@ func buildCodexMCPRemoteInstallCmd(server runtime.MCPServerConfig) (string, erro
 		return "", fmt.Errorf("mcp server %q endpoint is invalid: %w", server.Name, err)
 	}
 	cmd.WriteString(endpoint)
-	return nodeRuntimeCommand(cmd.String()), nil
+	return nodeRuntimeCommandWithGuard("codex", cmd.String()), nil
 }
 
 func buildCodexMCPRemoteBridgeScript(server runtime.MCPServerConfig) (string, error) {
@@ -226,7 +226,7 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 	}
 	lastMessagePath := filepath.Join(rt.Workspace(), ".skill-up", "codex-last-message.txt")
 	cmd := "mkdir -p " + shellQuote(filepath.Dir(lastMessagePath)) + "\n" +
-		nodeRuntimeCommand(buildCodexRunCmdWithLastMessage(instruction, a.effectiveModelName(ctx), a.runProviderConfig(ctx), sandboxFlag, lastMessagePath))
+		nodeRuntimeCommandWithGuard("codex", buildCodexRunCmdWithLastMessage(instruction, a.effectiveModelName(ctx), a.runProviderConfig(ctx), sandboxFlag, lastMessagePath))
 
 	envVars := a.credentialEnvVars(credential.EnvOpenAIAPIKey, credential.EnvOpenAIBaseURL)
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))

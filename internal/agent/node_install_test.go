@@ -43,3 +43,31 @@ func TestNodeBootstrapLinesUsesDefaultVersion(t *testing.T) {
 		t.Fatalf("node bootstrap command does not use default version %s:\n%s", agentNodeDefaultVersion, cmd)
 	}
 }
+
+func TestNodeRuntimeCommandGuardSkipsBootstrapWhenCLIPresent(t *testing.T) {
+	t.Parallel()
+
+	cmd := nodeRuntimeCommandWithGuard("claude", "claude --help")
+	if !strings.Contains(cmd, "if ! command -v 'claude' >/dev/null 2>&1; then") {
+		t.Fatalf("guarded runtime command missing CLI guard:\n%s", cmd)
+	}
+	// Bootstrap must live inside the guarded block, not at top level — verify
+	// the trailing `fi` precedes the actual command invocation.
+	guardClose := strings.Index(cmd, "\nfi\n")
+	cmdIdx := strings.Index(cmd, "claude --help")
+	if guardClose < 0 || cmdIdx < guardClose {
+		t.Fatalf("guarded runtime command should run cli after closing the guard block:\n%s", cmd)
+	}
+}
+
+func TestNodeRuntimeCommandWithoutGuardKeepsBootstrap(t *testing.T) {
+	t.Parallel()
+
+	cmd := nodeRuntimeCommand("echo hi")
+	if strings.Contains(cmd, "if ! command -v") && strings.Contains(cmd, ">/dev/null 2>&1; then\n  export NVM_DIR") {
+		t.Fatalf("unguarded runtime command should not wrap bootstrap in a CLI guard:\n%s", cmd)
+	}
+	if !strings.Contains(cmd, "nvm install '"+agentNodeDefaultVersion+"'") {
+		t.Fatalf("unguarded runtime command should still emit bootstrap:\n%s", cmd)
+	}
+}

@@ -69,7 +69,7 @@ func buildClaudeMCPInstallCmd(server runtime.MCPServerConfig) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return nodeRuntimeCommand(cmd), nil
+	return nodeRuntimeCommandWithGuard("claude", cmd), nil
 }
 
 func defaultClaudeCodeInstallCmd() string {
@@ -115,7 +115,7 @@ func (a *ClaudeCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions,
 	ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, opts.Env)
 
 	instruction := BuildInstructionFromMessages(messages)
-	cmd := nodeRuntimeCommand(buildClaudePrintCmd(sessionID, a.effectiveModelName(ctx), instruction))
+	cmd := nodeRuntimeCommandWithGuard("claude", buildClaudePrintCmd(sessionID, a.effectiveModelName(ctx), instruction))
 
 	result, err := rt.Exec(ctx, cmd, opts)
 	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result)
