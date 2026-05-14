@@ -31,15 +31,19 @@ const (
 	codexProcessSandbox = "--sandbox workspace-write"
 	codexBypassSandbox  = "--dangerously-bypass-approvals-and-sandbox"
 	codexCustomWireAPI  = "chat"
-	codexUserRole       = "user"
-	codexOutputText     = "output_text"
-	codexInputText      = "input_text"
-	codexAgentMsg       = "agent_message"
-	codexFnCall         = "function_call"
-	codexFnCallOut      = "function_call_output"
-	codexTokenCount     = "token_count"
-	codexStatusSuccess  = "success"
-	codexStatusError    = "error"
+	// codexOpenAIOverrideProvider is the provider key emitted when callers
+	// configure provider=openai with a custom BaseURL. Using a non-"openai"
+	// key avoids merge issues with codex's built-in openai provider config.
+	codexOpenAIOverrideProvider = "openai-override"
+	codexUserRole               = "user"
+	codexOutputText             = "output_text"
+	codexInputText              = "input_text"
+	codexAgentMsg               = "agent_message"
+	codexFnCall                 = "function_call"
+	codexFnCallOut              = "function_call_output"
+	codexTokenCount             = "token_count"
+	codexStatusSuccess          = "success"
+	codexStatusError            = "error"
 )
 
 // NewCodexAgent creates a new CodexAgent.
@@ -285,17 +289,19 @@ func (a *CodexAgent) runProviderConfig(ctx context.Context) codexProviderConfig 
 		return codexProviderConfig{BaseURL: a.Cfg.BaseURL}
 	}
 	// When OPENAI_BASE_URL (or DASHSCOPE_BASE_URL routed via provider env)
-	// resolves to a non-default endpoint, override codex's built-in openai
-	// provider so it talks to that endpoint instead of api.openai.com. Without
-	// these flags codex's bundled provider config wins and the env-supplied
-	// base URL is ignored.
+	// resolves to a non-default endpoint, route codex to it via a *distinct*
+	// provider entry. We can't reuse the literal "openai" name because codex
+	// ships a built-in provider config under that key and merging the override
+	// onto it is unreliable across codex versions — codex keeps using its
+	// bundled api.openai.com endpoint. A unique key forces codex to construct
+	// a brand-new provider definition from the -c flags alone.
 	if a.Cfg.ModelProvider == agentProviderOpenAI {
 		if a.Cfg.BaseURL == "" {
 			return codexProviderConfig{}
 		}
 		return codexProviderConfig{
-			Name:    agentProviderOpenAI,
-			Label:   agentProviderOpenAI,
+			Name:    codexOpenAIOverrideProvider,
+			Label:   codexOpenAIOverrideProvider,
 			BaseURL: a.Cfg.BaseURL,
 			EnvKey:  credential.EnvOpenAIAPIKey,
 			WireAPI: codexCustomWireAPI,

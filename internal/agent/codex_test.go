@@ -239,8 +239,8 @@ func TestCodexRunProviderConfig_OpenAIWithBaseURLOverridesBuiltin(t *testing.T) 
 	})
 
 	got := ag.runProviderConfig(context.Background())
-	if got.Name != agentProviderOpenAI {
-		t.Fatalf("provider name = %q, want %q", got.Name, agentProviderOpenAI)
+	if got.Name != codexOpenAIOverrideProvider {
+		t.Fatalf("provider name = %q, want %q", got.Name, codexOpenAIOverrideProvider)
 	}
 	if got.BaseURL != "https://dashscope.aliyuncs.com/compatible-mode/v1" {
 		t.Fatalf("base URL = %q, want DashScope endpoint", got.BaseURL)
