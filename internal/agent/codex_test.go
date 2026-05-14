@@ -229,6 +229,44 @@ func TestCodexRunProviderConfig_RejectsInvalidProviderName(t *testing.T) {
 	}
 }
 
+func TestCodexRunProviderConfig_OpenAIWithBaseURLOverridesBuiltin(t *testing.T) {
+	t.Parallel()
+
+	ag := NewCodexAgent(Config{
+		ModelProvider: agentProviderOpenAI,
+		ModelName:     "qwen3.6-plus",
+		BaseURL:       "https://dashscope.aliyuncs.com/compatible-mode/v1",
+	})
+
+	got := ag.runProviderConfig(context.Background())
+	if got.Name != agentProviderOpenAI {
+		t.Fatalf("provider name = %q, want %q", got.Name, agentProviderOpenAI)
+	}
+	if got.BaseURL != "https://dashscope.aliyuncs.com/compatible-mode/v1" {
+		t.Fatalf("base URL = %q, want DashScope endpoint", got.BaseURL)
+	}
+	if got.EnvKey != credential.EnvOpenAIAPIKey {
+		t.Fatalf("env key = %q, want %q", got.EnvKey, credential.EnvOpenAIAPIKey)
+	}
+	if got.WireAPI != "chat" {
+		t.Fatalf("wire API = %q, want chat", got.WireAPI)
+	}
+}
+
+func TestCodexRunProviderConfig_OpenAIWithoutBaseURLEmitsNothing(t *testing.T) {
+	t.Parallel()
+
+	ag := NewCodexAgent(Config{
+		ModelProvider: agentProviderOpenAI,
+		ModelName:     "gpt-5.4",
+	})
+
+	got := ag.runProviderConfig(context.Background())
+	if got.Name != "" || got.BaseURL != "" {
+		t.Fatalf("runProviderConfig() = %+v, want empty when BaseURL is unset", got)
+	}
+}
+
 func TestShellQuoteEscapesSingleQuote(t *testing.T) {
 	t.Parallel()
 

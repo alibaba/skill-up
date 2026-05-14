@@ -281,8 +281,25 @@ type codexProviderConfig struct {
 }
 
 func (a *CodexAgent) runProviderConfig(ctx context.Context) codexProviderConfig {
-	if a.Cfg.ModelProvider == "" || a.Cfg.ModelProvider == agentProviderOpenAI {
+	if a.Cfg.ModelProvider == "" {
 		return codexProviderConfig{BaseURL: a.Cfg.BaseURL}
+	}
+	// When OPENAI_BASE_URL (or DASHSCOPE_BASE_URL routed via provider env)
+	// resolves to a non-default endpoint, override codex's built-in openai
+	// provider so it talks to that endpoint instead of api.openai.com. Without
+	// these flags codex's bundled provider config wins and the env-supplied
+	// base URL is ignored.
+	if a.Cfg.ModelProvider == agentProviderOpenAI {
+		if a.Cfg.BaseURL == "" {
+			return codexProviderConfig{}
+		}
+		return codexProviderConfig{
+			Name:    agentProviderOpenAI,
+			Label:   agentProviderOpenAI,
+			BaseURL: a.Cfg.BaseURL,
+			EnvKey:  credential.EnvOpenAIAPIKey,
+			WireAPI: codexCustomWireAPI,
+		}
 	}
 	if reason := codexCustomProviderUnavailableReason(a.Cfg.ModelProvider, a.Cfg.BaseURL); reason != "" {
 		logging.DebugContextf(ctx, "codex provider config omitted for provider %q: %s", a.Cfg.ModelProvider, reason)
