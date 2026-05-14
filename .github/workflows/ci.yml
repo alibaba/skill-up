@@ -100,8 +100,11 @@ jobs:
           # claude_code + dashscope provider → routed through the Anthropic-compat endpoint.
           DASHSCOPE_BASE_URL: https://dashscope.aliyuncs.com/apps/anthropic
           # Direct ANTHROPIC_* fall-throughs for tests that bypass the provider resolver.
+          # ANTHROPIC_MODEL overrides hard-coded "anthropic/claude-sonnet-4-6"
+          # judges (see internal/cli/import.go) so we never hit real Claude.
           ANTHROPIC_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           ANTHROPIC_BASE_URL: https://dashscope.aliyuncs.com/apps/anthropic
+          ANTHROPIC_MODEL: qwen3.6-plus
           # codex/OpenAI-compat fall-through. OPENAI_MODEL overrides the
           # hard-coded "gpt-5.4" in TestAgent_Codex_NoneRuntime so codex
           # actually talks to DashScope instead of timing out on an unknown
