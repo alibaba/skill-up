@@ -57,27 +57,47 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # Fork PRs run without access to repository secrets. Detect that early
+      # and skip the rest of the job so we don't burn CI minutes installing
+      # CLIs only to have every LLM-dependent test hit a 401.
+      - name: Check secret availability
+        id: secrets
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+        run: |
+          if [ -z "$DASHSCOPE_API_KEY" ]; then
+            echo "::notice::Skipping e2e: DASHSCOPE_API_KEY not provisioned (likely a fork PR)."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-go@v6
+        if: steps.secrets.outputs.available == 'true'
         with:
           go-version: "1.25.x"
           cache: true
 
       - uses: actions/setup-node@v5
+        if: steps.secrets.outputs.available == 'true'
         with:
           node-version: "22"
 
       - name: Install claude-code CLI
+        if: steps.secrets.outputs.available == 'true'
         run: |
           npm install -g --include=optional @anthropic-ai/claude-code
           claude --version
 
       - name: Install codex CLI
+        if: steps.secrets.outputs.available == 'true'
         run: |
           # Pin to the version declared in internal/agent/codex.go (codexDefaultVersion).
           npm install -g --include=optional '@openai/codex@0.80.0'
           codex --version
 
       - name: Install qodercli
+        if: steps.secrets.outputs.available == 'true'
         run: |
           curl -fsSL https://qoder.com/install | bash
           # qoder.com installer drops the binary under ~/.qoder/bin by default;
@@ -85,11 +105,13 @@ jobs:
           echo "$HOME/.qoder/bin" >> "$GITHUB_PATH"
 
       - name: Verify qodercli on PATH
+        if: steps.secrets.outputs.available == 'true'
         run: |
           which qodercli
           qodercli --version || true
 
       - name: Run e2e tests (none runtime, full mode)
+        if: steps.secrets.outputs.available == 'true'
         # SKILL_UP_FULL_E2E unlocks tests that drive a real model. DashScope's
         # Anthropic- and OpenAI-compatible endpoints back claude-code and codex
         # respectively; QODER_PERSONAL_ACCESS_TOKEN authenticates qodercli.
@@ -99,16 +121,15 @@ jobs:
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           # claude_code + dashscope provider → routed through the Anthropic-compat endpoint.
           DASHSCOPE_BASE_URL: https://dashscope.aliyuncs.com/apps/anthropic
-          # Direct ANTHROPIC_* fall-throughs for tests that bypass the provider resolver.
-          # ANTHROPIC_MODEL overrides hard-coded "anthropic/claude-sonnet-4-6"
-          # judges (see internal/cli/import.go) so we never hit real Claude.
+          # Pin every anthropic-provider hop to qwen3.6-plus so no e2e path
+          # accidentally calls real Claude, regardless of which model the
+          # eval.yaml (or any hard-coded fallback elsewhere in the codebase)
+          # would otherwise pick.
           ANTHROPIC_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           ANTHROPIC_BASE_URL: https://dashscope.aliyuncs.com/apps/anthropic
           ANTHROPIC_MODEL: qwen3.6-plus
-          # codex/OpenAI-compat fall-through. OPENAI_MODEL overrides the
-          # hard-coded "gpt-5.4" in TestAgent_Codex_NoneRuntime so codex
-          # actually talks to DashScope instead of timing out on an unknown
-          # OpenAI model.
+          # Same idea for openai-provider hops (codex test pins "gpt-5.4" in
+          # its eval.yaml; OPENAI_MODEL overrides that to qwen3.6-plus).
           OPENAI_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           OPENAI_BASE_URL: https://dashscope.aliyuncs.com/compatible-mode/v1
           OPENAI_MODEL: qwen3.6-plus

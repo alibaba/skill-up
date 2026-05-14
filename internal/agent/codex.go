@@ -32,9 +32,12 @@ const (
 	codexBypassSandbox  = "--dangerously-bypass-approvals-and-sandbox"
 	codexCustomWireAPI  = "chat"
 	// codexOpenAIOverrideProvider is the provider key emitted when callers
-	// configure provider=openai with a custom BaseURL. Using a non-"openai"
-	// key avoids merge issues with codex's built-in openai provider config.
-	codexOpenAIOverrideProvider = "openai-override"
+	// configure provider=openai with a custom BaseURL. The literal "openai"
+	// name can't be reused because codex ships a built-in provider config
+	// under that key and won't reliably merge our overrides onto it. The
+	// "skill-up-" prefix makes the synthesised entry obvious when it shows
+	// up in codex command lines or logs (e.g. `-c model_provider="skill-up-openai"`).
+	codexOpenAIOverrideProvider = "skill-up-openai"
 	codexUserRole               = "user"
 	codexOutputText             = "output_text"
 	codexInputText              = "input_text"
