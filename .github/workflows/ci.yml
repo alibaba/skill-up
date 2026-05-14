@@ -89,12 +89,23 @@ jobs:
           which qodercli
           qodercli --version || true
 
-      - name: Run e2e tests (none runtime, no LLM calls)
-        # SKILL_UP_FULL_E2E is intentionally left unset: tests that drive a real
-        # model are still gated behind it. Tests that only need the engine
-        # binary (installation, none-runtime wiring, workspace artifact shape)
-        # now exercise the freshly-installed claude / codex / qodercli.
-        run: go test -tags e2e -timeout 900s -count=1 -v ./e2e
+      - name: Run e2e tests (none runtime, full mode)
+        # SKILL_UP_FULL_E2E unlocks tests that drive a real model. DashScope's
+        # Anthropic- and OpenAI-compatible endpoints back claude-code and codex
+        # respectively; QODER_PERSONAL_ACCESS_TOKEN authenticates qodercli.
+        run: go test -tags e2e -timeout 1800s -count=1 -v ./e2e
+        env:
+          SKILL_UP_FULL_E2E: "1"
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          # claude_code + dashscope provider → routed through the Anthropic-compat endpoint.
+          DASHSCOPE_BASE_URL: https://dashscope.aliyuncs.com/apps/anthropic
+          # Direct ANTHROPIC_* fall-throughs for tests that bypass the provider resolver.
+          ANTHROPIC_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          ANTHROPIC_BASE_URL: https://dashscope.aliyuncs.com/apps/anthropic
+          # codex/OpenAI-compat fall-through.
+          OPENAI_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          OPENAI_BASE_URL: https://dashscope.aliyuncs.com/compatible-mode/v1
+          QODER_PERSONAL_ACCESS_TOKEN: ${{ secrets.QODER_ACCESS_TOKEN }}
 
   lint:
     name: Lint
