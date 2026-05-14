@@ -383,8 +383,11 @@ func TestCLI_RunAutoWithExamples(t *testing.T) {
 	examplesDir := filepath.Join(getProjectRoot(), "examples", "code-stats")
 	result := Run(t, RunConfig{Timeout: 120e9}, "run", "--auto", examplesDir)
 
-	if !strings.Contains(result.Stdout, "Auto-detected Anthropic evals.json") {
-		t.Errorf("expected 'Auto-detected Anthropic evals.json' in output, got: %s", result.Stdout)
+	// examples/code-stats ships both eval.yaml and evals.json; auto-detection
+	// resolves to eval.yaml, so assert the actual log line rather than the
+	// Anthropic-format one that never fires for this fixture.
+	if !strings.Contains(result.Stdout, "Auto-detected eval.yaml") {
+		t.Errorf("expected 'Auto-detected eval.yaml' in output, got: %s", result.Stdout)
 	}
 	if !strings.Contains(result.Stdout, "Running evaluation") {
 		t.Errorf("expected runner stage log in output, got: %s", result.Stdout)
