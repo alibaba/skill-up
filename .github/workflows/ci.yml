@@ -52,7 +52,7 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   e2e:
-    name: E2E (quick)
+    name: E2E (none runtime)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -62,11 +62,39 @@ jobs:
           go-version: "1.25.x"
           cache: true
 
-      - name: Run e2e tests (quick mode)
-        run: go test -tags e2e -timeout 600s -count=1 ./e2e
-        env:
-          # Quick mode skips slow LLM-dependent tests (set to "1" to enable them).
-          SKILL_UP_FULL_E2E: ""
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Install claude-code CLI
+        run: |
+          npm install -g --include=optional @anthropic-ai/claude-code
+          claude --version
+
+      - name: Install codex CLI
+        run: |
+          # Pin to the version declared in internal/agent/codex.go (codexDefaultVersion).
+          npm install -g --include=optional '@openai/codex@0.80.0'
+          codex --version
+
+      - name: Install qodercli
+        run: |
+          curl -fsSL https://qoder.com/install | bash
+          # qoder.com installer drops the binary under ~/.qoder/bin by default;
+          # surface it on PATH for the rest of the job.
+          echo "$HOME/.qoder/bin" >> "$GITHUB_PATH"
+
+      - name: Verify qodercli on PATH
+        run: |
+          which qodercli
+          qodercli --version || true
+
+      - name: Run e2e tests (none runtime, no LLM calls)
+        # SKILL_UP_FULL_E2E is intentionally left unset: tests that drive a real
+        # model are still gated behind it. Tests that only need the engine
+        # binary (installation, none-runtime wiring, workspace artifact shape)
+        # now exercise the freshly-installed claude / codex / qodercli.
+        run: go test -tags e2e -timeout 900s -count=1 -v ./e2e
 
   lint:
     name: Lint
