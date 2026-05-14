@@ -102,9 +102,14 @@ jobs:
           # Direct ANTHROPIC_* fall-throughs for tests that bypass the provider resolver.
           ANTHROPIC_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           ANTHROPIC_BASE_URL: https://dashscope.aliyuncs.com/apps/anthropic
-          # codex/OpenAI-compat fall-through.
+          # codex/OpenAI-compat fall-through. OPENAI_MODEL overrides the
+          # hard-coded "gpt-5.4" in TestAgent_Codex_NoneRuntime so codex
+          # actually talks to DashScope instead of timing out on an unknown
+          # OpenAI model.
           OPENAI_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           OPENAI_BASE_URL: https://dashscope.aliyuncs.com/compatible-mode/v1
+          OPENAI_MODEL: qwen3.6-plus
+          DASHSCOPE_MODEL: qwen3.6-plus
           QODER_PERSONAL_ACCESS_TOKEN: ${{ secrets.QODER_ACCESS_TOKEN }}
 
   lint:
