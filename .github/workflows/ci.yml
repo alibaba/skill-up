@@ -245,17 +245,19 @@ jobs:
 
       - name: Run e2e tests (opensandbox runtime)
         if: steps.secrets.outputs.available == 'true'
-        # Only the claude_code opensandbox path is wired up here; the codex
-        # variant can be added once its provider routing is verified.
-        run: go test -tags e2e -timeout 1800s -count=1 -v -run TestAgent_ClaudeCode_OpenSandboxRuntime ./e2e
+        # Exercise the codex agent here: claude_code already has real-model
+        # coverage in the none-runtime job, whereas codex is otherwise only
+        # tested against a fake binary. This run is its sole real coverage.
+        run: go test -tags e2e -timeout 1800s -count=1 -v -run TestAgent_Codex_OpenSandboxRuntime ./e2e
         env:
-          SKILL_UP_FULL_E2E: "1"
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           DASHSCOPE_MODEL: qwen3.6-plus
-          # claude_code + dashscope provider → routed through the Anthropic-compat endpoint.
-          ANTHROPIC_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
-          ANTHROPIC_BASE_URL: https://dashscope.aliyuncs.com/apps/anthropic
-          ANTHROPIC_MODEL: qwen3.6-plus
+          # codex (dashscope provider) speaks the OpenAI wire API → route it
+          # through DashScope's OpenAI-compatible endpoint.
+          DASHSCOPE_BASE_URL: https://dashscope.aliyuncs.com/compatible-mode/v1
+          # Copies the in-sandbox agent workspace out before t.TempDir cleanup
+          # so the upload step below can surface it for post-mortem.
+          SKILL_UP_E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-opensandbox-artifacts
 
       - name: Upload OpenSandbox server log
         if: always() && steps.secrets.outputs.available == 'true'
@@ -263,6 +265,15 @@ jobs:
         with:
           name: opensandbox-server-log
           path: ${{ runner.temp }}/opensandbox-server.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload opensandbox e2e workspace artifacts
+        if: always() && steps.secrets.outputs.available == 'true' && hashFiles('e2e-opensandbox-artifacts/**') != ''
+        uses: actions/upload-artifact@v5
+        with:
+          name: e2e-opensandbox-workspaces
+          path: e2e-opensandbox-artifacts/
           if-no-files-found: ignore
           retention-days: 14
 

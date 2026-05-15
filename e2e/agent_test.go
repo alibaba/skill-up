@@ -726,6 +726,9 @@ report:
 `)
 
 	outputDir := t.TempDir()
+	// Surface the in-sandbox agent artifacts (stdout.json / response.md /
+	// transcript) as CI artifacts so a failure inside the sandbox is debuggable.
+	preserveWorkspaceArtifacts(t, outputDir)
 	result := Run(t, RunConfig{
 		Timeout: 10 * 60e9,
 		Env: []string{
@@ -840,6 +843,9 @@ report:
 `)
 
 	outputDir := t.TempDir()
+	// Surface the in-sandbox agent artifacts (stdout.json / response.md /
+	// transcript) as CI artifacts so a failure inside the sandbox is debuggable.
+	preserveWorkspaceArtifacts(t, outputDir)
 	env := []string{
 		"OPENSANDBOX_API_KEY=" + sandboxAPIKey,
 		"ANTHROPIC_API_KEY=" + anthropicAPIKey,
