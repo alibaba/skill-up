@@ -42,7 +42,7 @@
 **skill-up** is a CLI evaluation framework for Agent Skill developers. Declare your eval environment, dependencies, test cases, and grading strategy in `evals/eval.yaml` and `evals/cases/*.yaml`, then run evaluations locally or in CI to generate structured reports.
 
 > [!WARNING]
-> The core business logic of this repository is implemented, but the project is still in an **early evolution** stage: the code is not yet fully stable, and some CLI commands, configuration fields, and public APIs may still change in future releases. Please review the [CHANGELOG](CHANGELOG.md) and verify compatibility before using it in production.
+> This project is still in an **early evolution** stage: the code is not yet fully stable, and some CLI commands, configuration fields, and public APIs may still change in future releases. Please review the [CHANGELOG](CHANGELOG.md) and verify compatibility before using it in production.
 
 ## Features
 
@@ -53,22 +53,26 @@
 - **Anthropic Compatible**: Import `evals.json` via `skill-up import`, or auto-detect with `--auto`.
 - **CI-Ready**: Designed for local development and continuous integration pipelines.
 
-## Requirements
+## Why skill-up
 
-- [Go](https://go.dev/dl/) 1.25 or later — required for building and running the CLI.
+The official [Agent Skills evaluation guide](https://agentskills.io/skill-creation/evaluating-skills) describes the right evaluation loop: write realistic cases, run with and without the Skill, grade outputs, aggregate results, and iterate. `skill-up` turns that workflow into a reusable CLI:
+
+- Replaces ad hoc run folders with a declarative `eval.yaml` + `cases/*.yaml` format.
+- Automates workspace setup, Skill installation, Agent Engine invocation, judging, and report generation.
+- Supports multiple engines (`claude_code`, `codex`, `qodercli`) instead of tying the workflow to one client.
+- Keeps compatibility with Anthropic-style `evals.json` while adding richer judges, CI-friendly commands, and structured reports.
 
 ## Installation
 
-**From source:**
+Install with the script:
 
 ```bash
-go install github.com/alibaba/skill-up/cmd/skill-up@latest
+curl -fsSL https://raw.githubusercontent.com/alibaba/skill-up/main/install.sh | bash
 ```
 
-**Prebuilt binaries:**
-Download from [GitHub Releases](https://github.com/alibaba/skill-up/releases).
+The installer downloads the matching binary from [GitHub Releases](https://github.com/alibaba/skill-up/releases).
 
-**Build locally:**
+To build locally from a checkout, install [Go](https://go.dev/dl/) 1.25 or later:
 
 ```bash
 make build
@@ -88,32 +92,23 @@ schema_version: v1alpha1
 environment:
   type: none
 
-skills:
-  - source: local_path
-    path: .
-
 engine:
   name: claude_code
 
 cases:
   files:
     - evals/cases/hello-world.yaml
-  defaults:
-    timeout_seconds: 120
-    max_turns: 5
-
-report:
-  formats: [json]
 ```
 
-### 2. Write a Test Case
+When `evals/eval.yaml` lives under a directory that contains `SKILL.md`, skill-up installs the current Skill automatically. The omitted fields use defaults: JSON report output, `timeout_seconds: 300`, `max_turns: 10`, and `parallelism: 1`.
+
+For the full `eval.yaml` schema, see [Writing Evals](docs/guide/writing-evals.md).
+
+### 2. Write an Eval Case
 
 Create `evals/cases/hello-world.yaml`:
 
 ```yaml
-id: hello-world
-title: Skill should respond to basic requests
-
 input:
   prompt: |
     Please generate a Hello World program
@@ -122,24 +117,22 @@ expect:
   must_contain:
     - "Hello"
     - "World"
-
-judge:
-  type: rule_based
-  success:
-    - output_contains:
-        all: ["Hello", "World"]
 ```
+
+The case `id` defaults to the filename (`hello-world`). Add a `judge` block only when you need script-based or agent-based grading.
 
 ### 3. Validate Config
 
 ```bash
-skill-up validate ./evals/eval.yaml
+skill-up validate
 ```
+
+This step is optional, but useful before the first run: it checks `eval.yaml` and all referenced case files without starting an Agent Engine.
 
 ### 4. Run Evaluation
 
 ```bash
-skill-up run ./evals/eval.yaml
+skill-up run
 ```
 
 Results are written to `<skill-name>-workspace/iteration-1/`.
@@ -228,33 +221,6 @@ skill-up import ./evals/evals.json --output ./evals
 | `skill-up import <evals.json>` | Import Anthropic `evals.json` to YAML cases |
 | `skill-up debug judge <input.json>` | Debug judge module with a JSON input |
 | `skill-up debug report <input.json>` | Debug report module with a JSON input |
-
-## Project Structure
-
-```text
-skill-up/
-├── cmd/skill-up/          # CLI entrypoint
-├── internal/              # Private implementation
-│   ├── cli/               # Cobra commands
-│   ├── config/            # YAML config loader & validator
-│   ├── credential/        # API key & credential resolution
-│   ├── runtime/           # Workspace runtime (none / opensandbox)
-│   ├── agent/             # Agent Engine adapters
-│   ├── judge/             # Evaluation judges
-│   ├── report/            # Report generators (JSON / JUnit / HTML)
-│   └── runner/            # End-to-end orchestration
-├── pkg/transcript/        # Public transcript parsing API
-├── docs/                  # VitePress documentation site
-│   ├── .vitepress/        # VitePress config
-│   ├── guide/             # English user guide
-│   ├── zh/                # Chinese user guide
-│   └── public/            # Static assets (logo, etc.)
-├── e2e/                   # End-to-end tests
-├── examples/              # Example fixtures and scripts
-├── Makefile               # Build & quality targets
-├── go.mod / go.sum        # Go module dependencies
-└── README.md              # This file
-```
 
 ## License
 
