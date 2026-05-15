@@ -182,7 +182,7 @@ jobs:
 
       - name: Install uv
         if: steps.secrets.outputs.available == 'true'
-        uses: astral-sh/setup-uv@v8
+        uses: astral-sh/setup-uv@v8.1.0
 
       - name: Install OpenSandbox server
         if: steps.secrets.outputs.available == 'true'
