@@ -11,7 +11,7 @@ mcp:
 skills: []
 
 engine:
-  name: claude_code
+  type: claude_code
   model: {}
 
 cases:

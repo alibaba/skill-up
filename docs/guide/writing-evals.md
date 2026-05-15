@@ -45,7 +45,7 @@ environment:
   type: none
 
 engine:
-  name: claude_code
+  type: claude_code
   model:
     provider: anthropic
     name: claude-sonnet-4-6
@@ -80,7 +80,7 @@ skills:
 
 # ========== 5. Agent Engine ==========
 engine:
-  name: claude_code               # claude_code / codex / qodercli (also accepts qoder-cli)
+  type: claude_code               # claude_code / codex / qodercli (also accepts qoder-cli)
   model:
     provider: anthropic
     name: claude-sonnet-4-6
@@ -464,7 +464,7 @@ schema_version: v1alpha1
 environment:
   type: none
 engine:
-  name: claude_code
+  type: claude_code
   model:
     provider: anthropic
     name: claude-sonnet-4-6

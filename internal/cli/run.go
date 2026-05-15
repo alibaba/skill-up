@@ -400,6 +400,9 @@ func resolveEvalConfig(evalCfg *config.EvalConfig, engineName string, cmd *cobra
 	if engineName == "" {
 		if evalCfg != nil {
 			engineName = evalCfg.Engine.Name
+			if engineName == "" {
+				engineName = evalCfg.Engine.Type
+			}
 		}
 		if engineName == "" {
 			engineName = "claude_code"
@@ -411,6 +414,7 @@ func resolveEvalConfig(evalCfg *config.EvalConfig, engineName string, cmd *cobra
 	}
 
 	evalCfg.Engine.Name = engineName
+	evalCfg.Engine.Type = engineName
 
 	if modelFlag, _ := cmd.Flags().GetString("model"); modelFlag != "" {
 		parts := strings.SplitN(modelFlag, "/", modelFormatParts)

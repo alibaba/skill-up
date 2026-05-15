@@ -6,25 +6,21 @@ skill-up 是一个面向 Agent Skill 开发者的评测工具。你可以用它�
 
 ## 安装
 
-skill-up 以预编译二进制分发，无需安装任何运行时依赖。
-
-### 使用 go install（推荐）
+### 使用安装脚本
 
 ```bash
-go install github.com/alibaba/skill-up/cmd/skill-up@latest
+curl -fsSL https://raw.githubusercontent.com/alibaba/skill-up/main/install.sh | bash
 ```
 
-或从仓库 checkout 后本地构建：
+安装脚本会从 [GitHub Releases](https://github.com/alibaba/skill-up/releases) 下载当前平台对应的二进制文件。
+
+如需从仓库 checkout 后本地构建，需要安装 [Go](https://go.dev/dl/) 1.25 或更高版本：
 
 ```bash
 make build
 # 或
 go build -o bin/skill-up ./cmd/skill-up
 ```
-
-### 预编译二进制
-
-从 [GitHub Releases](https://github.com/alibaba/skill-up/releases) 下载对应平台的压缩包，解压后将 `skill-up` 可执行文件放入 `PATH`。
 
 ### 验证安装
 
@@ -70,41 +66,21 @@ schema_version: v1alpha1
 environment:
   type: none                    # 纯文本 Skill 无需容器隔离
 
-skills:
-  - source: local_path
-    path: .                     # 当前 Skill 目录
-  - source: local_path
-    path: ./dependency_skill_dir     # 相对于待测Skill目录下，依赖其他skill时， 其他的SKILL.md 所在路径；
-
 engine:
-  name: claude_code             # 使用 Claude Code 作为 Agent Engine
-  # model 配置为可选项。不填时，引擎将使用本地默认模型配置，不传 --model 参数。
-  # 如需指定模型，可取消下方注释：
-  # model:
-  #   provider: anthropic
-  #   name: claude-sonnet-4-6
+  type: claude_code             # 使用 Claude Code 作为 Agent Engine
 
 cases:
   files:
     - evals/cases/hello-world.yaml
-  defaults:
-    timeout_seconds: 120
-    max_turns: 5
-
-report:
-  formats: [json]
 ```
 
-> **提示：** `engine.model` 中的 `provider` 和 `name` 均为可选字段。省略时，引擎会使用自身的本地默认模型设置，运行命令中不会添加 `--model` 参数。如需明确指定模型，只需在 `engine` 下添加 `model` 配置即可。
+> **提示：** 当 `evals/eval.yaml` 位于包含 `SKILL.md` 的目录下时，skill-up 会自动安装当前 Skill。未写出的字段会使用默认值：JSON 报告、`timeout_seconds: 300`、`max_turns: 10`、`parallelism: 1`。只有需要覆盖默认行为时，才添加 `engine.model`、`skills`、`cases.defaults` 或 `report`。
 
 ### 第二步：编写评测用例
 
 创建 `evals/cases/hello-world.yaml`：
 
 ```yaml
-id: hello-world
-title: Skill 应该正确响应基本请求
-
 input:
   prompt: |
     请帮我生成一个 Hello World 程序
@@ -113,22 +89,16 @@ expect:
   must_contain:
     - "Hello"
     - "World"
-  must_not_contain:
-    - "error"
-
-judge:
-  type: rule_based
-  success:
-    - output_contains:
-        all: ["Hello", "World"]
 ```
+
+用例 `id` 默认取文件名（这里是 `hello-world`）。只有在需要脚本评测或 Agent 评测时，才需要额外添加 `judge` 配置。
 
 ### 第三步：校验配置
 
-在运行前先检查配置是否正确：
+这一步是可选的，但建议首次运行前执行：它只检查 `eval.yaml` 和引用的用例文件，不会启动 Agent Engine。
 
 ```bash
-skill-up validate ./evals/eval.yaml
+skill-up validate
 ```
 
 正确时输出：
@@ -140,7 +110,7 @@ skill-up validate ./evals/eval.yaml
 ### 第四步：运行评测
 
 ```bash
-skill-up run ./evals/eval.yaml
+skill-up run
 ```
 
 你将看到类似这样的输出：

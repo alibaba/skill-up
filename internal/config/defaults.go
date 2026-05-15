@@ -36,6 +36,7 @@ func deepCopyEvalConfig(cfg *EvalConfig) *EvalConfig {
 	if err := yaml.Unmarshal(data, &copied); err != nil {
 		panic("failed to unmarshal EvalConfig: " + err.Error())
 	}
+	copied.Engine.Normalize()
 	// Ensure nil slices are initialized to empty slices for consistency
 	// (YAML unmarshal may produce nil for empty arrays)
 	if copied.MCP.Servers == nil {
@@ -62,6 +63,7 @@ func loadDefaults() (*EvalConfig, error) {
 	if err := yaml.Unmarshal(defaultsYAML, &cfg); err != nil {
 		return nil, err
 	}
+	cfg.Engine.Normalize()
 
 	return &cfg, nil
 }

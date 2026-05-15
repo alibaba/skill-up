@@ -6,25 +6,21 @@ skill-up is an evaluation tool for Agent Skill developers. Use it to verify that
 
 ## Installation
 
-skill-up ships as a prebuilt binary and has no runtime dependencies.
-
-### From source (recommended)
+### Install with the script
 
 ```bash
-go install github.com/alibaba/skill-up/cmd/skill-up@latest
+curl -fsSL https://raw.githubusercontent.com/alibaba/skill-up/main/install.sh | bash
 ```
 
-Or build locally from a checkout:
+The installer downloads the matching binary from [GitHub Releases](https://github.com/alibaba/skill-up/releases).
+
+To build locally from a checkout, install [Go](https://go.dev/dl/) 1.25 or later:
 
 ```bash
 make build
 # or
 go build -o bin/skill-up ./cmd/skill-up
 ```
-
-### Prebuilt binaries
-
-Download from [GitHub Releases](https://github.com/alibaba/skill-up/releases).
 
 ### Verify the install
 
@@ -70,41 +66,21 @@ schema_version: v1alpha1
 environment:
   type: none                    # Plain-text Skills don't need an isolated container
 
-skills:
-  - source: local_path
-    path: .                     # The current Skill directory
-  - source: local_path
-    path: ./dependency_skill_dir   # Relative to the Skill under test, when depending on another SKILL.md
-
 engine:
-  name: claude_code             # Use Claude Code as the Agent Engine
-  # `model` is optional. If omitted, the engine uses its local default model
-  # and `--model` is NOT passed on the command line. To pin a model, uncomment:
-  # model:
-  #   provider: anthropic
-  #   name: claude-sonnet-4-6
+  type: claude_code             # Use Claude Code as the Agent Engine
 
 cases:
   files:
     - evals/cases/hello-world.yaml
-  defaults:
-    timeout_seconds: 120
-    max_turns: 5
-
-report:
-  formats: [json]
 ```
 
-> **Tip:** `engine.model.provider` and `engine.model.name` are both optional. When omitted, the engine falls back to its own default and skill-up will not append `--model`. Add an explicit `model` block under `engine` only when you need to pin a specific model.
+> **Tip:** When `evals/eval.yaml` lives under a directory that contains `SKILL.md`, skill-up installs the current Skill automatically. The omitted fields use defaults: JSON report output, `timeout_seconds: 300`, `max_turns: 10`, and `parallelism: 1`. Add `engine.model`, `skills`, `cases.defaults`, or `report` only when you need to override them.
 
 ### Step 2 — Write a case
 
 Create `evals/cases/hello-world.yaml`:
 
 ```yaml
-id: hello-world
-title: Skill should respond to a basic request
-
 input:
   prompt: |
     Please generate a Hello World program
@@ -113,22 +89,16 @@ expect:
   must_contain:
     - "Hello"
     - "World"
-  must_not_contain:
-    - "error"
-
-judge:
-  type: rule_based
-  success:
-    - output_contains:
-        all: ["Hello", "World"]
 ```
+
+The case `id` defaults to the filename (`hello-world`). Add a `judge` block only when you need script-based or agent-based grading.
 
 ### Step 3 — Validate the config
 
-Always validate before running:
+This step is optional, but useful before the first run: it checks `eval.yaml` and all referenced case files without starting an Agent Engine.
 
 ```bash
-skill-up validate ./evals/eval.yaml
+skill-up validate
 ```
 
 On success you should see:
@@ -140,7 +110,7 @@ On success you should see:
 ### Step 4 — Run the evaluation
 
 ```bash
-skill-up run ./evals/eval.yaml
+skill-up run
 ```
 
 You will see output similar to:

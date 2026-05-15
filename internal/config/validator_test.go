@@ -194,7 +194,7 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "missing engine.name",
+			name: "missing engine.type",
 			cfg: &EvalConfig{
 				SchemaVersion: "v1alpha1",
 				Environment:   Environment{Type: "none"},
@@ -212,7 +212,23 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 				},
 			},
 			wantErr: true,
-			errMsg:  "engine.name is required",
+			errMsg:  "engine.type is required",
+		},
+		{
+			name: "conflicting engine type and name",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Type: "claude_code",
+					Name: "codex",
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "engine.type and engine.name must match",
 		},
 		{
 			name: "missing engine.model.provider is valid",
