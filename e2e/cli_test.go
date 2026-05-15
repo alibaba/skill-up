@@ -371,7 +371,12 @@ func TestCLI_RunAutoWithEngine(t *testing.T) {
 // Full-e2e: --auto against real LLM backends
 // -----------------------------------------------------------------------------
 
-func TestCLI_RunAutoWithExamples(t *testing.T) {
+// TestCLI_RunAutoPrefersEvalYAML verifies that --auto picks eval.yaml when a
+// directory ships both eval.yaml and an Anthropic evals.json (as
+// examples/code-stats does). The companion TestCLI_RunAutoWithEvalsJSON cases
+// cover the Anthropic-evals.json branch — keep both fixtures around to exercise
+// each detector path.
+func TestCLI_RunAutoPrefersEvalYAML(t *testing.T) {
 	t.Parallel()
 
 	skipIfNotFullE2E(t)
@@ -383,8 +388,8 @@ func TestCLI_RunAutoWithExamples(t *testing.T) {
 	examplesDir := filepath.Join(getProjectRoot(), "examples", "code-stats")
 	result := Run(t, RunConfig{Timeout: 120e9}, "run", "--auto", examplesDir)
 
-	if !strings.Contains(result.Stdout, "Auto-detected Anthropic evals.json") {
-		t.Errorf("expected 'Auto-detected Anthropic evals.json' in output, got: %s", result.Stdout)
+	if !strings.Contains(result.Stdout, "Auto-detected eval.yaml") {
+		t.Errorf("expected 'Auto-detected eval.yaml' in output, got: %s", result.Stdout)
 	}
 	if !strings.Contains(result.Stdout, "Running evaluation") {
 		t.Errorf("expected runner stage log in output, got: %s", result.Stdout)

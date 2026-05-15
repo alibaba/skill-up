@@ -31,15 +31,22 @@ const (
 	codexProcessSandbox = "--sandbox workspace-write"
 	codexBypassSandbox  = "--dangerously-bypass-approvals-and-sandbox"
 	codexCustomWireAPI  = "chat"
-	codexUserRole       = "user"
-	codexOutputText     = "output_text"
-	codexInputText      = "input_text"
-	codexAgentMsg       = "agent_message"
-	codexFnCall         = "function_call"
-	codexFnCallOut      = "function_call_output"
-	codexTokenCount     = "token_count"
-	codexStatusSuccess  = "success"
-	codexStatusError    = "error"
+	// codexOpenAIOverrideProvider is the provider key emitted when callers
+	// configure provider=openai with a custom BaseURL. The literal "openai"
+	// name can't be reused because codex ships a built-in provider config
+	// under that key and won't reliably merge our overrides onto it. The
+	// "skill-up-" prefix makes the synthesised entry obvious when it shows
+	// up in codex command lines or logs (e.g. `-c model_provider="skill-up-openai"`).
+	codexOpenAIOverrideProvider = "skill-up-openai"
+	codexUserRole               = "user"
+	codexOutputText             = "output_text"
+	codexInputText              = "input_text"
+	codexAgentMsg               = "agent_message"
+	codexFnCall                 = "function_call"
+	codexFnCallOut              = "function_call_output"
+	codexTokenCount             = "token_count"
+	codexStatusSuccess          = "success"
+	codexStatusError            = "error"
 )
 
 // NewCodexAgent creates a new CodexAgent.
@@ -281,8 +288,27 @@ type codexProviderConfig struct {
 }
 
 func (a *CodexAgent) runProviderConfig(ctx context.Context) codexProviderConfig {
-	if a.Cfg.ModelProvider == "" || a.Cfg.ModelProvider == agentProviderOpenAI {
+	if a.Cfg.ModelProvider == "" {
 		return codexProviderConfig{BaseURL: a.Cfg.BaseURL}
+	}
+	// When OPENAI_BASE_URL (or DASHSCOPE_BASE_URL routed via provider env)
+	// resolves to a non-default endpoint, route codex to it via a *distinct*
+	// provider entry. We can't reuse the literal "openai" name because codex
+	// ships a built-in provider config under that key and merging the override
+	// onto it is unreliable across codex versions — codex keeps using its
+	// bundled api.openai.com endpoint. A unique key forces codex to construct
+	// a brand-new provider definition from the -c flags alone.
+	if a.Cfg.ModelProvider == agentProviderOpenAI {
+		if a.Cfg.BaseURL == "" {
+			return codexProviderConfig{}
+		}
+		return codexProviderConfig{
+			Name:    codexOpenAIOverrideProvider,
+			Label:   codexOpenAIOverrideProvider,
+			BaseURL: a.Cfg.BaseURL,
+			EnvKey:  credential.EnvOpenAIAPIKey,
+			WireAPI: codexCustomWireAPI,
+		}
 	}
 	if reason := codexCustomProviderUnavailableReason(a.Cfg.ModelProvider, a.Cfg.BaseURL); reason != "" {
 		logging.DebugContextf(ctx, "codex provider config omitted for provider %q: %s", a.Cfg.ModelProvider, reason)

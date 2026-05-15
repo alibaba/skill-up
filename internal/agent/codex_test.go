@@ -229,6 +229,65 @@ func TestCodexRunProviderConfig_RejectsInvalidProviderName(t *testing.T) {
 	}
 }
 
+// TestBuildCodexRunCmd_OpenAIWithBaseURL_EmitsSkillUpProviderFlags asserts the
+// full -c flag set produced when callers configure provider=openai together
+// with a custom BaseURL. The synthesised "skill-up-openai" provider entry must
+// appear verbatim in the resulting codex command; the legacy
+// `-c openai_base_url=...` fallback is unreachable on this path.
+func TestBuildCodexRunCmd_OpenAIWithBaseURL_EmitsSkillUpProviderFlags(t *testing.T) {
+	t.Parallel()
+
+	ag := NewCodexAgent(Config{
+		ModelProvider: agentProviderOpenAI,
+		ModelName:     "qwen3.6-plus",
+		BaseURL:       "https://dashscope.aliyuncs.com/compatible-mode/v1",
+	})
+
+	cmd := buildCodexRunCmd("hello world", ag.effectiveModelName(context.Background()), ag.runProviderConfig(context.Background()), codexBypassSandbox)
+	want := `codex exec --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -c 'model_provider="skill-up-openai"' -c 'model_providers.skill-up-openai.name="skill-up-openai"' -c 'model_providers.skill-up-openai.base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"' -c 'model_providers.skill-up-openai.env_key="OPENAI_API_KEY"' -c 'model_providers.skill-up-openai.wire_api="chat"' -m 'qwen3.6-plus' 'hello world'`
+	if cmd != want {
+		t.Fatalf("unexpected command:\nwant: %s\ngot:  %s", want, cmd)
+	}
+}
+
+func TestCodexRunProviderConfig_OpenAIWithBaseURLOverridesBuiltin(t *testing.T) {
+	t.Parallel()
+
+	ag := NewCodexAgent(Config{
+		ModelProvider: agentProviderOpenAI,
+		ModelName:     "qwen3.6-plus",
+		BaseURL:       "https://dashscope.aliyuncs.com/compatible-mode/v1",
+	})
+
+	got := ag.runProviderConfig(context.Background())
+	if got.Name != codexOpenAIOverrideProvider {
+		t.Fatalf("provider name = %q, want %q", got.Name, codexOpenAIOverrideProvider)
+	}
+	if got.BaseURL != "https://dashscope.aliyuncs.com/compatible-mode/v1" {
+		t.Fatalf("base URL = %q, want DashScope endpoint", got.BaseURL)
+	}
+	if got.EnvKey != credential.EnvOpenAIAPIKey {
+		t.Fatalf("env key = %q, want %q", got.EnvKey, credential.EnvOpenAIAPIKey)
+	}
+	if got.WireAPI != "chat" {
+		t.Fatalf("wire API = %q, want chat", got.WireAPI)
+	}
+}
+
+func TestCodexRunProviderConfig_OpenAIWithoutBaseURLEmitsNothing(t *testing.T) {
+	t.Parallel()
+
+	ag := NewCodexAgent(Config{
+		ModelProvider: agentProviderOpenAI,
+		ModelName:     "gpt-5.4",
+	})
+
+	got := ag.runProviderConfig(context.Background())
+	if got.Name != "" || got.BaseURL != "" {
+		t.Fatalf("runProviderConfig() = %+v, want empty when BaseURL is unset", got)
+	}
+}
+
 func TestShellQuoteEscapesSingleQuote(t *testing.T) {
 	t.Parallel()
 

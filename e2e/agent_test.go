@@ -632,6 +632,7 @@ report:
 		}
 		t.Fatalf("workspace directory not found at %s", workspaceDir)
 	}
+	preserveWorkspaceArtifacts(t, workspaceDir)
 
 	iterationDir := filepath.Join(workspaceDir, "iteration-1")
 	if _, err := os.Stat(iterationDir); os.IsNotExist(err) {
@@ -1119,6 +1120,7 @@ expect:
 
 	// Workspace is created at projectDir/<basename>-workspace by the runner.
 	workspaceDir := filepath.Join(projectDir, "test-skill-qoder-none-workspace")
+	preserveWorkspaceArtifacts(t, workspaceDir)
 	result := Run(t, RunConfig{Timeout: 120e9}, "run", evalPath)
 
 	if result.ExitCode != 0 && result.ExitCode != -1 {
