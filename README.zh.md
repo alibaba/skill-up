@@ -66,11 +66,19 @@
 
 使用安装脚本：
 
+**macOS / Linux**：
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/alibaba/skill-up/main/install.sh | bash
 ```
 
-安装脚本会从 [GitHub Releases](https://github.com/alibaba/skill-up/releases) 下载当前平台对应的二进制文件。
+**Windows（PowerShell）**：
+
+```powershell
+irm https://raw.githubusercontent.com/alibaba/skill-up/main/install.ps1 | iex
+```
+
+安装脚本会从 [GitHub Releases](https://github.com/alibaba/skill-up/releases) 下载当前平台对应的二进制文件。可通过 `SKILL_UP_VERSION` 指定版本，通过 `INSTALL_DIR` 覆盖安装目录。
 
 如需从仓库 checkout 后本地构建，需要安装 [Go](https://go.dev/dl/) 1.25 或更高版本：
 

@@ -66,11 +66,19 @@ The official [Agent Skills evaluation guide](https://agentskills.io/skill-creati
 
 Install with the script:
 
+**macOS / Linux**:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/alibaba/skill-up/main/install.sh | bash
 ```
 
-The installer downloads the matching binary from [GitHub Releases](https://github.com/alibaba/skill-up/releases).
+**Windows (PowerShell)**:
+
+```powershell
+irm https://raw.githubusercontent.com/alibaba/skill-up/main/install.ps1 | iex
+```
+
+The installer downloads the matching binary from [GitHub Releases](https://github.com/alibaba/skill-up/releases). Set `SKILL_UP_VERSION` to pin a release and `INSTALL_DIR` to override the install location.
 
 To build locally from a checkout, install [Go](https://go.dev/dl/) 1.25 or later:
 
