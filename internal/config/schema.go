@@ -89,42 +89,10 @@ type SkillRef struct {
 
 // EngineConfig defines the Agent Engine configuration.
 type EngineConfig struct {
-	Type    string      `yaml:"type,omitempty"` // claude_code, codex, custom
-	Name    string      `yaml:"name,omitempty"` // deprecated: use type
+	Name    string      `yaml:"name"` // claude_code, codex, custom
 	Version string      `yaml:"version,omitempty"`
 	Entry   string      `yaml:"entry,omitempty"`
 	Model   ModelConfig `yaml:"model"`
-}
-
-// Normalize fills the legacy Name field from Type so existing runtime code can
-// use one canonical value while the public YAML schema exposes engine.type.
-func (e *EngineConfig) Normalize() {
-	if e == nil {
-		return
-	}
-	if e.Name == "" && e.Type != "" {
-		e.Name = e.Type
-	}
-	if e.Type == "" && e.Name != "" {
-		e.Type = e.Name
-	}
-}
-
-// MarshalYAML emits the public engine.type field while keeping engine.name as
-// a read-compatible alias for older v1alpha1 configs.
-func (e EngineConfig) MarshalYAML() (any, error) {
-	e.Normalize()
-	return struct {
-		Type    string      `yaml:"type,omitempty"`
-		Version string      `yaml:"version,omitempty"`
-		Entry   string      `yaml:"entry,omitempty"`
-		Model   ModelConfig `yaml:"model"`
-	}{
-		Type:    e.Type,
-		Version: e.Version,
-		Entry:   e.Entry,
-		Model:   e.Model,
-	}, nil
 }
 
 // ModelConfig describes the model to use.

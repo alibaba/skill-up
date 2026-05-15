@@ -68,7 +68,6 @@ func (l *Loader) LoadEvalConfig() (*EvalConfig, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse eval.yaml: %w", err)
 	}
-	cfg.Engine.Normalize()
 
 	return &cfg, nil
 }

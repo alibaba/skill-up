@@ -125,40 +125,6 @@ report:
 	}
 }
 
-func TestLoader_LoadEvalConfig_EngineTypeAlias(t *testing.T) {
-	t.Parallel()
-	content := `schema_version: v1alpha1
-
-environment:
-  type: none
-
-engine:
-  type: codex
-
-cases:
-  files:
-    - evals/cases/test.yaml
-`
-
-	tmpDir := t.TempDir()
-	evalPath := filepath.Join(tmpDir, "eval.yaml")
-	if err := os.WriteFile(evalPath, []byte(content), 0o600); err != nil {
-		t.Fatalf("failed to write temp eval.yaml: %v", err)
-	}
-
-	loader := NewLoader(evalPath)
-	cfg, err := loader.LoadEvalConfig()
-	if err != nil {
-		t.Fatalf("LoadEvalConfig failed: %v", err)
-	}
-	if cfg.Engine.Type != "codex" {
-		t.Errorf("expected engine.type 'codex', got '%s'", cfg.Engine.Type)
-	}
-	if cfg.Engine.Name != "codex" {
-		t.Errorf("expected engine.name alias 'codex', got '%s'", cfg.Engine.Name)
-	}
-}
-
 // nolint:funlen // table-driven test cases drive the line count; splitting hurts readability.
 func TestLoader_LoadEvalConfig_PassThreshold(t *testing.T) {
 	t.Parallel()

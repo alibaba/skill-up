@@ -93,7 +93,7 @@ environment:
   type: none
 
 engine:
-  type: claude_code
+  name: claude_code
 
 cases:
   files:

@@ -24,7 +24,6 @@ func NewValidator() *Validator {
 // ValidateEvalConfig validates an eval configuration.
 func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	var errs []string
-	cfg.Engine.Normalize()
 
 	// schema_version is required and must be v1alpha1
 	if cfg.SchemaVersion == "" {
@@ -40,13 +39,9 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 		errs = append(errs, "environment.type must be one of: none, opensandbox")
 	}
 
-	// engine.type is required. engine.name remains accepted for v1alpha1
-	// compatibility and is normalized to the same internal value by Loader.
-	if cfg.Engine.Type != "" && cfg.Engine.Name != "" && cfg.Engine.Type != cfg.Engine.Name {
-		errs = append(errs, "engine.type and engine.name must match when both are set")
-	}
-	if cfg.Engine.Type == "" && cfg.Engine.Name == "" {
-		errs = append(errs, "engine.type is required")
+	// engine.name is required
+	if cfg.Engine.Name == "" {
+		errs = append(errs, "engine.name is required")
 	}
 
 	// engine.model.provider and engine.model.name are optional.

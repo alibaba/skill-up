@@ -39,7 +39,7 @@ This dict is the "intermediate decision result" — it does not require every ag
 
 The runner agent is the main agent that executes cases; default sources are:
 
-- `eval.engine.type`
+- `eval.engine.name`
 - `eval.engine.model.provider`
 - `eval.engine.model.name`
 - `eval.engine.model.base_url`

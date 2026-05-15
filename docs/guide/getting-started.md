@@ -67,7 +67,7 @@ environment:
   type: none                    # Plain-text Skills don't need an isolated container
 
 engine:
-  type: claude_code             # Use Claude Code as the Agent Engine
+  name: claude_code             # Use Claude Code as the Agent Engine
 
 cases:
   files:

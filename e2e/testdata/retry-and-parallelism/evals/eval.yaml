@@ -12,7 +12,7 @@ skills:
     path: .
 
 engine:
-  type: qoder-cli
+  name: qoder-cli
   model:
     provider: qoder
     name: auto

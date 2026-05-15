@@ -67,7 +67,7 @@ environment:
   type: none                    # 纯文本 Skill 无需容器隔离
 
 engine:
-  type: claude_code             # 使用 Claude Code 作为 Agent Engine
+  name: claude_code             # 使用 Claude Code 作为 Agent Engine
 
 cases:
   files:

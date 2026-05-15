@@ -30,9 +30,6 @@ func TestDefaultEvalConfig(t *testing.T) { //nolint:cyclop,gocyclo // exhaustive
 	}
 
 	// Verify engine defaults
-	if cfg.Engine.Type != "claude_code" {
-		t.Errorf("Engine.Type = %q, want %q", cfg.Engine.Type, "claude_code")
-	}
 	if cfg.Engine.Name != "claude_code" {
 		t.Errorf("Engine.Name = %q, want %q", cfg.Engine.Name, "claude_code")
 	}
