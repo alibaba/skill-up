@@ -76,7 +76,9 @@ cases:
 
 > **Tip:** When `evals/eval.yaml` lives under a directory that contains `SKILL.md`, skill-up installs the current Skill automatically. The omitted fields use defaults: JSON report output, `timeout_seconds: 300`, `max_turns: 10`, and `parallelism: 1`. Add `engine.model`, `skills`, `cases.defaults`, or `report` only when you need to override them.
 
-### Step 2 — Write a case
+For the full `eval.yaml` schema, see [Writing Evals](./writing-evals).
+
+### Step 2 — Write an Eval Case
 
 Create `evals/cases/hello-world.yaml`:
 

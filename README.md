@@ -102,7 +102,9 @@ cases:
 
 When `evals/eval.yaml` lives under a directory that contains `SKILL.md`, skill-up installs the current Skill automatically. The omitted fields use defaults: JSON report output, `timeout_seconds: 300`, `max_turns: 10`, and `parallelism: 1`.
 
-### 2. Write a Test Case
+For the full `eval.yaml` schema, see [Writing Evals](docs/guide/writing-evals.md).
+
+### 2. Write an Eval Case
 
 Create `evals/cases/hello-world.yaml`:
 

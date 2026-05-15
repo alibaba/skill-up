@@ -76,7 +76,9 @@ cases:
 
 > **提示：** 当 `evals/eval.yaml` 位于包含 `SKILL.md` 的目录下时，skill-up 会自动安装当前 Skill。未写出的字段会使用默认值：JSON 报告、`timeout_seconds: 300`、`max_turns: 10`、`parallelism: 1`。只有需要覆盖默认行为时，才添加 `engine.model`、`skills`、`cases.defaults` 或 `report`。
 
-### 第二步：编写评测用例
+完整的 `eval.yaml` 配置说明见 [编写评测配置与用例](./writing-evals)。
+
+### 第二步：编写 Eval Case
 
 创建 `evals/cases/hello-world.yaml`：
 
