@@ -47,6 +47,16 @@ func openSandboxE2EBaseURL() string {
 	return "https://agent-sandbox.example.com"
 }
 
+// openSandboxE2EImage returns the sandbox image reference for e2e tests.
+// Internal CI overrides via OPENSANDBOX_IMAGE; the placeholder default keeps
+// the open-source repo free of vendor-specific image URIs.
+func openSandboxE2EImage() string {
+	if image := os.Getenv("OPENSANDBOX_IMAGE"); image != "" {
+		return image
+	}
+	return "registry.example.com/agentic-execution:placeholder"
+}
+
 func dashScopeE2EAPIKey() string {
 	if apiKey := os.Getenv("DASHSCOPE_API_KEY"); apiKey != "" {
 		return apiKey
@@ -684,8 +694,7 @@ expect:
 environment:
   type: opensandbox
   workspace_mount: /workspace
-  # Placeholder image reference; replace with a valid OpenSandbox image in your environment.
-  image: registry.example.com/agentic-execution:placeholder
+  image: `+openSandboxE2EImage()+`
   ready_timeout_seconds: 300
   kwargs:
     base_url: `+openSandboxE2EBaseURL()+`
@@ -758,6 +767,121 @@ report:
 func isOpenSandboxReadyFailure(stderr string) bool {
 	return strings.Contains(stderr, "failed to create opensandbox") &&
 		strings.Contains(stderr, "did not become ready")
+}
+
+// TestAgent_ClaudeCode_OpenSandboxRuntime exercises the claude_code engine
+// against a real OpenSandbox runtime. Mirrors TestAgent_Codex_OpenSandboxRuntime
+// so both supported engines have end-to-end coverage of the opensandbox bridge.
+func TestAgent_ClaudeCode_OpenSandboxRuntime(t *testing.T) {
+	skipIfClaudeUnavailable(t)
+
+	sandboxAPIKey := openSandboxE2EAPIKey()
+	if sandboxAPIKey == "" {
+		t.Skip("OPENSANDBOX_API_KEY not set, skipping claude_code opensandbox test")
+	}
+	anthropicAPIKey := os.Getenv("ANTHROPIC_API_KEY")
+	if anthropicAPIKey == "" {
+		// Fall back to DASHSCOPE_API_KEY so CI that wires DashScope's
+		// Anthropic-compatible endpoint into ANTHROPIC_BASE_URL still runs.
+		anthropicAPIKey = dashScopeE2EAPIKey()
+	}
+	if anthropicAPIKey == "" {
+		t.Skip("ANTHROPIC_API_KEY/DASHSCOPE_API_KEY not set, skipping claude_code opensandbox test")
+	}
+
+	evalDir := t.TempDir()
+	writeFile(t, filepath.Join(evalDir, "SKILL.md"), "# ClaudeCode OpenSandbox E2E\n")
+	writeFile(t, filepath.Join(evalDir, "evals", "cases", "ok.yaml"), `id: ok
+title: ClaudeCode OpenSandbox smoke
+input:
+  prompt: Return a short acknowledgement.
+constraints:
+  timeout_seconds: 600
+  max_turns: 1
+expect:
+  must_not_contain:
+    - __skill_up_forbidden__
+`)
+
+	evalPath := filepath.Join(evalDir, "evals", "eval.yaml")
+	writeFile(t, evalPath, `schema_version: v1alpha1
+environment:
+  type: opensandbox
+  workspace_mount: /workspace
+  image: `+openSandboxE2EImage()+`
+  ready_timeout_seconds: 300
+  kwargs:
+    base_url: `+openSandboxE2EBaseURL()+`
+    request_timeout_seconds: "900"
+mcp:
+  servers: []
+skills: []
+engine:
+  name: claude_code
+  model:
+    provider: dashscope
+    name: `+dashScopeE2EModel()+`
+cases:
+  files:
+    - evals/cases/ok.yaml
+  defaults:
+    timeout_seconds: 600
+    max_turns: 1
+  parallelism: 1
+  retry_policy:
+    max_retries: 0
+benchmark:
+  enabled: false
+judge:
+  type: rule_based
+report:
+  formats: [json]
+  artifacts: [transcript]
+`)
+
+	outputDir := t.TempDir()
+	env := []string{
+		"OPENSANDBOX_API_KEY=" + sandboxAPIKey,
+		"ANTHROPIC_API_KEY=" + anthropicAPIKey,
+	}
+	if baseURL := os.Getenv("ANTHROPIC_BASE_URL"); baseURL != "" {
+		env = append(env, "ANTHROPIC_BASE_URL="+baseURL)
+	}
+	if model := os.Getenv("ANTHROPIC_MODEL"); model != "" {
+		env = append(env, "ANTHROPIC_MODEL="+model)
+	}
+
+	result := Run(t, RunConfig{
+		Timeout: 10 * 60e9,
+		Env:     env,
+	}, "run", evalPath, "--output-dir", outputDir)
+
+	if result.ExitCode == ExitCodeTimeout {
+		t.Skip("claude_code opensandbox run timed out")
+	}
+	if isOpenSandboxReadyFailure(result.Stderr) {
+		t.Skipf("opensandbox did not become ready: %s", result.Stderr)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("claude_code opensandbox run failed: exit=%d\nstdout=%s\nstderr=%s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+
+	resultPath := filepath.Join(outputDir, "iteration-1", "result.json")
+	data, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("failed to read result.json: %v", err)
+	}
+	if !strings.Contains(string(data), `"engine_name": "claude_code"`) || !strings.Contains(string(data), `"status": "PASS"`) {
+		t.Fatalf("unexpected result.json:\n%s", string(data))
+	}
+	responsePath := filepath.Join(outputDir, "iteration-1", "ok", "with_skill", "outputs", "response.md")
+	response, err := os.ReadFile(responsePath)
+	if err != nil {
+		t.Fatalf("failed to read response.md: %v", err)
+	}
+	if strings.TrimSpace(string(response)) == "" {
+		t.Fatalf("response.md is empty")
+	}
 }
 
 // TestAgent_ClaudeCode_WithAPIKey tests claude-code with real API key.
