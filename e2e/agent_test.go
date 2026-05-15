@@ -773,8 +773,8 @@ func isOpenSandboxReadyFailure(stderr string) bool {
 // against a real OpenSandbox runtime. Mirrors TestAgent_Codex_OpenSandboxRuntime
 // so both supported engines have end-to-end coverage of the opensandbox bridge.
 func TestAgent_ClaudeCode_OpenSandboxRuntime(t *testing.T) {
-	skipIfClaudeUnavailable(t)
-
+	// No skipIfClaudeUnavailable here: the opensandbox runtime bootstraps the
+	// claude CLI inside the sandbox, so the host runner does not need it.
 	sandboxAPIKey := openSandboxE2EAPIKey()
 	if sandboxAPIKey == "" {
 		t.Skip("OPENSANDBOX_API_KEY not set, skipping claude_code opensandbox test")
