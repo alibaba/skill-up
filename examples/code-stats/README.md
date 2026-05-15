@@ -30,7 +30,7 @@ code-stats/
 ```bash
 # Run evaluation using skill-creator workflow
 claude -p "$(cat <<'EOF'
-Create a skill evaluation for /Users/zhaoping/work/skill-up/examples/code-stats using skill-creator.
+Create a skill evaluation for ./examples/code-stats using skill-creator.
 EOF
 )"
 ```
@@ -38,8 +38,7 @@ EOF
 ### With skill-up (Go framework)
 
 ```bash
-# Build and run
-cd /Users/zhaoping/work/skill-up
+# Build and run (from repo root)
 make build
 ./bin/skill-up run ./examples/code-stats/evals/eval.yaml
 ```
