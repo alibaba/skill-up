@@ -14,7 +14,7 @@ skills:
     path: .
 
 engine:
-  name: qodercli
+  type: qodercli
   model:
     name: auto
 

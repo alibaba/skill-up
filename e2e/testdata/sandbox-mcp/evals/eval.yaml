@@ -12,7 +12,7 @@ mcp:
 skills: []
 
 engine:
-  name: claude_code
+  type: claude_code
   model:
     provider: anthropic
     name: qwen3.6-plus

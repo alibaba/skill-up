@@ -91,6 +91,8 @@ expect:
   must_contain:
     - "Hello"
     - "World"
+  must_not_contain:
+    - "error"
 ```
 
 The case `id` defaults to the filename (`hello-world`). Add a `judge` block only when you need script-based or agent-based grading.

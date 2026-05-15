@@ -91,6 +91,8 @@ expect:
   must_contain:
     - "Hello"
     - "World"
+  must_not_contain:
+    - "error"
 ```
 
 用例 `id` 默认取文件名（这里是 `hello-world`）。只有在需要脚本评测或 Agent 评测时，才需要额外添加 `judge` 配置。
