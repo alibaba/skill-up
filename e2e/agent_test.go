@@ -794,15 +794,13 @@ func TestAgent_ClaudeCode_OpenSandboxRuntime(t *testing.T) {
 	if sandboxAPIKey == "" {
 		t.Skip("OPENSANDBOX_API_KEY not set, skipping claude_code opensandbox test")
 	}
+	// claude_code authenticates with ANTHROPIC_API_KEY. Whether that key is a
+	// real Anthropic key or a DashScope key for the Anthropic-compatible
+	// endpoint is an external configuration choice (the CI workflow sets it);
+	// the test does not reach into other providers' env vars.
 	modelAPIKey := os.Getenv("ANTHROPIC_API_KEY")
 	if modelAPIKey == "" {
-		// Fall back to the DashScope key; a DashScope key authenticates both
-		// the OpenAI- and Anthropic-compatible endpoints. Only the key is
-		// borrowed here — the base URL is pinned below, never inherited.
-		modelAPIKey = dashScopeE2EAPIKey()
-	}
-	if modelAPIKey == "" {
-		t.Skip("ANTHROPIC_API_KEY/DASHSCOPE_API_KEY not set, skipping claude_code opensandbox test")
+		t.Skip("ANTHROPIC_API_KEY not set, skipping claude_code opensandbox test")
 	}
 
 	evalDir := t.TempDir()
