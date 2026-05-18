@@ -187,7 +187,10 @@ jobs:
       - name: Install OpenSandbox server
         if: steps.secrets.outputs.available == 'true'
         run: |
-          uv tool install opensandbox-server
+          # Pin the server version: it must stay compatible with the execd
+          # image pinned in the next step, and an unpinned "latest" would let
+          # an unrelated future release silently change behavior or break CI.
+          uv tool install 'opensandbox-server==0.1.13'
           # uv tool install drops console scripts under ~/.local/bin.
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
@@ -200,8 +203,9 @@ jobs:
           # not work — it lacks curl/git/node and the bootstrap fails.
           OPENSANDBOX_IMAGE: node:22
           # execd is the bootstrap binary OpenSandbox injects into every
-          # sandbox. Keep it roughly aligned with the installed server version;
-          # bump if the server log reports an execd compatibility error.
+          # sandbox. Pinned together with opensandbox-server 0.1.13 above;
+          # bump both in lockstep if the server log reports an execd
+          # compatibility error.
           OPENSANDBOX_EXECD_IMAGE: opensandbox/execd:v1.0.16
         run: |
           docker version
