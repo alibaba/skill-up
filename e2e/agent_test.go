@@ -57,13 +57,6 @@ func openSandboxE2EImage() string {
 	return "registry.example.com/agentic-execution:placeholder"
 }
 
-func dashScopeE2EAPIKey() string {
-	if apiKey := os.Getenv("DASHSCOPE_API_KEY"); apiKey != "" {
-		return apiKey
-	}
-	return os.Getenv("OPENAI_API_KEY")
-}
-
 func dashScopeE2EModel() string {
 	if model := os.Getenv("DASHSCOPE_MODEL"); model != "" {
 		return model
@@ -660,14 +653,15 @@ func TestAgent_Codex_OpenSandboxRuntime(t *testing.T) {
 	if sandboxAPIKey == "" {
 		t.Skip("OPENSANDBOX_API_KEY not set, skipping codex opensandbox test")
 	}
-	dashscopeAPIKey := dashScopeE2EAPIKey()
-	if dashscopeAPIKey == "" {
-		t.Skip("DASHSCOPE_API_KEY/OPENAI_API_KEY not set, skipping codex opensandbox test")
+	// codex speaks the OpenAI wire API; its key and endpoint come from
+	// OPENAI_API_KEY / OPENAI_BASE_URL (external config). The eval declares
+	// `provider: dashscope`, so skill-up resolves DASHSCOPE_API_KEY /
+	// DASHSCOPE_BASE_URL — the run env below re-exports these values under
+	// those names.
+	codexAPIKey := os.Getenv("OPENAI_API_KEY")
+	if codexAPIKey == "" {
+		t.Skip("OPENAI_API_KEY not set, skipping codex opensandbox test")
 	}
-	// codex speaks the OpenAI wire API; its endpoint comes from OPENAI_BASE_URL
-	// (external config). The eval declares `provider: dashscope`, so skill-up
-	// resolves DASHSCOPE_BASE_URL — the run env below re-exports this value
-	// under that name.
 	codexBaseURL := os.Getenv("OPENAI_BASE_URL")
 	if codexBaseURL == "" {
 		t.Skip("OPENAI_BASE_URL not set, skipping codex opensandbox test")
@@ -731,7 +725,7 @@ report:
 		Timeout: 10 * 60e9,
 		Env: []string{
 			"OPENSANDBOX_API_KEY=" + sandboxAPIKey,
-			"DASHSCOPE_API_KEY=" + dashscopeAPIKey,
+			"DASHSCOPE_API_KEY=" + codexAPIKey,
 			"DASHSCOPE_BASE_URL=" + codexBaseURL,
 			"DASHSCOPE_MODEL=" + dashScopeE2EModel(),
 		},

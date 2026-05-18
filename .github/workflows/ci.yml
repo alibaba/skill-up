@@ -254,10 +254,11 @@ jobs:
         # tested against a fake binary. This run is its sole real coverage.
         run: go test -tags e2e -timeout 1800s -count=1 -v -run TestAgent_Codex_OpenSandboxRuntime ./e2e
         env:
-          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           DASHSCOPE_MODEL: qwen3.6-plus
-          # codex speaks the OpenAI wire API → point it at DashScope's
-          # OpenAI-compatible endpoint via OPENAI_BASE_URL.
+          # codex speaks the OpenAI wire API → supply its key and endpoint via
+          # OPENAI_API_KEY / OPENAI_BASE_URL (DashScope's OpenAI-compatible
+          # endpoint, authenticated with the DashScope key).
+          OPENAI_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           OPENAI_BASE_URL: https://dashscope.aliyuncs.com/compatible-mode/v1
           # Copies the in-sandbox agent workspace out before t.TempDir cleanup
           # so the upload step below can surface it for post-mortem.
