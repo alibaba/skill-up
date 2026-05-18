@@ -635,7 +635,20 @@ func (r *OpenSandboxRuntime) networkPolicy() *opensandbox.NetworkPolicy {
 	case "deny_all":
 		return &opensandbox.NetworkPolicy{DefaultAction: "deny"}
 	case "allow_declared":
-		return &opensandbox.NetworkPolicy{DefaultAction: "allow"}
+		// Deny by default and permit only the declared egress targets, so an
+		// empty allowlist blocks all outbound traffic rather than allowing it.
+		policy := &opensandbox.NetworkPolicy{DefaultAction: "deny"}
+		for _, target := range r.cfg.AllowedEgress {
+			t := strings.TrimSpace(target)
+			if t == "" {
+				continue
+			}
+			policy.Egress = append(policy.Egress, opensandbox.NetworkRule{
+				Action: "allow",
+				Target: t,
+			})
+		}
+		return policy
 	default:
 		return nil
 	}

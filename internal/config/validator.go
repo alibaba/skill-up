@@ -171,6 +171,9 @@ func isValidJudgeType(t string) bool {
 func validateNetworkPolicy(env Environment) []string {
 	policy := env.NetworkPolicy
 	if policy == "" {
+		if len(env.AllowedEgress) > 0 {
+			return []string{"allowed_egress requires network_policy: allow_declared"}
+		}
 		return nil
 	}
 	if policy != "deny_all" && policy != "allow_declared" {
@@ -179,5 +182,27 @@ func validateNetworkPolicy(env Environment) []string {
 	if env.Type == runtimeTypeNone {
 		return []string{"network_policy requires environment.type opensandbox (none cannot enforce network isolation)"}
 	}
-	return nil
+
+	var errs []string
+	switch policy {
+	case "allow_declared":
+		if len(env.AllowedEgress) == 0 {
+			errs = append(errs, "network_policy: allow_declared requires a non-empty allowed_egress list")
+		}
+		for i, target := range env.AllowedEgress {
+			t := strings.TrimSpace(target)
+			if t == "" {
+				errs = append(errs, fmt.Sprintf("allowed_egress[%d] must not be empty", i))
+				continue
+			}
+			if strings.ContainsAny(t, "/ ") {
+				errs = append(errs, fmt.Sprintf("allowed_egress[%d] %q must be a bare FQDN or wildcard domain, not a URL", i, target))
+			}
+		}
+	case "deny_all":
+		if len(env.AllowedEgress) > 0 {
+			errs = append(errs, "allowed_egress is only valid with network_policy: allow_declared")
+		}
+	}
+	return errs
 }

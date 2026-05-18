@@ -112,15 +112,28 @@ func TestOpenSandboxCreatePassesNetworkPolicy(t *testing.T) {
 	setOpenSandboxTestAuth(t)
 
 	tests := []struct {
-		name       string
-		policy     string
-		wantNil    bool
-		wantAction string
+		name          string
+		policy        string
+		allowedEgress []string
+		wantNil       bool
+		wantAction    string
+		wantEgress    []string
 	}{
-		{"empty policy", "", true, ""},
-		{"deny_all", "deny_all", false, "deny"},
-		{"allow_declared", "allow_declared", false, "allow"},
-		{"unknown value", "custom", true, ""},
+		{name: "empty policy", policy: "", wantNil: true},
+		{name: "deny_all", policy: "deny_all", wantAction: "deny"},
+		{
+			name:          "allow_declared denies by default with allow rules",
+			policy:        "allow_declared",
+			allowedEgress: []string{"pypi.org", " *.example.com ", ""},
+			wantAction:    "deny",
+			wantEgress:    []string{"pypi.org", "*.example.com"},
+		},
+		{
+			name:       "allow_declared with no targets denies all",
+			policy:     "allow_declared",
+			wantAction: "deny",
+		},
+		{name: "unknown value", policy: "custom", wantNil: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -132,6 +145,7 @@ func TestOpenSandboxCreatePassesNetworkPolicy(t *testing.T) {
 			rt, err := NewOpenSandboxRuntime(Config{
 				Image:         "ubuntu:24.04",
 				NetworkPolicy: tt.policy,
+				AllowedEgress: tt.allowedEgress,
 				Kwargs:        map[string]string{"base_url": "https://sandbox.example.test"},
 				Delete:        true,
 			})
@@ -145,12 +159,23 @@ func TestOpenSandboxCreatePassesNetworkPolicy(t *testing.T) {
 				if gotOpts.NetworkPolicy != nil {
 					t.Fatalf("NetworkPolicy = %+v, want nil", gotOpts.NetworkPolicy)
 				}
-			} else {
-				if gotOpts.NetworkPolicy == nil {
-					t.Fatal("NetworkPolicy = nil, want non-nil")
+				return
+			}
+			if gotOpts.NetworkPolicy == nil {
+				t.Fatal("NetworkPolicy = nil, want non-nil")
+			}
+			if gotOpts.NetworkPolicy.DefaultAction != tt.wantAction {
+				t.Fatalf("DefaultAction = %q, want %q", gotOpts.NetworkPolicy.DefaultAction, tt.wantAction)
+			}
+			if len(gotOpts.NetworkPolicy.Egress) != len(tt.wantEgress) {
+				t.Fatalf("Egress = %+v, want %d rule(s)", gotOpts.NetworkPolicy.Egress, len(tt.wantEgress))
+			}
+			for i, rule := range gotOpts.NetworkPolicy.Egress {
+				if rule.Action != "allow" {
+					t.Errorf("Egress[%d].Action = %q, want allow", i, rule.Action)
 				}
-				if gotOpts.NetworkPolicy.DefaultAction != tt.wantAction {
-					t.Fatalf("DefaultAction = %q, want %q", gotOpts.NetworkPolicy.DefaultAction, tt.wantAction)
+				if rule.Target != tt.wantEgress[i] {
+					t.Errorf("Egress[%d].Target = %q, want %q", i, rule.Target, tt.wantEgress[i])
 				}
 			}
 		})

@@ -420,7 +420,7 @@ func TestCLI_RunAutoWithClaudeCode(t *testing.T) {
 // environment.network_policy field end-to-end so schema parsing, validator
 // rules, and CLI exit codes are all covered.
 
-func writeNetworkPolicyEval(t *testing.T, envType, policy string) string {
+func writeNetworkPolicyEval(t *testing.T, envType, policy string, allowedEgress ...string) string {
 	t.Helper()
 	tmpDir := t.TempDir()
 	writeFile(t, filepath.Join(tmpDir, "SKILL.md"), "# net-policy\n")
@@ -436,6 +436,14 @@ input:
 	}
 	if policy != "" {
 		envBlock += "  network_policy: " + policy + "\n"
+	}
+	if len(allowedEgress) > 0 {
+		envBlock += "  allowed_egress:\n"
+		for _, target := range allowedEgress {
+			// Quote entries so a leading '*' (wildcard domain) is not parsed
+			// as a YAML alias.
+			envBlock += "    - \"" + target + "\"\n"
+		}
 	}
 	writeFile(t, evalPath, `schema_version: v1alpha1
 environment:
@@ -470,12 +478,27 @@ func TestCLI_Validate_NetworkPolicy_AllowDeclaredOpenSandbox(t *testing.T) {
 	t.Parallel()
 	Cover(t, "skill-up validate network_policy=allow_declared opensandbox")
 
-	evalPath := writeNetworkPolicyEval(t, "opensandbox", "allow_declared")
+	evalPath := writeNetworkPolicyEval(t, "opensandbox", "allow_declared", "pypi.org", "*.githubusercontent.com")
 	result := RunSimple(t, "validate", evalPath)
 
 	if result.ExitCode != 0 {
 		t.Fatalf("expected exit 0, got %d\nstdout: %s\nstderr: %s",
 			result.ExitCode, result.Stdout, result.Stderr)
+	}
+}
+
+func TestCLI_Validate_NetworkPolicy_AllowDeclaredRequiresAllowlist(t *testing.T) {
+	t.Parallel()
+	Cover(t, "skill-up validate rejects allow_declared without allowed_egress")
+
+	evalPath := writeNetworkPolicyEval(t, "opensandbox", "allow_declared")
+	result := RunSimple(t, "validate", evalPath)
+
+	if result.ExitCode == 0 {
+		t.Fatalf("expected non-zero exit, stdout=%s stderr=%s", result.Stdout, result.Stderr)
+	}
+	if !strings.Contains(result.Stderr, "allow_declared requires a non-empty allowed_egress list") {
+		t.Fatalf("expected allowed_egress requirement error, stderr=%s", result.Stderr)
 	}
 }
 

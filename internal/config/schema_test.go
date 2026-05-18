@@ -161,6 +161,22 @@ func TestEnvironmentToRuntimeConfig_NetworkPolicy(t *testing.T) {
 	}
 }
 
+func TestEnvironmentToRuntimeConfig_AllowedEgress(t *testing.T) {
+	t.Parallel()
+
+	rtCfg := Environment{
+		Type:          "opensandbox",
+		NetworkPolicy: "allow_declared",
+		AllowedEgress: []string{"pypi.org", "*.githubusercontent.com"},
+	}.ToRuntimeConfig()
+
+	if len(rtCfg.AllowedEgress) != 2 ||
+		rtCfg.AllowedEgress[0] != "pypi.org" ||
+		rtCfg.AllowedEgress[1] != "*.githubusercontent.com" {
+		t.Errorf("AllowedEgress = %v, want [pypi.org *.githubusercontent.com]", rtCfg.AllowedEgress)
+	}
+}
+
 func TestDefaultEvalConfig_ReturnsNewInstance(t *testing.T) {
 	t.Parallel()
 

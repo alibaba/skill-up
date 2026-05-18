@@ -141,7 +141,8 @@ type Config struct {
 	Metadata       map[string]string
 	Kwargs         map[string]string
 
-	NetworkPolicy string // deny_all, allow_declared
+	NetworkPolicy string   // deny_all, allow_declared
+	AllowedEgress []string // FQDN/wildcard egress allowlist for allow_declared
 
 	SkillPath string
 

@@ -34,6 +34,7 @@ type Environment struct {
 	Metadata              map[string]string `yaml:"metadata,omitempty"`
 	Kwargs                map[string]string `yaml:"kwargs,omitempty"`
 	NetworkPolicy         string            `yaml:"network_policy,omitempty"` // deny_all, allow_declared
+	AllowedEgress         []string          `yaml:"allowed_egress,omitempty"` // FQDN/wildcard egress allowlist for allow_declared
 }
 
 // ToRuntimeConfig converts Environment to runtime.Config.
@@ -57,6 +58,7 @@ func (e Environment) ToRuntimeConfig() runtime.Config {
 		Metadata:        e.Metadata,
 		Kwargs:          e.Kwargs,
 		NetworkPolicy:   e.NetworkPolicy,
+		AllowedEgress:   e.AllowedEgress,
 		Delete:          true,
 	}
 }
