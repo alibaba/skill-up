@@ -2,7 +2,7 @@ schema_version: v1alpha1
 
 environment:
   type: none                      # none | opensandbox
-  # kwargs:                        # opensandbox 示例：base_url、extensions 等见 references/eval-yaml.md
+  # kwargs:                        # For opensandbox: base_url, extensions, etc. See references/eval-yaml.md
   #   base_url: https://agent-sandbox.example.com
   # image: registry.example.com/your-org/sandbox-base:latest
   # workspace_mount: /workspace
@@ -13,13 +13,13 @@ environment:
 
 skills:
   - source: local_path
-    path: .                       # 待测 Skill 目录
+    path: .                       # Directory of the Skill under test
   # - source: local_path
-  #   path: ../dependency_skill   # 其他 SKILL.md 所在路径
+  #   path: ../dependency_skill   # Path to other SKILL.md directory
 
 engine:
-  name: claude_code               # claude_code | codex | qodercli（也兼容 qoder-cli）
-  # model 可选；不填时引擎使用本地默认模型
+  name: claude_code               # claude_code | codex | qodercli (also compatible with qoder-cli)
+  # model is optional; omit to use engine's default model
   # model:
   #   provider: anthropic
   #   name: claude-sonnet-4-6
@@ -38,7 +38,7 @@ cases:
   defaults:
     timeout_seconds: 120
     max_turns: 5
-  # parallelism: 4                # 无状态用例可并行；也可用 skill-up run --parallelism N 临时覆盖
+  # parallelism: 4                # Stateless cases can run in parallel; or use skill-up run --parallelism N to override
 
 # benchmark:
 #   enabled: true

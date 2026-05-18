@@ -1,25 +1,25 @@
-id: basic                         # 必须与文件名一致
-title: 一句话说明这个用例想验证什么
+id: basic                         # Must match the filename
+title: Brief description of what this case validates
 description: |
-  更详细的背景说明（可选）。
+  More detailed background (optional).
 
 input:
   prompt: |
-    这里写要发给 Agent 的真实 prompt。
-    建议用贴近真实用户的口吻，不要过于机械。
+    Write the actual prompt to send to the Agent here.
+    Use a tone close to real users; avoid being too mechanical.
 
-# 多轮对话用 turns 替代 prompt：
+# For multi-turn conversations, use turns instead of prompt:
 # input:
 #   turns:
 #     - role: user
-#       content: "第一轮请求"
+#       content: "First request"
 #       post_condition:
-#         must_contain_any: ["关键字A", "关键字B"]
-#         on_fail: skip_remaining    # 或 fail
+#         must_contain_any: ["keywordA", "keywordB"]
+#         on_fail: skip_remaining    # or fail
 #     - role: user
-#       content: "第二轮请求"
+#       content: "Second request"
 
-# context:                            # 可选：初始化工作区
+# context:                            # Optional: initialize workspace
 #   repo_fixture: fixtures/repos/sample-project
 #   git:
 #     init: true
@@ -33,11 +33,11 @@ input:
 #   timeout_seconds: 180
 #   max_turns: 8
 
-expect:                              # 零成本门槛检查；不过则 judge 跳过
+expect:                              # Zero-cost gate checks; judge is skipped if these fail
   must_contain:
-    - "必须出现的关键字"
+    - "Required keyword"
   must_not_contain:
-    - "不该出现的关键字"
+    - "Keyword that should not appear"
   # exit_code: 0
   # files_exist:
   #   - "output.json"
@@ -46,16 +46,16 @@ judge:
   type: rule_based                   # rule_based | agent_judge | script
   success:
     - output_contains:
-        all: ["关键词1", "关键词2"]
+        all: ["keyword1", "keyword2"]
   # failure:
   #   - output_contains:
-  #       any: ["LGTM", "无需修改"]
+  #       any: ["LGTM", "No changes needed"]
 
-# agent_judge 示例（需要 LLM 语义评估时）：
+# Example for agent_judge (use when LLM semantic evaluation is needed):
 # judge:
 #   type: agent_judge
 #   model: anthropic/claude-sonnet-4-6
 #   criteria:
-#     - "输出正确识别了用户意图"
-#     - "没有编造不存在的字段"
+#     - "Output correctly identifies user intent"
+#     - "Does not fabricate non-existent fields"
 #   pass_threshold: 0.7
