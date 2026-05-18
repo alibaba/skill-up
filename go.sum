@@ -1,5 +1,5 @@
-github.com/alibaba/OpenSandbox/sdks/sandbox/go v1.0.0 h1:oqsi+3TwN7qQX1XHgk/io+fIr4KUKC6izLjah+D40q4=
-github.com/alibaba/OpenSandbox/sdks/sandbox/go v1.0.0/go.mod h1:RUNXUZnKDUAN/gIkfWcZZ1HNRJ0G6NIjGca0uMDex6I=
+github.com/alibaba/OpenSandbox/sdks/sandbox/go v1.0.1 h1:iZ/Mi7rZalQSJoGKs5MRuLxeRsbzVwlN41CKOx1R35Y=
+github.com/alibaba/OpenSandbox/sdks/sandbox/go v1.0.1/go.mod h1:+5yiVrwgbbwCD4+REoaqoIauQgjlnfL2mxbBrTy/Jgo=
 github.com/cenkalti/backoff/v5 v5.0.3 h1:ZN+IMa753KfX5hd8vVaMixjnqRZ3y8CuJKRKj1xcsSM=
 github.com/cenkalti/backoff/v5 v5.0.3/go.mod h1:rkhZdG3JZukswDf7f0cwqPNk4K0sa+F97BxZthm/crw=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
