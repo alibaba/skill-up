@@ -78,7 +78,7 @@ jobs:
           go-version: "1.25.x"
           cache: true
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         if: steps.secrets.outputs.available == 'true'
         with:
           node-version: "22"
