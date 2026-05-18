@@ -62,10 +62,9 @@ func buildMockedServerScript(serverName string, fileCfg mcpServerFile) (string, 
 // stdio framing layer (Content-Length headers and newline-delimited JSON), with
 // defensive guards against malformed input and oversized messages.
 const mcpProtocolScript = `
-let buffer = "";
-process.stdin.setEncoding("utf8");
+let buffer = Buffer.alloc(0);
 process.stdin.on("data", chunk => {
-  buffer += chunk;
+  buffer = Buffer.concat([buffer, chunk]);
   for (;;) {
     const message = readMessage();
     if (!message) break;
@@ -75,7 +74,7 @@ process.stdin.on("data", chunk => {
 function readMessage() {
   const headerEnd = buffer.indexOf("\r\n\r\n");
   if (headerEnd >= 0) {
-    const header = buffer.slice(0, headerEnd);
+    const header = buffer.slice(0, headerEnd).toString("utf8");
     const match = /content-length:\s*(\d+)/i.exec(header);
     if (!match) {
       const lineEnd = buffer.indexOf("\n");
@@ -83,10 +82,10 @@ function readMessage() {
       return readLineMessage(lineEnd);
     }
     const length = Number(match[1]);
-    if (length > 10 * 1024 * 1024) { buffer = ""; return null; }
+    if (length > 10 * 1024 * 1024) { buffer = Buffer.alloc(0); return null; }
     const start = headerEnd + 4;
     if (buffer.length < start + length) return null;
-    const body = buffer.slice(start, start + length);
+    const body = buffer.slice(start, start + length).toString("utf8");
     buffer = buffer.slice(start + length);
     try { return { payload: JSON.parse(body), framed: true }; } catch { return null; }
   }
@@ -95,7 +94,7 @@ function readMessage() {
   return readLineMessage(lineEnd);
 }
 function readLineMessage(lineEnd) {
-  const line = buffer.slice(0, lineEnd).trim();
+  const line = buffer.slice(0, lineEnd).toString("utf8").trim();
   buffer = buffer.slice(lineEnd + 1);
   if (!line) return null;
   try { return { payload: JSON.parse(line), framed: false }; } catch { return null; }
@@ -225,8 +224,26 @@ function sendText(id, text, framed) {
 function resolvePath(input) {
   if (!input) throw new Error("path is required");
   const raw = String(input);
-  const resolved = path.resolve(process.cwd(), raw);
-  const root = process.cwd();
+  const root = fs.realpathSync(process.cwd());
+  // path.resolve is purely lexical, so a symlinked parent component would
+  // pass a startsWith check while Node still follows it on disk. Resolve the
+  // deepest existing ancestor through realpath and re-check the canonical
+  // path; the non-existing tail (for write_file) cannot contain symlinks.
+  let existing = path.resolve(root, raw);
+  let suffix = "";
+  for (;;) {
+    try {
+      existing = fs.realpathSync(existing);
+      break;
+    } catch (e) {
+      if (e.code !== "ENOENT") throw e;
+      suffix = suffix ? path.join(path.basename(existing), suffix) : path.basename(existing);
+      const parent = path.dirname(existing);
+      if (parent === existing) throw new Error("path outside workspace: " + raw);
+      existing = parent;
+    }
+  }
+  const resolved = suffix ? path.join(existing, suffix) : existing;
   if (resolved !== root && !resolved.startsWith(root + path.sep)) {
     throw new Error("path outside workspace: " + raw);
   }
