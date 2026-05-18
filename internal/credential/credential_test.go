@@ -355,6 +355,11 @@ func TestResolveJudgeInitParams_FallsBackToRunnerWhenJudgeModelEmpty(t *testing.
 }
 
 func TestResolveJudgeInitParams_FallsBackToRunnerBaseURLBeforeCredentialFallback(t *testing.T) {
+	// Clear env vars that would override runner fallback.
+	for _, key := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL"} {
+		t.Setenv(key, "")
+	}
+
 	runner := AgentInitParams{
 		Kind:          AgentKindRunner,
 		Engine:        "claude-code",
