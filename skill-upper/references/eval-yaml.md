@@ -1,0 +1,96 @@
+# eval.yaml 字段参考（skill-up）
+
+`eval.yaml` 是评测入口，声明「在什么环境、用什么 Engine、跑哪些用例、如何出报告」。内容对齐 [skill-up 用户手册 - 编写评测](https://alibaba.github.io/skill-up/zh/guide/writing-evals.html)。
+
+## 完整字段骨架
+
+```yaml
+schema_version: v1alpha1
+
+environment:
+  type: none                      # none | opensandbox
+
+mcp:
+  servers:
+    - name: github
+      mode: real                  # real；mocked 预留
+      transport: http             # http | stdio；可按 endpoint/command 推断
+      config_ref: evals/fixtures/mcp/github.yaml
+
+skills:
+  - source: local_path
+    path: .
+
+engine:
+  name: claude_code               # claude_code | codex | qodercli（也兼容 qoder-cli）
+  model:
+    provider: anthropic
+    name: claude-sonnet-4-6
+    base_url: ""
+
+cases:
+  files:
+    - evals/cases/a.yaml
+  defaults:
+    timeout_seconds: 300
+    max_turns: 12
+  parallelism: 2
+  retry_policy:
+    max_retries: 1
+    retry_on: [timeout, error]
+
+benchmark:
+  enabled: false
+
+report:
+  formats: [json, html]
+  artifacts: [transcript]
+```
+
+`cases.parallelism` 可被 `skill-up run --parallelism N`（1–256）临时覆盖。
+
+## 运行环境
+
+| type | 适用场景 | 说明 |
+| --- | --- | --- |
+| `none` | 纯文本 I/O、不强依赖沙箱 | 冷启动最快 |
+| `opensandbox` | 需要远程沙箱（文件、命令执行等） | 需 `OPENSANDBOX_API_KEY`；服务地址等可放在 `environment.kwargs` 或 `OPENSANDBOX_BASE_URL` |
+
+### OpenSandbox 示例
+
+```yaml
+environment:
+  type: opensandbox
+  image: registry.example.com/your-org/sandbox-base:latest
+  workspace_mount: /workspace
+  ready_timeout_seconds: 300
+  kwargs:
+    base_url: https://agent-sandbox.example.com
+    extensions: '{"profile":"ci"}'
+    request_timeout_seconds: "900"
+    file_transfer_parallelism: "8"
+```
+
+常用 `kwargs`：`base_url`、`extensions`（JSON 字符串）、`request_timeout_seconds`、`file_transfer_parallelism` 等。鉴权密钥来自环境变量 `OPENSANDBOX_API_KEY`。
+
+> **与旧 skill-eval 文档的差异**：skill-up 当前 schema 使用 `none` / `opensandbox`，不要使用已废弃或不支持的 `docker` / `remote_sandbox` 类型名。
+
+## MCP
+
+- `mode: real` 会把真实 MCP Server 装进 Agent。
+- HTTP MCP 可 inline 或 `config_ref` 指向 `evals/fixtures/mcp/*.yaml`。
+- stdio MCP 可配置 `command` / `args`。
+- 环境变量引用：`${VAR}` 或整值 `$VAR`；`required_env` 会注入 Agent 环境。
+
+## Engine 与模型
+
+- `engine.model` 可选；省略时由引擎本地默认模型接管。
+- `provider` / `name` 组合在 CLI 中形如 `anthropic/claude-sonnet-4-6`、`openai/gpt-4` 等。
+- `qodercli` 通常无需配置 `model`。
+
+## 常见错误
+
+- `opensandbox` 但未配置鉴权或 `base_url` → 运行时失败
+- `engine.model` 与网关不匹配 → 连接报错
+- `cases.files` 路径不存在 → validate 失败
+- 所有相对路径相对于 **Skill 根目录**（`SKILL.md` 所在目录）

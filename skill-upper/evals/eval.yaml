@@ -1,0 +1,25 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+
+skills:
+  - source: local_path
+    path: .
+
+engine:
+  name: claude_code
+
+cases:
+  files:
+    - evals/cases/scaffold-new-evals.yaml
+    - evals/cases/add-case-to-existing.yaml
+    - evals/cases/scaffold-with-qodercli-engine.yaml
+    - evals/cases/scaffold-with-script-judge.yaml
+    - evals/cases/english-context-generates-english-only-cases.yaml
+  defaults:
+    timeout_seconds: 300
+    max_turns: 15
+
+report:
+  formats: [json, html]

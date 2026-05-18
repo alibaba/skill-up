@@ -62,6 +62,32 @@
 - 支持多个引擎（`claude_code`、`codex`、`qodercli`），不绑定单一客户端。
 - 兼容 Anthropic 风格的 `evals.json`，同时提供更丰富的 judge、适合 CI 的命令和结构化报告。
 
+## 推荐使用方式：AI 辅助配合 skill-upper
+
+为了获得最佳体验，我们推荐使用 **skill-upper** —— 一个 Agent Skill，帮助你通过自然对话与 AI Agent（如 Cursor、Claude Code、Qoder 等）来搭建和运行评测。
+
+无需手动编写 YAML 配置和执行 CLI 命令，你只需告诉 AI Agent：
+
+```
+"给这个 skill 添加评测用例"
+"运行评测套件"
+"这个测试用例为什么失败了？"
+```
+
+skill-upper 会自动帮你：
+- 定位 Skill 目录并读取 `SKILL.md`
+- 生成合适的 `eval.yaml` 和 `case.yaml` 文件
+- 执行 `skill-up validate` 和 `skill-up run`
+- 解读结果并解释失败原因
+- 处理凭据和配置
+
+使用 skill-upper 的步骤：
+1. 在你的 AI Agent 中安装 skill-upper skill（例如 Cursor Skills、Claude Skills）
+2. 在 AI Agent 中打开你的 Skill 项目
+3. 让 Agent 帮你创建或运行评测
+
+这种方式特别适合初学者，或者当你想快速迭代测试用例而无需记忆 CLI 语法时。
+
 ## 安装
 
 使用安装脚本：

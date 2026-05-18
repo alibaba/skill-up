@@ -1,0 +1,31 @@
+id: scaffold-with-script-judge
+title: 生成使用 script judge 的评测用例
+description: |
+  验证 skill-upper 在用户要求使用 script 类型 judge 时，
+  能否正确生成 case yaml（judge.type 为 script 且包含 script_path），
+  并同时生成对应的判分脚本文件。
+
+context:
+  repo_fixture: evals/fixtures/skills/sample-no-evals
+
+input:
+  prompt: |
+    请为当前目录下的 code-review-helper Skill 搭建评测。
+    我希望用 script 类型的 judge 来做评估，因为我需要用自定义脚本
+    解析 Agent 的输出 JSON 并检查结构化字段。
+    请帮我生成 eval.yaml、case yaml，以及对应的判分脚本。
+    环境类型用 none，引擎用 claude_code。
+
+expect:
+  files_exist:
+    - "evals/eval.yaml"
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "生成了 evals/eval.yaml 和至少一个 case yaml 文件"
+    - "case yaml 中 judge.type 为 script，且包含 script_path 字段指向一个脚本文件路径"
+    - "生成了 script_path 指向的判分脚本文件（如 .sh 或 .py），脚本中包含退出码逻辑（exit 0 表示 PASS，非 0 表示 FAIL）"
+    - "eval.yaml 的 environment.type 为 none"
+  pass_threshold: 0.75

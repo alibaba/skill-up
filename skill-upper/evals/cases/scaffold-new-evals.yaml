@@ -1,0 +1,30 @@
+id: scaffold-new-evals
+title: 为没有 evals 的 Skill 从零搭建评测脚手架
+description: |
+  验证 skill-upper 能否正确为一个全新的 Skill（无 evals/ 目录）
+  生成完整的评测脚手架，包括 eval.yaml 和至少一个 case yaml。
+
+context:
+  repo_fixture: evals/fixtures/skills/sample-no-evals
+
+input:
+  prompt: |
+    请为当前目录下的 code-review-helper Skill 搭建评测。
+    这个 Skill 还没有任何 evals，请帮我从零创建 eval.yaml 和测试用例。
+    环境类型用 none，引擎用 claude_code。
+
+expect:
+  files_exist:
+    - "evals/eval.yaml"
+  must_contain:
+    - "eval.yaml"
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "生成了 evals/eval.yaml 文件，且包含 schema_version、environment、engine、cases 等必要字段"
+    - "在 evals/cases/ 下生成了至少一个 case yaml 文件，且包含 id、title、input.prompt、judge 字段"
+    - "case 的 prompt 与 code-review-helper Skill 的功能相关（代码审查），而非无意义的占位符"
+    - "eval.yaml 中 cases.files 列表正确引用了生成的 case 文件路径"
+  pass_threshold: 0.75

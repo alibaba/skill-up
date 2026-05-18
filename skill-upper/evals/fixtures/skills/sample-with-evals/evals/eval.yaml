@@ -1,0 +1,21 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+
+skills:
+  - source: local_path
+    path: .
+
+engine:
+  name: claude_code
+
+cases:
+  files:
+    - evals/cases/add-todo.yaml
+  defaults:
+    timeout_seconds: 120
+    max_turns: 5
+
+report:
+  formats: [json]

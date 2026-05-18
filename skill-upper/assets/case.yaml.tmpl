@@ -1,0 +1,61 @@
+id: basic                         # 必须与文件名一致
+title: 一句话说明这个用例想验证什么
+description: |
+  更详细的背景说明（可选）。
+
+input:
+  prompt: |
+    这里写要发给 Agent 的真实 prompt。
+    建议用贴近真实用户的口吻，不要过于机械。
+
+# 多轮对话用 turns 替代 prompt：
+# input:
+#   turns:
+#     - role: user
+#       content: "第一轮请求"
+#       post_condition:
+#         must_contain_any: ["关键字A", "关键字B"]
+#         on_fail: skip_remaining    # 或 fail
+#     - role: user
+#       content: "第二轮请求"
+
+# context:                            # 可选：初始化工作区
+#   repo_fixture: fixtures/repos/sample-project
+#   git:
+#     init: true
+#     checkout: main
+#     apply_diff: fixtures/diffs/my.patch
+#   files:
+#     "src/main.py": |
+#       def hello(): ...
+
+# constraints:
+#   timeout_seconds: 180
+#   max_turns: 8
+
+expect:                              # 零成本门槛检查；不过则 judge 跳过
+  must_contain:
+    - "必须出现的关键字"
+  must_not_contain:
+    - "不该出现的关键字"
+  # exit_code: 0
+  # files_exist:
+  #   - "output.json"
+
+judge:
+  type: rule_based                   # rule_based | agent_judge | script
+  success:
+    - output_contains:
+        all: ["关键词1", "关键词2"]
+  # failure:
+  #   - output_contains:
+  #       any: ["LGTM", "无需修改"]
+
+# agent_judge 示例（需要 LLM 语义评估时）：
+# judge:
+#   type: agent_judge
+#   model: anthropic/claude-sonnet-4-6
+#   criteria:
+#     - "输出正确识别了用户意图"
+#     - "没有编造不存在的字段"
+#   pass_threshold: 0.7

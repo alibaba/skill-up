@@ -4,7 +4,35 @@ skill-up is an evaluation tool for Agent Skill developers. Use it to verify that
 
 ---
 
-## Installation
+## Recommended Usage: AI-Assisted with skill-upper
+
+For the best experience, we recommend using **skill-upper** — an Agent Skill that helps you set up and run evals through natural conversation with AI agents like Cursor, Claude Code, or Qoder.
+
+Instead of manually writing YAML configs and running CLI commands, you can simply tell your AI agent:
+
+```
+"Add evals for this skill"
+"Run the evaluation suite"
+"Why did this test case fail?"
+```
+
+The skill-upper skill will automatically:
+- Locate your Skill directory and read `SKILL.md`
+- Generate appropriate `eval.yaml` and `case.yaml` files
+- Run `skill-up validate` and `skill-up run`
+- Interpret results and explain failures
+- Handle credentials and configuration
+
+To use skill-upper:
+1. Install the skill-upper skill in your AI agent (e.g., Cursor Skills, Claude Skills)
+2. Open your Skill project in the AI agent
+3. Ask the agent to help you create or run evals
+
+This approach is especially helpful for beginners or when you want to quickly iterate on test cases without memorizing CLI syntax.
+
+---
+
+## Manual Installation
 
 ### Install with the script
 

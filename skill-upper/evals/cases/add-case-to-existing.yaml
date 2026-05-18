@@ -1,0 +1,29 @@
+id: add-case-to-existing
+title: 向已有 evals 的 Skill 添加新评测用例
+description: |
+  验证 skill-upper 能否在 Skill 已有 evals 基础上，
+  正确新增一个测试用例并更新 eval.yaml 的 cases.files 引用。
+
+context:
+  repo_fixture: evals/fixtures/skills/sample-with-evals
+
+input:
+  prompt: |
+    当前目录的 todo-manager Skill 已经有一个评测用例 add-todo。
+    请帮我再添加一个用例，测试"列出所有待办事项"的功能。
+    用例 ID 叫 list-todos，judge 类型用 rule_based。
+
+expect:
+  files_exist:
+    - "evals/cases/list-todos.yaml"
+    - "evals/eval.yaml"
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "在 evals/cases/ 下新建了 list-todos.yaml 文件"
+    - "list-todos.yaml 的 id 字段为 list-todos，且 judge.type 为 rule_based"
+    - "list-todos.yaml 的 prompt 与列出待办事项功能相关"
+    - "eval.yaml 的 cases.files 列表中新增了 evals/cases/list-todos.yaml 的引用，同时保留了原有的 add-todo.yaml"
+  pass_threshold: 0.75
