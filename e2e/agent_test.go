@@ -57,16 +57,6 @@ func openSandboxE2EImage() string {
 	return "registry.example.com/agentic-execution:placeholder"
 }
 
-func dashScopeE2EModel() string {
-	if model := os.Getenv("DASHSCOPE_MODEL"); model != "" {
-		return model
-	}
-	if model := os.Getenv("OPENAI_MODEL"); model != "" {
-		return model
-	}
-	return "qwen3.6-plus"
-}
-
 func TestAgent_Codex_NoneRuntime_WorkspaceDiffGitContexts(t *testing.T) {
 	t.Parallel()
 
@@ -653,11 +643,10 @@ func TestAgent_Codex_OpenSandboxRuntime(t *testing.T) {
 	if sandboxAPIKey == "" {
 		t.Skip("OPENSANDBOX_API_KEY not set, skipping codex opensandbox test")
 	}
-	// codex speaks the OpenAI wire API; its key and endpoint come from
-	// OPENAI_API_KEY / OPENAI_BASE_URL (external config). The eval declares
-	// `provider: dashscope`, so skill-up resolves DASHSCOPE_API_KEY /
-	// DASHSCOPE_BASE_URL — the run env below re-exports these values under
-	// those names.
+	// codex speaks the OpenAI wire API. The eval declares `provider: openai`,
+	// so skill-up resolves the key, endpoint and model name straight from
+	// OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_MODEL — all external config,
+	// no in-test defaults or cross-provider re-exports.
 	codexAPIKey := os.Getenv("OPENAI_API_KEY")
 	if codexAPIKey == "" {
 		t.Skip("OPENAI_API_KEY not set, skipping codex opensandbox test")
@@ -665,6 +654,10 @@ func TestAgent_Codex_OpenSandboxRuntime(t *testing.T) {
 	codexBaseURL := os.Getenv("OPENAI_BASE_URL")
 	if codexBaseURL == "" {
 		t.Skip("OPENAI_BASE_URL not set, skipping codex opensandbox test")
+	}
+	codexModel := os.Getenv("OPENAI_MODEL")
+	if codexModel == "" {
+		t.Skip("OPENAI_MODEL not set, skipping codex opensandbox test")
 	}
 
 	evalDir := t.TempDir()
@@ -697,8 +690,8 @@ skills: []
 engine:
   name: codex
   model:
-    provider: dashscope
-    name: `+dashScopeE2EModel()+`
+    provider: openai
+    name: `+codexModel+`
 cases:
   files:
     - evals/cases/ok.yaml
@@ -725,9 +718,8 @@ report:
 		Timeout: 10 * 60e9,
 		Env: []string{
 			"OPENSANDBOX_API_KEY=" + sandboxAPIKey,
-			"DASHSCOPE_API_KEY=" + codexAPIKey,
-			"DASHSCOPE_BASE_URL=" + codexBaseURL,
-			"DASHSCOPE_MODEL=" + dashScopeE2EModel(),
+			"OPENAI_API_KEY=" + codexAPIKey,
+			"OPENAI_BASE_URL=" + codexBaseURL,
 		},
 	}, "run", evalPath, "--output-dir", outputDir)
 
@@ -774,22 +766,23 @@ func TestAgent_ClaudeCode_OpenSandboxRuntime(t *testing.T) {
 	if sandboxAPIKey == "" {
 		t.Skip("OPENSANDBOX_API_KEY not set, skipping claude_code opensandbox test")
 	}
-	// claude_code authenticates with ANTHROPIC_API_KEY. Whether that key is a
-	// real Anthropic key or a DashScope key for the Anthropic-compatible
-	// endpoint is an external configuration choice (the CI workflow sets it);
-	// the test does not reach into other providers' env vars.
+	// claude_code speaks the Anthropic wire API. The eval declares
+	// `provider: anthropic`, so skill-up resolves the key, endpoint and model
+	// name straight from ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL /
+	// ANTHROPIC_MODEL — all external config, no in-test defaults. Whether the
+	// key is a real Anthropic key or a DashScope key for the Anthropic-
+	// compatible endpoint is the CI workflow's choice.
 	modelAPIKey := os.Getenv("ANTHROPIC_API_KEY")
 	if modelAPIKey == "" {
 		t.Skip("ANTHROPIC_API_KEY not set, skipping claude_code opensandbox test")
 	}
-	// claude_code speaks the Anthropic wire API; its endpoint comes from
-	// ANTHROPIC_BASE_URL (external config). The eval declares
-	// `provider: dashscope`, so skill-up resolves DASHSCOPE_BASE_URL — the run
-	// env below re-exports this value under that name so an inherited
-	// OpenAI-compatible DASHSCOPE_BASE_URL cannot leak in.
 	modelBaseURL := os.Getenv("ANTHROPIC_BASE_URL")
 	if modelBaseURL == "" {
 		t.Skip("ANTHROPIC_BASE_URL not set, skipping claude_code opensandbox test")
+	}
+	modelName := os.Getenv("ANTHROPIC_MODEL")
+	if modelName == "" {
+		t.Skip("ANTHROPIC_MODEL not set, skipping claude_code opensandbox test")
 	}
 
 	evalDir := t.TempDir()
@@ -822,8 +815,8 @@ skills: []
 engine:
   name: claude_code
   model:
-    provider: dashscope
-    name: `+dashScopeE2EModel()+`
+    provider: anthropic
+    name: `+modelName+`
 cases:
   files:
     - evals/cases/ok.yaml
@@ -846,20 +839,13 @@ report:
 	// Surface the in-sandbox agent artifacts (stdout.json / response.md /
 	// transcript) as CI artifacts so a failure inside the sandbox is debuggable.
 	preserveWorkspaceArtifacts(t, outputDir)
-	env := []string{
-		"OPENSANDBOX_API_KEY=" + sandboxAPIKey,
-		"DASHSCOPE_API_KEY=" + modelAPIKey,
-		"DASHSCOPE_BASE_URL=" + modelBaseURL,
-		"ANTHROPIC_API_KEY=" + modelAPIKey,
-		"ANTHROPIC_BASE_URL=" + modelBaseURL,
-	}
-	if model := os.Getenv("ANTHROPIC_MODEL"); model != "" {
-		env = append(env, "ANTHROPIC_MODEL="+model)
-	}
-
 	result := Run(t, RunConfig{
 		Timeout: 10 * 60e9,
-		Env:     env,
+		Env: []string{
+			"OPENSANDBOX_API_KEY=" + sandboxAPIKey,
+			"ANTHROPIC_API_KEY=" + modelAPIKey,
+			"ANTHROPIC_BASE_URL=" + modelBaseURL,
+		},
 	}, "run", evalPath, "--output-dir", outputDir)
 
 	if result.ExitCode == ExitCodeTimeout {
