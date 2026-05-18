@@ -66,6 +66,9 @@ func (p Provisioner) resolveServer(server config.MCPServer, lookupEnv func(strin
 	if err != nil {
 		return runtime.MCPServerConfig{}, err
 	}
+	if server.Mode == modeMocked {
+		return buildMockedRuntimeServerConfig(server, fileCfg, configRef)
+	}
 
 	endpoint, endpointEnv, err := resolveEndpoint(server, fileCfg, lookupEnv)
 	if err != nil {
@@ -101,7 +104,7 @@ func validateServerMode(server config.MCPServer) error {
 	case "":
 		return fmt.Errorf("mcp server %q mode is required", server.Name)
 	case modeMocked:
-		return fmt.Errorf("mcp server %q uses mocked mode, but MCP mock server provisioning is not implemented", server.Name)
+		return nil
 	case modeReal:
 		return nil
 	default:
@@ -205,13 +208,14 @@ func (p Provisioner) resolveConfigRef(configRef string) string {
 }
 
 type mcpServerFile struct {
-	Transport   string            `yaml:"transport"`
-	Command     string            `yaml:"command"`
-	Args        []string          `yaml:"args"`
-	Endpoint    string            `yaml:"endpoint"`
-	Env         map[string]string `yaml:"env"`
-	RequiredEnv []string          `yaml:"required_env"`
-	Headers     map[string]string `yaml:"headers"`
+	Transport     string            `yaml:"transport"`
+	Command       string            `yaml:"command"`
+	Args          []string          `yaml:"args"`
+	Endpoint      string            `yaml:"endpoint"`
+	Env           map[string]string `yaml:"env"`
+	RequiredEnv   []string          `yaml:"required_env"`
+	Headers       map[string]string `yaml:"headers"`
+	ToolResponses map[string]any    `yaml:"tool_responses"`
 }
 
 func loadServerFile(path string) (mcpServerFile, error) {

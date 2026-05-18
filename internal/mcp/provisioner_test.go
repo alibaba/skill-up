@@ -9,6 +9,8 @@ import (
 	"github.com/alibaba/skill-up/internal/config"
 )
 
+const nodeCommand = "node"
+
 func TestProvisioner_RealServerFromConfigRefResolvesAuthEnv(t *testing.T) {
 	t.Parallel()
 
@@ -166,10 +168,10 @@ func TestProvisioner_RealStdioServerFromConfig(t *testing.T) {
 		t.Fatalf("run env = %#v, want empty", env)
 	}
 	server := resolved.Servers[0]
-	if server.Transport != "stdio" {
+	if server.Transport != transportStdio {
 		t.Fatalf("Transport = %q, want stdio", server.Transport)
 	}
-	if server.Command != "node" {
+	if server.Command != nodeCommand {
 		t.Fatalf("Command = %q, want node", server.Command)
 	}
 	if strings.Join(server.Args, "|") != "marker-server.mjs|secret-marker" {
@@ -193,7 +195,7 @@ func TestProvisioner_RealStdioServerFromConfigRef(t *testing.T) {
 		t.Fatalf("Provision failed: %v", err)
 	}
 	server := resolved.Servers[0]
-	if server.Transport != "stdio" || server.Command != "node" || strings.Join(server.Args, "|") != "server.mjs" {
+	if server.Transport != transportStdio || server.Command != nodeCommand || strings.Join(server.Args, "|") != "server.mjs" {
 		t.Fatalf("server = %#v", server)
 	}
 }
@@ -218,13 +220,62 @@ func TestProvisioner_RealServerRequiresNonInteractiveAuth(t *testing.T) {
 	}
 }
 
-func TestProvisioner_MockedModeFailsFast(t *testing.T) {
+func TestProvisioner_MockedFilesystemUsesGeneratedStdioServer(t *testing.T) {
 	t.Parallel()
 
-	_, _, err := (Provisioner{}).Provision(config.MCPConfig{
+	resolved, env, err := (Provisioner{}).Provision(config.MCPConfig{
 		Servers: []config.MCPServer{{Name: "filesystem", Mode: "mocked"}},
 	})
-	if err == nil || !strings.Contains(err.Error(), "mock server provisioning is not implemented") {
-		t.Fatalf("expected mocked mode not implemented error, got %v", err)
+	if err != nil {
+		t.Fatalf("Provision failed: %v", err)
+	}
+	if len(env) != 0 {
+		t.Fatalf("run env = %#v, want empty", env)
+	}
+	server := resolved.Servers[0]
+	if server.Mode != modeMocked || server.Transport != transportStdio || server.Command != nodeCommand {
+		t.Fatalf("server = %#v", server)
+	}
+	if len(server.Args) != 2 || server.Args[0] != "-e" {
+		t.Fatalf("Args = %#v", server.Args)
+	}
+	if !strings.Contains(server.Args[1], "list_directory") || !strings.Contains(server.Args[1], "write_file") {
+		t.Fatalf("mock script does not expose filesystem tools")
+	}
+}
+
+func TestProvisioner_MockedServerFromConfigRefUsesToolResponses(t *testing.T) {
+	t.Parallel()
+
+	skillDir := t.TempDir()
+	configPath := filepath.Join(skillDir, "mcp.yaml")
+	content := `tool_responses:
+  create_publish_plan_simple:
+    default:
+      id: "plan-{{params.name | default: 'demo'}}"
+      status: created
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved, env, err := (Provisioner{SkillDir: skillDir}).Provision(config.MCPConfig{
+		Servers: []config.MCPServer{{Name: "project-mgmt", Mode: "mocked", ConfigRef: "mcp.yaml"}},
+	})
+	if err != nil {
+		t.Fatalf("Provision failed: %v", err)
+	}
+	if len(env) != 0 {
+		t.Fatalf("run env = %#v, want empty", env)
+	}
+	server := resolved.Servers[0]
+	if server.ConfigRef != configPath {
+		t.Fatalf("ConfigRef = %q, want %q", server.ConfigRef, configPath)
+	}
+	if server.Transport != transportStdio || server.Command != nodeCommand {
+		t.Fatalf("server = %#v", server)
+	}
+	if len(server.Args) != 2 || !strings.Contains(server.Args[1], "create_publish_plan_simple") {
+		t.Fatalf("mock script missing fixture tool: %#v", server.Args)
 	}
 }

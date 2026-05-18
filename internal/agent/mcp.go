@@ -24,10 +24,6 @@ type mcpInstallCommandBuilder func(runtime.MCPServerConfig) (string, error)
 
 func installMCPServers(ctx context.Context, rt Runtime, mcpCfg runtime.MCPConfig, build mcpInstallCommandBuilder) error {
 	for _, server := range mcpCfg.Servers {
-		if server.Mode == "mocked" {
-			continue
-		}
-
 		cmd, err := build(server)
 		if err != nil {
 			return err

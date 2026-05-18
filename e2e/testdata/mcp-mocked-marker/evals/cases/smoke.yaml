@@ -1,0 +1,12 @@
+id: mcp-mocked-marker-smoke
+title: Mocked MCP marker tool call
+
+input:
+  prompt: |
+    Use the MCP tool named echo_marker from the marker server.
+    Return only the text returned by that MCP tool.
+    Do not guess the answer.
+
+expect:
+  must_contain:
+    - skill-up-mcp-mocked-fixture-marker

@@ -148,7 +148,7 @@ The runtime may provide MCP server configuration:
 ```go
 type MCPServerConfig struct {
     Name      string            // MCP Server name
-    Mode      string            // real / mocked (mocked is reserved)
+    Mode      string            // real / mocked
     Transport string            // http / stdio
     Command   string            // stdio MCP launch command
     Args      []string          // stdio MCP launch arguments
