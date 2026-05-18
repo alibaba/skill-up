@@ -720,7 +720,7 @@ type fakeOpenSandbox struct {
 	killCtxErr             error
 }
 
-func (f *fakeOpenSandbox) ID() string { return "sbx-test" }
+func (f *fakeOpenSandbox) ID() string   { return "sbx-test" }
 func (f *fakeOpenSandbox) Close() error { return nil }
 func (f *fakeOpenSandbox) Kill(ctx context.Context) error {
 	f.killed = true
