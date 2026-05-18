@@ -256,9 +256,9 @@ jobs:
         env:
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           DASHSCOPE_MODEL: qwen3.6-plus
-          # codex (dashscope provider) speaks the OpenAI wire API → route it
-          # through DashScope's OpenAI-compatible endpoint.
-          DASHSCOPE_BASE_URL: https://dashscope.aliyuncs.com/compatible-mode/v1
+          # codex speaks the OpenAI wire API → point it at DashScope's
+          # OpenAI-compatible endpoint via OPENAI_BASE_URL.
+          OPENAI_BASE_URL: https://dashscope.aliyuncs.com/compatible-mode/v1
           # Copies the in-sandbox agent workspace out before t.TempDir cleanup
           # so the upload step below can surface it for post-mortem.
           SKILL_UP_E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-opensandbox-artifacts

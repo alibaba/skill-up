@@ -64,28 +64,6 @@ func dashScopeE2EAPIKey() string {
 	return os.Getenv("OPENAI_API_KEY")
 }
 
-func dashScopeE2EBaseURL() string {
-	if baseURL := os.Getenv("DASHSCOPE_BASE_URL"); baseURL != "" {
-		return baseURL
-	}
-	if baseURL := os.Getenv("OPENAI_BASE_URL"); baseURL != "" {
-		return baseURL
-	}
-	return "https://dashscope.aliyuncs.com/compatible-mode/v1"
-}
-
-// dashScopeAnthropicE2EBaseURL returns an Anthropic-wire-compatible base URL
-// for claude_code e2e tests. Defaults to DashScope's Anthropic-compatible
-// endpoint; override via ANTHROPIC_BASE_URL. This is intentionally separate
-// from dashScopeE2EBaseURL (OpenAI-compatible, used by codex) so the two
-// engines never share an endpoint.
-func dashScopeAnthropicE2EBaseURL() string {
-	if baseURL := os.Getenv("ANTHROPIC_BASE_URL"); baseURL != "" {
-		return baseURL
-	}
-	return "https://dashscope.aliyuncs.com/apps/anthropic"
-}
-
 func dashScopeE2EModel() string {
 	if model := os.Getenv("DASHSCOPE_MODEL"); model != "" {
 		return model
@@ -686,6 +664,14 @@ func TestAgent_Codex_OpenSandboxRuntime(t *testing.T) {
 	if dashscopeAPIKey == "" {
 		t.Skip("DASHSCOPE_API_KEY/OPENAI_API_KEY not set, skipping codex opensandbox test")
 	}
+	// codex speaks the OpenAI wire API; its endpoint comes from OPENAI_BASE_URL
+	// (external config). The eval declares `provider: dashscope`, so skill-up
+	// resolves DASHSCOPE_BASE_URL — the run env below re-exports this value
+	// under that name.
+	codexBaseURL := os.Getenv("OPENAI_BASE_URL")
+	if codexBaseURL == "" {
+		t.Skip("OPENAI_BASE_URL not set, skipping codex opensandbox test")
+	}
 
 	evalDir := t.TempDir()
 	writeFile(t, filepath.Join(evalDir, "SKILL.md"), "# Codex OpenSandbox E2E\n")
@@ -746,7 +732,7 @@ report:
 		Env: []string{
 			"OPENSANDBOX_API_KEY=" + sandboxAPIKey,
 			"DASHSCOPE_API_KEY=" + dashscopeAPIKey,
-			"DASHSCOPE_BASE_URL=" + dashScopeE2EBaseURL(),
+			"DASHSCOPE_BASE_URL=" + codexBaseURL,
 			"DASHSCOPE_MODEL=" + dashScopeE2EModel(),
 		},
 	}, "run", evalPath, "--output-dir", outputDir)
@@ -801,6 +787,15 @@ func TestAgent_ClaudeCode_OpenSandboxRuntime(t *testing.T) {
 	modelAPIKey := os.Getenv("ANTHROPIC_API_KEY")
 	if modelAPIKey == "" {
 		t.Skip("ANTHROPIC_API_KEY not set, skipping claude_code opensandbox test")
+	}
+	// claude_code speaks the Anthropic wire API; its endpoint comes from
+	// ANTHROPIC_BASE_URL (external config). The eval declares
+	// `provider: dashscope`, so skill-up resolves DASHSCOPE_BASE_URL — the run
+	// env below re-exports this value under that name so an inherited
+	// OpenAI-compatible DASHSCOPE_BASE_URL cannot leak in.
+	modelBaseURL := os.Getenv("ANTHROPIC_BASE_URL")
+	if modelBaseURL == "" {
+		t.Skip("ANTHROPIC_BASE_URL not set, skipping claude_code opensandbox test")
 	}
 
 	evalDir := t.TempDir()
@@ -857,19 +852,12 @@ report:
 	// Surface the in-sandbox agent artifacts (stdout.json / response.md /
 	// transcript) as CI artifacts so a failure inside the sandbox is debuggable.
 	preserveWorkspaceArtifacts(t, outputDir)
-	// The eval uses `provider: dashscope`, so skill-up resolves the model
-	// endpoint from DASHSCOPE_BASE_URL and hands it to claude_code as
-	// ANTHROPIC_BASE_URL. Pin DASHSCOPE_BASE_URL to the Anthropic-compatible
-	// endpoint here so an inherited OpenAI-compatible DASHSCOPE_BASE_URL (set
-	// by the codex opensandbox CI job) cannot leak in and turn an endpoint
-	// mismatch into what looks like an OpenSandbox regression.
-	anthropicBaseURL := dashScopeAnthropicE2EBaseURL()
 	env := []string{
 		"OPENSANDBOX_API_KEY=" + sandboxAPIKey,
 		"DASHSCOPE_API_KEY=" + modelAPIKey,
-		"DASHSCOPE_BASE_URL=" + anthropicBaseURL,
+		"DASHSCOPE_BASE_URL=" + modelBaseURL,
 		"ANTHROPIC_API_KEY=" + modelAPIKey,
-		"ANTHROPIC_BASE_URL=" + anthropicBaseURL,
+		"ANTHROPIC_BASE_URL=" + modelBaseURL,
 	}
 	if model := os.Getenv("ANTHROPIC_MODEL"); model != "" {
 		env = append(env, "ANTHROPIC_MODEL="+model)
