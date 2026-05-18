@@ -444,6 +444,76 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "valid network_policy deny_all with opensandbox",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:          "opensandbox",
+					NetworkPolicy: "deny_all",
+				},
+				Engine: EngineConfig{
+					Name: "claude_code",
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid network_policy allow_declared with opensandbox",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:          "opensandbox",
+					NetworkPolicy: "allow_declared",
+				},
+				Engine: EngineConfig{
+					Name: "claude_code",
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid network_policy value",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:          "opensandbox",
+					NetworkPolicy: "allow_all",
+				},
+				Engine: EngineConfig{
+					Name: "claude_code",
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "network_policy must be one of: deny_all, allow_declared",
+		},
+		{
+			name: "network_policy with none runtime is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:          "none",
+					NetworkPolicy: "deny_all",
+				},
+				Engine: EngineConfig{
+					Name: "claude_code",
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "network_policy requires environment.type opensandbox",
+		},
 	}
 
 	for _, tt := range tests {

@@ -106,6 +106,57 @@ func TestOpenSandboxCreateUsesSDKOptions(t *testing.T) {
 	}
 }
 
+func TestOpenSandboxCreatePassesNetworkPolicy(t *testing.T) {
+	origCreate := createOpenSandbox
+	t.Cleanup(func() { createOpenSandbox = origCreate })
+	setOpenSandboxTestAuth(t)
+
+	tests := []struct {
+		name       string
+		policy     string
+		wantNil    bool
+		wantAction string
+	}{
+		{"empty policy", "", true, ""},
+		{"deny_all", "deny_all", false, "deny"},
+		{"allow_declared", "allow_declared", false, "allow"},
+		{"unknown value", "custom", true, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotOpts opensandbox.SandboxCreateOptions
+			createOpenSandbox = func(_ context.Context, _ opensandbox.ConnectionConfig, opts opensandbox.SandboxCreateOptions) (openSandboxClient, error) {
+				gotOpts = opts
+				return &fakeOpenSandbox{}, nil
+			}
+			rt, err := NewOpenSandboxRuntime(Config{
+				Image:         "ubuntu:24.04",
+				NetworkPolicy: tt.policy,
+				Kwargs:        map[string]string{"base_url": "https://sandbox.example.test"},
+				Delete:        true,
+			})
+			if err != nil {
+				t.Fatalf("NewOpenSandboxRuntime error: %v", err)
+			}
+			if err := rt.Create(context.Background()); err != nil {
+				t.Fatalf("Create error: %v", err)
+			}
+			if tt.wantNil {
+				if gotOpts.NetworkPolicy != nil {
+					t.Fatalf("NetworkPolicy = %+v, want nil", gotOpts.NetworkPolicy)
+				}
+			} else {
+				if gotOpts.NetworkPolicy == nil {
+					t.Fatal("NetworkPolicy = nil, want non-nil")
+				}
+				if gotOpts.NetworkPolicy.DefaultAction != tt.wantAction {
+					t.Fatalf("DefaultAction = %q, want %q", gotOpts.NetworkPolicy.DefaultAction, tt.wantAction)
+				}
+			}
+		})
+	}
+}
+
 func TestOpenSandboxCreateSnapshotsKwargs(t *testing.T) {
 	origCreate := createOpenSandbox
 	t.Cleanup(func() { createOpenSandbox = origCreate })

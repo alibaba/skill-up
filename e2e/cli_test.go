@@ -416,6 +416,115 @@ func TestCLI_RunAutoWithClaudeCode(t *testing.T) {
 	}
 }
 
+// network_policy e2e coverage: exercise the validate/run commands on the
+// environment.network_policy field end-to-end so schema parsing, validator
+// rules, and CLI exit codes are all covered.
+
+func writeNetworkPolicyEval(t *testing.T, envType, policy string) string {
+	t.Helper()
+	tmpDir := t.TempDir()
+	writeFile(t, filepath.Join(tmpDir, "SKILL.md"), "# net-policy\n")
+	casePath := filepath.Join(tmpDir, "evals", "cases", "ok.yaml")
+	writeFile(t, casePath, `id: ok
+input:
+  prompt: hi
+`)
+	evalPath := filepath.Join(tmpDir, "evals", "eval.yaml")
+	envBlock := "  type: " + envType + "\n"
+	if envType == "opensandbox" {
+		envBlock += "  kwargs:\n    base_url: https://sandbox.example.test\n"
+	}
+	if policy != "" {
+		envBlock += "  network_policy: " + policy + "\n"
+	}
+	writeFile(t, evalPath, `schema_version: v1alpha1
+environment:
+`+envBlock+`engine:
+  name: claude_code
+  model:
+    provider: anthropic
+    name: dummy
+cases:
+  files:
+    - evals/cases/ok.yaml
+judge:
+  type: rule_based
+`)
+	return evalPath
+}
+
+func TestCLI_Validate_NetworkPolicy_DenyAllOpenSandbox(t *testing.T) {
+	t.Parallel()
+	Cover(t, "skill-up validate network_policy=deny_all opensandbox")
+
+	evalPath := writeNetworkPolicyEval(t, "opensandbox", "deny_all")
+	result := RunSimple(t, "validate", evalPath)
+
+	if result.ExitCode != 0 {
+		t.Fatalf("expected exit 0, got %d\nstdout: %s\nstderr: %s",
+			result.ExitCode, result.Stdout, result.Stderr)
+	}
+}
+
+func TestCLI_Validate_NetworkPolicy_AllowDeclaredOpenSandbox(t *testing.T) {
+	t.Parallel()
+	Cover(t, "skill-up validate network_policy=allow_declared opensandbox")
+
+	evalPath := writeNetworkPolicyEval(t, "opensandbox", "allow_declared")
+	result := RunSimple(t, "validate", evalPath)
+
+	if result.ExitCode != 0 {
+		t.Fatalf("expected exit 0, got %d\nstdout: %s\nstderr: %s",
+			result.ExitCode, result.Stdout, result.Stderr)
+	}
+}
+
+func TestCLI_Validate_NetworkPolicy_RejectsInvalidValue(t *testing.T) {
+	t.Parallel()
+	Cover(t, "skill-up validate rejects invalid network_policy")
+
+	evalPath := writeNetworkPolicyEval(t, "opensandbox", "allow_all")
+	result := RunSimple(t, "validate", evalPath)
+
+	if result.ExitCode == 0 {
+		t.Fatalf("expected non-zero exit, stdout=%s stderr=%s", result.Stdout, result.Stderr)
+	}
+	if !strings.Contains(result.Stderr, "network_policy must be one of") {
+		t.Fatalf("expected network_policy enum error, stderr=%s", result.Stderr)
+	}
+}
+
+func TestCLI_Validate_NetworkPolicy_RejectsWithRuntimeNone(t *testing.T) {
+	t.Parallel()
+	Cover(t, "skill-up validate rejects network_policy with type=none")
+
+	evalPath := writeNetworkPolicyEval(t, "none", "deny_all")
+	result := RunSimple(t, "validate", evalPath)
+
+	if result.ExitCode == 0 {
+		t.Fatalf("expected non-zero exit, stdout=%s stderr=%s", result.Stdout, result.Stderr)
+	}
+	if !strings.Contains(result.Stderr, "network_policy requires environment.type opensandbox") {
+		t.Fatalf("expected runtime-type incompatibility error, stderr=%s", result.Stderr)
+	}
+}
+
+func TestCLI_Run_NetworkPolicy_DryRun(t *testing.T) {
+	t.Parallel()
+	Cover(t, "skill-up run --dry-run with network_policy")
+
+	evalPath := writeNetworkPolicyEval(t, "opensandbox", "deny_all")
+	result := RunSimple(t, "run", evalPath, "--dry-run")
+
+	if result.ExitCode != 0 {
+		t.Fatalf("expected exit 0, got %d\nstdout: %s\nstderr: %s",
+			result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if !strings.Contains(result.Stdout, "Would run") {
+		t.Fatalf("expected dry-run banner, stdout=%s", result.Stdout)
+	}
+}
+
 func TestCLI_RunTestdataSample(t *testing.T) {
 	t.Parallel()
 

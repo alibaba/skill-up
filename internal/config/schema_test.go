@@ -135,6 +135,32 @@ func TestEnvironmentToRuntimeConfig_OpenSandboxKwargs(t *testing.T) {
 	}
 }
 
+func TestEnvironmentToRuntimeConfig_NetworkPolicy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		policy string
+		want   string
+	}{
+		{"empty", "", ""},
+		{"deny_all", "deny_all", "deny_all"},
+		{"allow_declared", "allow_declared", "allow_declared"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rtCfg := Environment{
+				Type:          "opensandbox",
+				NetworkPolicy: tt.policy,
+			}.ToRuntimeConfig()
+			if rtCfg.NetworkPolicy != tt.want {
+				t.Errorf("NetworkPolicy = %q, want %q", rtCfg.NetworkPolicy, tt.want)
+			}
+		})
+	}
+}
+
 func TestDefaultEvalConfig_ReturnsNewInstance(t *testing.T) {
 	t.Parallel()
 

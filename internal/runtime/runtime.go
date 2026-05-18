@@ -141,6 +141,8 @@ type Config struct {
 	Metadata       map[string]string
 	Kwargs         map[string]string
 
+	NetworkPolicy string // deny_all, allow_declared
+
 	SkillPath string
 
 	Delete bool

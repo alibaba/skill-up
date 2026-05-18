@@ -172,6 +172,7 @@ func (r *OpenSandboxRuntime) Create(ctx context.Context) error {
 		Metadata:       r.cfg.Metadata,
 		Extensions:     r.extensions,
 		ReadyTimeout:   r.cfg.ReadyTimeout,
+		NetworkPolicy:  r.networkPolicy(),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create opensandbox: %w", err)
@@ -627,6 +628,17 @@ func (r *OpenSandboxRuntime) entrypoint() []string {
 	}
 	// The sandbox joins entrypoint items with " && ", so the default must stay a single shell line.
 	return []string{"tail -F /dev/null"}
+}
+
+func (r *OpenSandboxRuntime) networkPolicy() *opensandbox.NetworkPolicy {
+	switch strings.ToLower(strings.TrimSpace(r.cfg.NetworkPolicy)) {
+	case "deny_all":
+		return &opensandbox.NetworkPolicy{DefaultAction: "deny"}
+	case "allow_declared":
+		return &opensandbox.NetworkPolicy{DefaultAction: "allow"}
+	default:
+		return nil
+	}
 }
 
 func (r *OpenSandboxRuntime) resolveExtensions(ctx context.Context) map[string]string {

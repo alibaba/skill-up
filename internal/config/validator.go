@@ -13,6 +13,12 @@ const (
 	maxRetryPolicyRetries = 10
 )
 
+// Runtime type constants.
+const (
+	runtimeTypeNone        = "none"
+	runtimeTypeOpenSandbox = "opensandbox"
+)
+
 // Validator checks eval and case documents against the v1alpha1 schema.
 type Validator struct{}
 
@@ -38,6 +44,8 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	} else if !isValidRuntimeType(cfg.Environment.Type) {
 		errs = append(errs, "environment.type must be one of: none, opensandbox")
 	}
+
+	errs = append(errs, validateNetworkPolicy(cfg.Environment)...)
 
 	// engine.name is required
 	if cfg.Engine.Name == "" {
@@ -153,9 +161,23 @@ func (v *Validator) ValidateAll(result *EvalResult) error {
 }
 
 func isValidRuntimeType(t string) bool {
-	return t == "none" || t == "opensandbox"
+	return t == runtimeTypeNone || t == runtimeTypeOpenSandbox
 }
 
 func isValidJudgeType(t string) bool {
 	return t == judgeTypeRuleBased || t == judgeTypeScript || t == judgeTypeAgentJudge
+}
+
+func validateNetworkPolicy(env Environment) []string {
+	policy := env.NetworkPolicy
+	if policy == "" {
+		return nil
+	}
+	if policy != "deny_all" && policy != "allow_declared" {
+		return []string{"network_policy must be one of: deny_all, allow_declared"}
+	}
+	if env.Type == runtimeTypeNone {
+		return []string{"network_policy requires environment.type opensandbox (none cannot enforce network isolation)"}
+	}
+	return nil
 }
