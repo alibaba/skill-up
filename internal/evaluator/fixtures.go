@@ -165,11 +165,16 @@ func (g *gitCheckoutUploader) Upload(ctx context.Context, rt runtime.Runtime, ca
 	// the wrong HEAD would mask a typo and run branch-dependent evals against
 	// the wrong revision. `git switch` is branch-only, so a same-named file can
 	// never make it silently revert a path instead of changing branch.
+	//
+	// The branch name is single-quoted via shellquote for the `git switch`
+	// invocations and is never interpolated into the error message (a
+	// double-quoted echo would re-evaluate command substitutions); the Go
+	// error below already reports the branch name safely via %q.
 	quoted := shellquote.Quote(branch)
 	script := fmt.Sprintf("set -eu\n"+
 		"if git switch %[1]s 2>/dev/null; then :\n"+
 		"elif ! git rev-parse --verify --quiet HEAD >/dev/null 2>&1; then git switch -c %[1]s\n"+
-		"else echo \"branch %[1]s does not exist in the fixture repo\" >&2; exit 1\n"+
+		"else echo 'configured branch does not exist in the fixture repo' >&2; exit 1\n"+
 		"fi\n", quoted)
 
 	result, err := rt.Exec(ctx, script, runtime.ExecOptions{

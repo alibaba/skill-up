@@ -2,6 +2,8 @@ package evaluator
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -76,6 +78,28 @@ func TestGitCheckoutUploader_FailsForMissingBranchInCommittedRepo(t *testing.T) 
 
 	if err := (&gitCheckoutUploader{}).Upload(context.Background(), rt, caseCfg, "", ""); err == nil {
 		t.Fatal("expected error for missing branch in committed repo, got nil")
+	}
+}
+
+func TestGitCheckoutUploader_ErrorPathDoesNotEvaluateBranch(t *testing.T) {
+	rt := &mockRuntime{workspace: t.TempDir()}
+	// A branch name carrying a command substitution but no whitespace/control
+	// chars, so it passes validateGitBranch and reaches the shell script.
+	caseCfg := gitContextCase(&config.GitContext{Init: true, Checkout: "$(>pwned)"})
+
+	if err := (&gitInitUploader{}).Upload(context.Background(), rt, caseCfg, "", ""); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if res, err := rt.Exec(context.Background(), "git commit -q --allow-empty -m init",
+		runtime.ExecOptions{Cwd: rt.Workspace()}); err != nil || res.ExitCode != 0 {
+		t.Fatalf("seed commit: err=%v exit=%d stderr=%s", err, res.ExitCode, res.Stderr)
+	}
+
+	if err := (&gitCheckoutUploader{}).Upload(context.Background(), rt, caseCfg, "", ""); err == nil {
+		t.Fatal("expected error for invalid branch, got nil")
+	}
+	if _, err := os.Stat(filepath.Join(rt.Workspace(), "pwned")); !os.IsNotExist(err) {
+		t.Fatalf("branch name was evaluated by the shell: stat err=%v", err)
 	}
 }
 
