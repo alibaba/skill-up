@@ -213,7 +213,7 @@ func loadCredentialsAndAgent(cmd *cobra.Command, evalCfg *config.EvalConfig) (ag
 	cliModel, _ := cmd.Flags().GetString("model")
 	cliAPIKey, _ := cmd.Flags().GetString("api-key")
 
-	resolver := credential.NewResolver("")
+	resolver := credential.NewResolver(credential.DefaultConfPath())
 	if err := resolver.Load(); err != nil {
 		return nil, nil, credential.AgentInitParams{}, fmt.Errorf("failed to load credentials: %w", err)
 	}
