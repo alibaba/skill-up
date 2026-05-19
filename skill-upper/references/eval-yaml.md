@@ -73,7 +73,6 @@ environment:
 
 常用 `kwargs`：`base_url`、`extensions`（JSON 字符串）、`request_timeout_seconds`、`file_transfer_parallelism` 等。鉴权密钥来自环境变量 `OPENSANDBOX_API_KEY`。
 
-> **与旧 skill-eval 文档的差异**：skill-up 当前 schema 使用 `none` / `opensandbox`，不要使用已废弃或不支持的 `docker` / `remote_sandbox` 类型名。
 
 ## MCP
 

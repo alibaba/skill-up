@@ -125,7 +125,7 @@ Adapt language per "Language Rules for Generated Artifacts". In an English conte
 
 Selection guidelines:
 
-- `environment.type`: use `none` for pure-text Skills; use `opensandbox` when you need a remote sandbox (set `OPENSANDBOX_API_KEY`, put non-secrets in `environment.kwargs`). `docker` / `remote_sandbox` are **not** supported naming-wise compared to legacy skill-eval docs.
+- `environment.type`: use `none` for pure-text Skills; use `opensandbox` when you need a remote sandbox (set `OPENSANDBOX_API_KEY`, put non-secrets in `environment.kwargs`).
 - `engine.name` + `engine.model`: default `claude_code`; `model` is optional. For `qodercli`, often omit `model`.
 - `judge.type`: `rule_based` (preferred), `script`, `agent_judge` (expensive) — see `references/judge-types.md`.
 - Case ID = filename without `.yaml`; prompts should exercise real Skill value.

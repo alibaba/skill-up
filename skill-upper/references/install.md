@@ -81,4 +81,3 @@ xattr -d com.apple.quarantine "$(which skill-up)"
 make build
 ```
 
-不推荐混用**来源不明**的旧版 `skill-eval` 二进制与 skill-up 格式的仓库，以免字段不兼容。
