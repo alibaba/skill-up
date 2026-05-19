@@ -15,7 +15,7 @@ on:
       - '.github/workflows/docs.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -40,16 +40,45 @@ jobs:
         run: go build ./...
 
       - name: Test (with race detector and coverage)
-        run: go test -race -timeout 120s -covermode=atomic -coverprofile=coverage.out ./...
+        run: go test -race -timeout 120s -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          files: ./coverage.out
-          flags: unittests
-          fail_ci_if_error: false
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      # Self-hosted coverage badge: parse the total from `go tool cover -func`
+      # and rewrite .github/badges/coverage.json. The shields.io endpoint badge
+      # in README.md reads this JSON via raw.githubusercontent.com.
+      - name: Compute coverage and update badge
+        id: coverage
+        run: |
+          pct=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%","",$3); print $3}')
+          if [ -z "$pct" ]; then
+            echo "could not parse total coverage" >&2
+            exit 1
+          fi
+          color=$(awk -v p="$pct" 'BEGIN {
+            if (p+0 >= 80)      print "brightgreen";
+            else if (p+0 >= 60) print "yellow";
+            else                print "red";
+          }')
+          mkdir -p .github/badges
+          printf '{\n  "schemaVersion": 1,\n  "label": "coverage",\n  "message": "%s%%",\n  "color": "%s"\n}\n' \
+            "$pct" "$color" > .github/badges/coverage.json
+          echo "pct=$pct" >> "$GITHUB_OUTPUT"
+          echo "color=$color" >> "$GITHUB_OUTPUT"
+          echo "::notice::Total coverage: ${pct}% (${color})"
+
+      # Commit the refreshed badge back to main. PRs (including forks) only
+      # compute the number for visibility and never write to the repo.
+      - name: Commit updated coverage badge
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          if git diff --quiet -- .github/badges/coverage.json; then
+            echo "coverage badge unchanged, nothing to commit"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/badges/coverage.json
+          git commit -m "chore(ci): update coverage badge to ${{ steps.coverage.outputs.pct }}% [skip ci]"
+          git push
 
   e2e:
     name: E2E (none runtime)

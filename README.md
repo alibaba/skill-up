@@ -9,8 +9,11 @@
     <a href="https://github.com/alibaba/skill-up/actions">
       <img src="https://github.com/alibaba/skill-up/actions/workflows/ci.yml/badge.svg" alt="CI" />
     </a>
-    <a href="https://codecov.io/gh/alibaba/skill-up">
-      <img src="https://codecov.io/gh/alibaba/skill-up/branch/main/graph/badge.svg" alt="Coverage" />
+    <a href="https://deepwiki.com/alibaba/skill-up">
+      <img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" />
+    </a>
+    <a href="./.github/badges/coverage.json">
+      <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/alibaba/skill-up/main/.github/badges/coverage.json" alt="Coverage" />
     </a>
     <a href="https://go.dev/">
       <img src="https://img.shields.io/badge/go-%3E%3D1.25-blue" alt="Go Version" />
@@ -149,12 +152,12 @@ skill-up auto-loads an optional user-level config that supplies default OpenTele
 embed (empty) < user (~/.config/skill-up/config.yaml) < project ($PWD/.skill-up.yaml) < explicit (--config)
 ```
 
-| Source     | Path                                                                                   |
-| ---------- | -------------------------------------------------------------------------------------- |
-| `embed`    | empty `Config{}` — no vendor defaults baked in                                         |
+| Source     | Path                                                                                                      |
+| ---------- | --------------------------------------------------------------------------------------------------------- |
+| `embed`    | empty `Config{}` — no vendor defaults baked in                                                            |
 | `user`     | `$SKILL_EVAL_CONFIG`, else `$XDG_CONFIG_HOME/skill-up/config.yaml`, else `~/.config/skill-up/config.yaml` |
-| `project`  | `$PWD/.skill-up.yaml`                                                                |
-| `explicit` | `--config <path>` (must exist)                                                         |
+| `project`  | `$PWD/.skill-up.yaml`                                                                                     |
+| `explicit` | `--config <path>` (must exist)                                                                            |
 
 Missing files at the `user` and `project` layers are silently skipped; a missing `--config` path is a hard error. A corrupt config at any layer also fails the run.
 
@@ -212,15 +215,15 @@ skill-up import ./evals/evals.json --output ./evals
 
 ## CLI Overview
 
-| Command | Description |
-|---------|-------------|
-| `skill-up run [path]` | Run evaluation cases and produce reports |
-| `skill-up validate [path]` | Validate `eval.yaml` and case files |
-| `skill-up list-cases [path]` | List all cases referenced by the config |
-| `skill-up report <result.json>` | Generate reports from a previous run |
-| `skill-up import <evals.json>` | Import Anthropic `evals.json` to YAML cases |
-| `skill-up debug judge <input.json>` | Debug judge module with a JSON input |
-| `skill-up debug report <input.json>` | Debug report module with a JSON input |
+| Command                              | Description                                 |
+| ------------------------------------ | ------------------------------------------- |
+| `skill-up run [path]`                | Run evaluation cases and produce reports    |
+| `skill-up validate [path]`           | Validate `eval.yaml` and case files         |
+| `skill-up list-cases [path]`         | List all cases referenced by the config     |
+| `skill-up report <result.json>`      | Generate reports from a previous run        |
+| `skill-up import <evals.json>`       | Import Anthropic `evals.json` to YAML cases |
+| `skill-up debug judge <input.json>`  | Debug judge module with a JSON input        |
+| `skill-up debug report <input.json>` | Debug report module with a JSON input       |
 
 ## License
 

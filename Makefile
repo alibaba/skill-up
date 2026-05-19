@@ -1,4 +1,4 @@
-.PHONY: build test vet fmt fmt-check lint lint-new revive verify tidy clean install hooks e2e lint-tools
+.PHONY: build test vet fmt fmt-check lint lint-new revive verify tidy clean install hooks e2e lint-tools coverage coverage-badge
 
 CMD := ./cmd/skill-up
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -89,6 +89,25 @@ hooks:
 # Run e2e tests
 e2e:
 	go test -tags e2e -v ./e2e
+
+# Generate a coverage profile across all packages (writes coverage.out).
+coverage:
+	go test -race -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
+
+# Compute total coverage from coverage.out and refresh .github/badges/coverage.json
+# so the shields.io endpoint badge in README.md picks up the new percentage.
+# Color thresholds: >=80 green, >=60 yellow, otherwise red.
+coverage-badge: coverage
+	@pct=$$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%","",$$3); print $$3}'); \
+	if [ -z "$$pct" ]; then echo "could not parse total coverage" >&2; exit 1; fi; \
+	color=$$(awk -v p="$$pct" 'BEGIN { \
+	  if (p+0 >= 80) print "brightgreen"; \
+	  else if (p+0 >= 60) print "yellow"; \
+	  else print "red"; \
+	}'); \
+	mkdir -p .github/badges; \
+	printf '{\n  "schemaVersion": 1,\n  "label": "coverage",\n  "message": "%s%%",\n  "color": "%s"\n}\n' "$$pct" "$$color" > .github/badges/coverage.json; \
+	echo "coverage badge updated: $$pct% ($$color)"
 
 # Note: multi-platform builds, checksums and archives for releases are produced
 # by GoReleaser (see .goreleaser.yaml and .github/workflows/release.yml).

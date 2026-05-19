@@ -9,8 +9,11 @@
     <a href="https://github.com/alibaba/skill-up/actions">
       <img src="https://github.com/alibaba/skill-up/actions/workflows/ci.yml/badge.svg" alt="CI" />
     </a>
-    <a href="https://codecov.io/gh/alibaba/skill-up">
-      <img src="https://codecov.io/gh/alibaba/skill-up/branch/main/graph/badge.svg" alt="Coverage" />
+    <a href="https://deepwiki.com/alibaba/skill-up">
+      <img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" />
+    </a>
+    <a href="./.github/badges/coverage.json">
+      <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/alibaba/skill-up/main/.github/badges/coverage.json" alt="Coverage" />
     </a>
     <a href="https://go.dev/">
       <img src="https://img.shields.io/badge/go-%3E%3D1.25-blue" alt="Go Version" />
@@ -145,15 +148,15 @@ skill-up import ./evals/evals.json --output ./evals
 
 ## CLI 命令概览
 
-| 命令 | 说明 |
-|---------|-------------|
-| `skill-up run [path]` | 运行评测用例并生成报告 |
-| `skill-up validate [path]` | 校验 `eval.yaml` 和用例文件 |
-| `skill-up list-cases [path]` | 列出配置引用的所有用例 |
-| `skill-up report <result.json>` | 从已有结果生成报告 |
-| `skill-up import <evals.json>` | 将 Anthropic `evals.json` 导入为 YAML 用例 |
-| `skill-up debug judge <input.json>` | 使用 JSON 输入调试 judge 模块 |
-| `skill-up debug report <input.json>` | 使用 JSON 输入调试 report 模块 |
+| 命令                                 | 说明                                       |
+| ------------------------------------ | ------------------------------------------ |
+| `skill-up run [path]`                | 运行评测用例并生成报告                     |
+| `skill-up validate [path]`           | 校验 `eval.yaml` 和用例文件                |
+| `skill-up list-cases [path]`         | 列出配置引用的所有用例                     |
+| `skill-up report <result.json>`      | 从已有结果生成报告                         |
+| `skill-up import <evals.json>`       | 将 Anthropic `evals.json` 导入为 YAML 用例 |
+| `skill-up debug judge <input.json>`  | 使用 JSON 输入调试 judge 模块              |
+| `skill-up debug report <input.json>` | 使用 JSON 输入调试 report 模块             |
 
 ## 许可证
 
