@@ -69,7 +69,7 @@ environment:
 mcp:
   servers:
     - name: github                # MCP Server 名称
-      mode: real                  # 当前支持 real；mocked 暂未实现
+      mode: real                  # real / mocked
       transport: http             # http / stdio；未指定时按 endpoint/command 推断
       config_ref: evals/fixtures/mcp/github.yaml  # 配置文件路径
 
@@ -113,7 +113,7 @@ report:
 
 ### MCP 配置说明
 
-MCP 当前支持 `mode: real`，用于把真实 MCP Server 安装到 `claude_code`、`qodercli` 或 `codex` 等 Agent。`mode: mocked` 是预留模式，当前会明确报错，避免误以为 mock server 已经启动。
+MCP 支持 `mode: real` 和 `mode: mocked`。`real` 用于把真实 MCP Server 安装到 `claude_code`、`qodercli` 或 `codex` 等 Agent；`mocked` 会由 `internal/mcp` 生成本地 stdio Mock Server，并按普通 MCP 配置安装到 Agent。
 
 HTTP MCP 可以直接在 `eval.yaml` 中声明，也可以用 `config_ref` 引用 `evals/fixtures/mcp/*.yaml`：
 
@@ -147,6 +147,34 @@ mcp:
       transport: stdio
       command: /usr/bin/python3
       args: [evals/fixtures/mcp/marker_server.py]
+```
+
+mocked MCP 可以直接使用内置的 `filesystem` Mock Server：
+
+```yaml
+mcp:
+  servers:
+    - name: filesystem
+      mode: mocked
+```
+
+也可以通过 `config_ref` 定义工具响应：
+
+```yaml
+mcp:
+  servers:
+    - name: project-mgmt
+      mode: mocked
+      config_ref: evals/fixtures/mcp/project-mgmt.yaml
+```
+
+```yaml
+tool_responses:
+  create_publish_plan_simple:
+    default:
+      id: 999
+      name: "{{params.name}}"
+      status: ONGOING
 ```
 
 环境变量引用支持 `${VAR}` 和完整值 `$VAR` 两种形式，变量名必须匹配 `[A-Za-z_][A-Za-z0-9_]*`。`required_env` 会把变量注入 Agent 运行环境；`headers` 中完整的环境变量引用会额外记录变量名，供 Agent 安装 MCP 时选择合适的传递方式。

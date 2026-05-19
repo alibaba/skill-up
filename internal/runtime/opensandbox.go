@@ -43,7 +43,7 @@ const openSandboxDefaultFileTransferParallelism = 8
 
 type openSandboxClient interface {
 	ID() string
-	Close()
+	Close() error
 	Kill(ctx context.Context) error
 	Pause(ctx context.Context) error
 	Ping(ctx context.Context) error
@@ -78,7 +78,7 @@ func createOpenSandboxCompat(ctx context.Context, cfg opensandbox.ConnectionConf
 
 	lifecycle := newOpenSandboxLifecycleClient(cfg)
 	created, err := lifecycle.CreateSandbox(ctx, opensandbox.CreateSandboxRequest{
-		Image:          opensandbox.ImageSpec{URI: opts.Image, Auth: opts.ImageAuth},
+		Image:          &opensandbox.ImageSpec{URI: opts.Image, Auth: opts.ImageAuth},
 		Entrypoint:     entrypoint,
 		ResourceLimits: limits,
 		Timeout:        timeout,
@@ -172,6 +172,7 @@ func (r *OpenSandboxRuntime) Create(ctx context.Context) error {
 		Metadata:       r.cfg.Metadata,
 		Extensions:     r.extensions,
 		ReadyTimeout:   r.cfg.ReadyTimeout,
+		NetworkPolicy:  r.networkPolicy(),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create opensandbox: %w", err)
@@ -197,15 +198,21 @@ func (r *OpenSandboxRuntime) closeSandbox(ctx context.Context) error {
 	sandbox := r.sandbox
 	if !r.cfg.Delete {
 		logging.DebugContextf(ctx, "OpenSandboxRuntime.Close: skipping cleanup, sandbox preserved: %s", sandbox.ID())
-		sandbox.Close()
+		err := sandbox.Close()
 		r.sandbox = nil
+		if err != nil {
+			return fmt.Errorf("failed to close opensandbox %s: %w", sandbox.ID(), err)
+		}
 		return nil
 	}
 	if err := sandbox.Kill(ctx); err != nil {
 		return fmt.Errorf("failed to kill opensandbox %s: %w", sandbox.ID(), err)
 	}
-	sandbox.Close()
+	err := sandbox.Close()
 	r.sandbox = nil
+	if err != nil {
+		return fmt.Errorf("failed to close opensandbox %s: %w", sandbox.ID(), err)
+	}
 	return nil
 }
 
@@ -627,6 +634,30 @@ func (r *OpenSandboxRuntime) entrypoint() []string {
 	}
 	// The sandbox joins entrypoint items with " && ", so the default must stay a single shell line.
 	return []string{"tail -F /dev/null"}
+}
+
+func (r *OpenSandboxRuntime) networkPolicy() *opensandbox.NetworkPolicy {
+	switch strings.ToLower(strings.TrimSpace(r.cfg.NetworkPolicy)) {
+	case "deny_all":
+		return &opensandbox.NetworkPolicy{DefaultAction: "deny"}
+	case "allow_declared":
+		// Deny by default and permit only the declared egress targets, so an
+		// empty allowlist blocks all outbound traffic rather than allowing it.
+		policy := &opensandbox.NetworkPolicy{DefaultAction: "deny"}
+		for _, target := range r.cfg.AllowedEgress {
+			t := strings.TrimSpace(target)
+			if t == "" {
+				continue
+			}
+			policy.Egress = append(policy.Egress, opensandbox.NetworkRule{
+				Action: "allow",
+				Target: t,
+			})
+		}
+		return policy
+	default:
+		return nil
+	}
 }
 
 func (r *OpenSandboxRuntime) resolveExtensions(ctx context.Context) map[string]string {

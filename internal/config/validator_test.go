@@ -444,6 +444,151 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "valid network_policy deny_all with opensandbox",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:          "opensandbox",
+					NetworkPolicy: "deny_all",
+				},
+				Engine: EngineConfig{
+					Name: "claude_code",
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid network_policy allow_declared with opensandbox",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:          "opensandbox",
+					NetworkPolicy: "allow_declared",
+					AllowedEgress: []string{"pypi.org", "*.githubusercontent.com"},
+				},
+				Engine: EngineConfig{
+					Name: "claude_code",
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "allow_declared without allowed_egress is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:          "opensandbox",
+					NetworkPolicy: "allow_declared",
+				},
+				Engine: EngineConfig{
+					Name: "claude_code",
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "network_policy: allow_declared requires a non-empty allowed_egress list",
+		},
+		{
+			name: "allowed_egress with deny_all is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:          "opensandbox",
+					NetworkPolicy: "deny_all",
+					AllowedEgress: []string{"pypi.org"},
+				},
+				Engine: EngineConfig{
+					Name: "claude_code",
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "allowed_egress is only valid with network_policy: allow_declared",
+		},
+		{
+			name: "allowed_egress without network_policy is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:          "opensandbox",
+					AllowedEgress: []string{"pypi.org"},
+				},
+				Engine: EngineConfig{
+					Name: "claude_code",
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "allowed_egress requires network_policy: allow_declared",
+		},
+		{
+			name: "allowed_egress entry as URL is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:          "opensandbox",
+					NetworkPolicy: "allow_declared",
+					AllowedEgress: []string{"https://pypi.org/simple"},
+				},
+				Engine: EngineConfig{
+					Name: "claude_code",
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "must be a bare FQDN or wildcard domain",
+		},
+		{
+			name: "invalid network_policy value",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:          "opensandbox",
+					NetworkPolicy: "allow_all",
+				},
+				Engine: EngineConfig{
+					Name: "claude_code",
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "network_policy must be one of: deny_all, allow_declared",
+		},
+		{
+			name: "network_policy with none runtime is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:          "none",
+					NetworkPolicy: "deny_all",
+				},
+				Engine: EngineConfig{
+					Name: "claude_code",
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "network_policy requires environment.type opensandbox",
+		},
 	}
 
 	for _, tt := range tests {

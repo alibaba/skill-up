@@ -13,6 +13,12 @@ const (
 	maxRetryPolicyRetries = 10
 )
 
+// Runtime type constants.
+const (
+	runtimeTypeNone        = "none"
+	runtimeTypeOpenSandbox = "opensandbox"
+)
+
 // Validator checks eval and case documents against the v1alpha1 schema.
 type Validator struct{}
 
@@ -38,6 +44,8 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	} else if !isValidRuntimeType(cfg.Environment.Type) {
 		errs = append(errs, "environment.type must be one of: none, opensandbox")
 	}
+
+	errs = append(errs, validateNetworkPolicy(cfg.Environment)...)
 
 	// engine.name is required
 	if cfg.Engine.Name == "" {
@@ -153,9 +161,48 @@ func (v *Validator) ValidateAll(result *EvalResult) error {
 }
 
 func isValidRuntimeType(t string) bool {
-	return t == "none" || t == "opensandbox"
+	return t == runtimeTypeNone || t == runtimeTypeOpenSandbox
 }
 
 func isValidJudgeType(t string) bool {
 	return t == judgeTypeRuleBased || t == judgeTypeScript || t == judgeTypeAgentJudge
+}
+
+func validateNetworkPolicy(env Environment) []string {
+	policy := env.NetworkPolicy
+	if policy == "" {
+		if len(env.AllowedEgress) > 0 {
+			return []string{"allowed_egress requires network_policy: allow_declared"}
+		}
+		return nil
+	}
+	if policy != "deny_all" && policy != "allow_declared" {
+		return []string{"network_policy must be one of: deny_all, allow_declared"}
+	}
+	if env.Type == runtimeTypeNone {
+		return []string{"network_policy requires environment.type opensandbox (none cannot enforce network isolation)"}
+	}
+
+	var errs []string
+	switch policy {
+	case "allow_declared":
+		if len(env.AllowedEgress) == 0 {
+			errs = append(errs, "network_policy: allow_declared requires a non-empty allowed_egress list")
+		}
+		for i, target := range env.AllowedEgress {
+			t := strings.TrimSpace(target)
+			if t == "" {
+				errs = append(errs, fmt.Sprintf("allowed_egress[%d] must not be empty", i))
+				continue
+			}
+			if strings.ContainsAny(t, "/ ") {
+				errs = append(errs, fmt.Sprintf("allowed_egress[%d] %q must be a bare FQDN or wildcard domain, not a URL", i, target))
+			}
+		}
+	case "deny_all":
+		if len(env.AllowedEgress) > 0 {
+			errs = append(errs, "allowed_egress is only valid with network_policy: allow_declared")
+		}
+	}
+	return errs
 }

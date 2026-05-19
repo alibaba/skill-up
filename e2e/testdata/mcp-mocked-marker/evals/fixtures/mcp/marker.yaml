@@ -1,0 +1,3 @@
+tool_responses:
+  echo_marker:
+    default: skill-up-mcp-mocked-fixture-marker
