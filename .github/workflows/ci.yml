@@ -24,10 +24,18 @@ permissions:
 jobs:
   build:
     name: Build & Test
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      # Surface failures on every OS independently instead of cancelling the
+      # whole matrix when one runner fails.
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         go-version: ["1.25.x"]
+    # Windows is being promoted to a first-class platform (issue #31). Until the
+    # remaining cross-platform fixes land and the runner is verified green,
+    # keep its failures non-blocking so they surface without gating merges.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
 
     steps:
       - uses: actions/checkout@v6
@@ -49,8 +57,11 @@ jobs:
       # Self-hosted coverage badge: parse the total from `go tool cover -func`
       # and rewrite .github/badges/coverage.json. The shields.io endpoint badge
       # in README.md reads this JSON via raw.githubusercontent.com.
+      # Ubuntu-only: the Windows leg of the matrix uses a different shell
+      # toolchain and we only need one canonical coverage number.
       - name: Compute coverage and update badge
         id: coverage
+        if: matrix.os == 'ubuntu-latest'
         run: |
           pct=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%","",$3); print $3}')
           if [ -z "$pct" ]; then
@@ -79,7 +90,7 @@ jobs:
       # upload would silently match nothing and, combined with
       # if-no-files-found: error, fail the build job on every push to main.
       - name: Upload coverage badge artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: matrix.os == 'ubuntu-latest' && github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v7
         with:
           name: coverage-badge
