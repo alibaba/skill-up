@@ -26,7 +26,7 @@ skill-up run [path] [flags]
 | `--include-case-name` | —                            | 只运行匹配的用例（支持 glob，可多次指定）                                                                                                                  |
 | `--exclude-case-name` | —                            | 排除匹配的用例（支持 glob，可多次指定）                                                                                                                    |
 | `--format`            | —                            | 附加报告格式：`junit` / `html`（可多次指定）。`result.json` 始终写入；`--format junit` 生成 `report.xml`，`--format html` 生成 `report.html`；`--format json` 为空操作 |
-| `--output-dir`        | `eval.yaml` 同级目录          | 报告和产物的输出目录                                                                                                                                       |
+| `--output-dir`        | 与 skill 目录同级的 `<skill-name>-workspace/` | 报告和产物的输出目录                                                                                                                       |
 | `--iteration`         | `1`                          | 总运行次数。每轮运行的产物分别写入 `iteration-1/` 到 `iteration-N/`                                                                                         |
 | `--engine`            | 配置文件中的值                | 覆盖 Engine 名称                                                                                                                                          |
 | `--model`             | 配置文件中的值                | 覆盖模型（格式：`provider/name`）                                                                                                                          |

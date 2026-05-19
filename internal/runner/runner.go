@@ -111,7 +111,9 @@ func (r *Runner) Evaluate(ctx context.Context, cases []*config.CaseConfig, ag ag
 
 	workspaceDir := opts.OutputDir
 	if workspaceDir == "" {
-		workspaceDir = filepath.Join(skillDir, skillName+"-workspace")
+		// Default workspace sits alongside the skill directory, not inside it,
+		// matching the Anthropic eval layout (<skill>/ and <skill>-workspace/ as siblings).
+		workspaceDir = filepath.Join(filepath.Dir(cleanDir), skillName+"-workspace")
 	}
 	runCount := opts.Iteration
 	startIteration := 1

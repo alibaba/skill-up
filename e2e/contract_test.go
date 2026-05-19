@@ -403,8 +403,8 @@ input:
 	}
 
 	// --no-delete should preserve workspace
-	// The workspace is created at <skillDir>/<skillName>-workspace/
-	pattern := filepath.Join(dir, "*-workspace")
+	// The workspace is created alongside the skill directory as <skillName>-workspace/
+	pattern := filepath.Join(filepath.Dir(dir), "*-workspace")
 	matches, _ := filepath.Glob(pattern)
 	if len(matches) == 0 {
 		t.Logf("Note: workspace directory not found; --no-delete behavior may vary")
@@ -950,8 +950,8 @@ judge:
 	Run(t, RunConfig{Env: env, WorkDir: dir, Timeout: 60 * time.Second},
 		"run", filepath.Join(dir, "evals", "eval.yaml"), "--no-delete")
 
-	// Find the workspace directory
-	pattern := filepath.Join(dir, "*-workspace", "iteration-*", "grading-format", "with_skill", "grading.json")
+	// Find the workspace directory (created alongside the skill directory)
+	pattern := filepath.Join(filepath.Dir(dir), "*-workspace", "iteration-*", "grading-format", "with_skill", "grading.json")
 	matches, _ := filepath.Glob(pattern)
 	if len(matches) == 0 {
 		t.Skip("grading.json not found; may depend on workspace layout")
