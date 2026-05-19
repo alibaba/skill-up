@@ -20,6 +20,8 @@ import (
 
 const agentJudgeType = "agent_judge"
 
+const testRuntimeOpenSandbox = "opensandbox"
+
 func TestRunCommand_UsesUsageAwareArgs(t *testing.T) {
 	t.Parallel()
 
@@ -955,6 +957,56 @@ func TestApplyRunConfigOverrides_RuntimeKwargs(t *testing.T) {
 	}
 	if got := cfg.Environment.Kwargs["extensions"]; got != `{"profile":"ci"}` {
 		t.Fatalf("extensions kwarg = %q, want CLI value", got)
+	}
+}
+
+func TestApplyRunConfigOverrides_RuntimeType(t *testing.T) {
+	t.Parallel()
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String(runtimeFlagName, "", "")
+	if err := cmd.Flags().Set(runtimeFlagName, testRuntimeOpenSandbox); err != nil {
+		t.Fatalf("set runtime: %v", err)
+	}
+
+	cfg := config.DefaultEvalConfig()
+	cfg.Environment.Type = "none"
+	if err := applyRunConfigOverrides(cfg, cmd); err != nil {
+		t.Fatalf("applyRunConfigOverrides: %v", err)
+	}
+	if got := cfg.Environment.Type; got != testRuntimeOpenSandbox {
+		t.Fatalf("Environment.Type = %q, want opensandbox", got)
+	}
+}
+
+func TestApplyRunConfigOverrides_RuntimeTypeUnsetPreservesConfig(t *testing.T) {
+	t.Parallel()
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String(runtimeFlagName, "", "")
+
+	cfg := config.DefaultEvalConfig()
+	cfg.Environment.Type = testRuntimeOpenSandbox
+	if err := applyRunConfigOverrides(cfg, cmd); err != nil {
+		t.Fatalf("applyRunConfigOverrides: %v", err)
+	}
+	if got := cfg.Environment.Type; got != testRuntimeOpenSandbox {
+		t.Fatalf("Environment.Type = %q, want opensandbox", got)
+	}
+}
+
+func TestApplyRunConfigOverrides_RuntimeTypeRejectsInvalid(t *testing.T) {
+	t.Parallel()
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String(runtimeFlagName, "", "")
+	if err := cmd.Flags().Set(runtimeFlagName, "docker"); err != nil {
+		t.Fatalf("set runtime: %v", err)
+	}
+
+	cfg := config.DefaultEvalConfig()
+	if err := applyRunConfigOverrides(cfg, cmd); err == nil {
+		t.Fatal("applyRunConfigOverrides: want error for invalid --runtime, got nil")
 	}
 }
 
