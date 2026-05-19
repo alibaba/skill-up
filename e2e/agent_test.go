@@ -63,7 +63,7 @@ func TestAgent_Codex_NoneRuntime_WorkspaceDiffGitContexts(t *testing.T) {
 	fakeCodexDir := writeFakeCodexBinary(t)
 	evalRoot := createWorkspaceDiffEvalDir(t)
 	evalPath := filepath.Join(evalRoot, "evals", "eval.yaml")
-	workspaceDir := filepath.Join(evalRoot, filepath.Base(evalRoot)+"-workspace")
+	workspaceDir := filepath.Join(filepath.Dir(evalRoot), filepath.Base(evalRoot)+"-workspace")
 	debugDir := t.TempDir()
 
 	result := Run(t, RunConfig{
@@ -607,7 +607,7 @@ report:
 
 	var workspaceDir string
 	evalDirBase := filepath.Base(evalDir)
-	workspaceDir = filepath.Join(evalDir, evalDirBase+"-workspace")
+	workspaceDir = filepath.Join(filepath.Dir(evalDir), evalDirBase+"-workspace")
 	if _, err := os.Stat(workspaceDir); os.IsNotExist(err) {
 		entries, _ := os.ReadDir(evalDir)
 		for _, e := range entries {
@@ -1234,8 +1234,8 @@ expect:
 `
 	writeFile(t, filepath.Join(casesDir, "test-case.yaml"), caseContent)
 
-	// Workspace is created at projectDir/<basename>-workspace by the runner.
-	workspaceDir := filepath.Join(projectDir, "test-skill-qoder-none-workspace")
+	// Workspace is created alongside the skill directory as <basename>-workspace.
+	workspaceDir := filepath.Join(base, "test-skill-qoder-none-workspace")
 	preserveWorkspaceArtifacts(t, workspaceDir)
 	result := Run(t, RunConfig{Timeout: 120e9}, "run", evalPath)
 
