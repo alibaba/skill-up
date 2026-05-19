@@ -72,6 +72,12 @@ jobs:
       # Hand the badge to the push-only update-coverage-badge job below via
       # an artifact. PRs (including forks) still run the compute step above
       # for visibility, but skip the upload so they can never trigger a push.
+      #
+      # include-hidden-files: true is required — the badge lives under
+      # .github/, and actions/upload-artifact defaults to excluding files
+      # whose path contains any dot-prefixed segment. Without this the
+      # upload would silently match nothing and, combined with
+      # if-no-files-found: error, fail the build job on every push to main.
       - name: Upload coverage badge artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v5
@@ -79,6 +85,7 @@ jobs:
           name: coverage-badge
           path: .github/badges/coverage.json
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 1
 
   update-coverage-badge:
