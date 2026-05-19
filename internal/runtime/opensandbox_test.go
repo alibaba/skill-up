@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -577,6 +579,30 @@ func TestOpenSandboxUploadDirUploadsFilesInSingleBatch(t *testing.T) {
 	}
 	if strings.Contains(fake.execs[0].Command, "tar") {
 		t.Fatalf("UploadDir exec command = %q, want no tar command", fake.execs[0].Command)
+	}
+}
+
+func TestOpenSandboxUploadDirChunksLargeTreeIntoBoundedBatches(t *testing.T) {
+	dir := t.TempDir()
+	const total = openSandboxUploadBatchSize + 2
+	for i := range total {
+		name := fmt.Sprintf("file-%03d.txt", i)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), noneFileMode); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	fake := &fakeOpenSandbox{execResult: &opensandbox.Execution{ExitCode: intPtr(0)}}
+	rt := &OpenSandboxRuntime{workspace: "/workspace", sandbox: fake}
+
+	if err := rt.UploadDir(context.Background(), dir, "dest"); err != nil {
+		t.Fatalf("UploadDir returned error: %v", err)
+	}
+	if len(fake.uploads) != total {
+		t.Fatalf("uploaded files = %d, want %d", len(fake.uploads), total)
+	}
+	wantBatches := []int{openSandboxUploadBatchSize, 2}
+	if !slices.Equal(fake.uploadFilesBatchSizes, wantBatches) {
+		t.Fatalf("UploadFiles batch sizes = %#v, want %#v", fake.uploadFilesBatchSizes, wantBatches)
 	}
 }
 

@@ -41,6 +41,11 @@ const (
 
 const openSandboxDefaultFileTransferParallelism = 8
 
+// openSandboxUploadBatchSize caps how many files a single UploadFiles request
+// carries. It bounds the open file descriptors held per batch so uploading a
+// large directory tree stays well under a typical ulimit -n.
+const openSandboxUploadBatchSize = 128
+
 type openSandboxClient interface {
 	ID() string
 	Close() error
@@ -297,6 +302,19 @@ func collectUploadItems(sourceDir, targetRoot string) ([]uploadItem, []string, e
 }
 
 func (r *OpenSandboxRuntime) uploadFiles(ctx context.Context, items []uploadItem) error {
+	for start := 0; start < len(items); start += openSandboxUploadBatchSize {
+		end := min(start+openSandboxUploadBatchSize, len(items))
+		if err := r.uploadFileBatch(ctx, items[start:end]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// uploadFileBatch uploads one bounded batch of files in a single SDK request.
+// Batching keeps the number of simultaneously open file descriptors below
+// openSandboxUploadBatchSize so large directory trees do not exhaust ulimit -n.
+func (r *OpenSandboxRuntime) uploadFileBatch(ctx context.Context, items []uploadItem) error {
 	if len(items) == 0 {
 		return nil
 	}
