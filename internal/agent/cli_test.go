@@ -298,3 +298,21 @@ func TestCLIAgent_InstallMCPUsesResolvedEndpointConfigRefAndEnv(t *testing.T) {
 		t.Fatalf("marker content: got %q, want %q", string(data), want)
 	}
 }
+
+func TestCheckCommandForOS(t *testing.T) {
+	tests := []struct {
+		name, in, goos, want string
+	}{
+		{"posix unchanged", "command -v codex", "linux", "command -v codex"},
+		{"darwin unchanged", "command -v claude", "darwin", "command -v claude"},
+		{"windows translates", "command -v codex", "windows", "where codex"},
+		{"windows non-command form unchanged", "codex --version", "windows", "codex --version"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := checkCommandForOS(tt.in, tt.goos); got != tt.want {
+				t.Fatalf("checkCommandForOS(%q, %q) = %q, want %q", tt.in, tt.goos, got, tt.want)
+			}
+		})
+	}
+}

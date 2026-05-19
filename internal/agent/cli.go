@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"text/template"
 	"time"
 
@@ -151,12 +152,26 @@ func (a *CLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messag
 	return sessionResult, nil
 }
 
+// checkCommandForOS adapts a POSIX `command -v X` availability check to the
+// target OS. Windows cmd.exe has no `command` builtin; `where` is the
+// equivalent. Other command forms are returned unchanged.
+func checkCommandForOS(checkCmd, goos string) string {
+	if goos != "windows" {
+		return checkCmd
+	}
+	if binary, ok := strings.CutPrefix(checkCmd, "command -v "); ok {
+		return "where " + binary
+	}
+	return checkCmd
+}
+
 // Check verifies the agent executable is available.
 func (a *CLIAgent) Check(ctx context.Context, rt Runtime) error {
 	checkCmd := a.Cfg.CheckCmd
 	if checkCmd == "" {
 		return fmt.Errorf("CheckCmd not configured for agent %s", a.Name())
 	}
+	checkCmd = checkCommandForOS(checkCmd, runtime.TargetGOOS(rt))
 
 	result, err := rt.Exec(ctx, checkCmd, a.mergeExecOptionsEnv(ctx, ExecOptions{}, nil, nil))
 	if err != nil {

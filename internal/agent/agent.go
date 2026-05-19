@@ -16,6 +16,7 @@ import (
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/observability"
 	"github.com/alibaba/skill-up/internal/runtime"
+	"github.com/alibaba/skill-up/internal/shellquote"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
 
@@ -339,22 +340,13 @@ func formatAgentModel(provider, model string) string {
 	return provider + "/" + model
 }
 
-// shellQuote quotes a string for safe shell usage.
+// shellQuote quotes a string for safe POSIX shell usage. Agent commands are
+// always composed for and executed by bash (via the Node/nvm bootstrap), so
+// POSIX quoting is correct even when skill-up itself runs on a Windows host.
+// It delegates to internal/shellquote so the project keeps a single quoting
+// implementation.
 func shellQuote(s string) string {
-	if s == "" {
-		return "''"
-	}
-	var result strings.Builder
-	result.WriteByte('\'')
-	for _, c := range s {
-		if c == '\'' {
-			result.WriteString(`'\''`)
-		} else {
-			result.WriteRune(c)
-		}
-	}
-	result.WriteByte('\'')
-	return result.String()
+	return shellquote.QuotePOSIX(s)
 }
 
 // BuildInstructionFromMessages converts messages to a single instruction string.
