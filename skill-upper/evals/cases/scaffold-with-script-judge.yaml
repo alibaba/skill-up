@@ -30,4 +30,4 @@ judge:
     - "case yaml 中 judge.type 为 script，且包含 script_path 字段指向一个脚本文件路径"
     - "生成了 script_path 指向的判分脚本文件（如 .sh 或 .py），脚本中包含退出码逻辑（exit 0 表示 PASS，非 0 表示 FAIL）"
     - "eval.yaml 的 environment.type 为 none"
-  pass_threshold: 0.75
+  pass_threshold: 1
