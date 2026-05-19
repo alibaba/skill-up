@@ -6,6 +6,8 @@ description: |
 
 context:
   repo_fixture: evals/fixtures/skills/sample-no-evals
+  git:
+    init: true
 
 input:
   prompt: |
