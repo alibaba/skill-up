@@ -49,6 +49,7 @@ type openSandboxClient interface {
 	Ping(ctx context.Context) error
 	CreateDirectory(ctx context.Context, remotePath string, mode int) error
 	UploadFile(ctx context.Context, reader io.Reader, opts opensandbox.UploadFileOptions) error
+	UploadFiles(ctx context.Context, entries []opensandbox.UploadFileEntry) error
 	DownloadFile(ctx context.Context, remotePath, rangeHeader string) (io.ReadCloser, error)
 	SearchFiles(ctx context.Context, dir, pattern string) ([]opensandbox.FileInfo, error)
 	RunCommandWithOpts(ctx context.Context, req opensandbox.RunCommandRequest, handlers *opensandbox.ExecutionHandlers) (*opensandbox.Execution, error)
@@ -325,55 +326,42 @@ func (r *OpenSandboxRuntime) uploadFiles(ctx context.Context, items []uploadItem
 	if len(items) == 0 {
 		return nil
 	}
-	parallelism := r.fileParallelism
-	if parallelism <= 0 {
-		parallelism = openSandboxDefaultFileTransferParallelism
-	}
-	parallelism = min(parallelism, len(items))
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	entries := make([]opensandbox.UploadFileEntry, 0, len(items))
+	closers := make([]io.Closer, 0, len(items))
+	defer func() {
+		for _, c := range closers {
+			_ = c.Close()
+		}
+	}()
 
-	jobs := make(chan uploadItem)
-	errCh := make(chan error, 1)
-	var wg sync.WaitGroup
-	for range parallelism {
-		wg.Go(func() {
-			for item := range jobs {
-				if err := r.uploadRemoteFile(ctx, item.source, item.target); err != nil {
-					select {
-					case errCh <- err:
-						cancel()
-					default:
-					}
-					return
-				}
-			}
+	for _, item := range items {
+		file, err := os.Open(item.source)
+		if err != nil {
+			return fmt.Errorf("failed to open source file %s: %w", item.source, err)
+		}
+		closers = append(closers, file)
+
+		info, err := file.Stat()
+		if err != nil {
+			return fmt.Errorf("failed to stat source file %s: %w", item.source, err)
+		}
+		entries = append(entries, opensandbox.UploadFileEntry{
+			File: file,
+			Options: opensandbox.UploadFileOptions{
+				FileName: filepath.Base(item.source),
+				Metadata: opensandbox.FileMetadata{
+					Path: item.target,
+					Mode: opensandbox.OctalMode(info.Mode()),
+				},
+			},
 		})
 	}
 
-	for _, item := range items {
-		select {
-		case <-ctx.Done():
-			close(jobs)
-			wg.Wait()
-			select {
-			case err := <-errCh:
-				return err
-			default:
-				return ctx.Err()
-			}
-		case jobs <- item:
-		}
+	if err := r.sandbox.UploadFiles(ctx, entries); err != nil {
+		return fmt.Errorf("failed to upload %d files: %w", len(entries), err)
 	}
-	close(jobs)
-	wg.Wait()
-	select {
-	case err := <-errCh:
-		return err
-	default:
-		return nil
-	}
+	return nil
 }
 
 // DownloadFile downloads a file from the sandbox to the host.

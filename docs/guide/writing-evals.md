@@ -188,7 +188,7 @@ Common fields:
 | `kwargs.base_url` | OpenSandbox service URL; can also be set via `OPENSANDBOX_BASE_URL`. |
 | `kwargs.extensions` | OpenSandbox extension config as a JSON string. |
 | `kwargs.request_timeout_seconds` | Request timeout for the OpenSandbox SDK. |
-| `kwargs.file_transfer_parallelism` | Concurrency for directory upload/download. |
+| `kwargs.file_transfer_parallelism` | Concurrency for directory download. |
 
 ---
 
