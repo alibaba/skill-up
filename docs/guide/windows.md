@@ -33,6 +33,24 @@ this order:
 If none is found the script judge fails with a clear error. Install
 [Git for Windows](https://git-scm.com/download/win) or set `SKILL_UP_BASH`.
 
+## OpenSandbox runtime on Windows
+
+The `opensandbox` runtime talks to a remote OpenSandbox server over HTTP and
+never spawns a host shell. Running `skill-up.exe` on native Windows against a
+remote sandbox works today: all host-side path handling already crosses the
+host→sandbox boundary through `filepath.ToSlash`, and the sandbox itself is a
+Linux container, so the script judge and any agent run inside it behave
+exactly as they do on Linux.
+
+OpenSandbox does **not** offer Windows-container sandboxes — its SDK and
+execution API (bash sessions, POSIX UID/GID) are Linux-only. "Windows sandbox"
+therefore means *a Windows host driving a Linux sandbox*, which is supported.
+
+For a Windows machine that needs the full agent workflow **without** a remote
+sandbox, run skill-up inside **WSL2**. WSL2 is a Linux environment, so both the
+`none` and `opensandbox` runtimes — including the agent Node/nvm bootstrap —
+work without limitation.
+
 ## Contributor tooling
 
 `make` is not available on Windows by default. Use the PowerShell scripts

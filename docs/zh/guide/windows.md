@@ -29,6 +29,22 @@ skill-up 原生支持 Windows。本页说明哪些功能可用、当前的限制
 若都找不到，script judge 会以明确的错误失败。请安装
 [Git for Windows](https://git-scm.com/download/win) 或设置 `SKILL_UP_BASH`。
 
+## Windows 上的 OpenSandbox runtime
+
+`opensandbox` runtime 通过 HTTP 与远程 OpenSandbox 服务器通信，不会启动任何
+宿主机 shell。在原生 Windows 上运行 `skill-up.exe` 连接远程 sandbox 当前即可
+工作：所有宿主机侧的路径处理都已通过 `filepath.ToSlash` 跨越「宿主机→sandbox」
+边界，而 sandbox 本身是 Linux 容器，因此其中的 script judge 和 agent 行为与在
+Linux 上完全一致。
+
+OpenSandbox **不**提供 Windows 容器 sandbox —— 其 SDK 和执行 API（bash 会话、
+POSIX UID/GID）仅支持 Linux。因此「Windows sandbox」指的是*由 Windows 宿主机
+驱动一个 Linux sandbox*，这一场景是支持的。
+
+如果某台 Windows 机器需要在**没有**远程 sandbox 的情况下使用完整的 agent
+工作流，请在 **WSL2** 中运行 skill-up。WSL2 是 Linux 环境，因此 `none` 与
+`opensandbox` 两种 runtime —— 包括 agent 的 Node/nvm 引导 —— 都能无限制工作。
+
 ## 贡献者工具
 
 Windows 默认没有 `make`。请改用 `scripts/windows/` 下的 PowerShell 脚本：
