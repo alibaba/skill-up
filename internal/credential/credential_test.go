@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -37,6 +38,21 @@ func TestMaskAPIKey(t *testing.T) {
 				t.Errorf("MaskAPIKey(%q) = %q, want %q", tt.key, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestDefaultConfPath(t *testing.T) {
+	t.Parallel()
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("cannot determine home directory: %v", err)
+	}
+
+	got := DefaultConfPath()
+	want := filepath.Join(home, ".skill-up", "credentials.yaml")
+	if got != want {
+		t.Errorf("DefaultConfPath() = %q, want %q", got, want)
 	}
 }
 

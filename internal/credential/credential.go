@@ -2,6 +2,7 @@ package credential
 
 import (
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/joho/godotenv"
@@ -21,6 +22,18 @@ const (
 )
 
 const apiKeyMaskLen = 4 // Length for API key masking
+
+// DefaultConfPath returns the default credentials file path,
+// ~/.skill-up/credentials.yaml. It returns "" when the home directory
+// cannot be determined, in which case the file layer is silently skipped.
+func DefaultConfPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+
+	return filepath.Join(home, ".skill-up", "credentials.yaml")
+}
 
 // Resolver resolves credentials for model providers.
 type Resolver struct {
