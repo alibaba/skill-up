@@ -14,8 +14,12 @@ on:
       - '*.md'
       - '.github/workflows/docs.yml'
 
+# Default the workflow token to read-only. Jobs that execute PR-supplied
+# code (build/test, e2e, lint) must never be able to push to the repo, even
+# on same-repository PRs where GITHUB_TOKEN would otherwise be writable.
+# Only the dedicated badge-commit job below opts back into contents: write.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -65,19 +69,47 @@ jobs:
           echo "color=$color" >> "$GITHUB_OUTPUT"
           echo "::notice::Total coverage: ${pct}% (${color})"
 
-      # Commit the refreshed badge back to main. PRs (including forks) only
-      # compute the number for visibility and never write to the repo.
-      - name: Commit updated coverage badge
+      # Hand the badge to the push-only update-coverage-badge job below via
+      # an artifact. PRs (including forks) still run the compute step above
+      # for visibility, but skip the upload so they can never trigger a push.
+      - name: Upload coverage badge artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v5
+        with:
+          name: coverage-badge
+          path: .github/badges/coverage.json
+          if-no-files-found: error
+          retention-days: 1
+
+  update-coverage-badge:
+    name: Commit coverage badge
+    needs: build
+    # Gate the entire job — not just individual steps — on push-to-main so
+    # the contents: write token below is never issued for pull_request runs.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download coverage badge artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: coverage-badge
+          path: .github/badges/
+
+      - name: Commit updated coverage badge
         run: |
           if git diff --quiet -- .github/badges/coverage.json; then
             echo "coverage badge unchanged, nothing to commit"
             exit 0
           fi
+          pct=$(awk -F'"' '/"message"/ {print $4}' .github/badges/coverage.json)
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .github/badges/coverage.json
-          git commit -m "chore(ci): update coverage badge to ${{ steps.coverage.outputs.pct }}% [skip ci]"
+          git commit -m "chore(ci): update coverage badge to ${pct} [skip ci]"
           git push
 
   e2e:
