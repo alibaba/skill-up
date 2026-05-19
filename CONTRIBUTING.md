@@ -20,6 +20,10 @@ We welcome bug reports, feature requests, documentation improvements, and code c
    # If you touched anything under e2e/ or internal/runner/, also run:
    make e2e
    ```
+   On Windows, `make` is unavailable by default — use the PowerShell scripts
+   in `scripts/windows/` (`verify.ps1`, `lint-tools.ps1`, `hooks.ps1`) and the
+   standard `go build` / `go test -race ./...` commands. See the
+   [Windows support guide](docs/guide/windows.md).
 5. Commit using **Conventional Commits** (enforced by `.githooks/commit-msg`). See the *Commit Message* section below for the allowed types and examples.
 6. Push your branch to your fork and open a Pull Request against `main`. Fill out the PR template, link any related issues, and describe the user-visible impact.
 7. Update [`CHANGELOG.md`](CHANGELOG.md) in the same PR if your change is user-visible.
