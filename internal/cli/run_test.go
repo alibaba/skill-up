@@ -1010,6 +1010,26 @@ func TestApplyRunConfigOverrides_RuntimeTypeRejectsInvalid(t *testing.T) {
 	}
 }
 
+func TestApplyRunConfigOverrides_RuntimeTypeNoneRejectsNetworkPolicy(t *testing.T) {
+	t.Parallel()
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String(runtimeFlagName, "", "")
+	if err := cmd.Flags().Set(runtimeFlagName, "none"); err != nil {
+		t.Fatalf("set runtime: %v", err)
+	}
+
+	cfg := config.DefaultEvalConfig()
+	cfg.Environment.Type = testRuntimeOpenSandbox
+	cfg.Environment.NetworkPolicy = "deny_all"
+	if err := applyRunConfigOverrides(cfg, cmd); err == nil {
+		t.Fatal("applyRunConfigOverrides: want error for --runtime none with network_policy, got nil")
+	}
+	if got := cfg.Environment.Type; got != testRuntimeOpenSandbox {
+		t.Fatalf("Environment.Type = %q, want unchanged after rejected override", got)
+	}
+}
+
 func TestApplyRunConfigOverrides_UserConfigKwargs(t *testing.T) {
 	t.Parallel()
 

@@ -512,8 +512,9 @@ func applyRuntimeKwargOverrides(evalCfg *config.EvalConfig, cmd *cobra.Command) 
 }
 
 // applyRuntimeTypeOverride applies the --runtime flag onto environment.type.
-// The value is validated here because config validation runs before CLI
-// overrides are applied, so an overridden value would otherwise bypass it.
+// The value and its compatibility with network_policy are validated here
+// because config validation runs before CLI overrides are applied, so an
+// overridden value would otherwise bypass validation.
 func applyRuntimeTypeOverride(evalCfg *config.EvalConfig, cmd *cobra.Command) error {
 	flag := cmd.Flags().Lookup(runtimeFlagName)
 	if flag == nil || !flag.Changed {
@@ -522,6 +523,9 @@ func applyRuntimeTypeOverride(evalCfg *config.EvalConfig, cmd *cobra.Command) er
 	value := strings.TrimSpace(flag.Value.String())
 	if !slices.Contains(validRuntimeTypes, value) {
 		return fmt.Errorf("invalid --runtime %q (supported: %s)", value, strings.Join(validRuntimeTypes, ", "))
+	}
+	if value == "none" && evalCfg.Environment.NetworkPolicy != "" {
+		return fmt.Errorf("--runtime none is incompatible with network_policy %q (none cannot enforce network isolation)", evalCfg.Environment.NetworkPolicy)
 	}
 	evalCfg.Environment.Type = value
 	return nil
