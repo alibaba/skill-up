@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -523,25 +525,31 @@ func TestOpenSandboxUploadDownloadFile(t *testing.T) {
 	}
 }
 
-func TestOpenSandboxUploadDirUploadsFilesConcurrently(t *testing.T) {
+func writeUploadDirFixture(t *testing.T, dir string) {
+	t.Helper()
+	for _, sub := range []string{"nested", "empty"} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), noneDirMode); err != nil {
+			t.Fatalf("create %s dir: %v", sub, err)
+		}
+	}
+	files := map[string]string{
+		"file.txt":         "content",
+		"nested/other.txt": "other",
+	}
+	for rel, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(rel)), []byte(content), noneFileMode); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+}
+
+func TestOpenSandboxUploadDirUploadsFilesInSingleBatch(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "nested"), noneDirMode); err != nil {
-		t.Fatalf("create nested dir: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(dir, "empty"), noneDirMode); err != nil {
-		t.Fatalf("create empty dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("content"), noneFileMode); err != nil {
-		t.Fatalf("write source: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "nested", "other.txt"), []byte("other"), noneFileMode); err != nil {
-		t.Fatalf("write nested source: %v", err)
-	}
+	writeUploadDirFixture(t, dir)
 	fake := &fakeOpenSandbox{
-		execResult:  &opensandbox.Execution{ExitCode: intPtr(0)},
-		uploadDelay: 20 * time.Millisecond,
+		execResult: &opensandbox.Execution{ExitCode: intPtr(0)},
 	}
-	rt := &OpenSandboxRuntime{workspace: "/workspace", sandbox: fake, fileParallelism: 2}
+	rt := &OpenSandboxRuntime{workspace: "/workspace", sandbox: fake}
 
 	if err := rt.UploadDir(context.Background(), dir, "dest"); err != nil {
 		t.Fatalf("UploadDir returned error: %v", err)
@@ -563,14 +571,38 @@ func TestOpenSandboxUploadDirUploadsFilesConcurrently(t *testing.T) {
 			t.Fatalf("UploadDir mkdir command = %q, want %s", fake.execs[0].Command, want)
 		}
 	}
-	if fake.maxConcurrentUploads < 2 {
-		t.Fatalf("max concurrent uploads = %d, want at least 2", fake.maxConcurrentUploads)
+	if fake.uploadFilesCalls != 1 {
+		t.Fatalf("UploadFiles calls = %d, want a single batched call", fake.uploadFilesCalls)
 	}
-	if fake.maxConcurrentUploads > 2 {
-		t.Fatalf("max concurrent uploads = %d, want no more than 2", fake.maxConcurrentUploads)
+	if len(fake.uploadFilesBatchSizes) != 1 || fake.uploadFilesBatchSizes[0] != 2 {
+		t.Fatalf("UploadFiles batch sizes = %#v, want one batch of 2 files", fake.uploadFilesBatchSizes)
 	}
 	if strings.Contains(fake.execs[0].Command, "tar") {
 		t.Fatalf("UploadDir exec command = %q, want no tar command", fake.execs[0].Command)
+	}
+}
+
+func TestOpenSandboxUploadDirChunksLargeTreeIntoBoundedBatches(t *testing.T) {
+	dir := t.TempDir()
+	const total = openSandboxUploadBatchSize + 2
+	for i := range total {
+		name := fmt.Sprintf("file-%03d.txt", i)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), noneFileMode); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	fake := &fakeOpenSandbox{execResult: &opensandbox.Execution{ExitCode: intPtr(0)}}
+	rt := &OpenSandboxRuntime{workspace: "/workspace", sandbox: fake}
+
+	if err := rt.UploadDir(context.Background(), dir, "dest"); err != nil {
+		t.Fatalf("UploadDir returned error: %v", err)
+	}
+	if len(fake.uploads) != total {
+		t.Fatalf("uploaded files = %d, want %d", len(fake.uploads), total)
+	}
+	wantBatches := []int{openSandboxUploadBatchSize, 2}
+	if !slices.Equal(fake.uploadFilesBatchSizes, wantBatches) {
+		t.Fatalf("UploadFiles batch sizes = %#v, want %#v", fake.uploadFilesBatchSizes, wantBatches)
 	}
 }
 
@@ -712,6 +744,8 @@ type fakeOpenSandbox struct {
 	uploadMu               sync.Mutex
 	activeUploads          int
 	maxConcurrentUploads   int
+	uploadFilesCalls       int
+	uploadFilesBatchSizes  []int
 	downloadDelay          time.Duration
 	downloadMu             sync.Mutex
 	activeDownloads        int
@@ -765,6 +799,19 @@ func (f *fakeOpenSandbox) UploadFile(_ context.Context, reader io.Reader, opts o
 	}
 	f.uploads[opts.Metadata.Path] = data
 	f.uploadMu.Unlock()
+	return nil
+}
+
+func (f *fakeOpenSandbox) UploadFiles(ctx context.Context, entries []opensandbox.UploadFileEntry) error {
+	f.uploadMu.Lock()
+	f.uploadFilesCalls++
+	f.uploadFilesBatchSizes = append(f.uploadFilesBatchSizes, len(entries))
+	f.uploadMu.Unlock()
+	for _, entry := range entries {
+		if err := f.UploadFile(ctx, entry.File, entry.Options); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

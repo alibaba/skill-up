@@ -216,7 +216,7 @@ environment:
 | `kwargs.base_url` | OpenSandbox 服务地址，也可用 `OPENSANDBOX_BASE_URL` 设置 |
 | `kwargs.extensions` | JSON 字符串形式的 OpenSandbox 扩展配置 |
 | `kwargs.request_timeout_seconds` | OpenSandbox SDK 请求超时时间 |
-| `kwargs.file_transfer_parallelism` | 目录上传/下载并发度 |
+| `kwargs.file_transfer_parallelism` | 目录下载并发度 |
 
 ---
 

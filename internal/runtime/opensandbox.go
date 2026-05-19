@@ -41,6 +41,11 @@ const (
 
 const openSandboxDefaultFileTransferParallelism = 8
 
+// openSandboxUploadBatchSize caps how many files a single UploadFiles request
+// carries. It bounds the open file descriptors held per batch so uploading a
+// large directory tree stays well under a typical ulimit -n.
+const openSandboxUploadBatchSize = 128
+
 type openSandboxClient interface {
 	ID() string
 	Close() error
@@ -48,7 +53,7 @@ type openSandboxClient interface {
 	Pause(ctx context.Context) error
 	Ping(ctx context.Context) error
 	CreateDirectory(ctx context.Context, remotePath string, mode int) error
-	UploadFile(ctx context.Context, reader io.Reader, opts opensandbox.UploadFileOptions) error
+	UploadFiles(ctx context.Context, entries []opensandbox.UploadFileEntry) error
 	DownloadFile(ctx context.Context, remotePath, rangeHeader string) (io.ReadCloser, error)
 	SearchFiles(ctx context.Context, dir, pattern string) ([]opensandbox.FileInfo, error)
 	RunCommandWithOpts(ctx context.Context, req opensandbox.RunCommandRequest, handlers *opensandbox.ExecutionHandlers) (*opensandbox.Execution, error)
@@ -247,32 +252,7 @@ func (r *OpenSandboxRuntime) UploadFile(ctx context.Context, sourcePath, targetP
 	if err := r.ensureDirectory(ctx, path.Dir(target), 755); err != nil {
 		return fmt.Errorf("failed to create target directory %s: %w", path.Dir(target), err)
 	}
-	return r.uploadRemoteFile(ctx, sourcePath, target)
-}
-
-func (r *OpenSandboxRuntime) uploadRemoteFile(ctx context.Context, sourcePath, target string) error {
-	file, err := os.Open(sourcePath)
-	if err != nil {
-		return fmt.Errorf("failed to open source file %s: %w", sourcePath, err)
-	}
-	defer func() {
-		_ = file.Close()
-	}()
-
-	info, err := file.Stat()
-	if err != nil {
-		return fmt.Errorf("failed to stat source file %s: %w", sourcePath, err)
-	}
-	if err := r.sandbox.UploadFile(ctx, file, opensandbox.UploadFileOptions{
-		FileName: filepath.Base(sourcePath),
-		Metadata: opensandbox.FileMetadata{
-			Path: target,
-			Mode: opensandbox.OctalMode(info.Mode()),
-		},
-	}); err != nil {
-		return fmt.Errorf("failed to upload file %s to %s: %w", sourcePath, target, err)
-	}
-	return nil
+	return r.uploadFiles(ctx, []uploadItem{{source: sourcePath, target: target}})
 }
 
 // UploadDir recursively uploads a directory tree from the host into the sandbox.
@@ -322,58 +302,58 @@ func collectUploadItems(sourceDir, targetRoot string) ([]uploadItem, []string, e
 }
 
 func (r *OpenSandboxRuntime) uploadFiles(ctx context.Context, items []uploadItem) error {
+	for start := 0; start < len(items); start += openSandboxUploadBatchSize {
+		end := min(start+openSandboxUploadBatchSize, len(items))
+		if err := r.uploadFileBatch(ctx, items[start:end]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// uploadFileBatch uploads one bounded batch of files in a single SDK request.
+// Batching keeps the number of simultaneously open file descriptors below
+// openSandboxUploadBatchSize so large directory trees do not exhaust ulimit -n.
+func (r *OpenSandboxRuntime) uploadFileBatch(ctx context.Context, items []uploadItem) error {
 	if len(items) == 0 {
 		return nil
 	}
-	parallelism := r.fileParallelism
-	if parallelism <= 0 {
-		parallelism = openSandboxDefaultFileTransferParallelism
-	}
-	parallelism = min(parallelism, len(items))
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	entries := make([]opensandbox.UploadFileEntry, 0, len(items))
+	closers := make([]io.Closer, 0, len(items))
+	defer func() {
+		for _, c := range closers {
+			_ = c.Close()
+		}
+	}()
 
-	jobs := make(chan uploadItem)
-	errCh := make(chan error, 1)
-	var wg sync.WaitGroup
-	for range parallelism {
-		wg.Go(func() {
-			for item := range jobs {
-				if err := r.uploadRemoteFile(ctx, item.source, item.target); err != nil {
-					select {
-					case errCh <- err:
-						cancel()
-					default:
-					}
-					return
-				}
-			}
+	for _, item := range items {
+		file, err := os.Open(item.source)
+		if err != nil {
+			return fmt.Errorf("failed to open source file %s: %w", item.source, err)
+		}
+		closers = append(closers, file)
+
+		info, err := file.Stat()
+		if err != nil {
+			return fmt.Errorf("failed to stat source file %s: %w", item.source, err)
+		}
+		entries = append(entries, opensandbox.UploadFileEntry{
+			File: file,
+			Options: opensandbox.UploadFileOptions{
+				FileName: filepath.Base(item.source),
+				Metadata: opensandbox.FileMetadata{
+					Path: item.target,
+					Mode: opensandbox.OctalMode(info.Mode()),
+				},
+			},
 		})
 	}
 
-	for _, item := range items {
-		select {
-		case <-ctx.Done():
-			close(jobs)
-			wg.Wait()
-			select {
-			case err := <-errCh:
-				return err
-			default:
-				return ctx.Err()
-			}
-		case jobs <- item:
-		}
+	if err := r.sandbox.UploadFiles(ctx, entries); err != nil {
+		return fmt.Errorf("failed to upload %d files: %w", len(entries), err)
 	}
-	close(jobs)
-	wg.Wait()
-	select {
-	case err := <-errCh:
-		return err
-	default:
-		return nil
-	}
+	return nil
 }
 
 // DownloadFile downloads a file from the sandbox to the host.
