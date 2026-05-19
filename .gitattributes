@@ -1,0 +1,16 @@
+# Keep line endings deterministic regardless of the contributor's OS or
+# core.autocrlf setting.
+
+# Go source must be LF: gofmt and the toolchain expect Unix line endings.
+*.go   text eol=lf
+
+# Shell scripts must be LF: a CRLF shebang line (e.g. "#!/bin/sh\r") makes
+# the kernel fail to locate the interpreter.
+*.sh   text eol=lf
+
+# PowerShell handles LF on every platform; keep it consistent with .editorconfig.
+*.ps1  text eol=lf
+
+# Windows batch scripts use CRLF.
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
