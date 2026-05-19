@@ -124,6 +124,12 @@ internal/           Private implementation — never import from outside the mod
 pkg/                Publicly importable APIs (semver-stable; change with care)
   skillup/          Embeddable evaluation API
   transcript/       Transcript parsing helpers
+skill-upper/        Distributable Agent Skill that guides AI agents through the
+                    skill-up eval workflow (scaffolding, running, interpreting).
+                    Contains SKILL.md (English), SKILL.zh.md (Chinese), assets/
+                    templates, references/, and its own evals/ suite. Not part of
+                    `go build`; consumed by Agent Engines (Cursor, Claude Code,
+                    Qoder, etc.) at runtime.
 e2e/                End-to-end tests (build-tag gated) + testdata/
 examples/           Example fixtures and debug inputs
 docs/               Design docs, user manuals, and the VitePress site
