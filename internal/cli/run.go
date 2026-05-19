@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -34,7 +35,11 @@ const (
 	maxParallelismOverride = 256
 	runtimeKwargFlagName   = "runtime-kwarg"
 	runtimeKwargAlias      = "rk"
+	runtimeFlagName        = "runtime"
 )
+
+// validRuntimeTypes lists the environment.type values accepted by --runtime.
+var validRuntimeTypes = []string{"none", "opensandbox"}
 
 type verbosityValue int
 
@@ -94,6 +99,7 @@ func init() {
 	runCmd.Flags().StringArray("format", nil, "Report format (json, junit, html). Can be specified multiple times. Default: json")
 	runCmd.Flags().String("output-dir", "", "Directory for report/artifact outputs. Default: <skill-name>-workspace alongside the skill directory")
 	runCmd.Flags().String("engine", "", "Override engine name")
+	runCmd.Flags().String(runtimeFlagName, "", "Override environment.type (none, opensandbox)")
 	runCmd.Flags().String("model", "", "Override model (accepts either a bare model name or provider/name)")
 	runCmd.Flags().String("api-key", "", "API key for the model provider")
 	runCmd.Flags().Int("parallelism", 0, "Override cases.parallelism. Must be between 1 and 256 when specified")
@@ -438,6 +444,9 @@ func applyRunConfigOverrides(evalCfg *config.EvalConfig, cmd *cobra.Command) err
 	if err := applyRuntimeKwargOverrides(evalCfg, cmd); err != nil {
 		return err
 	}
+	if err := applyRuntimeTypeOverride(evalCfg, cmd); err != nil {
+		return err
+	}
 	applyUserConfigKwargs(cmd.Context(), evalCfg)
 
 	parallelismFlag := cmd.Flags().Lookup("parallelism")
@@ -499,6 +508,26 @@ func applyRuntimeKwargOverrides(evalCfg *config.EvalConfig, cmd *cobra.Command) 
 		}
 		evalCfg.Environment.Kwargs[key] = val
 	}
+	return nil
+}
+
+// applyRuntimeTypeOverride applies the --runtime flag onto environment.type.
+// The value and its compatibility with network_policy are validated here
+// because config validation runs before CLI overrides are applied, so an
+// overridden value would otherwise bypass validation.
+func applyRuntimeTypeOverride(evalCfg *config.EvalConfig, cmd *cobra.Command) error {
+	flag := cmd.Flags().Lookup(runtimeFlagName)
+	if flag == nil || !flag.Changed {
+		return nil
+	}
+	value := strings.TrimSpace(flag.Value.String())
+	if !slices.Contains(validRuntimeTypes, value) {
+		return fmt.Errorf("invalid --runtime %q (supported: %s)", value, strings.Join(validRuntimeTypes, ", "))
+	}
+	if value == "none" && evalCfg.Environment.NetworkPolicy != "" {
+		return fmt.Errorf("--runtime none is incompatible with network_policy %q (none cannot enforce network isolation)", evalCfg.Environment.NetworkPolicy)
+	}
+	evalCfg.Environment.Type = value
 	return nil
 }
 
