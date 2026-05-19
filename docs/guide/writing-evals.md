@@ -69,7 +69,7 @@ environment:
 mcp:
   servers:
     - name: github                # MCP server name
-      mode: real                  # `real` is supported; `mocked` is reserved
+      mode: real                  # real / mocked
       transport: http             # http / stdio; inferred from endpoint/command if omitted
       config_ref: evals/fixtures/mcp/github.yaml  # Path to config file
 
@@ -113,7 +113,7 @@ report:
 
 ### MCP configuration
 
-MCP currently supports `mode: real`, which installs a real MCP server into Agents such as `claude_code`, `qodercli`, or `codex`. `mode: mocked` is reserved and currently raises an error to avoid silently shipping a non-mocked server.
+MCP supports `mode: real` and `mode: mocked`. `real` installs a real MCP server into Agents such as `claude_code`, `qodercli`, or `codex`; `mocked` makes `internal/mcp` generate a local stdio mock server that is then installed into the Agent like any other MCP server.
 
 HTTP MCP servers can be declared inline or pulled in via `config_ref`:
 
@@ -147,6 +147,34 @@ mcp:
       transport: stdio
       command: /usr/bin/python3
       args: [evals/fixtures/mcp/marker_server.py]
+```
+
+A mocked MCP server can use the built-in `filesystem` mock server directly:
+
+```yaml
+mcp:
+  servers:
+    - name: filesystem
+      mode: mocked
+```
+
+Or define tool responses through `config_ref`:
+
+```yaml
+mcp:
+  servers:
+    - name: project-mgmt
+      mode: mocked
+      config_ref: evals/fixtures/mcp/project-mgmt.yaml
+```
+
+```yaml
+tool_responses:
+  create_publish_plan_simple:
+    default:
+      id: 999
+      name: "{{params.name}}"
+      status: ONGOING
 ```
 
 Environment-variable references support both `${VAR}` and full-value `$VAR` forms; the variable name must match `[A-Za-z_][A-Za-z0-9_]*`. Variables listed in `required_env` are injected into the Agent process; full env-var references inside `headers` are also recorded by name so the Agent can pick the right transport mechanism when installing the MCP server.

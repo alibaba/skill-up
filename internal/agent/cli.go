@@ -35,10 +35,6 @@ func (a *CLIAgent) InstallMCP(ctx context.Context, rt Runtime, mcpCfg runtime.MC
 	workspace := rt.Workspace()
 
 	for _, server := range mcpCfg.Servers {
-		if server.Mode == "mocked" {
-			continue
-		}
-
 		data := struct {
 			Name      string
 			Transport string
