@@ -60,6 +60,25 @@ func TestGitCheckoutUploader_SwitchesToExistingBranch(t *testing.T) {
 	}
 }
 
+func TestGitCheckoutUploader_FailsForMissingBranchInCommittedRepo(t *testing.T) {
+	rt := &mockRuntime{workspace: t.TempDir()}
+	caseCfg := gitContextCase(&config.GitContext{Init: true, Checkout: "typo-branch"})
+
+	if err := (&gitInitUploader{}).Upload(context.Background(), rt, caseCfg, "", ""); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	// Give the repo a commit so HEAD is born; a missing branch is now a typo,
+	// not a fresh repo, and must fail instead of being silently created.
+	if res, err := rt.Exec(context.Background(), "git commit -q --allow-empty -m init",
+		runtime.ExecOptions{Cwd: rt.Workspace()}); err != nil || res.ExitCode != 0 {
+		t.Fatalf("seed commit: err=%v exit=%d stderr=%s", err, res.ExitCode, res.Stderr)
+	}
+
+	if err := (&gitCheckoutUploader{}).Upload(context.Background(), rt, caseCfg, "", ""); err == nil {
+		t.Fatal("expected error for missing branch in committed repo, got nil")
+	}
+}
+
 func TestGitCheckoutUploader_NoopWhenUnset(t *testing.T) {
 	rt := &mockRuntime{workspace: t.TempDir()}
 

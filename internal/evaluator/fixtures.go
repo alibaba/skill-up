@@ -158,11 +158,19 @@ func (g *gitCheckoutUploader) Upload(ctx context.Context, rt runtime.Runtime, ca
 		return err
 	}
 
-	// Switch to the branch if it exists, otherwise create it from the current
-	// HEAD. `git switch` is branch-only, so a same-named file can never make it
-	// silently revert a path instead of changing branch.
+	// Switch to the branch if it exists. On a freshly initialized repo with no
+	// commits (unborn HEAD) the branch cannot exist yet, so create it. But if
+	// the repo already has commits (e.g. from a repo_fixture with its own
+	// .git) and the branch is missing, fail loudly: silently creating it from
+	// the wrong HEAD would mask a typo and run branch-dependent evals against
+	// the wrong revision. `git switch` is branch-only, so a same-named file can
+	// never make it silently revert a path instead of changing branch.
 	quoted := shellquote.Quote(branch)
-	script := fmt.Sprintf("set -eu\ngit switch %s 2>/dev/null || git switch -c %s\n", quoted, quoted)
+	script := fmt.Sprintf("set -eu\n"+
+		"if git switch %[1]s 2>/dev/null; then :\n"+
+		"elif ! git rev-parse --verify --quiet HEAD >/dev/null 2>&1; then git switch -c %[1]s\n"+
+		"else echo \"branch %[1]s does not exist in the fixture repo\" >&2; exit 1\n"+
+		"fi\n", quoted)
 
 	result, err := rt.Exec(ctx, script, runtime.ExecOptions{
 		Cwd: rt.Workspace(),
@@ -252,11 +260,15 @@ type fixtureRegistry struct {
 
 func newFixtureRegistry() *fixtureRegistry {
 	return &fixtureRegistry{
+		// Order matters: the git repo must exist and be on the right branch
+		// before inline context.files are written, so those files land on the
+		// target branch as case overrides instead of being clobbered by (or
+		// aborting) the branch switch. apply_diff runs last, on top of both.
 		uploaders: []FixtureUploader{
 			&repoFixtureUploader{},
-			&contextFilesUploader{},
 			&gitInitUploader{},
 			&gitCheckoutUploader{},
+			&contextFilesUploader{},
 			&applyDiffUploader{},
 		},
 	}
