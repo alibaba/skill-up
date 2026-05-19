@@ -557,6 +557,12 @@ func (r *OpenSandboxRuntime) MergeEnv(env map[string]string) {
 	mergeIntoEnvBaseline(&r.cfg.Env, env)
 }
 
+// TargetGOOS reports "linux": OpenSandbox always executes commands inside a
+// Linux sandbox regardless of the host OS.
+func (r *OpenSandboxRuntime) TargetGOOS() string {
+	return "linux"
+}
+
 func (r *OpenSandboxRuntime) connectionConfig() opensandbox.ConnectionConfig {
 	return opensandbox.ConnectionConfig{
 		Domain:         r.baseURL,

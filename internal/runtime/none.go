@@ -8,12 +8,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/observability"
+	"github.com/alibaba/skill-up/internal/platform"
 )
 
 const (
@@ -178,9 +180,10 @@ func (r *NoneRuntime) Exec(ctx context.Context, command string, opts ExecOptions
 	defer span.End()
 	startTime := time.Now()
 
-	cmd := exec.CommandContext(ctx, "bash", "-c", command)
-	// Run in a dedicated process group and kill the whole group on
-	// cancellation, so a timed-out command's descendants do not outlive it.
+	cmd := platform.NewShellCmd(ctx, command)
+	// Run in a dedicated process group (POSIX only — no-op on Windows) and
+	// kill the whole group on cancellation, so a timed-out command's
+	// descendants do not outlive it.
 	configureProcessGroup(cmd)
 	// WaitDelay bounds how long Wait blocks after the context is cancelled:
 	// without it, a killed command whose grandchildren still hold the stdout
@@ -332,4 +335,10 @@ func (r *NoneRuntime) Workspace() string {
 // RequiresProcessSandbox keeps local agent execution constrained.
 func (r *NoneRuntime) RequiresProcessSandbox() bool {
 	return true
+}
+
+// TargetGOOS reports the host OS, since NoneRuntime executes commands directly
+// on the host.
+func (r *NoneRuntime) TargetGOOS() string {
+	return goruntime.GOOS
 }

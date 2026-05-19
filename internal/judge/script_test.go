@@ -11,26 +11,32 @@ import (
 	evalruntime "github.com/alibaba/skill-up/internal/runtime"
 )
 
-const osWindows = "windows"
-
-// scriptJudgeCase parametrises the common "write script → run judge →
-// assert status & evidence" flow so individual test bodies stay focused on
-// what's unique. Extracted to silence dupl on near-identical pass/fail cases.
+// scriptJudgeCase parametrises the common "write script → run judge → assert
+// status & evidence" flow so individual test bodies stay focused on what's
+// unique. Each case carries both a POSIX (.sh) and a Windows (.cmd) script
+// body; runScriptJudgeCase picks the one matching the host OS, since these
+// tests exercise the none runtime, which executes on the host.
 type scriptJudgeCase struct {
-	scriptName    string
-	scriptBody    string
+	posixScript   string
+	windowsScript string
 	input         Input
 	expectStatus  Status
 	evidenceMatch string
 }
 
+// script returns the upload name and body appropriate for the host OS.
+func (tc scriptJudgeCase) script() (name, body string) {
+	if runtime.GOOS == osWindows {
+		return "check.cmd", tc.windowsScript
+	}
+	return "check.sh", tc.posixScript
+}
+
 func runScriptJudgeCase(t *testing.T, tc scriptJudgeCase) {
 	t.Helper()
-	if runtime.GOOS == osWindows {
-		t.Skip("skipping on windows")
-	}
 	dir := t.TempDir()
-	script := writeScript(t, dir, tc.scriptName, tc.scriptBody)
+	name, body := tc.script()
+	script := writeScript(t, dir, name, body)
 	in := tc.input
 	if in.WorkspacePath == "" {
 		in.WorkspacePath = dir
@@ -50,8 +56,8 @@ func runScriptJudgeCase(t *testing.T, tc scriptJudgeCase) {
 
 func TestScriptJudge_Pass(t *testing.T) {
 	runScriptJudgeCase(t, scriptJudgeCase{
-		scriptName: "check.sh",
-		scriptBody: "#!/bin/sh\necho \"all checks passed\"\nexit 0\n",
+		posixScript:   "#!/bin/sh\necho \"all checks passed\"\nexit 0\n",
+		windowsScript: "@echo off\r\necho all checks passed\r\nexit /b 0\r\n",
 		input: Input{
 			FinalMessage: "test output",
 			ExitCode:     0,
@@ -63,8 +69,8 @@ func TestScriptJudge_Pass(t *testing.T) {
 
 func TestScriptJudge_Pass_EmptyStdout(t *testing.T) {
 	runScriptJudgeCase(t, scriptJudgeCase{
-		scriptName:    "check.sh",
-		scriptBody:    "#!/bin/sh\nexit 0\n",
+		posixScript:   "#!/bin/sh\nexit 0\n",
+		windowsScript: "@echo off\r\nexit /b 0\r\n",
 		expectStatus:  StatusPass,
 		evidenceMatch: "script passed",
 	})
@@ -76,8 +82,8 @@ func TestScriptJudge_Pass_EmptyStdout(t *testing.T) {
 
 func TestScriptJudge_Fail_NonZeroExit(t *testing.T) {
 	runScriptJudgeCase(t, scriptJudgeCase{
-		scriptName:    "check.sh",
-		scriptBody:    "#!/bin/sh\necho \"review quality below threshold\"\nexit 1\n",
+		posixScript:   "#!/bin/sh\necho \"review quality below threshold\"\nexit 1\n",
+		windowsScript: "@echo off\r\necho review quality below threshold\r\nexit /b 1\r\n",
 		expectStatus:  StatusFail,
 		evidenceMatch: "review quality below threshold",
 	})
@@ -85,8 +91,8 @@ func TestScriptJudge_Fail_NonZeroExit(t *testing.T) {
 
 func TestScriptJudge_Fail_NonZeroExit_EmptyStdout(t *testing.T) {
 	runScriptJudgeCase(t, scriptJudgeCase{
-		scriptName:    "check.sh",
-		scriptBody:    "#!/bin/sh\nexit 2\n",
+		posixScript:   "#!/bin/sh\nexit 2\n",
+		windowsScript: "@echo off\r\nexit /b 2\r\n",
 		expectStatus:  StatusFail,
 		evidenceMatch: "exited with code 2",
 	})
@@ -98,8 +104,8 @@ func TestScriptJudge_Fail_NonZeroExit_EmptyStdout(t *testing.T) {
 
 func TestScriptJudge_StderrCaptured(t *testing.T) {
 	runScriptJudgeCase(t, scriptJudgeCase{
-		scriptName:    "check.sh",
-		scriptBody:    "#!/bin/sh\necho \"passed\"\necho \"debug info here\" >&2\nexit 0\n",
+		posixScript:   "#!/bin/sh\necho \"passed\"\necho \"debug info here\" >&2\nexit 0\n",
+		windowsScript: "@echo off\r\necho passed\r\necho debug info here 1>&2\r\nexit /b 0\r\n",
 		expectStatus:  StatusPass,
 		evidenceMatch: "debug info here",
 	})
@@ -110,11 +116,14 @@ func TestScriptJudge_StderrCaptured(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestScriptJudge_Timeout(t *testing.T) {
-	if runtime.GOOS == osWindows {
-		t.Skip("skipping on windows")
-	}
 	dir := t.TempDir()
-	script := writeScript(t, dir, "slow.sh", "#!/bin/sh\nsleep 10\nexit 0\n")
+	name, body := "slow.sh", "#!/bin/sh\nsleep 10\nexit 0\n"
+	if runtime.GOOS == osWindows {
+		// ping -n 11 to a local address waits ~10s without needing console
+		// input (unlike `timeout`).
+		name, body = "slow.cmd", "@echo off\r\nping -n 11 127.0.0.1 >nul\r\nexit /b 0\r\n"
+	}
+	script := writeScript(t, dir, name, body)
 	j := &ScriptJudge{
 		ScriptPath:     script,
 		TimeoutSeconds: 1,
@@ -148,14 +157,16 @@ func TestScriptJudge_ScriptNotFound(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestScriptJudge_EnvVarsInjected(t *testing.T) {
-	if runtime.GOOS == osWindows {
-		t.Skip("skipping on windows")
-	}
 	dir := t.TempDir()
-	script := writeScript(t, dir, "check_env.sh", `#!/bin/sh
-echo "transcript=$EVAL_TRANSCRIPT_PATH final=$EVAL_FINAL_MESSAGE exit=$EVAL_EXIT_CODE"
-exit 0
-`)
+	name, body := "check_env.sh", "#!/bin/sh\n"+
+		"echo \"transcript=$EVAL_TRANSCRIPT_PATH final=$EVAL_FINAL_MESSAGE exit=$EVAL_EXIT_CODE\"\n"+
+		"exit 0\n"
+	if runtime.GOOS == osWindows {
+		name, body = "check_env.cmd", "@echo off\r\n"+
+			"echo transcript=%EVAL_TRANSCRIPT_PATH% final=%EVAL_FINAL_MESSAGE% exit=%EVAL_EXIT_CODE%\r\n"+
+			"exit /b 0\r\n"
+	}
+	script := writeScript(t, dir, name, body)
 	j := &ScriptJudge{
 		ScriptPath:     script,
 		TranscriptPath: filepath.Join(dir, "transcript.json"),
@@ -171,7 +182,7 @@ exit 0
 	assertNoError(t, err)
 	assertStatus(t, r, StatusPass)
 	ev := r.AssertionResults[0].Evidence
-	if !strings.Contains(ev, "transcript=/tmp/skill-up-judge-") {
+	if !strings.Contains(ev, "transcript=") || !strings.Contains(ev, "skill-up-judge-") {
 		t.Fatalf("EVAL_TRANSCRIPT_PATH not injected, evidence: %s", ev)
 	}
 	if !strings.Contains(ev, "final=hello world") {
@@ -183,9 +194,6 @@ exit 0
 }
 
 func TestScriptJudge_EvaluatesInRuntime(t *testing.T) {
-	if runtime.GOOS == osWindows {
-		t.Skip("skipping on windows")
-	}
 	dir := t.TempDir()
 	script := writeScript(t, dir, "check_runtime.sh", `#!/bin/sh
 echo "cwd=$(pwd) transcript=$EVAL_TRANSCRIPT_PATH final=$EVAL_FINAL_MESSAGE exit=$EVAL_EXIT_CODE"

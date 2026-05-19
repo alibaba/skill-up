@@ -616,15 +616,12 @@ func TestE2E_GradingJSON_SkipResult_Format(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestE2E_ScriptJudge_FullPipeline(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("skipping script test on windows")
-	}
-
 	dir := t.TempDir()
 
 	// Create the evaluation script: check whether EVAL_FINAL_MESSAGE
-	// contains "bug".
-	scriptContent := `#!/bin/sh
+	// contains "bug". The script judge dispatches by extension, so the host
+	// OS determines whether a POSIX shell or a Windows batch script is used.
+	scriptName, scriptContent := "eval_check.sh", `#!/bin/sh
 # Evaluation script: check whether the agent output identifies the bug.
 # Reads the EVAL_FINAL_MESSAGE env var (injected by ScriptJudge).
 if echo "$EVAL_FINAL_MESSAGE" | grep -q "bug"; then
@@ -635,7 +632,18 @@ else
   exit 1
 fi
 `
-	scriptPath := writeScript(t, dir, "eval_check.sh", scriptContent)
+	if runtime.GOOS == osWindows {
+		scriptName, scriptContent = "eval_check.cmd", "@echo off\r\n"+
+			"echo %EVAL_FINAL_MESSAGE% | findstr /C:\"bug\" >nul\r\n"+
+			"if %errorlevel%==0 (\r\n"+
+			"  echo Agent correctly identified the bug\r\n"+
+			"  exit /b 0\r\n"+
+			") else (\r\n"+
+			"  echo Agent failed to identify the bug\r\n"+
+			"  exit /b 1\r\n"+
+			")\r\n"
+	}
+	scriptPath := writeScript(t, dir, scriptName, scriptContent)
 
 	expectCfg := &config.Expect{}
 

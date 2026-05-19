@@ -4,13 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"path"
 	"strconv"
 	"strings"
 	"time"
 
 	evalruntime "github.com/alibaba/skill-up/internal/runtime"
-	"github.com/alibaba/skill-up/internal/shellquote"
 )
 
 // DefaultScriptTimeout is the default timeout for script execution (30s).
@@ -76,24 +74,30 @@ func (j *ScriptJudge) runtime(ctx context.Context) (evalruntime.Runtime, func(),
 }
 
 func (j *ScriptJudge) evaluateInRuntime(ctx context.Context, rt evalruntime.Runtime, in Input, timeout time.Duration) (*Result, error) {
-	remoteDir := path.Join("/tmp", fmt.Sprintf("skill-up-judge-%d", time.Now().UnixNano()))
-	remoteScript := path.Join(remoteDir, "script")
+	targetGOOS := evalruntime.TargetGOOS(rt)
+	plan, err := planScript(j.ScriptPath, targetGOOS)
+	if err != nil {
+		return nil, fmt.Errorf("script execution failed: %w", err)
+	}
+
+	remoteDir := judgeTempDir(targetGOOS)
+	remoteScript := joinForGOOS(targetGOOS, remoteDir, plan.uploadName)
 	if err := rt.UploadFile(ctx, j.ScriptPath, remoteScript); err != nil {
 		return nil, fmt.Errorf("script execution failed: upload script judge: %w", err)
 	}
 	defer func() {
-		_, _ = rt.Exec(context.WithoutCancel(ctx), "rm -rf "+shellquote.Quote(remoteDir), evalruntime.ExecOptions{})
+		_, _ = rt.Exec(context.WithoutCancel(ctx), removeDirCommand(targetGOOS, remoteDir), evalruntime.ExecOptions{})
 	}()
 
 	remoteTranscript := ""
 	if j.TranscriptPath != "" {
-		remoteTranscript = path.Join(remoteDir, "transcript.json")
+		remoteTranscript = joinForGOOS(targetGOOS, remoteDir, "transcript.json")
 		if err := rt.UploadFile(ctx, j.TranscriptPath, remoteTranscript); err != nil {
 			return nil, fmt.Errorf("script execution failed: upload script judge transcript: %w", err)
 		}
 	}
 
-	command := "chmod 700 " + shellquote.Quote(remoteScript) + " && " + shellquote.Quote(remoteScript)
+	command := plan.command(remoteScript)
 	cwd := in.WorkspacePath
 	if cwd == "" {
 		cwd = rt.Workspace()
