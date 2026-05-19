@@ -48,7 +48,6 @@ type openSandboxClient interface {
 	Pause(ctx context.Context) error
 	Ping(ctx context.Context) error
 	CreateDirectory(ctx context.Context, remotePath string, mode int) error
-	UploadFile(ctx context.Context, reader io.Reader, opts opensandbox.UploadFileOptions) error
 	UploadFiles(ctx context.Context, entries []opensandbox.UploadFileEntry) error
 	DownloadFile(ctx context.Context, remotePath, rangeHeader string) (io.ReadCloser, error)
 	SearchFiles(ctx context.Context, dir, pattern string) ([]opensandbox.FileInfo, error)
@@ -248,32 +247,7 @@ func (r *OpenSandboxRuntime) UploadFile(ctx context.Context, sourcePath, targetP
 	if err := r.ensureDirectory(ctx, path.Dir(target), 755); err != nil {
 		return fmt.Errorf("failed to create target directory %s: %w", path.Dir(target), err)
 	}
-	return r.uploadRemoteFile(ctx, sourcePath, target)
-}
-
-func (r *OpenSandboxRuntime) uploadRemoteFile(ctx context.Context, sourcePath, target string) error {
-	file, err := os.Open(sourcePath)
-	if err != nil {
-		return fmt.Errorf("failed to open source file %s: %w", sourcePath, err)
-	}
-	defer func() {
-		_ = file.Close()
-	}()
-
-	info, err := file.Stat()
-	if err != nil {
-		return fmt.Errorf("failed to stat source file %s: %w", sourcePath, err)
-	}
-	if err := r.sandbox.UploadFile(ctx, file, opensandbox.UploadFileOptions{
-		FileName: filepath.Base(sourcePath),
-		Metadata: opensandbox.FileMetadata{
-			Path: target,
-			Mode: opensandbox.OctalMode(info.Mode()),
-		},
-	}); err != nil {
-		return fmt.Errorf("failed to upload file %s to %s: %w", sourcePath, target, err)
-	}
-	return nil
+	return r.uploadFiles(ctx, []uploadItem{{source: sourcePath, target: target}})
 }
 
 // UploadDir recursively uploads a directory tree from the host into the sandbox.
