@@ -92,7 +92,7 @@ func init() {
 	runCmd.Flags().StringArray("include-case-name", nil, "Include cases matching glob pattern (can be specified multiple times)")
 	runCmd.Flags().StringArray("exclude-case-name", nil, "Exclude cases matching glob pattern (can be specified multiple times)")
 	runCmd.Flags().StringArray("format", nil, "Report format (json, junit, html). Can be specified multiple times. Default: json")
-	runCmd.Flags().String("output-dir", "", "Directory for report/artifact outputs. Default: <skill-dir>/<skill-name>-workspace")
+	runCmd.Flags().String("output-dir", "", "Directory for report/artifact outputs. Default: <skill-name>-workspace alongside the skill directory")
 	runCmd.Flags().String("engine", "", "Override engine name")
 	runCmd.Flags().String("model", "", "Override model (accepts either a bare model name or provider/name)")
 	runCmd.Flags().String("api-key", "", "API key for the model provider")

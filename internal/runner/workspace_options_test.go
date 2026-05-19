@@ -118,6 +118,32 @@ func TestRunner_Evaluate_DefaultsZeroIterationToOne(t *testing.T) {
 	}
 }
 
+func TestRunner_Evaluate_DefaultWorkspaceIsSiblingOfSkillDir(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	skillDir := filepath.Join(root, "my-skill")
+	evalsDir := filepath.Join(skillDir, "evals")
+	if err := os.MkdirAll(evalsDir, 0o755); err != nil {
+		t.Fatalf("mkdir evals: %v", err)
+	}
+
+	loader := config.NewLoader(filepath.Join(evalsDir, "eval.yaml"))
+	r := NewRunner(&config.EvalConfig{
+		Environment: config.Environment{Type: "none"},
+		Cases:       config.CasesConfig{Parallelism: 1},
+	}, loader, nil, credential.AgentInitParams{})
+
+	if _, err := r.Evaluate(context.Background(), []*config.CaseConfig{{ID: "case-1", Title: "Case 1"}}, &runnerTestAgent{}, EvaluateOptions{}); err != nil {
+		t.Fatalf("Evaluate failed: %v", err)
+	}
+
+	want := filepath.Join(root, "my-skill-workspace")
+	if got := r.workspace.RootDir; got != want {
+		t.Fatalf("workspace RootDir = %q, want %q (sibling of skill dir, not inside it)", got, want)
+	}
+}
+
 func TestRunner_Evaluate_RunsMultipleIterations(t *testing.T) {
 	evalDir := t.TempDir()
 	evalsDir := filepath.Join(evalDir, "evals")
