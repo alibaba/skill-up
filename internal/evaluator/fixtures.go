@@ -146,6 +146,51 @@ func (g *gitInitUploader) Upload(ctx context.Context, rt runtime.Runtime, caseCf
 	return nil
 }
 
+type gitCheckoutUploader struct{}
+
+func (g *gitCheckoutUploader) Upload(ctx context.Context, rt runtime.Runtime, caseCfg *config.CaseConfig, _ string, _ string) error {
+	if caseCfg.Context.Git == nil || caseCfg.Context.Git.Checkout == "" {
+		return nil
+	}
+
+	branch := caseCfg.Context.Git.Checkout
+	if err := validateGitBranch(branch); err != nil {
+		return err
+	}
+
+	// Switch to the branch if it exists, otherwise create it from the current
+	// HEAD. `git switch` is branch-only, so a same-named file can never make it
+	// silently revert a path instead of changing branch.
+	quoted := shellquote.Quote(branch)
+	script := fmt.Sprintf("set -eu\ngit switch %s 2>/dev/null || git switch -c %s\n", quoted, quoted)
+
+	result, err := rt.Exec(ctx, script, runtime.ExecOptions{
+		Cwd: rt.Workspace(),
+	})
+	if err != nil {
+		return fmt.Errorf("git checkout %q failed: %w", branch, err)
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("git checkout %q exited with code %d: %s", branch, result.ExitCode, result.Stderr)
+	}
+
+	logging.DebugContextf(ctx, "Checked out git branch %s", branch)
+	return nil
+}
+
+// validateGitBranch rejects branch names that would be unsafe to pass to
+// `git switch`, even after shell quoting (control characters git itself
+// rejects, or a leading `-` that git would treat as an option).
+func validateGitBranch(branch string) error {
+	if strings.ContainsAny(branch, "\n\r\x00\t ") {
+		return fmt.Errorf("git checkout branch %q contains whitespace or control characters", branch)
+	}
+	if strings.HasPrefix(branch, "-") {
+		return fmt.Errorf("git checkout branch %q must not start with '-'", branch)
+	}
+	return nil
+}
+
 type applyDiffUploader struct{}
 
 func (a *applyDiffUploader) Upload(ctx context.Context, rt runtime.Runtime, caseCfg *config.CaseConfig, skillDir, fixtureBaseDir string) error {
@@ -211,6 +256,7 @@ func newFixtureRegistry() *fixtureRegistry {
 			&repoFixtureUploader{},
 			&contextFilesUploader{},
 			&gitInitUploader{},
+			&gitCheckoutUploader{},
 			&applyDiffUploader{},
 		},
 	}
