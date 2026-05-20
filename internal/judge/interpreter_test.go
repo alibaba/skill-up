@@ -101,10 +101,17 @@ func TestShebangExtension(t *testing.T) {
 	}{
 		{"posix sh", "#!/bin/sh\necho hi\n", ".sh"},
 		{"env bash", "#!/usr/bin/env bash\necho hi\n", ".sh"},
+		{"env -S bash", "#!/usr/bin/env -S bash -eu\necho hi\n", ".sh"},
 		{"pwsh", "#!/usr/bin/env pwsh\nWrite-Host hi\n", ".ps1"},
+		{"powershell direct", "#!/usr/local/bin/powershell\nWrite-Host hi\n", ".ps1"},
 		{"no shebang", "echo hi\n", ""},
 		{"empty", "", ""},
-		{"unrecognized", "#!/usr/bin/env ruby\nputs 1\n", ""},
+		{"unrecognized ruby", "#!/usr/bin/env ruby\nputs 1\n", ""},
+		// fish, ksh-suffixed names etc. must not be misclassified as `.sh`
+		// just because their name contains the letters "sh".
+		{"fish not sh", "#!/usr/bin/env fish\necho hi\n", ""},
+		{"python not sh", "#!/usr/bin/env python3\nprint(1)\n", ""},
+		{"swish not sh", "#!/usr/local/bin/swish\n", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -118,6 +118,13 @@ func removeDirCommand(targetGOOS, dir string) string {
 	return "rm -rf " + shellquote.QuotePOSIX(dir)
 }
 
+// shebangPOSIXShells lists interpreter basenames mapped to a POSIX `.sh`
+// dispatch. Matching is exact so `fish`, `ruby`, `python` etc. do not get
+// misclassified just because their name contains the letters "sh".
+var shebangPOSIXShells = map[string]bool{
+	"sh": true, "bash": true, "dash": true, "ksh": true, "zsh": true, "ash": true,
+}
+
 // shebangExtension reads the first line of scriptPath and maps a recognized
 // shebang to a synthetic file extension. It returns "" when the shebang is
 // missing or unrecognized.
@@ -136,12 +143,39 @@ func shebangExtension(scriptPath string) string {
 	if !strings.HasPrefix(line, "#!") {
 		return ""
 	}
-	switch {
-	case strings.Contains(line, "pwsh"), strings.Contains(line, "powershell"):
-		return ".ps1"
-	case strings.Contains(line, "sh"): // sh, bash, dash, zsh, ...
-		return ".sh"
-	default:
+	interp := parseShebangInterpreter(line[2:])
+	if interp == "" {
 		return ""
 	}
+	switch interp {
+	case "pwsh", "powershell":
+		return ".ps1"
+	}
+	if shebangPOSIXShells[interp] {
+		return ".sh"
+	}
+	return ""
+}
+
+// parseShebangInterpreter extracts the interpreter basename from the body of a
+// shebang line. It understands both direct paths and the `/usr/bin/env <name>`
+// form so e.g. `#!/usr/bin/env bash` and `#!/bin/sh` both resolve to a single
+// token. Returns "" when the line has no usable interpreter.
+func parseShebangInterpreter(body string) string {
+	fields := strings.Fields(body)
+	if len(fields) == 0 {
+		return ""
+	}
+	first := filepath.Base(fields[0])
+	if first == "env" && len(fields) >= 2 {
+		// Skip env's own option flags (e.g. `env -S bash`).
+		for _, f := range fields[1:] {
+			if strings.HasPrefix(f, "-") {
+				continue
+			}
+			return filepath.Base(f)
+		}
+		return ""
+	}
+	return first
 }

@@ -10,9 +10,14 @@ func QuotePOSIX(s string) string {
 
 // windowsQuoteTriggers are the characters that force QuoteWindows to wrap its
 // argument: argv-splitting whitespace and quotes, plus the cmd.exe
-// metacharacters, so a value remains intact whether the consuming shell is
-// CommandLineToArgvW or cmd /c.
-const windowsQuoteTriggers = " \t\n\v\"&|<>^"
+// metacharacters and grouping characters, so a value remains intact whether
+// the consuming shell is CommandLineToArgvW or cmd /c.
+//
+// `%` is included so values containing `%VAR%`-shaped tokens are at least
+// flagged via quoting; note that cmd expands `%VAR%` even inside double
+// quotes and there is no reliable command-line escape for it, so callers
+// that route through cmd must avoid percent signs in user-controlled paths.
+const windowsQuoteTriggers = " \t\n\v\"&|<>^()%"
 
 // QuoteWindows returns a representation of s safe to pass as a single argument
 // on a Windows command line, following the CommandLineToArgvW parsing rules:
