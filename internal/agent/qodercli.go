@@ -126,8 +126,11 @@ func (a *QoderCLIAgent) buildSessionResult(ctx context.Context, rt Runtime, opts
 	var finalMsg string
 	var inputTokens, outputTokens int
 
+	cleanupCtx, cleanupCancel := sessionCleanupContext(ctx)
+	defer cleanupCancel()
+
 	generatedFiles := []string{}
-	if artifactPath, err := persistSessionArtifact(ctx, rt, opts.ArtifactDir, "stdout.txt", result.Stdout); err == nil {
+	if artifactPath, err := persistSessionArtifact(cleanupCtx, rt, opts.ArtifactDir, "stdout.txt", result.Stdout); err == nil {
 		if opts.ArtifactDir == "" {
 			generatedFiles = append(generatedFiles, artifactPath)
 		}
@@ -135,7 +138,7 @@ func (a *QoderCLIAgent) buildSessionResult(ctx context.Context, rt Runtime, opts
 
 	var cleanupSession func()
 	generatedFiles, cleanupSession = withDownloadedSession(
-		ctx, rt, opts.ArtifactDir, findQoderSessionFile(ctx, rt), generatedFiles,
+		cleanupCtx, rt, opts.ArtifactDir, findQoderSessionFile(cleanupCtx, rt), generatedFiles,
 		func(artifactPath string) {
 			t, f, inTok, outTok := parseSessionFile(artifactPath)
 			if len(t) > 0 {

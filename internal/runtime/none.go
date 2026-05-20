@@ -195,12 +195,22 @@ func (r *NoneRuntime) Exec(ctx context.Context, command string, opts ExecOptions
 	span.SetAttributes(attribute.Int("process.exit_code", result.ExitCode))
 	observability.RecordRuntimeExec(ctx, result.ExitCode, time.Since(startTime).Milliseconds())
 
-	if result.ExitCode != 0 {
+	switch {
+	case result.ExitCode == -1 && ctx.Err() != nil:
+		// Process was killed because the parent context was canceled or
+		// hit its deadline. -1 is a sentinel, not a real exit code, and
+		// attaching the full command source ("exited with code -1: set
+		// -e ...") misleads readers into chasing a script-level failure.
+		logging.ErrorContextf(ctx, "command killed by context (%v); command: %s", ctx.Err(), maskCommand(command))
+		if result.Stderr != "" {
+			logNonZeroStderr(ctx, result.ExitCode, result.Stderr)
+		}
+	case result.ExitCode != 0:
 		logNonZeroExit(ctx, result.ExitCode, command)
 		if result.Stderr != "" {
 			logNonZeroStderr(ctx, result.ExitCode, result.Stderr)
 		}
-	} else if result.Stderr != "" {
+	case result.Stderr != "":
 		logging.WarnContextf(ctx, "stderr: %s", result.Stderr)
 	}
 

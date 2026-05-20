@@ -500,18 +500,33 @@ func (r *OpenSandboxRuntime) Exec(ctx context.Context, command string, opts Exec
 
 	exec, err := r.sandbox.RunCommandWithOpts(ctx, req, nil)
 	result := executionToResult(exec)
-	if err != nil && result.ExitCode == 0 {
+	// Distinguish two failure modes that previously both surfaced as exit
+	// code -1:
+	//   (a) sandbox SDK call itself errored, or returned nil — the remote
+	//       command may never have run, and there is no real exit code to
+	//       report. Avoid the misleading "command exited with code -1: <full
+	//       script>" log; record this as a sandbox-side failure instead.
+	//   (b) remote command ran and returned a non-zero exit code — log as
+	//       before.
+	sandboxCallFailed := err != nil || exec == nil
+	if sandboxCallFailed && result.ExitCode == 0 {
 		result.ExitCode = -1
 	}
 	span.SetAttributes(attribute.Int("process.exit_code", result.ExitCode))
 	observability.RecordRuntimeExec(ctx, result.ExitCode, time.Since(startTime).Milliseconds())
 
-	if result.ExitCode != 0 {
+	switch {
+	case sandboxCallFailed:
+		logging.ErrorContextf(ctx, "opensandbox SDK call failed before a remote exit code was reported (err=%v); command: %s", err, maskCommand(command))
+		if result.Stderr != "" {
+			logNonZeroStderr(ctx, result.ExitCode, result.Stderr)
+		}
+	case result.ExitCode != 0:
 		logNonZeroExit(ctx, result.ExitCode, command)
 		if result.Stderr != "" {
 			logNonZeroStderr(ctx, result.ExitCode, result.Stderr)
 		}
-	} else if result.Stderr != "" {
+	case result.Stderr != "":
 		logging.WarnContextf(ctx, "stderr: %s", result.Stderr)
 	}
 	if err != nil {
