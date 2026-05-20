@@ -27,7 +27,7 @@ var knownWindowsBashPaths = []string{
 // then well-known Git Bash locations.
 func DiscoverBash() (string, bool) {
 	if v := os.Getenv(BashEnvOverride); v != "" {
-		if isRegularFile(v) {
+		if isRegularFile(v) && !isWSLBash(v) {
 			return v, true
 		}
 	}
