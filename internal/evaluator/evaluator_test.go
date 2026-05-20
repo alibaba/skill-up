@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -2491,7 +2492,7 @@ func TestContextFilesUploader_RejectsUnsafePaths(t *testing.T) {
 	}{
 		{name: "empty", path: ""},
 		{name: "workspace root", path: "."},
-		{name: "absolute", path: filepath.Join(string(filepath.Separator), "tmp", "secret.txt")},
+		{name: "absolute", path: absoluteSecretPath()},
 		{name: "parent traversal", path: "../secret.txt"},
 		{name: "nested parent traversal", path: "fixtures/../../secret.txt"},
 	}
@@ -2709,4 +2710,14 @@ func TestGitInitUploader_InitWithRemotes(t *testing.T) {
 	if !strings.Contains(result.Stdout, "https://github.com/example/repo.git") {
 		t.Fatalf("expected remote URL in output, got %s", result.Stdout)
 	}
+}
+
+// absoluteSecretPath returns a path that filepath.IsAbs reports as absolute on
+// the host OS. On Windows that requires a drive letter; `\tmp\secret.txt`
+// alone is considered relative.
+func absoluteSecretPath() string {
+	if goruntime.GOOS == "windows" {
+		return `C:\tmp\secret.txt`
+	}
+	return "/tmp/secret.txt"
 }

@@ -4,13 +4,27 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"testing"
 
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
 
+// skipIfNoPOSIXShell skips tests that rely on a POSIX shell at the host
+// (RunCmd/InstallSkillCmd/InstallMCPCmd templates baked with bash builtins,
+// `&&` pipelines, `$VAR` expansion, etc.). On Windows skill-up's none runtime
+// uses cmd.exe, which can't interpret those constructs — agent execution on
+// native Windows is intentionally out of scope; users go through WSL2.
+func skipIfNoPOSIXShell(t *testing.T) {
+	t.Helper()
+	if goruntime.GOOS == "windows" {
+		t.Skip("POSIX-shell agent template; native Windows agent execution is unsupported (use WSL2)")
+	}
+}
+
 func TestCLIAgent_Run(t *testing.T) {
+	skipIfNoPOSIXShell(t)
 	t.Parallel()
 
 	// Use NoneRuntime as the test runtime
@@ -41,6 +55,7 @@ func TestCLIAgent_Run(t *testing.T) {
 }
 
 func TestCLIAgent_RunExitError(t *testing.T) {
+	skipIfNoPOSIXShell(t)
 	t.Parallel()
 
 	rt := &runtime.NoneRuntime{}
@@ -172,6 +187,7 @@ func TestCLIAgent_InstallSkillDefault(t *testing.T) {
 }
 
 func TestCLIAgent_InstallSkillWithCmd(t *testing.T) {
+	skipIfNoPOSIXShell(t)
 	t.Parallel()
 
 	rt := &runtime.NoneRuntime{}
@@ -259,6 +275,7 @@ func TestCLIAgent_InstallMCPConfiguredServersRequireInstallCommand(t *testing.T)
 }
 
 func TestCLIAgent_InstallMCPUsesResolvedEndpointConfigRefAndEnv(t *testing.T) {
+	skipIfNoPOSIXShell(t)
 	t.Parallel()
 
 	rt := &runtime.NoneRuntime{}

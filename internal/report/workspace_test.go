@@ -46,21 +46,26 @@ func TestNewIterationWorkspace_DefaultAndInvalidIteration(t *testing.T) {
 
 func TestIterationWorkspace_Paths(t *testing.T) {
 	t.Parallel()
-	ws, err := NewIterationWorkspace("/tmp/test-workspace", "test-skill", 1)
+	// Use filepath.Join so the test root and the values produced by
+	// IterationDir/CaseDir/etc. share the host's path separator.
+	root := filepath.Join(string(filepath.Separator), "tmp", "test-workspace")
+	iter := filepath.Join(root, "iteration-1")
+	caseDir := filepath.Join(iter, "case-1")
+	ws, err := NewIterationWorkspace(root, "test-skill", 1)
 	if err != nil {
 		t.Fatalf("NewIterationWorkspace error: %v", err)
 	}
 
-	if ws.IterationDir() != "/tmp/test-workspace/iteration-1" {
+	if ws.IterationDir() != iter {
 		t.Errorf("unexpected iteration dir: %s", ws.IterationDir())
 	}
-	if ws.CaseDir("case-1") != "/tmp/test-workspace/iteration-1/case-1" {
+	if ws.CaseDir("case-1") != caseDir {
 		t.Errorf("unexpected case dir: %s", ws.CaseDir("case-1"))
 	}
-	if ws.WithSkillDir("case-1") != "/tmp/test-workspace/iteration-1/case-1/with_skill" {
+	if ws.WithSkillDir("case-1") != filepath.Join(caseDir, "with_skill") {
 		t.Errorf("unexpected with_skill dir: %s", ws.WithSkillDir("case-1"))
 	}
-	if ws.WithoutSkillDir("case-1") != "/tmp/test-workspace/iteration-1/case-1/without_skill" {
+	if ws.WithoutSkillDir("case-1") != filepath.Join(caseDir, "without_skill") {
 		t.Errorf("unexpected without_skill dir: %s", ws.WithoutSkillDir("case-1"))
 	}
 }

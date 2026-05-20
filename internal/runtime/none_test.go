@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -224,7 +225,13 @@ func TestNoneRuntime_ExecReturnsContextErrorOnTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	result, err := rt.Exec(ctx, "sleep 1", ExecOptions{})
+	// `sleep 1` is POSIX; on Windows cmd.exe falls back to a long ping
+	// so the process actually outlives the deadline and gets killed.
+	sleepCmd := "sleep 1"
+	if goruntime.GOOS == "windows" {
+		sleepCmd = "ping -n 3 127.0.0.1 > nul"
+	}
+	result, err := rt.Exec(ctx, sleepCmd, ExecOptions{})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected context deadline exceeded, got %v", err)
 	}
@@ -438,6 +445,15 @@ func TestNoneRuntime_ExecWithEnv(t *testing.T) {
 // shell. If the runtime pre-expanded $CUSTOM_BIN / $PATH the child would
 // see "/agent/bin:..." instead of the literal "$CUSTOM_BIN:$PATH".
 func TestNoneRuntime_ForwardsEnvLiterally(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		// printf '%s' "$VAR" is POSIX-shell syntax; cmd.exe (Windows host
+		// shell when no bash is discovered) has no printf and no $VAR
+		// expansion. The behavioural contract (env values forwarded
+		// literally) is the same on Windows, but this specific assertion
+		// can't be expressed there.
+		t.Skip("POSIX printf/$VAR assertion; no Windows equivalent")
+	}
+
 	rt := &NoneRuntime{cfg: Config{
 		Env: map[string]string{
 			"CUSTOM_BIN":      "/agent/bin",
