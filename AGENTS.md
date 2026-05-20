@@ -126,7 +126,7 @@ pkg/                Publicly importable APIs (semver-stable; change with care)
   transcript/       Transcript parsing helpers
 skills/skill-upper/ Distributable Agent Skill that guides AI agents through the
                     skill-up eval workflow (scaffolding, running, interpreting).
-                    Contains SKILL.md (English), SKILL.zh.md (Chinese), assets/
+                    Contains SKILL.md, assets/
                     templates, references/, and its own evals/ suite. Not part of
                     `go build`; consumed by Agent Engines (Cursor, Claude Code,
                     Qoder, etc.) at runtime.
