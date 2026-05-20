@@ -673,7 +673,7 @@ func (r *OpenSandboxRuntime) ensureDirectory(ctx context.Context, dir string, mo
 	if err == nil {
 		return nil
 	}
-	quoted := shellquote.Quote(dir)
+	quoted := shellquote.QuotePOSIX(dir)
 	result, execErr := r.runCommand(ctx, "/", "mkdir -p "+quoted+" && test -d "+quoted+" && test -w "+quoted, 30)
 	if execErr != nil {
 		return err
@@ -696,7 +696,7 @@ func (r *OpenSandboxRuntime) ensureDirectories(ctx context.Context, dirs []strin
 	command.WriteString("mkdir -p")
 	for _, dir := range dirs {
 		command.WriteByte(' ')
-		command.WriteString(shellquote.Quote(dir))
+		command.WriteString(shellquote.QuotePOSIX(dir))
 	}
 	result, err := r.runCommand(ctx, "/", command.String(), 30)
 	if err != nil {

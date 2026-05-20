@@ -129,7 +129,7 @@ func (g *gitInitUploader) Upload(ctx context.Context, rt runtime.Runtime, caseCf
 			return err
 		}
 		fmt.Fprintf(&script, "git remote add %s %s\n",
-			shellquote.Quote(remote.Name), shellquote.Quote(remote.URL))
+			shellquote.QuotePOSIX(remote.Name), shellquote.QuotePOSIX(remote.URL))
 	}
 
 	result, err := rt.Exec(ctx, script.String(), runtime.ExecOptions{
@@ -222,7 +222,7 @@ func (a *applyDiffUploader) Upload(ctx context.Context, rt runtime.Runtime, case
 	}
 
 	// Quote the tmp path and use `--` to stop git from treating the path as an option.
-	result, err := rt.Exec(ctx, "git apply -- "+shellquote.Quote(tmpPath), runtime.ExecOptions{
+	result, err := rt.Exec(ctx, "git apply -- "+shellquote.QuotePOSIX(tmpPath), runtime.ExecOptions{
 		Cwd: rt.Workspace(),
 	})
 	if err != nil {
