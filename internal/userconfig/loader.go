@@ -154,6 +154,24 @@ func resolveProjectConfigPath(opts LoadOptions) string {
 	return filepath.Join(dir, ProjectConfigFile)
 }
 
+// LoadFile reads and validates a single config file. Returns an error if the
+// file is missing, unparseable, or fails Validate. Unlike LoadEffective it
+// does not consult any discovery layers — it is meant for callers (e.g. the
+// `init` subcommand) that want to vet a specific file in isolation.
+func LoadFile(path string) (Config, error) {
+	cfg, ok, err := loadConfigFile(path)
+	if err != nil {
+		return Config{}, err
+	}
+	if !ok {
+		return Config{}, fmt.Errorf("config file not found: %s", path)
+	}
+	if err := cfg.Validate(); err != nil {
+		return Config{}, fmt.Errorf("validate %s: %w", path, err)
+	}
+	return cfg, nil
+}
+
 func loadConfigFile(path string) (Config, bool, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // path is user-supplied by design
 	if err != nil {

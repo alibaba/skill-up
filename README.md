@@ -222,11 +222,17 @@ Missing files at the `user` and `project` layers are silently skipped; a missing
 ### Quickstart
 
 ```bash
-skill-up init              # writes ~/.config/skill-up/config.yaml (XDG-aware)
-skill-up init --local      # writes $PWD/.skill-up.yaml
-skill-up init --print      # writes the template to stdout
-skill-up init --force      # overwrite an existing file
+skill-up init                            # writes a template to ~/.config/skill-up/config.yaml (XDG-aware)
+skill-up init --local                    # writes a template to $PWD/.skill-up.yaml
+skill-up init --print                    # prints the template to stdout
+skill-up init --force                    # overwrite an existing file
+skill-up init --config foo.yaml          # reads foo.yaml, writes it to ~/.config/skill-up/config.yaml
+skill-up init --config foo.yaml --local  # reads foo.yaml, writes it to $PWD/.skill-up.yaml
 ```
+
+With `--config <path>`, `init` reads that file (validating it as a skill-up
+config) and writes its raw bytes to the target — comments and formatting are
+preserved. Without `--config`, `init` writes a commented YAML template.
 
 ### Schema
 

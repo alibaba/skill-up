@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- `skill-up init`: `--config <path>` now names a **source** file to read
+  rather than a write target. `init` validates the source as a skill-up
+  config and writes its raw bytes (comments preserved) to the target
+  selected by `--local` (or the default XDG path). `--local` and
+  `--config` are no longer mutually exclusive. Without `--config`, `init`
+  still writes the commented template as before. This aligns `--config`
+  with the `run`/`validate` discovery chain semantics
+  (`embed < user < project < --config`).
+
+### Added
+- `userconfig.LoadFile(path)` helper for callers that need to read and
+  validate a single config file without consulting discovery layers.
+
 ## [0.1.1] - 2026-05-15
 
 ### Added
