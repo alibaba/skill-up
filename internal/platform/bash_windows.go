@@ -5,6 +5,8 @@ package platform
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 )
 
 // knownWindowsBashPaths lists the default Git Bash install locations checked
@@ -21,14 +23,15 @@ var knownWindowsBashPaths = []string{
 }
 
 // DiscoverBash locates a bash interpreter on Windows. It checks, in order:
-// the SKILL_UP_BASH override, PATH, then well-known Git Bash / WSL locations.
+// the SKILL_UP_BASH override, PATH (excluding the WSL shim under System32),
+// then well-known Git Bash locations.
 func DiscoverBash() (string, bool) {
 	if v := os.Getenv(BashEnvOverride); v != "" {
 		if isRegularFile(v) {
 			return v, true
 		}
 	}
-	if p, err := exec.LookPath("bash"); err == nil {
+	if p, err := exec.LookPath("bash"); err == nil && !isWSLBash(p) {
 		return p, true
 	}
 	for _, p := range knownWindowsBashPaths {
@@ -37,6 +40,32 @@ func DiscoverBash() (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// isWSLBash reports whether p is the WSL bash shim shipped with Windows. The
+// shim lives under %SystemRoot%\System32, which is on PATH by default on every
+// Windows host, so PATH-based discovery would otherwise prefer it. The shim
+// expects Linux-format paths (`/mnt/<drive>/...`) and silently fails on the
+// Windows host paths we pass through, so we treat it as "no bash found" and
+// fall through to the known Git Bash locations.
+func isWSLBash(p string) bool {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return false
+	}
+	system32 := windowsSystem32Dir()
+	if system32 == "" {
+		return false
+	}
+	return strings.EqualFold(filepath.Dir(abs), system32)
+}
+
+func windowsSystem32Dir() string {
+	if root := os.Getenv("SystemRoot"); root != "" {
+		return filepath.Join(root, "System32")
+	}
+	// Fall back to the convention; SystemRoot is set on every modern Windows.
+	return `C:\Windows\System32`
 }
 
 func isRegularFile(p string) bool {
