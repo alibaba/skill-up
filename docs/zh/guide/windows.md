@@ -37,9 +37,11 @@ skill-up 原生支持 Windows。本页说明哪些功能可用、当前的限制
 边界，而 sandbox 本身是 Linux 容器，因此其中的 script judge 和 agent 行为与在
 Linux 上完全一致。
 
-OpenSandbox **不**提供 Windows 容器 sandbox —— 其 SDK 和执行 API（bash 会话、
-POSIX UID/GID）仅支持 Linux。因此「Windows sandbox」指的是*由 Windows 宿主机
-驱动一个 Linux sandbox*，这一场景是支持的。
+OpenSandbox 也提供 [**Windows guest profile**](https://github.com/alibaba/OpenSandbox/blob/main/docs/windows-sandbox.md)：
+服务端在 Linux 容器里通过 KVM/QEMU 运行 `dockur/windows`，创建 API 接受
+`platform: {"os": "windows", "arch": "amd64"}`。撰写本文时 Go SDK 尚未暴露
+`Platform` 字段，因此从 skill-up 驱动 Windows guest sandbox 依赖上游 Go SDK
+补齐 —— 单独跟进。
 
 如果某台 Windows 机器需要在**没有**远程 sandbox 的情况下使用完整的 agent
 工作流，请在 **WSL2** 中运行 skill-up。WSL2 是 Linux 环境，因此 `none` 与

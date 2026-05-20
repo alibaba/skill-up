@@ -42,9 +42,12 @@ host→sandbox boundary through `filepath.ToSlash`, and the sandbox itself is a
 Linux container, so the script judge and any agent run inside it behave
 exactly as they do on Linux.
 
-OpenSandbox does **not** offer Windows-container sandboxes — its SDK and
-execution API (bash sessions, POSIX UID/GID) are Linux-only. "Windows sandbox"
-therefore means *a Windows host driving a Linux sandbox*, which is supported.
+OpenSandbox also offers a [**Windows guest profile**](https://github.com/alibaba/OpenSandbox/blob/main/docs/windows-sandbox.md):
+the server runs `dockur/windows` (Windows in KVM/QEMU inside a Linux container)
+and the API accepts `platform: {"os": "windows", "arch": "amd64"}` on create.
+At the time of writing the Go SDK does not yet expose the `Platform` field, so
+driving a Windows-guest sandbox from skill-up is blocked on an upstream Go SDK
+update — tracked separately.
 
 For a Windows machine that needs the full agent workflow **without** a remote
 sandbox, run skill-up inside **WSL2**. WSL2 is a Linux environment, so both the
