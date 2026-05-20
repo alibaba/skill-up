@@ -1,0 +1,26 @@
+id: english-context-generates-english-only-cases
+title: Respond in English and generate English-only case files in English context
+description: |
+  Verifies that skill-upper follows an English user prompt by replying in
+  English and by generating eval case YAML files that do not contain Chinese
+  or CJK characters.
+
+context:
+  repo_fixture: evals/fixtures/skills/sample-no-evals
+
+input:
+  prompt: |
+    Please set up evaluations for the code-review-helper Skill in the current directory.
+    This Skill does not have any evals yet, so create evals/eval.yaml and at least one
+    case YAML file under evals/cases/.
+
+    Use environment type none and engine claude_code.
+
+expect:
+  files_exist:
+    - "evals/eval.yaml"
+
+judge:
+  type: script
+  script_path: evals/fixtures/scripts/assert-english-only-generated-cases.sh
+  timeout_seconds: 30

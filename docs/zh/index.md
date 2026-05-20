@@ -20,6 +20,10 @@ hero:
       link: https://github.com/alibaba/skill-up
 
 features:
+  - title: AI 辅助配合 skill-upper
+    details: 使用 skill-upper Agent Skill，通过自然对话与 AI Agent（如 Cursor、Claude Code、Qoder 等）创建和运行评测，无需记忆 CLI 语法。
+    link: /zh/guide/getting-started#推荐使用方式-ai-辅助配合-skill-upper
+    linkText: 了解更多
   - title: 声明式评测配置
     details: 通过 YAML（eval.yaml + cases/*.yaml）定义评测环境、引擎、模型与用例。
     link: /zh/guide/writing-evals

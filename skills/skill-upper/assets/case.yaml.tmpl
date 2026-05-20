@@ -1,0 +1,61 @@
+id: basic                         # Must match the filename
+title: Brief description of what this case validates
+description: |
+  More detailed background (optional).
+
+input:
+  prompt: |
+    Write the actual prompt to send to the Agent here.
+    Use a tone close to real users; avoid being too mechanical.
+
+# For multi-turn conversations, use turns instead of prompt:
+# input:
+#   turns:
+#     - role: user
+#       content: "First request"
+#       post_condition:
+#         must_contain_any: ["keywordA", "keywordB"]
+#         on_fail: skip_remaining    # or fail
+#     - role: user
+#       content: "Second request"
+
+# context:                            # Optional: initialize workspace
+#   repo_fixture: fixtures/repos/sample-project
+#   git:
+#     init: true
+#     checkout: main
+#     apply_diff: fixtures/diffs/my.patch
+#   files:
+#     "src/main.py": |
+#       def hello(): ...
+
+# constraints:
+#   timeout_seconds: 180
+#   max_turns: 8
+
+expect:                              # Zero-cost gate checks; judge is skipped if these fail
+  must_contain:
+    - "Required keyword"
+  must_not_contain:
+    - "Keyword that should not appear"
+  # exit_code: 0
+  # files_exist:
+  #   - "output.json"
+
+judge:
+  type: rule_based                   # rule_based | agent_judge | script
+  success:
+    - output_contains:
+        all: ["keyword1", "keyword2"]
+  # failure:
+  #   - output_contains:
+  #       any: ["LGTM", "No changes needed"]
+
+# Example for agent_judge (use when LLM semantic evaluation is needed):
+# judge:
+#   type: agent_judge
+#   model: anthropic/claude-sonnet-4-6
+#   criteria:
+#     - "Output correctly identifies user intent"
+#     - "Does not fabricate non-existent fields"
+#   pass_threshold: 0.7

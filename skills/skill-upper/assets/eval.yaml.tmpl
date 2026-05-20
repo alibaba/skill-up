@@ -1,0 +1,47 @@
+schema_version: v1alpha1
+
+environment:
+  type: none                      # none | opensandbox
+  # kwargs:                        # For opensandbox: base_url, extensions, etc. See references/eval-yaml.md
+  #   base_url: https://agent-sandbox.example.com
+  # image: registry.example.com/your-org/sandbox-base:latest
+  # workspace_mount: /workspace
+  # env:
+  #   TZ: UTC
+  # setup_steps:
+  #   - run: git config --global user.name "eval"
+
+skills:
+  - source: local_path
+    path: .                       # Directory of the Skill under test
+  # - source: local_path
+  #   path: ../dependency_skill   # Path to other SKILL.md directory
+
+engine:
+  name: claude_code               # claude_code | codex | qodercli (also compatible with qoder-cli)
+  # model is optional; omit to use engine's default model
+  # model:
+  #   provider: anthropic
+  #   name: claude-sonnet-4-6
+  #   base_url: ""
+
+# mcp:
+#   servers:
+#     - name: github
+#       mode: real
+#       transport: http
+#       config_ref: evals/fixtures/mcp/github.json
+
+cases:
+  files:
+    - evals/cases/basic.yaml
+  defaults:
+    timeout_seconds: 120
+    max_turns: 5
+  # parallelism: 4                # Stateless cases can run in parallel; or use skill-up run --parallelism N to override
+
+# benchmark:
+#   enabled: true
+
+report:
+  formats: [json]

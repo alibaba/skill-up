@@ -1,0 +1,16 @@
+id: add-todo
+title: 验证能否正确添加待办事项
+
+input:
+  prompt: |
+    帮我添加一个待办事项：明天下午3点开会
+
+expect:
+  must_contain:
+    - "待办"
+
+judge:
+  type: rule_based
+  success:
+    - output_contains:
+        all: ["待办", "添加"]

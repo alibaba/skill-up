@@ -1,0 +1,33 @@
+id: scaffold-with-qodercli-engine
+title: 使用 qodercli 引擎为 Skill 搭建评测
+description: |
+  验证 skill-upper 在用户指定非默认 engine（如 qodercli）时，
+  能否正确生成配置，engine.name 应为 qodercli 而非默认的 claude_code。
+  注意 qodercli 无需配置 model，Skill 应知晓这一点。
+
+context:
+  repo_fixture: evals/fixtures/skills/sample-no-evals
+  git:
+    init: true
+
+input:
+  prompt: |
+    请为当前目录下的 code-review-helper Skill 搭建评测。
+    这个 Skill 还没有 evals，请帮我创建。
+    注意：我想用 qodercli 作为 engine，环境类型用 none。
+
+expect:
+  files_exist:
+    - "evals/eval.yaml"
+  must_contain:
+    - "eval.yaml"
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "生成了 evals/eval.yaml 文件，且 engine.name 为 qodercli（而非 claude_code 或 codex）"
+    - "eval.yaml 中没有配置 engine.model 字段（因为 qodercli 目前无法切换模型），或者明确说明了 qodercli 无需配置模型"
+    - "在 evals/cases/ 下生成了至少一个 case yaml 文件，包含与代码审查相关的 prompt"
+    - "eval.yaml 中 cases.files 正确引用了生成的 case 文件"
+  pass_threshold: 0.75

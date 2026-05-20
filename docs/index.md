@@ -20,6 +20,10 @@ hero:
       link: https://github.com/alibaba/skill-up
 
 features:
+  - title: AI-Assisted with skill-upper
+    details: Use the skill-upper Agent Skill to create and run evals through natural conversation with AI agents like Cursor, Claude Code, or Qoder. No need to memorize CLI syntax.
+    link: /guide/getting-started#recommended-usage-ai-assisted-with-skill-upper
+    linkText: Learn more
   - title: Declarative Eval Config
     details: Define evaluation environment, engine, model, and cases through YAML (eval.yaml + cases/*.yaml).
     link: /guide/writing-evals

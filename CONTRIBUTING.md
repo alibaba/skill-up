@@ -50,6 +50,12 @@ skill-up/
 │   ├── mcp/                 # MCP Server configuration (mocked / real)
 │   └── skill/               # Install Skill into each Engine's conventional directory (excluding evals/)
 ├── pkg/transcript/          # Reusable transcript parsing and helpers (publicly importable package)
+├── skills/                  # Distributable Agent Skills
+│   └── skill-upper/         #   Guides AI agents through eval workflow
+│       ├── SKILL.md         #     Skill definition (workflow; language policy inside)
+│       ├── assets/          #     YAML templates (eval.yaml.tmpl, case.yaml.tmpl)
+│       ├── references/      #     Reference docs for CLI, schema, judges, migration
+│       └── evals/           #     Evals for the skill-upper Skill itself
 ├── docs/                    # VitePress documentation site (guide/, zh/, user-manual/, .vitepress/, public/)
 ├── .githooks/               # Git hooks (commit message, pre-commit checks); see "Engineering Constraints" below
 ├── .github/workflows/       # CI (build & test) and Release (GoReleaser)
@@ -123,6 +129,12 @@ skill-up/
 
 - **Meaning**: A **publicly reusable** toolkit for transcript parsing and querying; other Go projects that need to be compatible with the same format may depend on this package.
 - **Difference from `internal`**: `internal/` does not expose a stable API; packages in `pkg/` are intended to be importable, versionable library boundaries.
+
+### `skills/skill-upper/`
+
+- **Meaning**: A **distributable Agent Skill** that teaches AI agents (Cursor, Claude Code, Qoder, etc.) how to scaffold, run, and interpret skill-up evaluations on behalf of a user. It is consumed at runtime by Agent Engines — not compiled into the Go binary.
+- **Contents**: `SKILL.md` (workflow and language policy), `assets/` (YAML templates for `eval.yaml` and `case.yaml`), `references/` (CLI, schema, judge, and migration docs), and `evals/` (the Skill's own evaluation suite).
+- **Maintenance advice**: When CLI flags, schema fields, judge types, or report formats change, update the corresponding `references/` docs and the workflow steps in `SKILL.md` in the same commit. Keep templates in `assets/` consistent with the latest `v1alpha1` schema.
 
 ### `docs/`
 
