@@ -64,29 +64,61 @@
 
 ## 推荐使用方式：AI 辅助配合 skill-upper
 
-为了获得最佳体验，我们推荐使用 **skill-upper** —— 一个 Agent Skill，帮助你通过自然对话与 AI Agent（如 Cursor、Claude Code、Qoder 等）来搭建和运行评测。
+推荐使用仓库内置的 **skill-upper** Agent Skill。它会引导 AI Agent
+为目标 Skill 生成评测配置、校验、运行并解释结果，避免一开始就手写所有
+YAML。
 
-无需手动编写 YAML 配置和执行 CLI 命令，你只需告诉 AI Agent：
+### 1. 安装 `skill-upper` Agent Skill
 
+推荐使用 `skills` CLI 安装：
+
+```bash
+# Codex，全局安装
+npx skills add https://github.com/alibaba/skill-up/tree/main/skills/skill-upper -g -a codex -y
+
+# Claude Code，全局安装
+npx skills add https://github.com/alibaba/skill-up/tree/main/skills/skill-upper -g -a claude-code -y
 ```
-"给这个 skill 添加评测用例"
-"运行评测套件"
-"这个测试用例为什么失败了？"
+
+安装这个 Skill 前不需要先安装 `skill-up`。`skill-upper` 在运行时会检查
+`skill-up` 命令是否可用；如果缺失，它会引导 Agent 完成安装。
+
+### 2. 添加与运行评测
+
+在 AI Agent 中打开目标 Skill 项目。目标项目至少应包含：
+
+```text
+my-skill/
+  SKILL.md
 ```
 
-skill-upper 会自动帮你：
-- 定位 Skill 目录并读取 `SKILL.md`
-- 生成合适的 `eval.yaml` 和 `case.yaml` 文件
-- 执行 `skill-up validate` 和 `skill-up run`
-- 解读结果并解释失败原因
-- 处理凭据和配置
+然后直接给 Agent 一个明确任务：
 
-使用 skill-upper 的步骤：
-1. 在你的 AI Agent 中安装 skill-upper skill（例如 Cursor Skills、Claude Skills）
-2. 在 AI Agent 中打开你的 Skill 项目
-3. 让 Agent 帮你创建或运行评测
+```text
+使用 skill-upper 给这个 Skill 添加评测。
+添加这个评测用例：
+- 输入：写一个 hello world 的程序。
+- 评测：是否包含 hello 和 world 打印。
 
-这种方式特别适合初学者，或者当你想快速迭代测试用例而无需记忆 CLI 语法时。
+然后运行 skill-up 完成校验和评测。
+```
+
+Agent 应该会生成类似结构：
+
+```text
+my-skill/
+  SKILL.md
+  evals/
+    eval.yaml
+    cases/
+      basic.yaml
+my-skill-workspace/
+  iteration-1/
+    result.json
+```
+
+当 `evals/eval.yaml` 位于包含 `SKILL.md` 的目录下时，`skill-up` 会在运行时
+自动安装这个本地 Skill，通常不需要在 `eval.yaml` 里手动写 Skill 路径。
 
 ## 安装
 

@@ -64,29 +64,64 @@ The official [Agent Skills evaluation guide](https://agentskills.io/skill-creati
 
 ## Recommended Usage: AI-Assisted with skill-upper
 
-For the best experience, we recommend using **skill-upper** — an Agent Skill that helps you set up and run evals through natural conversation with AI agents like Cursor, Claude Code, or Qoder.
+For the best experience, use **skill-upper** — the Agent Skill shipped in this
+repository. It lets you ask an AI agent to scaffold, validate, run, and explain
+evals instead of hand-writing every YAML file first.
 
-Instead of manually writing YAML configs and running CLI commands, you can simply tell your AI agent:
+### 1. Install the `skill-upper` Agent Skill
 
+Recommended: install it with the `skills` CLI:
+
+```bash
+# Codex, global install
+npx skills add https://github.com/alibaba/skill-up/tree/main/skills/skill-upper -g -a codex -y
+
+# Claude Code, global install
+npx skills add https://github.com/alibaba/skill-up/tree/main/skills/skill-upper -g -a claude-code -y
 ```
-"Add evals for this skill"
-"Run the evaluation suite"
-"Why did this test case fail?"
+
+You do not need to install `skill-up` before installing this Skill.
+`skill-upper` checks whether the `skill-up` command is available when it runs
+and guides the agent through installation if it is missing.
+
+### 2. Add and run evals
+
+Open the target Skill project in your AI agent. The target project should have
+this shape:
+
+```text
+my-skill/
+  SKILL.md
 ```
 
-The skill-upper skill will automatically:
-- Locate your Skill directory and read `SKILL.md`
-- Generate appropriate `eval.yaml` and `case.yaml` files
-- Run `skill-up validate` and `skill-up run`
-- Interpret results and explain failures
-- Handle credentials and configuration
+Then ask the agent something concrete:
 
-To use skill-upper:
-1. Install the skill-upper skill in your AI agent (e.g., Cursor Skills, Claude Skills)
-2. Open your Skill project in the AI agent
-3. Ask the agent to help you create or run evals
+```text
+Use skill-upper to add evals for this Skill.
+Add this evaluation case:
+- Input: write a hello world program.
+- Evaluation: check that the output contains hello and world.
 
-This approach is especially helpful for beginners or when you want to quickly iterate on test cases without memorizing CLI syntax.
+After that run skill-up to validate and run.
+```
+
+The agent should create files like:
+
+```text
+my-skill/
+  SKILL.md
+  evals/
+    eval.yaml
+    cases/
+      basic.yaml
+my-skill-workspace/
+  iteration-1/
+    result.json
+```
+
+When `evals/eval.yaml` lives under a directory containing `SKILL.md`,
+`skill-up` automatically installs that local Skill for the run, so you usually
+do not need to list the Skill path manually in `eval.yaml`.
 
 ## Installation
 
