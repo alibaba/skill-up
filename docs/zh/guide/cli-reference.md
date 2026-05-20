@@ -184,6 +184,44 @@ skill-up report result.json --format html --output-dir ./reports
 
 ---
 
+## skill-up init
+
+写出一份 skill-up 用户配置文件。完整的加载顺序与字段说明见 [用户配置](./user-config)。
+
+```bash
+skill-up init [flags]
+```
+
+### Flags
+
+| Flag       | 默认值       | 说明                                                                                            |
+| :--------: | :----------: | :---------------------------------------------------------------------------------------------: |
+| `--local`  | `false`      | 写到 `$PWD/.skill-up.yaml` 而不是 XDG 路径                                                       |
+| `--config` | —            | **读取源**文件（先校验，再原样拷贝，注释保留）。未提供时写出带注释的模板                          |
+| `--print`  | `false`      | 输出到 stdout，而不是写盘                                                                        |
+| `--force`  | `false`      | 覆盖已存在的目标文件                                                                             |
+
+> 注意：对 `init` 子命令，`--config` 是**读取源**；对其他子命令（`run`、`validate` …），`--config` 是加载链最顶层的覆盖路径。
+
+### 示例
+
+```bash
+# 写出带注释的模板
+skill-up init                                  # -> ~/.config/skill-up/config.yaml
+skill-up init --local                          # -> ./.skill-up.yaml
+skill-up init --print                          # -> stdout
+
+# 从已有配置初始化（先校验，注释完整保留）
+skill-up init --config ./team-config.yaml          # -> ~/.config/skill-up/config.yaml
+skill-up init --config ./team-config.yaml --local  # -> ./.skill-up.yaml
+skill-up init --config ./team-config.yaml --print  # 校验后输出到 stdout
+
+# 覆盖
+skill-up init --local --force
+```
+
+---
+
 ## skill-up import
 
 将 Anthropic `evals.json` 格式的用例一次性转换为 skill-up 的原生 YAML 格式。

@@ -38,6 +38,7 @@ export default defineConfig({
             text: 'Reference',
             items: [
               { text: 'CLI Reference', link: '/guide/cli-reference' },
+              { text: 'User Configuration', link: '/guide/user-config' },
               { text: 'Writing Evals', link: '/guide/writing-evals' },
               { text: 'Migrating from Anthropic', link: '/guide/migration' },
             ],
@@ -62,6 +63,7 @@ export default defineConfig({
               text: 'Reference',
               items: [
                 { text: 'CLI Reference', link: '/guide/cli-reference' },
+                { text: 'User Configuration', link: '/guide/user-config' },
                 { text: 'Migrating from Anthropic', link: '/guide/migration' },
               ],
             },
@@ -91,6 +93,7 @@ export default defineConfig({
             text: '参考',
             items: [
               { text: 'CLI 命令参考', link: '/zh/guide/cli-reference' },
+              { text: '用户配置', link: '/zh/guide/user-config' },
               { text: '编写评测配置与用例', link: '/zh/guide/writing-evals' },
               { text: '从 Anthropic 格式迁移', link: '/zh/guide/migration' },
             ],
@@ -115,6 +118,7 @@ export default defineConfig({
               text: '参考',
               items: [
                 { text: 'CLI 命令参考', link: '/zh/guide/cli-reference' },
+                { text: '用户配置', link: '/zh/guide/user-config' },
                 { text: '从 Anthropic 格式迁移', link: '/zh/guide/migration' },
               ],
             },
