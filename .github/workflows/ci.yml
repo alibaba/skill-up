@@ -32,10 +32,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         go-version: ["1.25.x"]
-    # Windows is being promoted to a first-class platform (issue #31). Until the
-    # remaining cross-platform fixes land and the runner is verified green,
-    # keep its failures non-blocking so they surface without gating merges.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
 
     steps:
       - uses: actions/checkout@v6
