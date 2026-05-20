@@ -51,7 +51,12 @@ jobs:
       - name: Build
         run: go build ./...
 
+      # Force bash on Windows runners too: pwsh's legacy native-argument
+      # passing splits `-coverprofile=coverage.out` and feeds `.out` to go
+      # as a package import path, producing `FAIL .out [setup failed]`.
+      # Git Bash is preinstalled on windows-latest and parses args verbatim.
       - name: Test (with race detector and coverage)
+        shell: bash
         run: go test -race -timeout 120s -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
 
       # Self-hosted coverage badge: parse the total from `go tool cover -func`
