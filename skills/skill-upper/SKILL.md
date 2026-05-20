@@ -1,6 +1,6 @@
 ---
 name: skill-upper
-description: 'Set up, run, and interpret Agent Skill evaluations (evals) with the skill-up CLI / 使用 skill-up CLI 给 Agent Skill 搭建和运行评测. Use when the user asks to evaluate, test, regress, or verify a Skill; add evals or cases; write eval.yaml/case.yaml; run skill-up run/validate/list-cases/report/import/init; or migrate from Anthropic evals.json. This file is the authoritative workflow for English-context tasks. Handles Skill discovery, evals scaffolding, judge authoring, credentials, user config, validation, runs, and reports. English prompts require English replies and case YAML with no Chinese/CJK prose or comments.'
+description: 'Set up, run, and interpret Agent Skill evaluations (evals) with the skill-up CLI / 使用 skill-up CLI 给 Agent Skill 搭建和运行评测. Use when the user asks to evaluate, test, regress, or verify a Skill; add evals or cases; write eval.yaml/case.yaml; run skill-up run/validate/list-cases/report/import/init; or migrate from Anthropic evals.json. Handles Skill discovery, evals scaffolding, judge authoring, credentials, user config, validation, runs, and reports.'
 ---
 
 # use-skill-up-cli
@@ -8,12 +8,6 @@ description: 'Set up, run, and interpret Agent Skill evaluations (evals) with th
 Help the user set up, run, and interpret evaluations for Agent Skills via the `skill-up` CLI.
 
 Manual: <https://alibaba.github.io/skill-up/>
-
-> Chinese: [`SKILL.zh.md`](./SKILL.zh.md).
-
-## English Context Authority
-
-Use this file as the authoritative workflow whenever the user's current message is primarily English or explicitly asks for English output. Do not derive English behavior from the Chinese `SKILL.md`; follow the instructions in this file for locating Skills, scaffolding evals, writing cases, selecting judges, validating, running, and summarizing results.
 
 ## Language Policy
 
