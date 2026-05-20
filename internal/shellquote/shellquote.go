@@ -8,29 +8,22 @@ func QuotePOSIX(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// windowsQuoteTriggers are the characters that force QuoteWindows to wrap its
-// argument: argv-splitting whitespace and quotes, plus the cmd.exe
-// metacharacters and grouping characters, so a value remains intact whether
-// the consuming shell is CommandLineToArgvW or cmd /c.
-//
-// `%` is included so values containing `%VAR%`-shaped tokens are at least
-// flagged via quoting; note that cmd expands `%VAR%` even inside double
-// quotes and there is no reliable command-line escape for it, so callers
-// that route through cmd must avoid percent signs in user-controlled paths.
-const windowsQuoteTriggers = " \t\n\v\"&|<>^()%"
-
 // QuoteWindows returns a representation of s safe to pass as a single argument
 // on a Windows command line, following the CommandLineToArgvW parsing rules:
 // the argument is wrapped in double quotes; any run of backslashes immediately
 // preceding a double quote (or the closing quote) is doubled; interior double
-// quotes are escaped as \". A double-quoted value is also interpreted
-// identically by bash, so the result is safe under both `cmd /c` and `bash -c`.
+// quotes are escaped as \".
+//
+// The result is always wrapped, even when s has no whitespace or metacharacter
+// triggers: when NoneRuntime.Exec routes through bash on Windows (the default
+// when Git Bash is discoverable), an unquoted backslash-bearing path such as
+// `C:\tmp\script.cmd` would have its backslashes stripped by bash and reach
+// the downstream `cmd /c` / `powershell -File` as `C:tmpscript.cmd`. Wrapping
+// in double quotes keeps backslashes literal under both bash and cmd, and is
+// equally safe for CommandLineToArgvW consumers.
 func QuoteWindows(s string) string {
 	if s == "" {
 		return `""`
-	}
-	if !strings.ContainsAny(s, windowsQuoteTriggers) {
-		return s
 	}
 	var b strings.Builder
 	b.WriteByte('"')

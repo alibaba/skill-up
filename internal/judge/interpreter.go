@@ -65,7 +65,10 @@ func planWindowsScript(scriptPath string) (scriptPlan, error) {
 		return scriptPlan{
 			uploadName: "script" + ext,
 			command: func(remoteScript string) string {
-				return "cmd /c " + shellquote.QuoteWindows(remoteScript)
+				// `/d` disables HKLM/HKCU AutoRun so the host's
+				// `Command Processor\AutoRun` cannot inject commands ahead
+				// of the script and make judge results non-deterministic.
+				return "cmd /d /c " + shellquote.QuoteWindows(remoteScript)
 			},
 		}, nil
 	case ".sh", ".bash":
@@ -113,7 +116,9 @@ func joinForGOOS(targetGOOS string, elem ...string) string {
 // target OS.
 func removeDirCommand(targetGOOS, dir string) string {
 	if targetGOOS == osWindows {
-		return "cmd /c rd /s /q " + shellquote.QuoteWindows(dir)
+		// `/d` matches the script-judge cmd invocations so AutoRun cannot
+		// run between Exec calls.
+		return "cmd /d /c rd /s /q " + shellquote.QuoteWindows(dir)
 	}
 	return "rm -rf " + shellquote.QuotePOSIX(dir)
 }

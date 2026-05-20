@@ -44,8 +44,8 @@ func TestPlanWindowsScript(t *testing.T) {
 		wantCmdHead string
 	}{
 		{"powershell", `C:\skill\check.ps1`, "script.ps1", "powershell -NoProfile -ExecutionPolicy Bypass -File "},
-		{"cmd", `C:\skill\check.cmd`, "script.cmd", "cmd /c "},
-		{"bat", `C:\skill\check.bat`, "script.bat", "cmd /c "},
+		{"cmd", `C:\skill\check.cmd`, "script.cmd", "cmd /d /c "},
+		{"bat", `C:\skill\check.bat`, "script.bat", "cmd /d /c "},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -131,7 +131,7 @@ func TestRemoveDirCommand(t *testing.T) {
 	if got, want := removeDirCommand("linux", "/tmp/d"), "rm -rf '/tmp/d'"; got != want {
 		t.Fatalf("posix removeDirCommand = %q, want %q", got, want)
 	}
-	if got, want := removeDirCommand("windows", `C:\tmp\d`), `cmd /c rd /s /q C:\tmp\d`; got != want {
+	if got, want := removeDirCommand("windows", `C:\tmp\d`), `cmd /d /c rd /s /q "C:\tmp\d"`; got != want {
 		t.Fatalf("windows removeDirCommand = %q, want %q", got, want)
 	}
 }

@@ -23,8 +23,10 @@ func TestQuoteWindows(t *testing.T) {
 		name, in, want string
 	}{
 		{"empty", "", `""`},
-		{"plain", "plain", "plain"},
-		{"backslash path no space", `C:\tmp\s.ps1`, `C:\tmp\s.ps1`},
+		// QuoteWindows always wraps in double quotes so bash (which strips
+		// unquoted backslashes) does not mangle paths like `C:\tmp\file`.
+		{"plain", "plain", `"plain"`},
+		{"backslash path no space", `C:\tmp\s.ps1`, `"C:\tmp\s.ps1"`},
 		{"space", `C:\Program Files\s.exe`, `"C:\Program Files\s.exe"`},
 		{"interior quote", `a"b`, `"a\"b"`},
 		{"trailing backslash with space", `a b\`, `"a b\\"`},
