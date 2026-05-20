@@ -332,9 +332,12 @@ func (a *CodexAgent) buildSessionResult(
 	result ExecResult,
 	lastMessagePath string,
 ) *SessionResult {
+	cleanupCtx, cleanupCancel := sessionCleanupContext(ctx)
+	defer cleanupCancel()
+
 	generatedFiles := []string{}
 	if result.Stdout != "" {
-		if artifactPath, err := persistSessionArtifact(ctx, rt, opts.ArtifactDir, "stdout.json", result.Stdout); err == nil {
+		if artifactPath, err := persistSessionArtifact(cleanupCtx, rt, opts.ArtifactDir, "stdout.json", result.Stdout); err == nil {
 			if opts.ArtifactDir == "" {
 				generatedFiles = append(generatedFiles, artifactPath)
 			}
@@ -346,7 +349,7 @@ func (a *CodexAgent) buildSessionResult(
 
 	var cleanupSession func()
 	generatedFiles, cleanupSession = withDownloadedSession(
-		ctx, rt, opts.ArtifactDir, findCodexSessionPath(ctx, rt, streamParsed.threadID), generatedFiles,
+		cleanupCtx, rt, opts.ArtifactDir, findCodexSessionPath(cleanupCtx, rt, streamParsed.threadID), generatedFiles,
 		func(artifactPath string) {
 			sessionParsed := parseCodexSessionFile(artifactPath)
 			if len(sessionParsed.transcript) > len(streamParsed.transcript) &&
@@ -368,7 +371,7 @@ func (a *CodexAgent) buildSessionResult(
 		finalMsg = trans.FinalAssistantMessage()
 	}
 	var lastMsgCleanup func()
-	finalMsg, trans, generatedFiles, lastMsgCleanup = resolveCodexLastMessage(ctx, rt, opts.ArtifactDir, lastMessagePath, finalMsg, trans, generatedFiles)
+	finalMsg, trans, generatedFiles, lastMsgCleanup = resolveCodexLastMessage(cleanupCtx, rt, opts.ArtifactDir, lastMessagePath, finalMsg, trans, generatedFiles)
 	defer lastMsgCleanup()
 
 	return &SessionResult{

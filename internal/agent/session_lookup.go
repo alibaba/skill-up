@@ -5,7 +5,25 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 )
+
+// sessionCleanupTimeout caps how long the post-run session-file lookup,
+// download and stdout persistence steps may run. It is independent of the
+// agent run's own timeout because those steps execute after the agent
+// process has already returned (or been killed) and must not inherit a
+// canceled run context — otherwise every Exec / DownloadFile call fires
+// against a dead ctx and logs misleading "command exited with code -1"
+// noise that hides the real timeout.
+const sessionCleanupTimeout = 30 * time.Second
+
+// sessionCleanupContext derives a context for post-run session-file
+// persistence, lookup and download. It detaches from cancellation of the
+// run context (so a timed-out agent run does not poison the cleanup) but
+// preserves context values such as the OTel trace ID.
+func sessionCleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), sessionCleanupTimeout)
+}
 
 // withDownloadedSession encapsulates the "download → register → parse" pipeline
 // shared by claude_code / qodercli / codex. It calls `apply` with the local
