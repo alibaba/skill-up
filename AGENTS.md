@@ -124,7 +124,7 @@ internal/           Private implementation — never import from outside the mod
 pkg/                Publicly importable APIs (semver-stable; change with care)
   skillup/          Embeddable evaluation API
   transcript/       Transcript parsing helpers
-skill-upper/        Distributable Agent Skill that guides AI agents through the
+skills/skill-upper/ Distributable Agent Skill that guides AI agents through the
                     skill-up eval workflow (scaffolding, running, interpreting).
                     Contains SKILL.md (English), SKILL.zh.md (Chinese), assets/
                     templates, references/, and its own evals/ suite. Not part of
