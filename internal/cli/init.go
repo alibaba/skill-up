@@ -54,7 +54,11 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	target, err := resolveInitTarget(local)
+	resolveTarget := resolveUserConfigTarget
+	if local {
+		resolveTarget = resolveProjectConfigTarget
+	}
+	target, err := resolveTarget()
 	if err != nil {
 		return err
 	}
@@ -91,14 +95,20 @@ func resolveInitContent(sourcePath string) (string, error) {
 	return string(data), nil
 }
 
-func resolveInitTarget(local bool) (string, error) {
-	if local {
-		wd, err := os.Getwd()
-		if err != nil {
-			return "", err
-		}
-		return filepath.Join(wd, userconfig.ProjectConfigFile), nil
+// resolveProjectConfigTarget returns $PWD/.skill-up.yaml — the per-project
+// config layer.
+func resolveProjectConfigTarget() (string, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", err
 	}
+	return filepath.Join(wd, userconfig.ProjectConfigFile), nil
+}
+
+// resolveUserConfigTarget returns the XDG-aware user config path
+// ($XDG_CONFIG_HOME/skill-up/config.yaml, falling back to
+// ~/.config/skill-up/config.yaml).
+func resolveUserConfigTarget() (string, error) {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
 		return filepath.Join(xdg, userconfig.UserConfigDir, userconfig.UserConfigFile), nil
 	}
