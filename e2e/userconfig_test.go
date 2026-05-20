@@ -31,12 +31,12 @@ func TestCLI_InitPrint(t *testing.T) {
 
 func TestCLI_InitWriteAndForce(t *testing.T) {
 	t.Parallel()
-	Cover(t, "skill-up init writes XDG file")
+	Cover(t, "skill-up init --local write + --force overwrite")
 
 	tmp := t.TempDir()
-	target := filepath.Join(tmp, "config.yaml")
+	target := filepath.Join(tmp, ".skill-up.yaml")
 
-	r1 := RunSimple(t, "init", "--config", target)
+	r1 := Run(t, RunConfig{WorkDir: tmp}, "init", "--local")
 	if r1.ExitCode != 0 {
 		t.Fatalf("first write failed: %s", r1.Stderr)
 	}
@@ -44,14 +44,40 @@ func TestCLI_InitWriteAndForce(t *testing.T) {
 		t.Fatalf("target not created: %v", err)
 	}
 
-	r2 := RunSimple(t, "init", "--config", target)
+	r2 := Run(t, RunConfig{WorkDir: tmp}, "init", "--local")
 	if r2.ExitCode == 0 {
 		t.Fatalf("second write without --force should fail; stdout: %s", r2.Stdout)
 	}
 
-	r3 := RunSimple(t, "init", "--config", target, "--force")
+	r3 := Run(t, RunConfig{WorkDir: tmp}, "init", "--local", "--force")
 	if r3.ExitCode != 0 {
 		t.Fatalf("force write failed: %s", r3.Stderr)
+	}
+}
+
+func TestCLI_InitConfigSourceCopied(t *testing.T) {
+	t.Parallel()
+	Cover(t, "skill-up init --config <source> --local")
+
+	tmp := t.TempDir()
+	source := filepath.Join(tmp, "source.yaml")
+	sourceContent := "# my custom header\nschema_version: v1alpha1\nkind: SkillEvalConfig\ntelemetry:\n  service_name: from-source\n"
+	if err := os.WriteFile(source, []byte(sourceContent), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	r := Run(t, RunConfig{WorkDir: tmp}, "init", "--config", source, "--local")
+	if r.ExitCode != 0 {
+		t.Fatalf("init --config <source> --local failed: %s", r.Stderr)
+	}
+
+	got, err := os.ReadFile(filepath.Join(tmp, ".skill-up.yaml"))
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	// The source bytes must round-trip verbatim — comments and all.
+	if string(got) != sourceContent {
+		t.Errorf("target content mismatch\nwant:\n%s\ngot:\n%s", sourceContent, got)
 	}
 }
 
@@ -89,12 +115,17 @@ func TestCLI_UserConfigRoundTrip(t *testing.T) {
 	Cover(t, "skill-up --config round-trip")
 
 	tmp := t.TempDir()
-	cfgPath := filepath.Join(tmp, "config.yaml")
 
-	// Generate then re-load via --config against a real eval.yaml.
-	if r := RunSimple(t, "init", "--config", cfgPath); r.ExitCode != 0 {
-		t.Fatalf("init: %s", r.Stderr)
+	// Write a template into a temp workdir via --local, then re-load that
+	// file via --config when running validate against a real eval.yaml.
+	if r := Run(t, RunConfig{WorkDir: tmp}, "init", "--local"); r.ExitCode != 0 {
+		t.Fatalf("init --local: %s", r.Stderr)
 	}
+	cfgPath := filepath.Join(tmp, ".skill-up.yaml")
+	if _, err := os.Stat(cfgPath); err != nil {
+		t.Fatalf("expected %s to exist: %v", cfgPath, err)
+	}
+
 	examplesDir := getExamplesDir()
 	evalPath := filepath.Join(examplesDir, "eval.yaml")
 	r := RunSimple(t, "--config", cfgPath, "validate", evalPath)

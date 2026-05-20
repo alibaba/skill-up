@@ -51,49 +51,121 @@ func TestInit_Print(t *testing.T) {
 	}
 }
 
-func TestInit_WriteAndForce(t *testing.T) {
-	t.Parallel()
+func TestInit_LocalWritesTemplate(t *testing.T) {
 	tmp := t.TempDir()
-	target := filepath.Join(tmp, "config.yaml")
+	t.Chdir(tmp)
 
 	cmd := newInitCmdForTest()
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetArgs([]string{"--config", target})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--local"})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("first write: %v", err)
+		t.Fatalf("init --local: %v", err)
 	}
-	if _, err := os.Stat(target); err != nil {
-		t.Fatalf("target not created: %v", err)
+	target := filepath.Join(tmp, ".skill-up.yaml")
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if string(got) != initTemplateContent {
+		t.Errorf("expected template content, got:\n%s", got)
 	}
 
+	// Second write without --force must fail.
 	cmd2 := newInitCmdForTest()
-	cmd2.SetArgs([]string{"--config", target})
 	cmd2.SetOut(&bytes.Buffer{})
 	cmd2.SetErr(&bytes.Buffer{})
 	cmd2.SilenceUsage = true
 	cmd2.SilenceErrors = true
+	cmd2.SetArgs([]string{"--local"})
 	if err := cmd2.Execute(); err == nil {
 		t.Fatal("expected error on second write without --force")
 	}
 
+	// With --force, succeeds.
 	cmd3 := newInitCmdForTest()
-	cmd3.SetArgs([]string{"--config", target, "--force"})
 	cmd3.SetOut(&bytes.Buffer{})
+	cmd3.SetArgs([]string{"--local", "--force"})
 	if err := cmd3.Execute(); err != nil {
 		t.Fatalf("force write: %v", err)
 	}
 }
 
-func TestInit_LocalConflictsWithConfig(t *testing.T) {
+func TestInit_ConfigSourceCopiedToLocal(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	source := filepath.Join(tmp, "source.yaml")
+	sourceContent := "# my custom comment\nschema_version: v1alpha1\nkind: SkillEvalConfig\ntelemetry:\n  service_name: custom\n"
+	if err := os.WriteFile(source, []byte(sourceContent), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	cmd := newInitCmdForTest()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--config", source, "--local"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	target := filepath.Join(tmp, ".skill-up.yaml")
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	// Source bytes must be preserved verbatim (comments and all).
+	if string(got) != sourceContent {
+		t.Errorf("target content mismatch\nwant:\n%s\ngot:\n%s", sourceContent, got)
+	}
+}
+
+func TestInit_ConfigSourcePrint(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	source := filepath.Join(tmp, "source.yaml")
+	sourceContent := "schema_version: v1alpha1\nkind: SkillEvalConfig\n# kept comment\n"
+	if err := os.WriteFile(source, []byte(sourceContent), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	cmd := newInitCmdForTest()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"--config", source, "--print"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init --print: %v", err)
+	}
+	if out.String() != sourceContent {
+		t.Errorf("print output mismatch\nwant:\n%s\ngot:\n%s", sourceContent, out.String())
+	}
+}
+
+func TestInit_ConfigSourceMissing(t *testing.T) {
 	t.Parallel()
 	cmd := newInitCmdForTest()
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
-	cmd.SetArgs([]string{"--local", "--config", "/tmp/x.yaml"})
+	cmd.SetArgs([]string{"--config", "/definitely/does/not/exist.yaml", "--print"})
 	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected mutual exclusion error")
+		t.Fatal("expected error for missing source")
+	}
+}
+
+func TestInit_ConfigSourceInvalid(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	source := filepath.Join(tmp, "bad.yaml")
+	if err := os.WriteFile(source, []byte("not: [valid yaml"), 0o600); err != nil {
+		t.Fatalf("write bad source: %v", err)
+	}
+	cmd := newInitCmdForTest()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"--config", source, "--print"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error for invalid source")
 	}
 }

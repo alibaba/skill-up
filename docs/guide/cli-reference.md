@@ -184,6 +184,44 @@ skill-up report result.json --format html --output-dir ./reports
 
 ---
 
+## skill-up init
+
+Write a skill-up user-config file. See [User Configuration](./user-config) for the discovery chain and schema.
+
+```bash
+skill-up init [flags]
+```
+
+### Flags
+
+| Flag       | Default                                            | Description                                                                                  |
+| :--------: | :-------------------------------------------------: | :-------------------------------------------------------------------------------------------: |
+| `--local`  | `false`                                            | Write target is `$PWD/.skill-up.yaml` instead of the XDG path                                |
+| `--config` | —                                                  | **Source** file to read (validated, copied verbatim with comments). Without this, a commented template is written. |
+| `--print`  | `false`                                            | Print to stdout instead of writing to disk                                                   |
+| `--force`  | `false`                                            | Overwrite an existing target                                                                 |
+
+> Note: for `init`, `--config` names the *source* to read. For every other subcommand (`run`, `validate`, …) it is the *load-path override* sitting at the top of the discovery chain.
+
+### Examples
+
+```bash
+# Write a commented template
+skill-up init                                  # -> ~/.config/skill-up/config.yaml
+skill-up init --local                          # -> ./.skill-up.yaml
+skill-up init --print                          # -> stdout
+
+# Seed from an existing config (validates, preserves comments)
+skill-up init --config ./team-config.yaml          # -> ~/.config/skill-up/config.yaml
+skill-up init --config ./team-config.yaml --local  # -> ./.skill-up.yaml
+skill-up init --config ./team-config.yaml --print  # validate & dump to stdout
+
+# Overwrite
+skill-up init --local --force
+```
+
+---
+
 ## skill-up import
 
 One-shot conversion of an Anthropic `evals.json` into skill-up's native YAML format.

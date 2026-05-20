@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,18 +17,22 @@ const (
 
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Write a skill-up user-config template",
-	Long: `Write a commented YAML template for the skill-up user-config file.
+	Short: "Write a skill-up user-config file",
+	Long: `Write a skill-up user-config file.
 
-Default target is the XDG path ($XDG_CONFIG_HOME/skill-up/config.yaml or
-~/.config/skill-up/config.yaml). Use --local to write $PWD/.skill-up.yaml,
-or --config <path> to choose an explicit target. --print writes to stdout
-instead.`,
+Without --config, writes a commented YAML template. With --config <path>,
+reads that file (validating it as a skill-up config) and writes its raw
+contents to the target, preserving comments and formatting.
+
+Target selection:
+  default        $XDG_CONFIG_HOME/skill-up/config.yaml (or ~/.config/...)
+  --local        $PWD/.skill-up.yaml
+  --print        stdout (no file written)`,
 	RunE: runInit,
 }
 
 func init() {
-	initCmd.Flags().Bool("local", false, "Write to $PWD/.skill-up.yaml")
+	initCmd.Flags().Bool("local", false, "Write target is $PWD/.skill-up.yaml instead of the XDG path")
 	initCmd.Flags().Bool("print", false, "Print to stdout instead of writing to disk")
 	initCmd.Flags().Bool("force", false, "Overwrite an existing file")
 	rootCmd.AddCommand(initCmd)
@@ -39,20 +42,23 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	local, _ := cmd.Flags().GetBool("local")
 	printOnly, _ := cmd.Flags().GetBool("print")
 	force, _ := cmd.Flags().GetBool("force")
-	configPath, _ := cmd.Flags().GetString(configFlagName)
+	sourcePath, _ := cmd.Flags().GetString(configFlagName)
 
-	if local && configPath != "" {
-		return errors.New("--local and --config are mutually exclusive")
+	content, err := resolveInitContent(sourcePath)
+	if err != nil {
+		return err
 	}
-
-	content := renderInitTemplate(userconfig.Redact(userconfig.Config{}))
 
 	if printOnly {
 		_, err := fmt.Fprint(cmd.OutOrStdout(), content)
 		return err
 	}
 
-	target, err := resolveInitTarget(configPath, local)
+	resolveTarget := resolveUserConfigTarget
+	if local {
+		resolveTarget = resolveProjectConfigTarget
+	}
+	target, err := resolveTarget()
 	if err != nil {
 		return err
 	}
@@ -71,35 +77,51 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func resolveInitTarget(configPath string, local bool) (string, error) {
-	switch {
-	case configPath != "":
-		return configPath, nil
-	case local:
-		wd, err := os.Getwd()
-		if err != nil {
-			return "", err
-		}
-		return filepath.Join(wd, userconfig.ProjectConfigFile), nil
-	default:
-		if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-			return filepath.Join(xdg, userconfig.UserConfigDir, userconfig.UserConfigFile), nil
-		}
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		return filepath.Join(home, ".config", userconfig.UserConfigDir, userconfig.UserConfigFile), nil
+// resolveInitContent returns the bytes to write. If sourcePath is empty the
+// embedded template is used. Otherwise the source is loaded and validated as
+// a skill-up config, and its raw bytes are returned so comments/formatting
+// survive.
+func resolveInitContent(sourcePath string) (string, error) {
+	if sourcePath == "" {
+		return initTemplateContent, nil
 	}
+	if _, err := userconfig.LoadFile(sourcePath); err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(sourcePath) //nolint:gosec // path is user-supplied by design
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
-// renderInitTemplate produces a commented YAML template covering every
-// top-level section. All optional knobs are commented out so the default
-// behavior is a no-op.
-func renderInitTemplate(_ userconfig.Config) string {
-	return initTemplateContent
+// resolveProjectConfigTarget returns $PWD/.skill-up.yaml — the per-project
+// config layer.
+func resolveProjectConfigTarget() (string, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(wd, userconfig.ProjectConfigFile), nil
 }
 
+// resolveUserConfigTarget returns the XDG-aware user config path
+// ($XDG_CONFIG_HOME/skill-up/config.yaml, falling back to
+// ~/.config/skill-up/config.yaml).
+func resolveUserConfigTarget() (string, error) {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, userconfig.UserConfigDir, userconfig.UserConfigFile), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", userconfig.UserConfigDir, userconfig.UserConfigFile), nil
+}
+
+// initTemplateContent is the commented YAML template used by `init` when no
+// --config source is given. All optional knobs are commented out so the
+// default behavior is a no-op.
 const initTemplateContent = `# skill-up user config -- auto-loaded by every command.
 # Discovery order (lowest to highest precedence):
 #   embedded defaults < ~/.config/skill-up/config.yaml < $PWD/.skill-up.yaml < --config
