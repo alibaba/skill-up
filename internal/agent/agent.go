@@ -15,6 +15,7 @@ import (
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/observability"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/internal/shellquote"
 	"github.com/alibaba/skill-up/pkg/transcript"
@@ -22,6 +23,28 @@ import (
 
 // ErrAgentNotFound is returned when the agent executable is not found.
 var ErrAgentNotFound = errors.New("agent not found in PATH")
+
+// ErrAgentRequiresBash is returned when an agent CLI is invoked on a Windows
+// host where Git Bash (or another bash discoverable by platform.DiscoverBash)
+// is not available. Agent commands are POSIX-quoted and assume a bash
+// interpreter; running them through the cmd.exe fallback would let metachars
+// (`& | " %VAR%`) in the instruction reach the shell unprotected. See
+// docs/guide/windows.md for the documented limitation.
+var ErrAgentRequiresBash = errors.New("agent CLI execution on Windows requires bash; install Git for Windows or set SKILL_UP_BASH")
+
+// requireBashOnWindowsHost rejects agent execution when the runtime's target
+// is Windows but the host shell would be cmd.exe. We only enforce this for
+// runtimes whose target matches the host (NoneRuntime today); sandboxed
+// runtimes target a non-Windows guest and never go through platform.Host().
+func requireBashOnWindowsHost(rt Runtime) error {
+	if rt.TargetGOOS() != "windows" {
+		return nil
+	}
+	if platform.Host().IsBash {
+		return nil
+	}
+	return ErrAgentRequiresBash
+}
 
 // ErrAgentInstallFailed is returned when agent installation fails.
 var ErrAgentInstallFailed = errors.New("agent installation failed")
@@ -185,8 +208,7 @@ func (a *BaseAgent) logCredentialStatus(ctx context.Context, apiKeyEnv, baseURLE
 	// This does not scan unrelated providers.
 	if apiKey := os.Getenv(apiKeyEnv); apiKey != "" {
 		logging.DebugContextf(ctx, "%s detected for %s (source=process_env)", apiKeyEnv, a.Name())
-		if baseURL := os.Getenv(baseURLEnv); baseURLEnv != "" && baseURL != "" {
-			_ = baseURL
+		if baseURLEnv != "" && os.Getenv(baseURLEnv) != "" {
 			logging.DebugContextf(ctx, "%s detected for %s (source=process_env)", baseURLEnv, a.Name())
 		}
 		return

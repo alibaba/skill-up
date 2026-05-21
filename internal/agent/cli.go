@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/alibaba/skill-up/internal/observability"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
@@ -123,6 +124,9 @@ func (a *CLIAgent) InstallSkill(ctx context.Context, rt Runtime, skillCfg runtim
 
 // Run executes the agent with the given messages and returns the session result.
 func (a *CLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (*SessionResult, error) {
+	if err := requireBashOnWindowsHost(rt); err != nil {
+		return nil, fmt.Errorf("%s: %w", a.Name(), err)
+	}
 	start := time.Now()
 
 	instruction := BuildInstructionFromMessages(messages)
@@ -167,7 +171,7 @@ var commandVRegexp = regexp.MustCompile(`^\s*command\s+-v\s+(\S+)(\s.*)?$`)
 // instead of failing to open the missing /dev/null path. Other command
 // forms are returned unchanged.
 func checkCommandForOS(checkCmd, goos string) string {
-	if goos != "windows" {
+	if goos != platform.GOOSWindows {
 		return checkCmd
 	}
 	m := commandVRegexp.FindStringSubmatch(checkCmd)
@@ -181,6 +185,9 @@ func checkCommandForOS(checkCmd, goos string) string {
 
 // Check verifies the agent executable is available.
 func (a *CLIAgent) Check(ctx context.Context, rt Runtime) error {
+	if err := requireBashOnWindowsHost(rt); err != nil {
+		return fmt.Errorf("%s: %w", a.Name(), err)
+	}
 	checkCmd := a.Cfg.CheckCmd
 	if checkCmd == "" {
 		return fmt.Errorf("CheckCmd not configured for agent %s", a.Name())

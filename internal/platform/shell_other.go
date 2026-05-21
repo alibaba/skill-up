@@ -5,6 +5,7 @@ package platform
 import (
 	"context"
 	"os/exec"
+	"sync"
 
 	"github.com/alibaba/skill-up/internal/shellquote"
 )
@@ -20,7 +21,15 @@ import (
 //
 // On POSIX the shell is bash when discoverable, sh otherwise. POSIX
 // single-quoting is correct in both cases.
-func Host() HostShell {
+//
+// The result is cached for the process lifetime; see shell_windows.go for
+// the rationale.
+var hostShell = sync.OnceValue(buildHostShell)
+
+// Host returns the cached HostShell descriptor for the current POSIX host.
+func Host() HostShell { return hostShell() }
+
+func buildHostShell() HostShell {
 	bash, hasBash := DiscoverBash()
 	shell := "sh"
 	if hasBash {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/alibaba/skill-up/internal/shellquote"
@@ -29,7 +30,17 @@ import (
 // cmd.exe is not a POSIX shell, so bash-style command strings (the agent
 // nvm/Node bootstrap) do not run natively on Windows under the cmd
 // fallback; that remains a documented limitation in docs/guide/windows.md.
-func Host() HostShell {
+//
+// The result is cached for the process lifetime: PATH / SKILL_UP_BASH are
+// documented as read-once at startup (see BashEnvOverride), and the host's
+// bash install does not change while skill-up is running. Caching avoids
+// repeating LookPath/Stat work on every NoneRuntime.Exec.
+var hostShell = sync.OnceValue(buildHostShell)
+
+// Host returns the cached HostShell descriptor for the current Windows host.
+func Host() HostShell { return hostShell() }
+
+func buildHostShell() HostShell {
 	bash, hasBash := DiscoverBash()
 	if hasBash {
 		return HostShell{
@@ -68,7 +79,7 @@ func quoteForBashDoubleQuote(s string) string {
 	var b strings.Builder
 	b.Grow(len(s) + 2)
 	b.WriteByte('"')
-	for i := 0; i < len(s); i++ { //nolint:intrange // hot loop on bytes, no slicing tricks
+	for i := range len(s) {
 		c := s[i]
 		if c == '\\' || c == '"' || c == '$' || c == '`' {
 			b.WriteByte('\\')

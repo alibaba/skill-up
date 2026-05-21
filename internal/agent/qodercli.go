@@ -70,6 +70,9 @@ func (a *QoderCLIAgent) CheckCredentials(ctx context.Context) error {
 //
 //nolint:dupl
 func (a *QoderCLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (*SessionResult, error) {
+	if err := requireBashOnWindowsHost(rt); err != nil {
+		return nil, fmt.Errorf("%s: %w", a.Name(), err)
+	}
 	start := time.Now()
 
 	instruction := BuildInstructionFromMessages(messages)
