@@ -234,53 +234,9 @@ func lookupProviderEnv(provider string, kind scopedValueKind) (value, envVar str
 	return value, envVar, true
 }
 
-// ProviderConfigured reports whether the caller has supplied a configuration
-// path for this provider — i.e. the credential resolver has an entry for it,
-// or one of `<PROVIDER>_API_KEY` / `<PROVIDER>_BASE_URL` /
-// `<PROVIDER>_PERSONAL_ACCESS_TOKEN` is set in the process env. The PAT env
-// is the canonical Qoder credential (see EnvQoderPersonalAccessToken /
-// QoderCLIAgent.CheckCredentials), so probing it makes qoder-only-via-PAT
-// setups count as configured.
-//
-// This is used to disambiguate the two valid interpretations of a slashed
-// `--model provider/name` input:
-//
-//   - When the provider IS configured, the user intends `provider` as a
-//     credential namespace (e.g. `provider: dashscope, name: claude-sonnet-4-6`
-//     uses dashscope's API key but talks to a bare Anthropic model id) and a
-//     split is appropriate.
-//   - When the provider is NOT configured, the slashed string is more likely
-//     a literal model identifier the upstream API expects verbatim
-//     (e.g. `anthropic_modelscope/deepseek-v4-pro` registered as-is on an
-//     internal anthropic-proxy gateway). Callers can treat it as opaque.
-//
-// Note: this helper intentionally does NOT consider CLI overrides such as
-// `--api-key`; the CLI layer treats those as a separate "configured via
-// CLI" signal when deciding whether to collapse a tentative split, so that
-// `ProviderConfigured` itself stays purely about persisted/env-resident
-// configuration. Returns false for empty provider input.
-func ProviderConfigured(provider string, resolver *Resolver) bool {
-	if provider == "" {
-		return false
-	}
-	if resolver != nil {
-		if _, ok := resolver.Get(provider); ok {
-			return true
-		}
-	}
-	if _, _, ok := lookupProviderEnv(provider, valueAPIKey); ok {
-		return true
-	}
-	if _, _, ok := lookupProviderEnv(provider, valueBaseURL); ok {
-		return true
-	}
-	// QODER_PERSONAL_ACCESS_TOKEN-style auth: provider-scoped PAT env that
-	// some engines (Qoder) use instead of `<PROVIDER>_API_KEY`.
-	if v := os.Getenv(strings.ToUpper(provider) + "_PERSONAL_ACCESS_TOKEN"); v != "" {
-		return true
-	}
-	return false
-}
+// Provider-existence and slashed-model disambiguation helpers live in
+// provider_query.go (Resolver.HasProvider, ResolveModelRef) so that
+// agent_init.go stays focused on AgentInitParams construction.
 
 func setResolvedValue(params *AgentInitParams, kind scopedValueKind, value string, source ValueSource) {
 	switch kind {

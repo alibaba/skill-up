@@ -411,35 +411,23 @@ func evaluateOptionsFromFlags(cmd *cobra.Command) (runner.EvaluateOptions, error
 	}, nil
 }
 
-// collapseUnconfiguredProviderSplit undoes the optimistic split that
+// collapseUnconfiguredProviderSplit re-runs `credential.ResolveModelRef`
+// against the loaded resolver to undo the optimistic split that
 // resolveEvalConfig performs on `--model provider/name` when the provider
-// half is not actually configured. In that case the slashed input is more
-// likely a literal model identifier the upstream API expects verbatim
-// (e.g. an internal anthropic-proxy gateway that registers models under
-// `anthropic_modelscope/deepseek-v4-pro`) than a credential namespace
-// prefix the agent should peel off.
+// half turns out to be unconfigured. See ResolveModelRef for the
+// disambiguation rationale and the debug log emitted on collapse.
 //
-// Three guards keep this surgical:
+// Two CLI-only guards short-circuit the re-check:
 //
-//   - Only the CLI-split case is touched: when `cliModel` does not contain
-//     a `/`, the provider/name pair came from eval.yaml's separate
-//     `engine.model.{provider,name}` fields. Those are user-authored
-//     explicit configuration and must not be rewritten — e.g. a config that
-//     sets `provider: anthropic, name: claude-sonnet-4-6` and relies on
-//     `claude` CLI login state has no env footprint but is still
-//     deliberate.
-//
-//   - `cliAPIKey` non-empty counts as "configured via CLI": the user is
-//     supplying credentials for whatever provider sits in
-//     `evalCfg.Engine.Model.Provider`, so applyCLIOverrides (which requires
-//     a non-empty Provider to apply `--api-key`) must still see it.
-//
-//   - Otherwise defer to `credential.ProviderConfigured` (resolver entry /
-//     `<PROVIDER>_API_KEY|BASE_URL|PERSONAL_ACCESS_TOKEN` env).
-//
-// Configured providers (e.g. `dashscope` with DASHSCOPE_API_KEY set) keep
-// the split — that's the existing namespace-style usage where the bare
-// model name is what should hit the wire.
+//   - cliModel without `/` → the provider/name pair came from
+//     eval.yaml's separate `engine.model.{provider,name}` keys. Those are
+//     user-authored explicit configuration (often relying on a CLI's
+//     persisted login state with no env footprint) and must not be
+//     rewritten.
+//   - cliAPIKey non-empty → the user is supplying credentials for
+//     whatever provider sits in evalCfg.Engine.Model.Provider, so
+//     applyCLIOverrides (which requires a non-empty Provider to apply
+//     `--api-key`) must still see it.
 //
 // Safe no-op when Provider is empty or already collapsed.
 func collapseUnconfiguredProviderSplit(evalCfg *config.EvalConfig, resolver *credential.Resolver, cliModel, cliAPIKey string) {
@@ -451,21 +439,14 @@ func collapseUnconfiguredProviderSplit(evalCfg *config.EvalConfig, resolver *cre
 	if provider == "" || name == "" {
 		return
 	}
-	// Only undo splits that came from a `--model provider/name` CLI flag.
-	// eval.yaml-sourced pairs (where the user wrote provider and name as
-	// separate YAML keys) reach here without `/` in cliModel, and must be
-	// preserved.
 	if !strings.Contains(cliModel, "/") {
 		return
 	}
 	if cliAPIKey != "" {
 		return
 	}
-	if credential.ProviderConfigured(provider, resolver) {
-		return
-	}
-	evalCfg.Engine.Model.Provider = ""
-	evalCfg.Engine.Model.Name = provider + "/" + name
+	evalCfg.Engine.Model.Provider, evalCfg.Engine.Model.Name =
+		credential.ResolveModelRef(provider+"/"+name, resolver)
 }
 
 // resolveEvalConfig resolves the engine name and ensures evalCfg is non-nil.
@@ -618,23 +599,16 @@ func formatModelRef(provider, name string) string {
 	}
 }
 
+// normalizeCLIModelOverride returns the bare model identifier from a
+// `--model` flag value, peeling off any `provider/` prefix only when the
+// prefix is a configured provider. See credential.ResolveModelRef for
+// the disambiguation rationale; this is the cliModel-side caller of it.
 func normalizeCLIModelOverride(modelFlag string, resolver *credential.Resolver) string {
 	if modelFlag == "" {
 		return modelFlag
 	}
-	parts := strings.SplitN(modelFlag, "/", modelFormatParts)
-	if len(parts) == modelFormatParts && parts[0] != "" && parts[1] != "" {
-		// Only peel off the provider prefix when it's a configured provider
-		// — same disambiguation as collapseUnconfiguredProviderSplit. For
-		// unknown providers the slashed string is more likely a literal
-		// model identifier the upstream API expects verbatim (e.g. ducky's
-		// `anthropic_modelscope/deepseek-v4-pro`); stripping would defeat
-		// the un-split applied to evalCfg.Engine.Model.
-		if credential.ProviderConfigured(parts[0], resolver) {
-			return parts[1]
-		}
-	}
-	return modelFlag
+	_, name := credential.ResolveModelRef(modelFlag, resolver)
+	return name
 }
 
 func isDirectory(pathname string) bool {
