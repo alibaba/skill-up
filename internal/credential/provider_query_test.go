@@ -67,6 +67,30 @@ func TestHasProvider_TrueWhenPersonalAccessTokenEnvSet(t *testing.T) {
 	}
 }
 
+func TestHasProvider_TrueForFrameworkDefaults(t *testing.T) {
+	// Not parallel: explicitly unsets framework provider envs to make sure
+	// the unconditional `case "anthropic", "openai"` short-circuit is what
+	// returns true, not stray env state.
+	for _, key := range []string{
+		"ANTHROPIC_API_KEY",
+		"ANTHROPIC_BASE_URL",
+		"ANTHROPIC_PERSONAL_ACCESS_TOKEN",
+		"OPENAI_API_KEY",
+		"OPENAI_BASE_URL",
+		"OPENAI_PERSONAL_ACCESS_TOKEN",
+	} {
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, name := range []string{"anthropic", "Anthropic", "ANTHROPIC", "openai", "OpenAI"} {
+		if !(*Resolver)(nil).HasProvider(name) {
+			t.Fatalf("HasProvider(%q) returned false; framework defaults must be always-configured", name)
+		}
+	}
+}
+
 func TestHasProvider_FalseWhenNoEnvAndNoResolverEntry(t *testing.T) {
 	for _, key := range []string{
 		"UNKNOWN_VENDOR_API_KEY",

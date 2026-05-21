@@ -14,6 +14,15 @@ import (
 // EnvQoderPersonalAccessToken / QoderCLIAgent.CheckCredentials), so probing
 // it makes qoder-only-via-PAT setups count as configured.
 //
+// Framework default providers ("anthropic", "openai") are reported as
+// configured unconditionally — their upstream APIs only accept bare model
+// identifiers (no `provider/name` form), so a slashed `--model X/Y` with
+// X ∈ {anthropic, openai} can only mean "use bare Y on the X namespace",
+// never "the literal `X/Y` is the model id". The underlying agent CLIs
+// (claude, codex) also carry their own persistent login state that the
+// resolver/env probe can't see; treating them as configured avoids
+// collapsing splits when users rely on that login state alone.
+//
 // Safe on a nil receiver: only env probing applies, which is useful for
 // callers that need a provider check before any resolver has been loaded.
 //
@@ -22,6 +31,10 @@ import (
 func (r *Resolver) HasProvider(name string) bool {
 	if name == "" {
 		return false
+	}
+	switch strings.ToLower(name) {
+	case "anthropic", "openai":
+		return true
 	}
 	if r != nil {
 		if _, ok := r.Get(name); ok {
