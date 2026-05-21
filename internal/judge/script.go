@@ -102,11 +102,18 @@ func (j *ScriptJudge) evaluateInRuntime(ctx context.Context, rt evalruntime.Runt
 	if cwd == "" {
 		cwd = rt.Workspace()
 	}
+	// Translate the transcript path into the script interpreter's preferred
+	// form (e.g. forward slashes for `.sh` running under Git Bash so POSIX
+	// tools can `cat "$EVAL_TRANSCRIPT_PATH"`).
+	transcriptEnv := remoteTranscript
+	if remoteTranscript != "" && plan.envPath != nil {
+		transcriptEnv = plan.envPath(remoteTranscript)
+	}
 	result, err := rt.Exec(ctx, command, evalruntime.ExecOptions{
 		Cwd:        cwd,
 		TimeoutSec: int(timeout.Seconds()),
 		Env: map[string]string{
-			"EVAL_TRANSCRIPT_PATH": remoteTranscript,
+			"EVAL_TRANSCRIPT_PATH": transcriptEnv,
 			"EVAL_FINAL_MESSAGE":   in.FinalMessage,
 			"EVAL_EXIT_CODE":       strconv.Itoa(in.ExitCode),
 		},

@@ -22,6 +22,41 @@ func TestPlanScript_POSIXTarget(t *testing.T) {
 	if got != want {
 		t.Fatalf("command = %q, want %q", got, want)
 	}
+	if got := plan.envPath("/tmp/d/transcript.json"); got != "/tmp/d/transcript.json" {
+		t.Fatalf("POSIX envPath should be identity, got %q", got)
+	}
+}
+
+func TestParseShebang(t *testing.T) {
+	tests := []struct {
+		name, body string
+		wantInt    string
+		wantOpts   []string
+	}{
+		{"empty", "", "", nil},
+		{"posix sh", "/bin/sh", "sh", []string{}},
+		{"bash with opts", "/bin/bash -eu", "bash", []string{"-eu"}},
+		{"env bash", "/usr/bin/env bash", "bash", []string{}},
+		{"env -S bash -eu", "/usr/bin/env -S bash -eu", "bash", []string{"-eu"}},
+		{"env -i python", "/usr/bin/env -i python3", "python3", []string{}},
+		{"only env flags", "/usr/bin/env -S", "", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotInt, gotOpts := parseShebang(tt.body)
+			if gotInt != tt.wantInt {
+				t.Fatalf("interpreter = %q, want %q", gotInt, tt.wantInt)
+			}
+			if len(gotOpts) != len(tt.wantOpts) {
+				t.Fatalf("opts = %v, want %v", gotOpts, tt.wantOpts)
+			}
+			for i := range gotOpts {
+				if gotOpts[i] != tt.wantOpts[i] {
+					t.Fatalf("opts[%d] = %q, want %q", i, gotOpts[i], tt.wantOpts[i])
+				}
+			}
+		})
+	}
 }
 
 // POSIX targets preserve the original behavior: the file extension is ignored

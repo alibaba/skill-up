@@ -25,7 +25,16 @@ type scriptPlan struct {
 	// command builds the runtime Exec command string for the uploaded script
 	// at remoteScript (its path inside the runtime).
 	command func(remoteScript string) string
+	// envPath translates a runtime-side path (e.g. EVAL_TRANSCRIPT_PATH)
+	// into the form the script's interpreter will accept. Identity for most
+	// targets; the Windows `.sh` plan converts to forward slashes so POSIX
+	// tools running inside Git Bash can open the file.
+	envPath func(p string) string
 }
+
+// identityEnvPath is the default envPath used by plans that need no
+// translation between the runtime-side path and the script's view of it.
+func identityEnvPath(p string) string { return p }
 
 // planScript determines how to execute scriptPath in a runtime whose commands
 // run on targetGOOS.
@@ -41,6 +50,7 @@ func planScript(scriptPath, targetGOOS string) (scriptPlan, error) {
 				q := shellquote.QuotePOSIX(remoteScript)
 				return "chmod 700 " + q + " && " + q
 			},
+			envPath: identityEnvPath,
 		}, nil
 	}
 	return planWindowsScript(scriptPath)
@@ -60,6 +70,7 @@ func planWindowsScript(scriptPath string) (scriptPlan, error) {
 				return "powershell -NoProfile -ExecutionPolicy Bypass -File " +
 					shellquote.QuoteWindows(remoteScript)
 			},
+			envPath: identityEnvPath,
 		}, nil
 	case ".cmd", ".bat":
 		return scriptPlan{
@@ -70,6 +81,7 @@ func planWindowsScript(scriptPath string) (scriptPlan, error) {
 				// of the script and make judge results non-deterministic.
 				return "cmd /d /c " + shellquote.QuoteWindows(remoteScript)
 			},
+			envPath: identityEnvPath,
 		}, nil
 	case ".sh", ".bash":
 		bash, ok := platform.DiscoverBash()
@@ -78,13 +90,26 @@ func planWindowsScript(scriptPath string) (scriptPlan, error) {
 				"script judge: .sh script requires bash on Windows; install Git Bash or set %s",
 				platform.BashEnvOverride)
 		}
+		// Forward any shebang-encoded options (`#!/bin/bash -eu`,
+		// `#!/usr/bin/env -S bash -eu`, ...) so strict-mode flags that
+		// POSIX honors via shebang aren't silently dropped when we invoke
+		// bash explicitly on Windows.
+		_, opts := parseShebang(readShebang(scriptPath))
+		bashArgs := []string{shellquote.QuoteWindows(bash)}
+		for _, o := range opts {
+			bashArgs = append(bashArgs, shellquote.QuoteWindows(o))
+		}
 		return scriptPlan{
 			uploadName: "script.sh",
 			command: func(remoteScript string) string {
-				// bash on Windows reliably accepts forward-slash paths.
-				return shellquote.QuoteWindows(bash) + " " +
-					shellquote.QuoteWindows(filepath.ToSlash(remoteScript))
+				// bash on Windows accepts forward-slash paths; we also
+				// keep EVAL_TRANSCRIPT_PATH in that form (see envPath
+				// below) so POSIX tools inside the script can `cat` it.
+				args := append([]string{}, bashArgs...)
+				args = append(args, shellquote.QuoteWindows(filepath.ToSlash(remoteScript)))
+				return strings.Join(args, " ")
 			},
+			envPath: filepath.ToSlash,
 		}, nil
 	default:
 		return scriptPlan{}, fmt.Errorf(
@@ -134,6 +159,24 @@ var shebangPOSIXShells = map[string]bool{
 // shebang to a synthetic file extension. It returns "" when the shebang is
 // missing or unrecognized.
 func shebangExtension(scriptPath string) string {
+	interp, _ := parseShebang(readShebang(scriptPath))
+	if interp == "" {
+		return ""
+	}
+	switch interp {
+	case "pwsh", "powershell":
+		return ".ps1"
+	}
+	if shebangPOSIXShells[interp] {
+		return ".sh"
+	}
+	return ""
+}
+
+// readShebang returns the body of scriptPath's first line when it is a
+// shebang (everything after `#!`), or "" when there is no recognizable
+// shebang or the file cannot be opened.
+func readShebang(scriptPath string) string {
 	f, err := os.Open(scriptPath) //nolint:gosec // scriptPath is a caller-provided evaluation script
 	if err != nil {
 		return ""
@@ -148,39 +191,30 @@ func shebangExtension(scriptPath string) string {
 	if !strings.HasPrefix(line, "#!") {
 		return ""
 	}
-	interp := parseShebangInterpreter(line[2:])
-	if interp == "" {
-		return ""
-	}
-	switch interp {
-	case "pwsh", "powershell":
-		return ".ps1"
-	}
-	if shebangPOSIXShells[interp] {
-		return ".sh"
-	}
-	return ""
+	return line[2:]
 }
 
-// parseShebangInterpreter extracts the interpreter basename from the body of a
-// shebang line. It understands both direct paths and the `/usr/bin/env <name>`
-// form so e.g. `#!/usr/bin/env bash` and `#!/bin/sh` both resolve to a single
-// token. Returns "" when the line has no usable interpreter.
-func parseShebangInterpreter(body string) string {
+// parseShebang splits a shebang body into (interpreter basename, options
+// passed through to the interpreter). It understands direct paths and the
+// `/usr/bin/env <name>` / `env -S <name> <flags>` forms. Returns ("", nil)
+// when the body has no usable interpreter.
+func parseShebang(body string) (string, []string) {
 	fields := strings.Fields(body)
 	if len(fields) == 0 {
-		return ""
+		return "", nil
 	}
-	first := filepath.Base(fields[0])
-	if first == "env" && len(fields) >= 2 {
-		// Skip env's own option flags (e.g. `env -S bash`).
-		for _, f := range fields[1:] {
-			if strings.HasPrefix(f, "-") {
-				continue
-			}
-			return filepath.Base(f)
+	if filepath.Base(fields[0]) == "env" {
+		// Skip env's own flags (e.g. -S, -i) to find the real interpreter.
+		// Everything past the interpreter token is what env's -S passes
+		// through.
+		i := 1
+		for i < len(fields) && strings.HasPrefix(fields[i], "-") {
+			i++
 		}
-		return ""
+		if i >= len(fields) {
+			return "", nil
+		}
+		return filepath.Base(fields[i]), append([]string{}, fields[i+1:]...)
 	}
-	return first
+	return filepath.Base(fields[0]), append([]string{}, fields[1:]...)
 }
