@@ -102,6 +102,15 @@ func (a *ClaudeCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions,
 	logging.DebugContextf(ctx, "Session ID: %s", sessionID)
 
 	envVars := a.credentialEnvVars(credential.EnvAnthropicAPIKey, credential.EnvAnthropicBaseURL)
+	// Some Anthropic-compatible proxies (e.g. internal anthropic-proxy
+	// gateways) only validate `Authorization: Bearer <token>` and do not
+	// recognise the `x-api-key` header. The Anthropic SDK switches to
+	// Bearer when ANTHROPIC_AUTH_TOKEN is set, and the official Anthropic
+	// API also accepts Bearer, so writing both env vars covers both
+	// flavours without forcing operators to maintain two credentials.
+	if a.Cfg.APIKey != "" {
+		envVars[credential.EnvAnthropicAuthToken] = a.Cfg.APIKey
+	}
 	envVars["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
 	envVars["IS_SANDBOX"] = "1"
 	if observability.TracingEnabled() {
