@@ -33,11 +33,12 @@ func isFrameworkDefaultProvider(name string) bool {
 //   - it appears in frameworkDefaultProviders (engine-native provider
 //     with persistent login state the resolver can't see);
 //   - r has a resolver entry for it;
-//   - one of `<PROVIDER>_API_KEY`, `<PROVIDER>_BASE_URL`,
-//     `<PROVIDER>_PERSONAL_ACCESS_TOKEN` is set in the process env.
-//     The PAT env is the canonical Qoder credential
-//     (EnvQoderPersonalAccessToken / QoderCLIAgent.CheckCredentials), so
-//     probing it lets qoder-only-via-PAT setups count as configured.
+//   - `<PROVIDER>_API_KEY` or `<PROVIDER>_BASE_URL` is set in the process
+//     env — the generic env-credential convention used across providers;
+//   - `name == "qoder"` and EnvQoderPersonalAccessToken is set. The PAT
+//     env is Qoder-specific (see QoderCLIAgent.CheckCredentials); there
+//     is no general `<PROVIDER>_PERSONAL_ACCESS_TOKEN` convention, so
+//     this branch is hard-coded rather than templated on `name`.
 //
 // Safe on a nil receiver: only the framework-default and env probes
 // apply, which is useful for callers that need a provider check before
@@ -66,7 +67,7 @@ func (r *Resolver) HasProvider(name string) bool {
 	if _, _, ok := lookupProviderEnv(name, valueBaseURL); ok {
 		return true
 	}
-	if v := os.Getenv(strings.ToUpper(name) + "_PERSONAL_ACCESS_TOKEN"); v != "" {
+	if strings.EqualFold(name, "qoder") && os.Getenv(EnvQoderPersonalAccessToken) != "" {
 		return true
 	}
 	return false
@@ -124,8 +125,8 @@ func ResolveModelRef(raw string, resolver *Resolver, extraConfigured ...func(pre
 	}
 	upper := strings.ToUpper(parts[0])
 	logging.Debugf(
-		"ResolveModelRef: treating %q as opaque model id; provider %q has no resolver entry / %s_API_KEY / %s_BASE_URL / %s_PERSONAL_ACCESS_TOKEN env",
-		raw, parts[0], upper, upper, upper,
+		"ResolveModelRef: treating %q as opaque model id; provider %q has no resolver entry / %s_API_KEY / %s_BASE_URL env (and is not a framework default or qoder PAT setup)",
+		raw, parts[0], upper, upper,
 	)
 	return "", raw
 }

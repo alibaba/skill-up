@@ -58,26 +58,43 @@ func TestHasProvider_TrueWhenBaseURLEnvSet(t *testing.T) {
 	}
 }
 
-func TestHasProvider_TrueWhenPersonalAccessTokenEnvSet(t *testing.T) {
-	// Qoder authenticates via QODER_PERSONAL_ACCESS_TOKEN, not
-	// `<PROVIDER>_API_KEY`; PAT presence must count as configured.
-	t.Setenv("QODER_PERSONAL_ACCESS_TOKEN", "qpat-test")
+func TestHasProvider_TrueWhenQoderPATEnvSet(t *testing.T) {
+	// Qoder authenticates via QODER_PERSONAL_ACCESS_TOKEN (its own env,
+	// NOT a general `<PROVIDER>_PERSONAL_ACCESS_TOKEN` convention) — PAT
+	// presence must count as configured for qoder specifically.
+	t.Setenv(EnvQoderPersonalAccessToken, "qpat-test")
 	if !(&Resolver{}).HasProvider("qoder") {
-		t.Fatalf("HasProvider returned false when QODER_PERSONAL_ACCESS_TOKEN is set")
+		t.Fatalf("HasProvider returned false when %s is set", EnvQoderPersonalAccessToken)
+	}
+}
+
+func TestHasProvider_QoderPATDoesNotLeakToOtherProviders(t *testing.T) {
+	// The PAT probe is qoder-specific; setting QODER_PERSONAL_ACCESS_TOKEN
+	// must not mark unrelated providers (or imaginary `<X>_PAT` env names)
+	// as configured.
+	t.Setenv(EnvQoderPersonalAccessToken, "qpat-test")
+	for _, key := range []string{
+		"DASHSCOPE_API_KEY",
+		"DASHSCOPE_BASE_URL",
+	} {
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if (&Resolver{}).HasProvider("dashscope") {
+		t.Fatalf("qoder PAT must not register dashscope as configured")
 	}
 }
 
 func TestHasProvider_TrueForFrameworkDefaults(t *testing.T) {
 	// Not parallel: explicitly unsets framework provider envs to make sure
-	// the unconditional `case "anthropic", "openai"` short-circuit is what
-	// returns true, not stray env state.
+	// the framework-default short-circuit is what returns true, not stray
+	// env state.
 	for _, key := range []string{
 		"ANTHROPIC_API_KEY",
 		"ANTHROPIC_BASE_URL",
-		"ANTHROPIC_PERSONAL_ACCESS_TOKEN",
 		"OPENAI_API_KEY",
 		"OPENAI_BASE_URL",
-		"OPENAI_PERSONAL_ACCESS_TOKEN",
 	} {
 		if err := os.Unsetenv(key); err != nil {
 			t.Fatal(err)
@@ -95,7 +112,6 @@ func TestHasProvider_FalseWhenNoEnvAndNoResolverEntry(t *testing.T) {
 	for _, key := range []string{
 		"UNKNOWN_VENDOR_API_KEY",
 		"UNKNOWN_VENDOR_BASE_URL",
-		"UNKNOWN_VENDOR_PERSONAL_ACCESS_TOKEN",
 	} {
 		if err := os.Unsetenv(key); err != nil {
 			t.Fatal(err)
@@ -139,7 +155,6 @@ func TestResolveModelRef_CollapsesWhenProviderUnknown(t *testing.T) {
 	for _, key := range []string{
 		"ANTHROPIC_MODELSCOPE_API_KEY",
 		"ANTHROPIC_MODELSCOPE_BASE_URL",
-		"ANTHROPIC_MODELSCOPE_PERSONAL_ACCESS_TOKEN",
 	} {
 		if err := os.Unsetenv(key); err != nil {
 			t.Fatal(err)
@@ -161,7 +176,6 @@ func TestResolveModelRef_DebugLogsOnCollapse(t *testing.T) {
 	for _, key := range []string{
 		"TYPOED_API_KEY",
 		"TYPOED_BASE_URL",
-		"TYPOED_PERSONAL_ACCESS_TOKEN",
 	} {
 		if err := os.Unsetenv(key); err != nil {
 			t.Fatal(err)

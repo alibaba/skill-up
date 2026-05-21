@@ -1167,7 +1167,6 @@ func TestNormalizeCLIModelOverride_UnconfiguredProviderKeepsFullString(t *testin
 	for _, key := range []string{
 		"ANTHROPIC_MODELSCOPE_API_KEY",
 		"ANTHROPIC_MODELSCOPE_BASE_URL",
-		"ANTHROPIC_MODELSCOPE_PERSONAL_ACCESS_TOKEN",
 	} {
 		if err := os.Unsetenv(key); err != nil {
 			t.Fatal(err)
@@ -1240,7 +1239,6 @@ func TestCollapseUnconfiguredProviderSplit_CollapsesWhenProviderUnknown(t *testi
 	for _, key := range []string{
 		"ANTHROPIC_MODELSCOPE_API_KEY",
 		"ANTHROPIC_MODELSCOPE_BASE_URL",
-		"ANTHROPIC_MODELSCOPE_PERSONAL_ACCESS_TOKEN",
 	} {
 		if err := os.Unsetenv(key); err != nil {
 			t.Fatal(err)
@@ -1321,7 +1319,6 @@ var collapsePreservesSplitCases = []collapsePreservesSplitCase{
 		unsetEnvs: []string{
 			"ANTHROPIC_MODELSCOPE_API_KEY",
 			"ANTHROPIC_MODELSCOPE_BASE_URL",
-			"ANTHROPIC_MODELSCOPE_PERSONAL_ACCESS_TOKEN",
 		},
 		provider:  "anthropic_modelscope",
 		modelName: "deepseek-v4-pro",
@@ -1336,7 +1333,6 @@ var collapsePreservesSplitCases = []collapsePreservesSplitCase{
 		unsetEnvs: []string{
 			"DASHSCOPE_API_KEY",
 			"DASHSCOPE_BASE_URL",
-			"DASHSCOPE_PERSONAL_ACCESS_TOKEN",
 		},
 		provider:  testProviderDashscope,
 		modelName: testModelClaudeSonnet,
@@ -1363,7 +1359,6 @@ var collapsePreservesSplitCases = []collapsePreservesSplitCase{
 		unsetEnvs: []string{
 			"ANTHROPIC_API_KEY",
 			"ANTHROPIC_BASE_URL",
-			"ANTHROPIC_PERSONAL_ACCESS_TOKEN",
 		},
 		provider:  "anthropic",
 		modelName: testModelClaudeSonnet,
@@ -1378,7 +1373,6 @@ var collapsePreservesSplitCases = []collapsePreservesSplitCase{
 		unsetEnvs: []string{
 			"DASHSCOPE_API_KEY",
 			"DASHSCOPE_BASE_URL",
-			"DASHSCOPE_PERSONAL_ACCESS_TOKEN",
 		},
 		provider:  testProviderDashscope,
 		modelName: testModelClaudeSonnet,
