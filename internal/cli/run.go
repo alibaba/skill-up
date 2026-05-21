@@ -424,17 +424,15 @@ func evaluateOptionsFromFlags(cmd *cobra.Command) (runner.EvaluateOptions, error
 //     which is itself a concrete provider-configuration signal (the
 //     gateway endpoint is bound to that provider namespace).
 //
-// When either signal is present and `modelFlag` has the shape
-// `prefix/name`, the split is kept regardless of resolver/env state.
-// Otherwise falls through to ResolveModelRef.
+// Either signal upgrades any prefix to "configured", regardless of
+// resolver/env state. Wired through ResolveModelRef's extraConfigured
+// predicate so the SplitN / collapse logic stays in one place.
 func resolveModelRefWithCLIHints(modelFlag string, resolver *credential.Resolver, cliAPIKey, evalBaseURL string) (provider, name string) {
-	if cliAPIKey != "" || evalBaseURL != "" {
-		parts := strings.SplitN(modelFlag, "/", modelFormatParts)
-		if len(parts) == modelFormatParts && parts[0] != "" && parts[1] != "" {
-			return parts[0], parts[1]
-		}
+	if cliAPIKey == "" && evalBaseURL == "" {
+		return credential.ResolveModelRef(modelFlag, resolver)
 	}
-	return credential.ResolveModelRef(modelFlag, resolver)
+	cliHintConfigured := func(_ string) bool { return true }
+	return credential.ResolveModelRef(modelFlag, resolver, cliHintConfigured)
 }
 
 // collapseUnconfiguredProviderSplit re-runs the disambiguation

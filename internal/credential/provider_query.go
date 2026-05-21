@@ -2,38 +2,57 @@ package credential
 
 import (
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/alibaba/skill-up/internal/logging"
 )
 
-// HasProvider reports whether r has any configuration path for the named
-// provider — a resolver entry, or one of `<PROVIDER>_API_KEY`,
-// `<PROVIDER>_BASE_URL`, `<PROVIDER>_PERSONAL_ACCESS_TOKEN` in the process
-// env. The PAT env is the canonical Qoder credential (see
-// EnvQoderPersonalAccessToken / QoderCLIAgent.CheckCredentials), so probing
-// it makes qoder-only-via-PAT setups count as configured.
+// frameworkDefaultProviders are the engine-native providers whose upstream
+// APIs accept only bare model identifiers (no `provider/name` form). A
+// slashed `--model X/Y` with X in this set can only mean "use bare Y on
+// the X namespace" — never "the literal `X/Y` is the model id". The
+// underlying agent CLIs (claude, codex) also carry persistent login state
+// that the resolver/env probe can't see, so we treat these as configured
+// even when no env or resolver entry is present.
 //
-// Framework default providers ("anthropic", "openai") are reported as
-// configured unconditionally — their upstream APIs only accept bare model
-// identifiers (no `provider/name` form), so a slashed `--model X/Y` with
-// X ∈ {anthropic, openai} can only mean "use bare Y on the X namespace",
-// never "the literal `X/Y` is the model id". The underlying agent CLIs
-// (claude, codex) also carry their own persistent login state that the
-// resolver/env probe can't see; treating them as configured avoids
-// collapsing splits when users rely on that login state alone.
+// Kept as a package-private slice (rather than inlined in HasProvider) so
+// that adding a new engine-native provider is a one-line change and the
+// "why this set is hardcoded" rationale lives next to the data.
+var frameworkDefaultProviders = []string{"anthropic", "openai"}
+
+func isFrameworkDefaultProvider(name string) bool {
+	return slices.Contains(frameworkDefaultProviders, strings.ToLower(name))
+}
+
+// HasProvider reports whether r should treat `name` as a configured
+// provider for the purposes of `provider/name` model-ref disambiguation
+// (see ResolveModelRef). A provider is configured when any of the
+// following holds:
 //
-// Safe on a nil receiver: only env probing applies, which is useful for
-// callers that need a provider check before any resolver has been loaded.
+//   - it appears in frameworkDefaultProviders (engine-native provider
+//     with persistent login state the resolver can't see);
+//   - r has a resolver entry for it;
+//   - one of `<PROVIDER>_API_KEY`, `<PROVIDER>_BASE_URL`,
+//     `<PROVIDER>_PERSONAL_ACCESS_TOKEN` is set in the process env.
+//     The PAT env is the canonical Qoder credential
+//     (EnvQoderPersonalAccessToken / QoderCLIAgent.CheckCredentials), so
+//     probing it lets qoder-only-via-PAT setups count as configured.
 //
-// Used to disambiguate the two valid interpretations of a slashed
-// `--model provider/name` input — see ResolveModelRef.
+// Safe on a nil receiver: only the framework-default and env probes
+// apply, which is useful for callers that need a provider check before
+// any resolver has been loaded.
+//
+// Caveat — dual semantics: `true` means "treat the prefix as a namespace
+// for split", not "credentials definitely exist for this provider".
+// Framework defaults short-circuit this without any credential check; a
+// later auth step may still fail. Callers needing strict credential
+// presence should use Resolver.Get + lookupProviderEnv directly.
 func (r *Resolver) HasProvider(name string) bool {
 	if name == "" {
 		return false
 	}
-	switch strings.ToLower(name) {
-	case "anthropic", "openai":
+	if isFrameworkDefaultProvider(name) {
 		return true
 	}
 	if r != nil {
@@ -57,10 +76,13 @@ func (r *Resolver) HasProvider(name string) bool {
 // `provider/` prefix and returns the canonical (provider, name) pair the
 // CLI should store on `evalCfg.Engine.Model`.
 //
-// The split happens iff the prefix is a configured provider (per
-// HasProvider). Otherwise the slashed string is treated as an opaque model
-// identifier the upstream API expects verbatim — typical for internal
-// anthropic-proxy gateways that register models under
+// The split happens iff the prefix is a configured provider — per
+// Resolver.HasProvider, or any of the extraConfigured predicates. Extra
+// predicates exist so call sites with CLI-time signals (`--api-key`,
+// `engine.model.base_url`) can extend "configured" without duplicating
+// the SplitN logic. Otherwise the slashed string is treated as an opaque
+// model identifier the upstream API expects verbatim — typical for
+// internal anthropic-proxy gateways that register models under
 // `anthropic_modelscope/deepseek-v4-pro` keys.
 //
 // Two interpretations this disambiguates:
@@ -81,10 +103,10 @@ func (r *Resolver) HasProvider(name string) bool {
 // Engine-awareness: not currently required — every supported engine
 // agrees that "stored config exists" is the right disambiguation signal.
 // If a future engine needs a different policy (e.g. codex's
-// runProviderConfig wanting a wider notion of configured), extend the
-// signature with an engine parameter; until then keeping it engine-free
-// avoids leaking agent concerns into credential.
-func ResolveModelRef(raw string, resolver *Resolver) (provider, name string) {
+// runProviderConfig wanting a wider notion of configured), pass an
+// engine-specific predicate via extraConfigured; until then keeping the
+// core check engine-free avoids leaking agent concerns into credential.
+func ResolveModelRef(raw string, resolver *Resolver, extraConfigured ...func(prefix string) bool) (provider, name string) {
 	if raw == "" {
 		return "", ""
 	}
@@ -94,6 +116,11 @@ func ResolveModelRef(raw string, resolver *Resolver) (provider, name string) {
 	}
 	if resolver.HasProvider(parts[0]) {
 		return parts[0], parts[1]
+	}
+	for _, extra := range extraConfigured {
+		if extra != nil && extra(parts[0]) {
+			return parts[0], parts[1]
+		}
 	}
 	upper := strings.ToUpper(parts[0])
 	logging.Debugf(
