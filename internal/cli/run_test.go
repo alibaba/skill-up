@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/alibaba/skill-up/internal/config"
+	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/evaluator"
 	"github.com/alibaba/skill-up/internal/judge"
 	"github.com/alibaba/skill-up/internal/userconfig"
@@ -1136,9 +1137,10 @@ func TestApplyRunConfigOverrides_RejectsInvalidParallelism(t *testing.T) {
 }
 
 func TestNormalizeCLIModelOverride_StripsProviderPrefix(t *testing.T) {
-	t.Parallel()
+	// Not parallel: relies on process-wide env to mark "anthropic" as configured.
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
 
-	if got := normalizeCLIModelOverride("anthropic/auto"); got != "auto" {
+	if got := normalizeCLIModelOverride("anthropic/auto", nil); got != "auto" {
 		t.Fatalf("normalizeCLIModelOverride() = %q, want auto", got)
 	}
 }
@@ -1146,8 +1148,28 @@ func TestNormalizeCLIModelOverride_StripsProviderPrefix(t *testing.T) {
 func TestNormalizeCLIModelOverride_PreservesRawModel(t *testing.T) {
 	t.Parallel()
 
-	if got := normalizeCLIModelOverride("claude-sonnet-4-6"); got != "claude-sonnet-4-6" {
+	if got := normalizeCLIModelOverride("claude-sonnet-4-6", nil); got != "claude-sonnet-4-6" {
 		t.Fatalf("normalizeCLIModelOverride() = %q, want claude-sonnet-4-6", got)
+	}
+}
+
+func TestNormalizeCLIModelOverride_UnconfiguredProviderKeepsFullString(t *testing.T) {
+	// Not parallel: unsets env to make sure the provider half is unknown.
+	t.Setenv("ANTHROPIC_MODELSCOPE_API_KEY", "")
+	t.Setenv("ANTHROPIC_MODELSCOPE_BASE_URL", "")
+	if err := os.Unsetenv("ANTHROPIC_MODELSCOPE_API_KEY"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Unsetenv("ANTHROPIC_MODELSCOPE_BASE_URL"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Anthropic-proxy gateways register models under provider/name identifiers
+	// (e.g. ducky's `anthropic_modelscope/deepseek-v4-pro`); stripping the
+	// prefix would defeat the un-split in collapseUnconfiguredProviderSplit.
+	got := normalizeCLIModelOverride("anthropic_modelscope/deepseek-v4-pro", nil)
+	if got != "anthropic_modelscope/deepseek-v4-pro" {
+		t.Fatalf("normalizeCLIModelOverride() = %q, want anthropic_modelscope/deepseek-v4-pro", got)
 	}
 }
 
@@ -1173,5 +1195,68 @@ func TestFilterCases(t *testing.T) {
 	}
 	if filtered[0].ID != "advanced-feature" {
 		t.Errorf("expected advanced-feature, got %s", filtered[0].ID)
+	}
+}
+
+func TestCollapseUnconfiguredProviderSplit_CollapsesWhenProviderUnknown(t *testing.T) {
+	// Not parallel: depends on the absence of any anthropic_modelscope env.
+	for _, key := range []string{
+		"ANTHROPIC_MODELSCOPE_API_KEY",
+		"ANTHROPIC_MODELSCOPE_BASE_URL",
+	} {
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := config.DefaultEvalConfig()
+	cfg.Engine.Model.Provider = "anthropic_modelscope"
+	cfg.Engine.Model.Name = "deepseek-v4-pro"
+
+	collapseUnconfiguredProviderSplit(cfg, credential.NewResolver(""))
+
+	if cfg.Engine.Model.Provider != "" {
+		t.Fatalf("Provider = %q, want \"\" (collapsed)", cfg.Engine.Model.Provider)
+	}
+	// Anthropic-proxy gateways need the full identifier; the un-split must
+	// glue the original `provider/name` back together so it reaches the
+	// upstream API verbatim.
+	if cfg.Engine.Model.Name != "anthropic_modelscope/deepseek-v4-pro" {
+		t.Fatalf("Name = %q, want anthropic_modelscope/deepseek-v4-pro", cfg.Engine.Model.Name)
+	}
+}
+
+func TestCollapseUnconfiguredProviderSplit_KeepsSplitWhenProviderConfigured(t *testing.T) {
+	// Not parallel: relies on DASHSCOPE_API_KEY env to mark provider as configured.
+	t.Setenv("DASHSCOPE_API_KEY", "sk-test")
+
+	cfg := config.DefaultEvalConfig()
+	cfg.Engine.Model.Provider = "dashscope"
+	cfg.Engine.Model.Name = "claude-sonnet-4-6"
+
+	collapseUnconfiguredProviderSplit(cfg, credential.NewResolver(""))
+
+	// `provider: dashscope, name: claude-sonnet-4-6` is the credential-namespace
+	// usage — DASHSCOPE_* env routes auth, the bare claude model id is what
+	// the upstream Anthropic-compatible endpoint expects. Must not collapse.
+	if cfg.Engine.Model.Provider != "dashscope" {
+		t.Fatalf("Provider = %q, want dashscope", cfg.Engine.Model.Provider)
+	}
+	if cfg.Engine.Model.Name != "claude-sonnet-4-6" {
+		t.Fatalf("Name = %q, want claude-sonnet-4-6", cfg.Engine.Model.Name)
+	}
+}
+
+func TestCollapseUnconfiguredProviderSplit_NoopOnEmptyProvider(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.DefaultEvalConfig()
+	cfg.Engine.Model.Provider = ""
+	cfg.Engine.Model.Name = "claude-opus-4-7"
+
+	collapseUnconfiguredProviderSplit(cfg, nil)
+
+	if cfg.Engine.Model.Provider != "" || cfg.Engine.Model.Name != "claude-opus-4-7" {
+		t.Fatalf("unexpected mutation: %+v", cfg.Engine.Model)
 	}
 }

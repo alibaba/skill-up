@@ -224,11 +224,21 @@ func loadCredentialsAndAgent(cmd *cobra.Command, evalCfg *config.EvalConfig) (ag
 		return nil, nil, credential.AgentInitParams{}, fmt.Errorf("failed to load credentials: %w", err)
 	}
 
+	// `--model provider/name` was tentatively split into Provider+Name by
+	// resolveEvalConfig (before the resolver was loaded). Now that we know
+	// which providers actually have configuration, collapse the split back
+	// when the provider is unknown: in that case the slashed string is more
+	// likely a literal model identifier the upstream API expects verbatim
+	// (e.g. anthropic-proxy gateways registering models under
+	// `anthropic_modelscope/deepseek-v4-pro`) than a credential-namespace
+	// prefix the agent should peel off.
+	collapseUnconfiguredProviderSplit(evalCfg, resolver)
+
 	runnerParams := credential.ResolveRunnerInitParams(
 		evalCfg.Engine.Name,
 		evalCfg.Engine.Model,
 		resolver,
-		normalizeCLIModelOverride(cliModel),
+		normalizeCLIModelOverride(cliModel, resolver),
 		cliAPIKey,
 	)
 
@@ -401,6 +411,36 @@ func evaluateOptionsFromFlags(cmd *cobra.Command) (runner.EvaluateOptions, error
 	}, nil
 }
 
+// collapseUnconfiguredProviderSplit undoes the optimistic split that
+// resolveEvalConfig performs on `--model provider/name` when the provider
+// half is not actually configured (no resolver entry and no
+// `<PROVIDER>_API_KEY` / `<PROVIDER>_BASE_URL` env). In that case the
+// slashed input is more likely a literal model identifier the upstream API
+// expects verbatim (e.g. an internal anthropic-proxy gateway that registers
+// models under `anthropic_modelscope/deepseek-v4-pro`) than a credential
+// namespace prefix the agent should peel off.
+//
+// Configured providers (e.g. `dashscope` with DASHSCOPE_API_KEY set) keep
+// the split — that's the existing namespace-style usage where the bare
+// model name is what should hit the wire.
+//
+// Safe no-op when Provider is empty or already collapsed.
+func collapseUnconfiguredProviderSplit(evalCfg *config.EvalConfig, resolver *credential.Resolver) {
+	if evalCfg == nil {
+		return
+	}
+	provider := evalCfg.Engine.Model.Provider
+	name := evalCfg.Engine.Model.Name
+	if provider == "" || name == "" {
+		return
+	}
+	if credential.ProviderConfigured(provider, resolver) {
+		return
+	}
+	evalCfg.Engine.Model.Provider = ""
+	evalCfg.Engine.Model.Name = provider + "/" + name
+}
+
 // resolveEvalConfig resolves the engine name and ensures evalCfg is non-nil.
 func resolveEvalConfig(evalCfg *config.EvalConfig, engineName string, cmd *cobra.Command) *config.EvalConfig {
 	if engineName == "" {
@@ -551,13 +591,21 @@ func formatModelRef(provider, name string) string {
 	}
 }
 
-func normalizeCLIModelOverride(modelFlag string) string {
+func normalizeCLIModelOverride(modelFlag string, resolver *credential.Resolver) string {
 	if modelFlag == "" {
 		return modelFlag
 	}
 	parts := strings.SplitN(modelFlag, "/", modelFormatParts)
 	if len(parts) == modelFormatParts && parts[0] != "" && parts[1] != "" {
-		return parts[1]
+		// Only peel off the provider prefix when it's a configured provider
+		// — same disambiguation as collapseUnconfiguredProviderSplit. For
+		// unknown providers the slashed string is more likely a literal
+		// model identifier the upstream API expects verbatim (e.g. ducky's
+		// `anthropic_modelscope/deepseek-v4-pro`); stripping would defeat
+		// the un-split applied to evalCfg.Engine.Model.
+		if credential.ProviderConfigured(parts[0], resolver) {
+			return parts[1]
+		}
 	}
 	return modelFlag
 }

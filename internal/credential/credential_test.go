@@ -467,3 +467,57 @@ func TestResolveRunnerInitParams_UsesGenericProviderScopedEnv(t *testing.T) {
 		t.Fatalf("unexpected base-url resolution: %#v", params)
 	}
 }
+
+func TestProviderConfigured_EmptyProviderReturnsFalse(t *testing.T) {
+	t.Parallel()
+
+	if ProviderConfigured("", nil) {
+		t.Fatalf("ProviderConfigured(\"\", nil) = true, want false")
+	}
+}
+
+func TestProviderConfigured_TrueWhenResolverHasEntry(t *testing.T) {
+	t.Parallel()
+
+	resolver := NewResolver("")
+	resolver.creds["custom-provider"] = &config.APIKeyConfig{
+		Provider: "custom-provider",
+		APIKey:   "sk-x",
+	}
+	if !ProviderConfigured("custom-provider", resolver) {
+		t.Fatalf("ProviderConfigured returned false for resolver-known provider")
+	}
+}
+
+func TestProviderConfigured_TrueWhenAPIKeyEnvSet(t *testing.T) {
+	// Not parallel: t.Setenv is sequential per process.
+	t.Setenv("DASHSCOPE_API_KEY", "sk-test")
+	if !ProviderConfigured("dashscope", nil) {
+		t.Fatalf("ProviderConfigured returned false when DASHSCOPE_API_KEY is set")
+	}
+}
+
+func TestProviderConfigured_TrueWhenBaseURLEnvSet(t *testing.T) {
+	// Some setups only configure a base URL (e.g. private gateway behind a
+	// shared org token); that alone must count as "configured".
+	t.Setenv("ROUTIFY_BASE_URL", "https://routify.example.com")
+	if !ProviderConfigured("routify", nil) {
+		t.Fatalf("ProviderConfigured returned false when ROUTIFY_BASE_URL is set")
+	}
+}
+
+func TestProviderConfigured_FalseWhenNoEnvAndNoResolverEntry(t *testing.T) {
+	// Not parallel: guarantees the unknown provider has no env footprint.
+	for _, key := range []string{
+		"UNKNOWN_VENDOR_API_KEY",
+		"UNKNOWN_VENDOR_BASE_URL",
+	} {
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if ProviderConfigured("unknown_vendor", nil) {
+		t.Fatalf("ProviderConfigured returned true for fully unconfigured provider")
+	}
+}
