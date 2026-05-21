@@ -42,22 +42,41 @@ func identityEnvPath(p string) string { return p }
 
 // windowsQuoter returns the quoter that matches the shell NoneRuntime.Exec
 // will pick on the current Windows host. When a usable bash is discoverable
-// commands route through `bash -c`, so we must escape the two characters bash
-// keeps active inside double quotes (the dollar sign and the backtick) to
-// keep e.g. `C:\tmp\$foo\script.ps1` intact. When bash is unavailable the
-// command runs under `cmd /d /s /c` which treats both characters literally,
-// so plain QuoteWindows is correct -- inserting `\$` there would corrupt the
-// literal path.
+// commands route through `bash -c`, so we use double-quote-with-bash-escapes
+// (every \, ", $, ` doubled): bash decodes them back to the original byte,
+// and cmd later collapses the resulting `\\` runs through normal Windows
+// path normalization. When bash is unavailable the command runs under
+// `cmd /d /s /c` which already treats \, $, ` literally, so plain
+// QuoteWindows is correct -- bash-style escapes there would corrupt the
+// literal path (and cmd cannot escape `%VAR%` expansion regardless).
 func windowsQuoter() func(string) string {
 	if _, ok := platform.DiscoverBash(); ok {
-		return func(s string) string {
-			q := shellquote.QuoteWindows(s)
-			q = strings.ReplaceAll(q, "$", `\$`)
-			q = strings.ReplaceAll(q, "`", "\\`")
-			return q
-		}
+		return quoteForBashDoubleQuote
 	}
 	return shellquote.QuoteWindows
+}
+
+// quoteForBashDoubleQuote returns s wrapped in double quotes with every
+// character that bash treats as active inside double quotes escaped with a
+// backslash. The four actives are \, ", $, `. After bash decodes the
+// resulting string each of those bytes is delivered intact to the program
+// bash spawns (cmd / powershell / a second bash), so a path like
+// `C:\tmp\$foo\script.ps1` survives the bash -c hop without losing the
+// backslash before `$`. The cmd-fallback path is not affected because we
+// only choose this quoter when bash was discovered.
+func quoteForBashDoubleQuote(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + 2)
+	b.WriteByte('"')
+	for i := 0; i < len(s); i++ { //nolint:intrange // hot loop on bytes, no slicing tricks
+		c := s[i]
+		if c == '\\' || c == '"' || c == '$' || c == '`' {
+			b.WriteByte('\\')
+		}
+		b.WriteByte(c)
+	}
+	b.WriteByte('"')
+	return b.String()
 }
 
 // planScript determines how to execute scriptPath in a runtime whose commands
@@ -173,11 +192,16 @@ func joinForGOOS(targetGOOS string, elem ...string) string {
 	return path.Join(elem...)
 }
 
-// shebangPOSIXShells lists interpreter basenames mapped to a POSIX `.sh`
-// dispatch. Matching is exact so `fish`, `ruby`, `python` etc. do not get
-// misclassified just because their name contains the letters "sh".
+// shebangPOSIXShells lists interpreter basenames that the Windows planner
+// is willing to dispatch through Git Bash. Only `sh` and `bash` are listed:
+// the Windows `.sh` runner always invokes the discovered bash, so dropping
+// a `#!/usr/bin/env zsh` script into bash would silently change semantics.
+// Other POSIX shells (dash, ksh, zsh, ash) are intentionally rejected so
+// the planner returns "cannot determine interpreter" rather than mis-routing.
+// On POSIX targets this list is irrelevant: planScript ignores extension
+// and lets the kernel honor the script's actual shebang.
 var shebangPOSIXShells = map[string]bool{
-	"sh": true, "bash": true, "dash": true, "ksh": true, "zsh": true, "ash": true,
+	"sh": true, "bash": true,
 }
 
 // shebangExtension reads the first line of scriptPath and maps a recognized

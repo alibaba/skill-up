@@ -28,15 +28,20 @@ func TestPlanScript_POSIXTarget(t *testing.T) {
 }
 
 // TestWindowsQuoter verifies that the quoter selected by windowsQuoter()
-// applies the bash-active-character escapes only when bash is discoverable.
-// On the typical CI host bash is on PATH; on the rare host without bash we
-// expect plain QuoteWindows output (no extra backslashes that would corrupt
-// literal paths under cmd /d /s /c).
+// applies the bash double-quote escapes only when bash is discoverable.
+// On the typical CI host bash is on PATH (Git Bash), so every \ / " / $ /
+// backtick byte in the input is escaped; bash then decodes them back to the
+// original, and cmd later collapses the resulting `\\` runs via Windows
+// path normalization. On the rare host without bash we get plain
+// QuoteWindows output (no extra escapes that would corrupt the cmd-literal
+// path).
 func TestWindowsQuoter(t *testing.T) {
 	quote := windowsQuoter()
 	got := quote(`C:\tmp\$VAR\script.cmd`)
 	if _, ok := platform.DiscoverBash(); ok {
-		want := `"C:\tmp\\$VAR\script.cmd"`
+		// Every \ doubled (\\), and $ escaped (\$). Original bytes
+		// re-emerge after bash decodes the double-quoted string.
+		want := `"C:\\tmp\\\$VAR\\script.cmd"`
 		if got != want {
 			t.Fatalf("with bash: quoter(%q) = %q, want %q", `C:\tmp\$VAR\script.cmd`, got, want)
 		}
@@ -45,6 +50,28 @@ func TestWindowsQuoter(t *testing.T) {
 		if got != want {
 			t.Fatalf("without bash: quoter(%q) = %q, want %q", `C:\tmp\$VAR\script.cmd`, got, want)
 		}
+	}
+}
+
+func TestQuoteForBashDoubleQuote(t *testing.T) {
+	tests := []struct {
+		name, in, want string
+	}{
+		{"plain", `plain`, `"plain"`},
+		{"with space", `a b`, `"a b"`},
+		// Every \ doubled; a literal \$ in the input becomes \\\$.
+		{"backslash", `C:\tmp\file`, `"C:\\tmp\\file"`},
+		{"dollar at start", `$VAR`, `"\$VAR"`},
+		{"backslash+dollar", `C:\tmp\$VAR\file`, `"C:\\tmp\\\$VAR\\file"`},
+		{"backtick", "a`b", "\"a\\`b\""},
+		{"interior quote", `a"b`, `"a\"b"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := quoteForBashDoubleQuote(tt.in); got != tt.want {
+				t.Fatalf("quoteForBashDoubleQuote(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -178,6 +205,12 @@ func TestShebangExtension(t *testing.T) {
 		{"fish not sh", "#!/usr/bin/env fish\necho hi\n", ""},
 		{"python not sh", "#!/usr/bin/env python3\nprint(1)\n", ""},
 		{"swish not sh", "#!/usr/local/bin/swish\n", ""},
+		// On Windows the .sh runner always invokes bash; non-bash POSIX
+		// shells must not get silently routed to it. Reject so the planner
+		// reports "cannot determine interpreter".
+		{"zsh rejected", "#!/usr/bin/env zsh\necho hi\n", ""},
+		{"dash rejected", "#!/bin/dash\necho hi\n", ""},
+		{"ksh rejected", "#!/usr/bin/env ksh\necho hi\n", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

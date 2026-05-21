@@ -154,13 +154,18 @@ func (a *CLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messag
 
 // checkCommandForOS adapts a POSIX `command -v X` availability check to the
 // target OS. Windows cmd.exe has no `command` builtin; `where` is the
-// equivalent. Other command forms are returned unchanged.
+// equivalent. Common POSIX-only redirect targets (`/dev/null`) are rewritten
+// to their cmd equivalent (`nul`) so a quiet probe like
+// `command -v codex >/dev/null 2>&1` continues to silence its output instead
+// of failing to open the missing /dev/null path. Other command forms are
+// returned unchanged.
 func checkCommandForOS(checkCmd, goos string) string {
 	if goos != "windows" {
 		return checkCmd
 	}
-	if binary, ok := strings.CutPrefix(checkCmd, "command -v "); ok {
-		return "where " + binary
+	if rest, ok := strings.CutPrefix(checkCmd, "command -v "); ok {
+		rest = strings.ReplaceAll(rest, "/dev/null", "nul")
+		return "where " + rest
 	}
 	return checkCmd
 }
