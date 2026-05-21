@@ -133,6 +133,43 @@ jobs:
           git commit -m "chore(ci): update coverage badge to ${pct} [skip ci]"
           git push origin badges
 
+  e2e-windows:
+    # Windows e2e is intentionally narrower than the Linux e2e: it does not
+    # set SKILL_UP_FULL_E2E, so the LLM-dependent tests in e2e/cli_test.go,
+    # e2e/agent_test.go and e2e/mcp_test.go self-skip. The mock-engine and
+    # script-judge contract tests still exercise the Windows-specific code
+    # paths added by issue #31 — shell selection, MSYS argv handling,
+    # QuoteWindows, NewShellCmd's WaitDelay, the script-judge interpreter
+    # dispatch — through the full CLI pipeline. Real-LLM coverage stays on
+    # the Linux e2e job below.
+    name: E2E (none runtime, Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      # Match the Build & Test step's shell choice so pwsh's legacy argv
+      # passing does not split `-coverprofile`-style flags.
+      - name: Run e2e tests (none runtime, quick mode)
+        shell: bash
+        run: go test -tags e2e -timeout 1200s -count=1 -v ./e2e
+        env:
+          SKILL_UP_E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-artifacts
+
+      - name: Upload e2e workspace artifacts
+        if: always() && hashFiles('e2e-artifacts/**') != ''
+        uses: actions/upload-artifact@v5
+        with:
+          name: e2e-windows-workspaces
+          path: e2e-artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
+
   e2e:
     name: E2E (none runtime)
     runs-on: ubuntu-latest
