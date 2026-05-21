@@ -73,7 +73,7 @@ func TestOpenSandboxCreateUsesSDKOptions(t *testing.T) {
 		SandboxTimeout: 2 * time.Minute,
 		Env:            map[string]string{"RUNTIME_ENV": "1"},
 		Entrypoint:     []string{"tail", "-f", "/dev/null"},
-		Metadata:       map[string]string{"skill_eval": "true"},
+		Metadata:       map[string]string{"skill_up": "true"},
 		Kwargs: map[string]string{
 			"base_url":                "https://sandbox.example.test",
 			"extensions":              `{"template":"basic"}`,

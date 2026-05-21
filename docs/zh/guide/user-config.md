@@ -19,12 +19,12 @@ embed (空)
   < explicit  (--config <path>)
 ```
 
-| Layer      | 路径                                                                                                         | 文件缺失 |
-| :--------- | :----------------------------------------------------------------------------------------------------------- | :------- |
-| `embed`    | 空的 `Config{}`，不内嵌任何厂商默认值                                                                          | 永远存在 |
-| `user`     | `$SKILL_EVAL_CONFIG` → `$XDG_CONFIG_HOME/skill-up/config.yaml` → `~/.config/skill-up/config.yaml`            | 跳过     |
-| `project`  | `$PWD/.skill-up.yaml`                                                                                         | 跳过     |
-| `explicit` | 任意子命令的 `--config <path>`                                                                                | 报错     |
+| Layer      | 路径                                                                                            | 文件缺失 |
+| :--------- | :---------------------------------------------------------------------------------------------- | :------- |
+| `embed`    | 空的 `Config{}`，不内嵌任何厂商默认值                                                           | 永远存在 |
+| `user`     | `$SKILL_UP_CONFIG` → `$XDG_CONFIG_HOME/skill-up/config.yaml` → `~/.config/skill-up/config.yaml` | 跳过     |
+| `project`  | `$PWD/.skill-up.yaml`                                                                           | 跳过     |
+| `explicit` | 任意子命令的 `--config <path>`                                                                  | 报错     |
 
 `user` / `project` 层文件不存在或解析失败会降级为 stderr 上的 `warning:`，命令
 继续执行。`--config` 显式路径如果缺失或不合法则直接报错。
@@ -38,7 +38,7 @@ embed (空)
 
 ```yaml
 schema_version: v1alpha1
-kind: SkillEvalConfig
+kind: SkillUpConfig
 
 telemetry:
   service_name: skill-up                              # OTEL_SERVICE_NAME
@@ -120,7 +120,7 @@ skill-up init --config ./team-config.yaml --print
 
 ```yaml
 schema_version: v1alpha1
-kind: SkillEvalConfig
+kind: SkillUpConfig
 telemetry:
   service_name: skill-up
   traces_exporter: otlp
@@ -139,7 +139,7 @@ telemetry:
 
 ```yaml
 schema_version: v1alpha1
-kind: SkillEvalConfig
+kind: SkillUpConfig
 runtime_kwargs:
   opensandbox:
     base_url: http://sandbox.internal:9090
