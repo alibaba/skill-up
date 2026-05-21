@@ -152,23 +152,7 @@ func (a *ClaudeCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions,
 }
 
 func (a *ClaudeCodeAgent) effectiveModelName(_ context.Context) string {
-	name := strings.TrimSpace(a.Cfg.ModelName)
-	if name == "" {
-		return ""
-	}
-	// `--model provider/name` is split into ModelProvider+ModelName by the CLI
-	// parser. For the default Anthropic endpoint, the provider prefix is just
-	// routing metadata and must not reach claude (the real API only knows bare
-	// model names). For custom Anthropic-compatible proxies, however, the
-	// provider prefix is part of the model identifier the proxy registers
-	// against (e.g. ducky's `anthropic_modelscope/deepseek-v4-pro`); stripping
-	// it leaves the bare name and the proxy returns 400 model not found.
-	// Reconstruct provider/name iff the provider is non-default.
-	provider := strings.TrimSpace(a.Cfg.ModelProvider)
-	if provider == "" || provider == agentProviderAnthropic {
-		return name
-	}
-	return provider + "/" + name
+	return strings.TrimSpace(a.Cfg.ModelName)
 }
 
 func providerRateLimitSignal(result ExecResult, sessionResult *SessionResult) (string, bool) {

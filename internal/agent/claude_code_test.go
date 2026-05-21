@@ -175,49 +175,6 @@ func TestClaudeCodeEffectiveModelName_PassesThroughExplicitModel(t *testing.T) {
 	}
 }
 
-func TestClaudeCodeEffectiveModelName_DefaultAnthropicProviderDropsPrefix(t *testing.T) {
-	t.Parallel()
-
-	// `--model anthropic/claude-sonnet-4-6` against the default Anthropic
-	// endpoint must not propagate the `anthropic/` prefix to claude — the
-	// official API only knows bare model names.
-	ag := NewClaudeCodeAgent(Config{
-		ModelProvider: agentProviderAnthropic,
-		ModelName:     "claude-sonnet-4-6",
-	})
-	if got := ag.effectiveModelName(context.Background()); got != "claude-sonnet-4-6" {
-		t.Fatalf("effectiveModelName() = %q, want claude-sonnet-4-6", got)
-	}
-}
-
-func TestClaudeCodeEffectiveModelName_CustomProviderKeepsPrefix(t *testing.T) {
-	t.Parallel()
-
-	// `--model anthropic_modelscope/deepseek-v4-pro` against an
-	// Anthropic-compatible proxy must keep the `anthropic_modelscope/` prefix
-	// — proxies (e.g. ducky) register models under the full provider/name
-	// identifier and 400 with `model not found` when only the bare name is
-	// sent.
-	ag := NewClaudeCodeAgent(Config{
-		ModelProvider: "anthropic_modelscope",
-		ModelName:     "deepseek-v4-pro",
-	})
-	if got := ag.effectiveModelName(context.Background()); got != "anthropic_modelscope/deepseek-v4-pro" {
-		t.Fatalf("effectiveModelName() = %q, want anthropic_modelscope/deepseek-v4-pro", got)
-	}
-}
-
-func TestClaudeCodeEffectiveModelName_EmptyModelStaysEmpty(t *testing.T) {
-	t.Parallel()
-
-	// Empty model means "let claude pick its default"; provider alone must
-	// not synthesise a model name.
-	ag := NewClaudeCodeAgent(Config{ModelProvider: "anthropic_modelscope"})
-	if got := ag.effectiveModelName(context.Background()); got != "" {
-		t.Fatalf("effectiveModelName() with no model name = %q, want empty", got)
-	}
-}
-
 func TestClaudeCodeRun_EnablesTelemetryAndPropagatesTraceContext(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://collector:4318/v1/traces")
 	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL", "http/protobuf")
