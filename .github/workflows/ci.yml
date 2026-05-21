@@ -14,6 +14,10 @@ on:
       - '*.md'
       - '.github/workflows/docs.yml'
 
+# Default the workflow token to read-only. Jobs that execute PR-supplied
+# code (build/test, e2e, lint) must never be able to push to the repo, even
+# on same-repository PRs where GITHUB_TOKEN would otherwise be writable.
+# Only the dedicated badge-commit job below opts back into contents: write.
 permissions:
   contents: read
 
@@ -40,16 +44,80 @@ jobs:
         run: go build ./...
 
       - name: Test (with race detector and coverage)
-        run: go test -race -timeout 120s -covermode=atomic -coverprofile=coverage.out ./...
+        run: go test -race -timeout 120s -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+      # Self-hosted coverage badge: parse the total from `go tool cover -func`
+      # and rewrite .github/badges/coverage.json. The shields.io endpoint badge
+      # in README.md reads this JSON via raw.githubusercontent.com.
+      - name: Compute coverage and update badge
+        id: coverage
+        run: |
+          pct=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%","",$3); print $3}')
+          if [ -z "$pct" ]; then
+            echo "could not parse total coverage" >&2
+            exit 1
+          fi
+          color=$(awk -v p="$pct" 'BEGIN {
+            if (p+0 >= 80)      print "brightgreen";
+            else if (p+0 >= 60) print "yellow";
+            else                print "red";
+          }')
+          mkdir -p .github/badges
+          printf '{\n  "schemaVersion": 1,\n  "label": "coverage",\n  "message": "%s%%",\n  "color": "%s"\n}\n' \
+            "$pct" "$color" > .github/badges/coverage.json
+          echo "pct=$pct" >> "$GITHUB_OUTPUT"
+          echo "color=$color" >> "$GITHUB_OUTPUT"
+          echo "::notice::Total coverage: ${pct}% (${color})"
+
+      # Hand the badge to the push-only update-coverage-badge job below via
+      # an artifact. PRs (including forks) still run the compute step above
+      # for visibility, but skip the upload so they can never trigger a push.
+      #
+      # include-hidden-files: true is required — the badge lives under
+      # .github/, and actions/upload-artifact defaults to excluding files
+      # whose path contains any dot-prefixed segment. Without this the
+      # upload would silently match nothing and, combined with
+      # if-no-files-found: error, fail the build job on every push to main.
+      - name: Upload coverage badge artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v5
         with:
-          files: ./coverage.out
-          flags: unittests
-          fail_ci_if_error: false
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+          name: coverage-badge
+          path: .github/badges/coverage.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 1
+
+  update-coverage-badge:
+    name: Commit coverage badge
+    needs: build
+    # Gate the entire job — not just individual steps — on push-to-main so
+    # the contents: write token below is never issued for pull_request runs.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download coverage badge artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: coverage-badge
+          path: .github/badges/
+
+      - name: Commit updated coverage badge
+        run: |
+          if git diff --quiet -- .github/badges/coverage.json; then
+            echo "coverage badge unchanged, nothing to commit"
+            exit 0
+          fi
+          pct=$(awk -F'"' '/"message"/ {print $4}' .github/badges/coverage.json)
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/badges/coverage.json
+          git commit -m "chore(ci): update coverage badge to ${pct} [skip ci]"
+          git push
 
   e2e:
     name: E2E (none runtime)
