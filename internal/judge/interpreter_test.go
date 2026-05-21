@@ -174,6 +174,69 @@ func TestPlanWindowsScript_UnknownInterpreter(t *testing.T) {
 	}
 }
 
+// .ps1 file with a shebang that names pwsh must dispatch to pwsh.exe, not
+// the legacy powershell.exe.
+func TestPlanWindowsScript_PS1ShebangPwsh(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "check.ps1")
+	if err := os.WriteFile(scriptPath, []byte("#!/usr/bin/env pwsh\nWrite-Host hi\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	plan, err := planWindowsScript(scriptPath, platform.Host())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cmd := plan.command(`C:\tmp\d\script.ps1`)
+	if !strings.HasPrefix(cmd, "pwsh ") {
+		t.Fatalf("expected pwsh prefix, got %q", cmd)
+	}
+	if strings.HasPrefix(cmd, "powershell ") {
+		t.Fatalf("pwsh shebang should not route to powershell.exe: %q", cmd)
+	}
+}
+
+// .ps1 file with `#!/usr/bin/env -S pwsh -NoLogo` must forward -NoLogo to
+// the interpreter -- shebang options must not be silently dropped.
+func TestPlanWindowsScript_PS1ShebangForwardsOpts(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "check.ps1")
+	if err := os.WriteFile(scriptPath, []byte("#!/usr/bin/env -S pwsh -NoLogo\nWrite-Host hi\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	plan, err := planWindowsScript(scriptPath, platform.Host())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cmd := plan.command(`C:\tmp\d\script.ps1`)
+	if !strings.Contains(cmd, "-NoLogo") {
+		t.Fatalf("expected -NoLogo forwarded from shebang, got %q", cmd)
+	}
+	// Sanity: defaults still get appended.
+	for _, want := range []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File"} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("expected %q in command, got %q", want, cmd)
+		}
+	}
+}
+
+// .ps1 file with no shebang (or a non-PowerShell shebang) must keep the
+// legacy default: powershell.exe with the standard flag set.
+func TestPlanWindowsScript_PS1NoShebangUsesLegacyDefault(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "check.ps1")
+	if err := os.WriteFile(scriptPath, []byte("Write-Host hi\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	plan, err := planWindowsScript(scriptPath, platform.Host())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cmd := plan.command(`C:\tmp\d\script.ps1`)
+	if !strings.HasPrefix(cmd, "powershell -NoProfile -ExecutionPolicy Bypass -File ") {
+		t.Fatalf("expected legacy powershell default, got %q", cmd)
+	}
+}
+
 // TestPlanWindowsScript_ShellScript covers the .sh branch, whose outcome
 // depends on whether bash is discoverable on the host running the test.
 func TestPlanWindowsScript_ShellScript(t *testing.T) {

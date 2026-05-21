@@ -61,9 +61,15 @@ func planScript(scriptPath, targetGOOS string) (scriptPlan, error) {
 }
 
 func planWindowsScript(scriptPath string, shell platform.HostShell) (scriptPlan, error) {
+	// Read and classify the shebang once: both the .ps1 (pwsh-vs-powershell
+	// selection, option forwarding) and .sh (bash strict-mode flags) plans
+	// consume the result. shebangInterp is "" when no recognized shebang
+	// was found.
+	shebangInterp, shebangOpts := parseShebang(readShebang(scriptPath))
+
 	ext := strings.ToLower(filepath.Ext(scriptPath))
 	if ext == "" {
-		ext = shebangExtension(scriptPath)
+		ext = extensionForShebangInterpreter(shebangInterp)
 	}
 
 	// Every command we emit (script run + cleanup) is quoted with the host
@@ -82,10 +88,34 @@ func planWindowsScript(scriptPath string, shell platform.HostShell) (scriptPlan,
 
 	switch ext {
 	case ".ps1":
+		// Pick pwsh.exe (PowerShell Core 7+) when the shebang explicitly
+		// asks for it; default to powershell.exe (Windows PowerShell 5.x)
+		// otherwise. Forward any shebang-encoded interpreter flags so
+		// `#!/usr/bin/env -S pwsh -NoLogo` does not silently lose -NoLogo
+		// when we re-invoke the interpreter ourselves. -NoProfile and
+		// -ExecutionPolicy Bypass are always appended because Windows
+		// PowerShell's default Restricted policy blocks unsigned scripts;
+		// the duplicate -NoProfile case is harmless if the shebang also
+		// sets it.
+		psBinary := psInterpLegacy
+		if shebangInterp == psInterpCore {
+			psBinary = psInterpCore
+		}
+		psArgs := []string{psBinary}
+		// Only forward shebang opts when the shebang itself names a
+		// PowerShell interpreter -- a `.ps1` file with a bogus
+		// `#!/bin/bash -eu` shebang otherwise leaks bash flags into the
+		// powershell invocation.
+		if shebangInterp == psInterpCore || shebangInterp == psInterpLegacy {
+			for _, o := range shebangOpts {
+				psArgs = append(psArgs, quote(o))
+			}
+		}
+		psArgs = append(psArgs, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File")
 		return scriptPlan{
 			uploadName: "script.ps1",
 			command: func(remoteScript string) string {
-				return "powershell -NoProfile -ExecutionPolicy Bypass -File " + quote(remoteScript)
+				return strings.Join(append(psArgs, quote(remoteScript)), " ")
 			},
 			cleanupCommand: winCleanup,
 			envPath:        identityEnvPath,
@@ -105,14 +135,18 @@ func planWindowsScript(scriptPath string, shell platform.HostShell) (scriptPlan,
 				"script judge: .sh script requires bash on Windows; install Git Bash or set %s",
 				platform.BashEnvOverride)
 		}
-		// Forward any shebang-encoded options (`#!/bin/bash -eu`,
+		// Forward shebang-encoded options (`#!/bin/bash -eu`,
 		// `#!/usr/bin/env -S bash -eu`, ...) so strict-mode flags that
 		// POSIX honors via shebang aren't silently dropped when we invoke
 		// bash explicitly on Windows.
-		_, opts := parseShebang(readShebang(scriptPath))
 		bashArgs := []string{quote(shell.Bash)}
-		for _, o := range opts {
-			bashArgs = append(bashArgs, quote(o))
+		// Forward only when the shebang actually names a POSIX shell, so a
+		// `.sh` file with an unrelated shebang (e.g. `#!/usr/bin/env pwsh`
+		// renamed to .sh) does not feed PowerShell flags to bash.
+		if shebangPOSIXShells[shebangInterp] {
+			for _, o := range shebangOpts {
+				bashArgs = append(bashArgs, quote(o))
+			}
 		}
 		return scriptPlan{
 			uploadName: "script.sh",
@@ -172,22 +206,39 @@ var shebangPOSIXShells = map[string]bool{
 	"sh": true, "bash": true,
 }
 
-// shebangExtension reads the first line of scriptPath and maps a recognized
-// shebang to a synthetic file extension. It returns "" when the shebang is
-// missing or unrecognized.
-func shebangExtension(scriptPath string) string {
-	interp, _ := parseShebang(readShebang(scriptPath))
+// PowerShell interpreter basenames recognized by the Windows planner.
+// `pwsh` is PowerShell Core 7+; `powershell` is the legacy Windows
+// PowerShell 5.x. They differ in syntax and module set, so we track them
+// separately and pick the binary that matches the shebang when present.
+const (
+	psInterpCore   = "pwsh"
+	psInterpLegacy = "powershell"
+)
+
+// extensionForShebangInterpreter maps a parsed shebang interpreter basename
+// to the synthetic file extension planWindowsScript dispatches on. Returns
+// "" for empty / unrecognized interpreters so the planner reports
+// "cannot determine interpreter" rather than mis-routing the script.
+func extensionForShebangInterpreter(interp string) string {
 	if interp == "" {
 		return ""
 	}
 	switch interp {
-	case "pwsh", "powershell":
+	case psInterpCore, psInterpLegacy:
 		return ".ps1"
 	}
 	if shebangPOSIXShells[interp] {
 		return ".sh"
 	}
 	return ""
+}
+
+// shebangExtension reads scriptPath's first line and returns the synthetic
+// extension implied by its shebang. Kept as a thin wrapper for tests that
+// exercise the full path → extension flow.
+func shebangExtension(scriptPath string) string {
+	interp, _ := parseShebang(readShebang(scriptPath))
+	return extensionForShebangInterpreter(interp)
 }
 
 // readShebang returns the body of scriptPath's first line when it is a
