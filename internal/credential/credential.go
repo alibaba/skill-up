@@ -17,6 +17,7 @@ const (
 	EnvOpenAIAPIKey             = "OPENAI_API_KEY" //nolint:gosec // false positive: constant name, not a credential
 	EnvOpenAIBaseURL            = "OPENAI_BASE_URL"
 	EnvAnthropicAPIKey          = "ANTHROPIC_API_KEY" //nolint:gosec // false positive: constant name, not a credential
+	EnvAnthropicAuthToken       = "ANTHROPIC_AUTH_TOKEN" //nolint:gosec // false positive: constant name, not a credential
 	EnvAnthropicBaseURL         = "ANTHROPIC_BASE_URL"
 	EnvQoderPersonalAccessToken = "QODER_PERSONAL_ACCESS_TOKEN" //nolint:gosec // false positive: constant name, not a credential
 )

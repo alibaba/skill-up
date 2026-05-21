@@ -175,6 +175,42 @@ func TestClaudeCodeEffectiveModelName_PassesThroughExplicitModel(t *testing.T) {
 	}
 }
 
+func TestClaudeCodeRun_WritesBothAnthropicAuthEnvVars(t *testing.T) {
+	t.Parallel()
+
+	rt := &claudeCodeTestRuntime{
+		workspace: t.TempDir(),
+		execResult: runtime.ExecResult{
+			Stdout:   "OK\n",
+			ExitCode: 0,
+		},
+	}
+	ag := NewClaudeCodeAgent(Config{
+		APIKey:    "sk-test-token",
+		BaseURL:   "https://anthropic-proxy.example.com",
+		ModelName: "claude-sonnet-4-6",
+	})
+
+	if _, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{
+		Role:    transcript.RoleUser,
+		Content: "Reply OK.",
+		Turn:    1,
+	}}); err != nil {
+		t.Fatalf("run claude-code: %v", err)
+	}
+
+	// Both vars must be present so internal anthropic-proxy gateways that
+	// only validate Authorization: Bearer (e.g. ducky /v1/anthropic-proxy)
+	// authenticate, while keeping x-api-key compatibility for the official
+	// Anthropic endpoint and any proxy that prefers it.
+	if got := rt.lastExecEnv[credential.EnvAnthropicAPIKey]; got != "sk-test-token" {
+		t.Fatalf("%s = %q, want sk-test-token", credential.EnvAnthropicAPIKey, got)
+	}
+	if got := rt.lastExecEnv[credential.EnvAnthropicAuthToken]; got != "sk-test-token" {
+		t.Fatalf("%s = %q, want sk-test-token", credential.EnvAnthropicAuthToken, got)
+	}
+}
+
 func TestClaudeCodeRun_EnablesTelemetryAndPropagatesTraceContext(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://collector:4318/v1/traces")
 	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL", "http/protobuf")
