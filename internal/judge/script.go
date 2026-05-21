@@ -86,7 +86,7 @@ func (j *ScriptJudge) evaluateInRuntime(ctx context.Context, rt evalruntime.Runt
 		return nil, fmt.Errorf("script execution failed: upload script judge: %w", err)
 	}
 	defer func() {
-		_, _ = rt.Exec(context.WithoutCancel(ctx), removeDirCommand(targetGOOS, remoteDir), evalruntime.ExecOptions{})
+		_, _ = rt.Exec(context.WithoutCancel(ctx), plan.cleanupCommand(remoteDir), evalruntime.ExecOptions{})
 	}()
 
 	remoteTranscript := ""

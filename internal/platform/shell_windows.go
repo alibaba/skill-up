@@ -21,12 +21,16 @@ import (
 // SysProcAttr.CmdLine so cmd's outer-quote stripping leaves embedded quoted
 // paths intact, and `cmd /d /c` disables HKLM/HKCU AutoRun so a host's
 // `cmd.exe AutoRun` registry value cannot prepend commands to every
-// evaluator invocation.
+// evaluator invocation. `cmd /s` forces cmd to use the deterministic
+// "strip the first and last quote" rule for the wrapping, regardless of
+// how many inner quotes the command contains; without /s, certain shapes
+// (notably "cmd /c <single-token-executable>") trigger cmd's "preserve
+// quotes" branch and the inner command is misparsed.
 func NewShellCmd(ctx context.Context, command string) *exec.Cmd {
 	if bash, ok := DiscoverBash(); ok {
 		return exec.CommandContext(ctx, bash, "-c", command)
 	}
 	cmd := exec.CommandContext(ctx, "cmd")
-	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: `cmd /d /c "` + command + `"`}
+	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: `cmd /d /s /c "` + command + `"`}
 	return cmd
 }

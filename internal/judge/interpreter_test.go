@@ -27,25 +27,24 @@ func TestPlanScript_POSIXTarget(t *testing.T) {
 	}
 }
 
-func TestQuoteWindowsThroughBash(t *testing.T) {
-	tests := []struct {
-		name, in, want string
-	}{
-		// No bash-active characters: identical to QuoteWindows.
-		{"plain", `C:\tmp\skill-up-judge-1\script.cmd`, `"C:\tmp\skill-up-judge-1\script.cmd"`},
-		// `$VAR` would otherwise be expanded by bash inside double quotes.
-		{"dollar", `C:\tmp\$VAR\script.cmd`, `"C:\tmp\\$VAR\script.cmd"`},
-		// Backtick triggers command substitution inside bash double quotes;
-		// both backticks of a pair must be escaped (leaving only one would
-		// turn the second into the start of a new, never-closed substitution).
-		{"backtick", "C:\\tmp\\`cmd`\\s.cmd", "\"C:\\tmp\\\\`cmd\\`\\s.cmd\""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := quoteWindowsThroughBash(tt.in); got != tt.want {
-				t.Fatalf("quoteWindowsThroughBash(%q) = %q, want %q", tt.in, got, tt.want)
-			}
-		})
+// TestWindowsQuoter verifies that the quoter selected by windowsQuoter()
+// applies the bash-active-character escapes only when bash is discoverable.
+// On the typical CI host bash is on PATH; on the rare host without bash we
+// expect plain QuoteWindows output (no extra backslashes that would corrupt
+// literal paths under cmd /d /s /c).
+func TestWindowsQuoter(t *testing.T) {
+	quote := windowsQuoter()
+	got := quote(`C:\tmp\$VAR\script.cmd`)
+	if _, ok := platform.DiscoverBash(); ok {
+		want := `"C:\tmp\\$VAR\script.cmd"`
+		if got != want {
+			t.Fatalf("with bash: quoter(%q) = %q, want %q", `C:\tmp\$VAR\script.cmd`, got, want)
+		}
+	} else {
+		want := `"C:\tmp\$VAR\script.cmd"`
+		if got != want {
+			t.Fatalf("without bash: quoter(%q) = %q, want %q", `C:\tmp\$VAR\script.cmd`, got, want)
+		}
 	}
 }
 
@@ -59,7 +58,10 @@ func TestParseShebang(t *testing.T) {
 		{"posix sh", "/bin/sh", "sh", []string{}},
 		{"bash with opts", "/bin/bash -eu", "bash", []string{"-eu"}},
 		{"env bash", "/usr/bin/env bash", "bash", []string{}},
-		{"env -S bash -eu", "/usr/bin/env -S bash -eu", "bash", []string{"-eu"}},
+		{"env -S split", "/usr/bin/env -S bash -eu", "bash", []string{"-eu"}},
+		{"env -S compact", "/usr/bin/env -Sbash -eu", "bash", []string{"-eu"}},
+		{"env -S compact full", "/usr/bin/env -Sbash\t-eu", "bash", []string{"-eu"}},
+		{"env --split-string=", "/usr/bin/env --split-string=bash -eu", "bash", []string{"-eu"}},
 		{"env -i python", "/usr/bin/env -i python3", "python3", []string{}},
 		{"only env flags", "/usr/bin/env -S", "", nil},
 	}
@@ -101,8 +103,8 @@ func TestPlanWindowsScript(t *testing.T) {
 		wantCmdHead string
 	}{
 		{"powershell", `C:\skill\check.ps1`, "script.ps1", "powershell -NoProfile -ExecutionPolicy Bypass -File "},
-		{"cmd", `C:\skill\check.cmd`, "script.cmd", "cmd /d /c "},
-		{"bat", `C:\skill\check.bat`, "script.bat", "cmd /d /c "},
+		{"cmd", `C:\skill\check.cmd`, "script.cmd", "cmd /d /s /c "},
+		{"bat", `C:\skill\check.bat`, "script.bat", "cmd /d /s /c "},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -184,12 +186,24 @@ func TestShebangExtension(t *testing.T) {
 	}
 }
 
-func TestRemoveDirCommand(t *testing.T) {
-	if got, want := removeDirCommand("linux", "/tmp/d"), "rm -rf '/tmp/d'"; got != want {
-		t.Fatalf("posix removeDirCommand = %q, want %q", got, want)
+func TestCleanupCommand_POSIX(t *testing.T) {
+	plan, err := planScript("/skill/check.sh", "linux")
+	if err != nil {
+		t.Fatalf("planScript: %v", err)
 	}
-	if got, want := removeDirCommand("windows", `C:\tmp\d`), `cmd /d /c rd /s /q "C:\tmp\d"`; got != want {
-		t.Fatalf("windows removeDirCommand = %q, want %q", got, want)
+	if got, want := plan.cleanupCommand("/tmp/d"), "rm -rf '/tmp/d'"; got != want {
+		t.Fatalf("posix cleanupCommand = %q, want %q", got, want)
+	}
+}
+
+func TestCleanupCommand_Windows(t *testing.T) {
+	plan, err := planWindowsScript(`C:\skill\check.ps1`)
+	if err != nil {
+		t.Fatalf("planWindowsScript: %v", err)
+	}
+	got := plan.cleanupCommand(`C:\tmp\d`)
+	if !strings.HasPrefix(got, "cmd /d /s /c rd /s /q ") {
+		t.Fatalf("windows cleanupCommand = %q, want prefix %q", got, "cmd /d /s /c rd /s /q ")
 	}
 }
 

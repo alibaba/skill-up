@@ -25,6 +25,10 @@ type scriptPlan struct {
 	// command builds the runtime Exec command string for the uploaded script
 	// at remoteScript (its path inside the runtime).
 	command func(remoteScript string) string
+	// cleanupCommand builds the command that recursively removes the
+	// per-judge temp dir on the target OS, using the same quoting rules as
+	// command so the same shell ultimately interprets it.
+	cleanupCommand func(dir string) string
 	// envPath translates a runtime-side path (e.g. EVAL_TRANSCRIPT_PATH)
 	// into the form the script's interpreter will accept. Identity for most
 	// targets; the Windows `.sh` plan converts to forward slashes so POSIX
@@ -36,19 +40,24 @@ type scriptPlan struct {
 // translation between the runtime-side path and the script's view of it.
 func identityEnvPath(p string) string { return p }
 
-// quoteWindowsThroughBash wraps shellquote.QuoteWindows but also escapes the
-// two characters that stay live inside bash's double quotes -- the dollar
-// sign and the backtick -- so a script-judge command remains safe when
-// NoneRuntime.Exec routes it through bash -c on Windows (Git Bash is
-// preferred when available). cmd /d /c receives an extra leading backslash
-// before those characters in the rare cases they appear in paths, which
-// Windows path normalization collapses transparently, so the same quoting
-// works on both shells.
-func quoteWindowsThroughBash(s string) string {
-	q := shellquote.QuoteWindows(s)
-	q = strings.ReplaceAll(q, "$", `\$`)
-	q = strings.ReplaceAll(q, "`", "\\`")
-	return q
+// windowsQuoter returns the quoter that matches the shell NoneRuntime.Exec
+// will pick on the current Windows host. When a usable bash is discoverable
+// commands route through `bash -c`, so we must escape the two characters bash
+// keeps active inside double quotes (the dollar sign and the backtick) to
+// keep e.g. `C:\tmp\$foo\script.ps1` intact. When bash is unavailable the
+// command runs under `cmd /d /s /c` which treats both characters literally,
+// so plain QuoteWindows is correct -- inserting `\$` there would corrupt the
+// literal path.
+func windowsQuoter() func(string) string {
+	if _, ok := platform.DiscoverBash(); ok {
+		return func(s string) string {
+			q := shellquote.QuoteWindows(s)
+			q = strings.ReplaceAll(q, "$", `\$`)
+			q = strings.ReplaceAll(q, "`", "\\`")
+			return q
+		}
+	}
+	return shellquote.QuoteWindows
 }
 
 // planScript determines how to execute scriptPath in a runtime whose commands
@@ -65,6 +74,9 @@ func planScript(scriptPath, targetGOOS string) (scriptPlan, error) {
 				q := shellquote.QuotePOSIX(remoteScript)
 				return "chmod 700 " + q + " && " + q
 			},
+			cleanupCommand: func(dir string) string {
+				return "rm -rf " + shellquote.QuotePOSIX(dir)
+			},
 			envPath: identityEnvPath,
 		}, nil
 	}
@@ -77,26 +89,34 @@ func planWindowsScript(scriptPath string) (scriptPlan, error) {
 		ext = shebangExtension(scriptPath)
 	}
 
+	// Pick a quoter that matches the shell NoneRuntime.Exec will use on
+	// this host -- once per plan so every command we emit (script run +
+	// cleanup) goes through the same shell semantics.
+	quote := windowsQuoter()
+	winCleanup := func(dir string) string {
+		// `/d /s /c` matches NewShellCmd's cmd fallback so the strip rule
+		// behaves the same way for the inner command.
+		return "cmd /d /s /c rd /s /q " + quote(dir)
+	}
+
 	switch ext {
 	case ".ps1":
 		return scriptPlan{
 			uploadName: "script.ps1",
 			command: func(remoteScript string) string {
-				return "powershell -NoProfile -ExecutionPolicy Bypass -File " +
-					quoteWindowsThroughBash(remoteScript)
+				return "powershell -NoProfile -ExecutionPolicy Bypass -File " + quote(remoteScript)
 			},
-			envPath: identityEnvPath,
+			cleanupCommand: winCleanup,
+			envPath:        identityEnvPath,
 		}, nil
 	case ".cmd", ".bat":
 		return scriptPlan{
 			uploadName: "script" + ext,
 			command: func(remoteScript string) string {
-				// `/d` disables HKLM/HKCU AutoRun so the host's
-				// `Command Processor\AutoRun` cannot inject commands ahead
-				// of the script and make judge results non-deterministic.
-				return "cmd /d /c " + quoteWindowsThroughBash(remoteScript)
+				return "cmd /d /s /c " + quote(remoteScript)
 			},
-			envPath: identityEnvPath,
+			cleanupCommand: winCleanup,
+			envPath:        identityEnvPath,
 		}, nil
 	case ".sh", ".bash":
 		bash, ok := platform.DiscoverBash()
@@ -110,9 +130,9 @@ func planWindowsScript(scriptPath string) (scriptPlan, error) {
 		// POSIX honors via shebang aren't silently dropped when we invoke
 		// bash explicitly on Windows.
 		_, opts := parseShebang(readShebang(scriptPath))
-		bashArgs := []string{quoteWindowsThroughBash(bash)}
+		bashArgs := []string{quote(bash)}
 		for _, o := range opts {
-			bashArgs = append(bashArgs, quoteWindowsThroughBash(o))
+			bashArgs = append(bashArgs, quote(o))
 		}
 		return scriptPlan{
 			uploadName: "script.sh",
@@ -121,10 +141,11 @@ func planWindowsScript(scriptPath string) (scriptPlan, error) {
 				// keep EVAL_TRANSCRIPT_PATH in that form (see envPath
 				// below) so POSIX tools inside the script can `cat` it.
 				args := append([]string{}, bashArgs...)
-				args = append(args, quoteWindowsThroughBash(filepath.ToSlash(remoteScript)))
+				args = append(args, quote(filepath.ToSlash(remoteScript)))
 				return strings.Join(args, " ")
 			},
-			envPath: filepath.ToSlash,
+			cleanupCommand: winCleanup,
+			envPath:        filepath.ToSlash,
 		}, nil
 	default:
 		return scriptPlan{}, fmt.Errorf(
@@ -150,17 +171,6 @@ func joinForGOOS(targetGOOS string, elem ...string) string {
 		return filepath.Join(elem...)
 	}
 	return path.Join(elem...)
-}
-
-// removeDirCommand builds a command that recursively removes dir on the
-// target OS.
-func removeDirCommand(targetGOOS, dir string) string {
-	if targetGOOS == osWindows {
-		// `/d` matches the script-judge cmd invocations so AutoRun cannot
-		// run between Exec calls.
-		return "cmd /d /c rd /s /q " + quoteWindowsThroughBash(dir)
-	}
-	return "rm -rf " + shellquote.QuotePOSIX(dir)
 }
 
 // shebangPOSIXShells lists interpreter basenames mapped to a POSIX `.sh`
@@ -210,26 +220,82 @@ func readShebang(scriptPath string) string {
 }
 
 // parseShebang splits a shebang body into (interpreter basename, options
-// passed through to the interpreter). It understands direct paths and the
-// `/usr/bin/env <name>` / `env -S <name> <flags>` forms. Returns ("", nil)
-// when the body has no usable interpreter.
+// passed through to the interpreter). It understands direct paths
+// (`#!/bin/bash -eu`), the `/usr/bin/env <name>` form, and both the
+// split `env -S <body>` and compact `env -S<body>` GNU extensions.
+//
+// The `-S <body>` body is treated as whitespace-separated tokens; nested
+// shell quoting inside -S (e.g. `-S bash -c "echo hi"`) is not parsed and
+// the embedded quotes survive in the returned options. Real-world judge
+// shebangs use only flag-style options, where this approximation is fine.
+//
+// Returns ("", nil) when the body has no usable interpreter.
 func parseShebang(body string) (string, []string) {
 	fields := strings.Fields(body)
 	if len(fields) == 0 {
 		return "", nil
 	}
 	if filepath.Base(fields[0]) == "env" {
-		// Skip env's own flags (e.g. -S, -i) to find the real interpreter.
-		// Everything past the interpreter token is what env's -S passes
-		// through.
-		i := 1
-		for i < len(fields) && strings.HasPrefix(fields[i], "-") {
-			i++
-		}
-		if i >= len(fields) {
-			return "", nil
-		}
-		return filepath.Base(fields[i]), append([]string{}, fields[i+1:]...)
+		return parseEnvShebang(fields[1:])
 	}
 	return filepath.Base(fields[0]), append([]string{}, fields[1:]...)
+}
+
+// parseEnvShebang processes the args after `env` in a shebang line.
+func parseEnvShebang(args []string) (string, []string) {
+	for i, f := range args {
+		switch {
+		case f == "-S" || f == "--split-string":
+			// Split form: -S takes everything that follows as one logical
+			// string. On a kernel shebang only one arg reaches env, so
+			// rejoining with spaces matches what env would receive.
+			return splitStringInterpreter(strings.Join(args[i+1:], " "))
+		case strings.HasPrefix(f, "--split-string="):
+			// Long compact: --split-string=<body>; any trailing tokens
+			// were whitespace-split out of the same logical arg, so
+			// rejoin them like the kernel-shebang one-arg rule.
+			rest := strings.TrimPrefix(f, "--split-string=")
+			if i+1 < len(args) {
+				if rest != "" {
+					rest += " "
+				}
+				rest += strings.Join(args[i+1:], " ")
+			}
+			return splitStringInterpreter(rest)
+		case strings.HasPrefix(f, "-S"):
+			// Compact form: -S<body> packs the split-string into the same
+			// token. Strip the -S prefix and concatenate any trailing
+			// tokens with a space (mirroring the kernel-shebang one-arg
+			// rule).
+			rest := strings.TrimPrefix(f, "-S")
+			if i+1 < len(args) {
+				if rest != "" {
+					rest += " "
+				}
+				rest += strings.Join(args[i+1:], " ")
+			}
+			return splitStringInterpreter(rest)
+		case strings.HasPrefix(f, "-"):
+			// Other env flag we do not interpret (-i, -u VAR, -v, --chdir, ...).
+			// Skip the flag; we do not try to consume its argument because
+			// shebang flags that take arguments in two tokens are vanishingly
+			// rare and out of scope for script judges.
+			continue
+		default:
+			// First non-flag token is the interpreter.
+			return filepath.Base(f), append([]string{}, args[i+1:]...)
+		}
+	}
+	return "", nil
+}
+
+// splitStringInterpreter parses the body that env's -S would split. We use
+// whitespace tokenization rather than a full shell parser because real judge
+// shebangs only use flag-style options here.
+func splitStringInterpreter(body string) (string, []string) {
+	tokens := strings.Fields(body)
+	if len(tokens) == 0 {
+		return "", nil
+	}
+	return filepath.Base(tokens[0]), append([]string{}, tokens[1:]...)
 }
