@@ -63,6 +63,13 @@ func TestParseShebang(t *testing.T) {
 		{"env -S compact full", "/usr/bin/env -Sbash\t-eu", "bash", []string{"-eu"}},
 		{"env --split-string=", "/usr/bin/env --split-string=bash -eu", "bash", []string{"-eu"}},
 		{"env -i python", "/usr/bin/env -i python3", "python3", []string{}},
+		// Value-taking short flags (-u NAME, -C DIR) must consume their
+		// value token so it does not get mistaken for the interpreter.
+		{"env -u VAR bash", "/usr/bin/env -u FOO bash -eu", "bash", []string{"-eu"}},
+		{"env -C DIR bash", "/usr/bin/env -C /tmp bash", "bash", []string{}},
+		// env -S with quoted bash -c "..." must preserve the quoted arg
+		// as one token instead of breaking it on whitespace.
+		{"env -S bash -c quoted", `/usr/bin/env -S bash -c "echo ok"`, "bash", []string{"-c", "echo ok"}},
 		{"only env flags", "/usr/bin/env -S", "", nil},
 	}
 	for _, tt := range tests {

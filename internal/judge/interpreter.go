@@ -241,9 +241,18 @@ func parseShebang(body string) (string, []string) {
 	return filepath.Base(fields[0]), append([]string{}, fields[1:]...)
 }
 
+// envValueTakingShortFlags lists GNU env short flags that consume a separate
+// value token after them in a shebang. The long forms accept `--name=value`
+// so they self-contain their value and don't need to be listed here.
+var envValueTakingShortFlags = map[string]bool{
+	"-u": true, // --unset NAME
+	"-C": true, // --chdir DIR
+}
+
 // parseEnvShebang processes the args after `env` in a shebang line.
 func parseEnvShebang(args []string) (string, []string) {
-	for i, f := range args {
+	for i := 0; i < len(args); { //nolint:intrange // we conditionally advance i by 2 when consuming flag values
+		f := args[i]
 		switch {
 		case f == "-S" || f == "--split-string":
 			// Split form: -S takes everything that follows as one logical
@@ -275,12 +284,14 @@ func parseEnvShebang(args []string) (string, []string) {
 				rest += strings.Join(args[i+1:], " ")
 			}
 			return splitStringInterpreter(rest)
+		case envValueTakingShortFlags[f]:
+			// Consume the flag and its value (e.g. `-u VAR`, `-C DIR`) so
+			// the value token does not get mistaken for the interpreter.
+			i += 2
 		case strings.HasPrefix(f, "-"):
-			// Other env flag we do not interpret (-i, -u VAR, -v, --chdir, ...).
-			// Skip the flag; we do not try to consume its argument because
-			// shebang flags that take arguments in two tokens are vanishingly
-			// rare and out of scope for script judges.
-			continue
+			// Self-contained env flag (-i, --ignore-environment,
+			// --chdir=DIR, --unset=VAR, ...). Skip the single token.
+			i++
 		default:
 			// First non-flag token is the interpreter.
 			return filepath.Base(f), append([]string{}, args[i+1:]...)
@@ -289,13 +300,114 @@ func parseEnvShebang(args []string) (string, []string) {
 	return "", nil
 }
 
-// splitStringInterpreter parses the body that env's -S would split. We use
-// whitespace tokenization rather than a full shell parser because real judge
-// shebangs only use flag-style options here.
+// splitStringInterpreter parses the body that env's -S would split. The
+// tokenizer respects single and double quotes plus backslash escapes so
+// shebangs like `#!/usr/bin/env -S bash -c "echo ok"` produce the same argv
+// as a POSIX kernel-shebang dispatch. Full env-S escape sequences (\xHH,
+// \n, \t, etc.) are not decoded -- they are rarely used in real script-judge
+// shebangs and decoding them would not survive in the cmd-fallback path
+// anyway. Unterminated quotes return ("", nil) which the planner converts
+// into a "cannot determine interpreter" error.
 func splitStringInterpreter(body string) (string, []string) {
-	tokens := strings.Fields(body)
-	if len(tokens) == 0 {
+	tokens, err := tokenizeShebangSplitString(body)
+	if err != nil || len(tokens) == 0 {
 		return "", nil
 	}
 	return filepath.Base(tokens[0]), append([]string{}, tokens[1:]...)
+}
+
+// tokenizerState carries the small bit of state the tokenizer mutates as it
+// walks body. Keeping it in a struct lets the per-state handlers stay small
+// enough that the top-level loop stays under gocyclo's threshold.
+type tokenizerState struct {
+	cur      strings.Builder
+	tokens   []string
+	inSingle bool
+	inDouble bool
+	started  bool
+	skipNext bool // when true, the next byte was consumed as an escape
+}
+
+func (s *tokenizerState) flush() {
+	if s.started {
+		s.tokens = append(s.tokens, s.cur.String())
+		s.cur.Reset()
+		s.started = false
+	}
+}
+
+// tokenizeShebangSplitString splits body into shell-style tokens used by
+// env -S: whitespace separates tokens; single quotes preserve every
+// character literally until the next single quote; double quotes preserve
+// characters with `\"` and `\\` decoded; outside quotes a backslash escapes
+// the next character. Returns an error when a quote is left unterminated.
+func tokenizeShebangSplitString(body string) ([]string, error) {
+	s := &tokenizerState{}
+	for i := 0; i < len(body); i++ { //nolint:intrange // we conditionally advance i to consume escape sequences
+		if s.skipNext {
+			s.skipNext = false
+			continue
+		}
+		next := byte(0)
+		if i+1 < len(body) {
+			next = body[i+1]
+		}
+		switch {
+		case s.inSingle:
+			tokenizeStepSingle(s, body[i])
+		case s.inDouble:
+			tokenizeStepDouble(s, body[i], next)
+		default:
+			tokenizeStepUnquoted(s, body[i], next)
+		}
+	}
+	if s.inSingle || s.inDouble {
+		return nil, fmt.Errorf("unterminated quote in shebang -S body: %q", body)
+	}
+	s.flush()
+	return s.tokens, nil
+}
+
+func tokenizeStepSingle(s *tokenizerState, c byte) {
+	if c == '\'' {
+		s.inSingle = false
+	} else {
+		s.cur.WriteByte(c)
+	}
+	s.started = true
+}
+
+func tokenizeStepDouble(s *tokenizerState, c, next byte) {
+	switch {
+	case c == '"':
+		s.inDouble = false
+	case c == '\\' && (next == '"' || next == '\\'):
+		s.cur.WriteByte(next)
+		s.skipNext = true
+	default:
+		s.cur.WriteByte(c)
+	}
+	s.started = true
+}
+
+func tokenizeStepUnquoted(s *tokenizerState, c, next byte) {
+	switch c {
+	case ' ', '\t', '\n', '\v', '\r', '\f':
+		s.flush()
+	case '\'':
+		s.inSingle = true
+		s.started = true
+	case '"':
+		s.inDouble = true
+		s.started = true
+	case '\\':
+		if next != 0 {
+			s.cur.WriteByte(next)
+			s.skipNext = true
+			s.started = true
+		}
+	default:
+		s.cur.WriteByte(c)
+		s.started = true
+	}
 }
