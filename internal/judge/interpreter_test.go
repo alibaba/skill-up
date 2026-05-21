@@ -87,6 +87,23 @@ func TestParseShebang(t *testing.T) {
 		{"env -S backslash space", `/usr/bin/env -S bash\_-eu`, "bash", []string{"-eu"}},
 		{"env -S backslash tab", `/usr/bin/env -S bash\t-eu`, "bash", []string{"-eu"}},
 		{"only env flags", "/usr/bin/env -S", "", nil},
+		// GNU env -a / --argv0=ARG overrides argv[0] of the executed
+		// command. -a takes a separate token; the parser must consume the
+		// argv0 value so it does not get mistaken for the interpreter.
+		{"env -a argv0 bash", "/usr/bin/env -a myargv0 bash -eu", "bash", []string{"-eu"}},
+		// --default-signal / --ignore-signal / --block-signal are
+		// optional-argument flags (`[=sig]`). Without `=sig` they take no
+		// value, so the next token IS the interpreter.
+		{"env --ignore-signal bash", "/usr/bin/env --ignore-signal bash -eu", "bash", []string{"-eu"}},
+		{"env --default-signal bash", "/usr/bin/env --default-signal bash", "bash", []string{}},
+		// GNU env accepts leading `NAME=VALUE` assignments before the
+		// command. The parser must skip them and pick the first
+		// non-assignment token as the interpreter.
+		{"env NAME=VALUE bash", "/usr/bin/env PYTHONPATH=/opt python3 -V", "python3", []string{"-V"}},
+		{"env -S NAME=VALUE bash", "/usr/bin/env -S PYTHONPATH=/opt python3 -V", "python3", []string{"-V"}},
+		// `\c` in unquoted env -S body terminates tokenization; tokens
+		// after it are ignored entirely.
+		{"env -S backslash c terminator", `/usr/bin/env -S bash -eu\c trailing junk`, "bash", []string{"-eu"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

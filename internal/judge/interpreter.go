@@ -238,18 +238,46 @@ func parseShebang(body string) (string, []string) {
 var envValueTakingShortFlags = map[string]bool{
 	"-u": true, // --unset NAME
 	"-C": true, // --chdir DIR
+	"-a": true, // --argv0 ARG (override argv[0])
 }
 
 // envValueTakingLongFlags lists GNU env long flags that accept their value
 // as the next token (the `--name=value` form is self-contained and handled
 // by the generic `strings.HasPrefix(f, "-")` skip arm).
+//
+// Intentionally omitted: --block-signal, --default-signal, --ignore-signal.
+// GNU env documents those as OPTIONAL-argument flags (`[=sig]`) -- without
+// the `=sig` suffix they take no value, so consuming the next token would
+// swallow the interpreter (e.g. `env --ignore-signal bash` would otherwise
+// be parsed as flag `--ignore-signal` with value `bash` and no interpreter
+// remaining).
 var envValueTakingLongFlags = map[string]bool{
-	"--unset":          true,
-	"--chdir":          true,
-	"--argv0":          true,
-	"--block-signal":   true,
-	"--default-signal": true,
-	"--ignore-signal":  true,
+	"--unset": true,
+	"--chdir": true,
+	"--argv0": true,
+}
+
+// isEnvAssignment reports whether tok has the env `NAME=VALUE` shape that
+// GNU env accepts in front of the command. The portable form is
+// `[A-Za-z_][A-Za-z0-9_]*=...`; everything before the first `=` must be a
+// valid C-identifier byte sequence.
+func isEnvAssignment(tok string) bool {
+	eq := strings.IndexByte(tok, '=')
+	if eq <= 0 {
+		return false
+	}
+	for i := range eq {
+		c := tok[i]
+		switch {
+		case c == '_':
+		case c >= 'A' && c <= 'Z':
+		case c >= 'a' && c <= 'z':
+		case i > 0 && c >= '0' && c <= '9':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // parseEnvShebang processes the args after `env` in a shebang line.
@@ -297,11 +325,28 @@ func parseEnvShebang(args []string) (string, []string) {
 			// --chdir=DIR, --unset=VAR, ...). Skip the single token.
 			i++
 		default:
-			// First non-flag token is the interpreter.
-			return filepath.Base(f), append([]string{}, args[i+1:]...)
+			// First non-flag token. GNU env allows leading `NAME=VALUE`
+			// assignments before the command (e.g.
+			// `env PYTHONPATH=/opt python3`); the helper skips those so we
+			// land on the real interpreter.
+			return interpreterFromArgs(args[i:])
 		}
 	}
 	return "", nil
+}
+
+// interpreterFromArgs returns the interpreter and trailing args after
+// skipping leading GNU env `NAME=VALUE` assignments. The first non-
+// assignment token is the interpreter; everything after it is forwarded.
+func interpreterFromArgs(args []string) (string, []string) {
+	i := 0
+	for i < len(args) && isEnvAssignment(args[i]) {
+		i++
+	}
+	if i >= len(args) {
+		return "", nil
+	}
+	return filepath.Base(args[i]), append([]string{}, args[i+1:]...)
 }
 
 // splitStringInterpreter parses the body that env's -S would split. The
@@ -317,7 +362,9 @@ func splitStringInterpreter(body string) (string, []string) {
 	if err != nil || len(tokens) == 0 {
 		return "", nil
 	}
-	return filepath.Base(tokens[0]), append([]string{}, tokens[1:]...)
+	// GNU env allows leading `NAME=VALUE` assignments inside -S too
+	// (e.g. `env -S PYTHONPATH=/opt python3`); reuse the same skip helper.
+	return interpreterFromArgs(tokens)
 }
 
 // tokenizerState carries the small bit of state the tokenizer mutates as it
@@ -330,6 +377,7 @@ type tokenizerState struct {
 	inDouble bool
 	started  bool
 	skipNext bool // when true, the next byte was consumed as an escape
+	done     bool // set by `\c` in unquoted context: ignore the rest of body
 }
 
 func (s *tokenizerState) flush() {
@@ -363,6 +411,9 @@ func tokenizeShebangSplitString(body string) ([]string, error) {
 			tokenizeStepDouble(s, body[i], next)
 		default:
 			tokenizeStepUnquoted(s, body[i], next)
+		}
+		if s.done {
+			break
 		}
 	}
 	if s.inSingle || s.inDouble {
@@ -421,10 +472,19 @@ func tokenizeStepUnquoted(s *tokenizerState, c, next byte) {
 		if next == 0 {
 			return
 		}
-		if envSWhitespaceEscapes[next] {
+		switch {
+		case next == 'c':
+			// GNU env -S documents `\c` (unquoted) as "ignore the rest
+			// of the split-string body". Stop tokenization right here so
+			// the planner sees only the tokens emitted so far.
+			s.flush()
+			s.skipNext = true
+			s.done = true
+			return
+		case envSWhitespaceEscapes[next]:
 			// Whitespace escape: ends the current token without writing.
 			s.flush()
-		} else {
+		default:
 			s.cur.WriteByte(next)
 			s.started = true
 		}
