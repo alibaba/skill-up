@@ -27,6 +27,28 @@ func TestPlanScript_POSIXTarget(t *testing.T) {
 	}
 }
 
+func TestQuoteWindowsThroughBash(t *testing.T) {
+	tests := []struct {
+		name, in, want string
+	}{
+		// No bash-active characters: identical to QuoteWindows.
+		{"plain", `C:\tmp\skill-up-judge-1\script.cmd`, `"C:\tmp\skill-up-judge-1\script.cmd"`},
+		// `$VAR` would otherwise be expanded by bash inside double quotes.
+		{"dollar", `C:\tmp\$VAR\script.cmd`, `"C:\tmp\\$VAR\script.cmd"`},
+		// Backtick triggers command substitution inside bash double quotes;
+		// both backticks of a pair must be escaped (leaving only one would
+		// turn the second into the start of a new, never-closed substitution).
+		{"backtick", "C:\\tmp\\`cmd`\\s.cmd", "\"C:\\tmp\\\\`cmd\\`\\s.cmd\""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := quoteWindowsThroughBash(tt.in); got != tt.want {
+				t.Fatalf("quoteWindowsThroughBash(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseShebang(t *testing.T) {
 	tests := []struct {
 		name, body string

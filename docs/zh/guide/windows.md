@@ -16,7 +16,7 @@ skill-up 原生支持 Windows。本页说明哪些功能可用、当前的限制
   | ----------------- | ------------------------------------------- |
   | `.ps1`            | PowerShell                                  |
   | `.cmd` / `.bat`   | `cmd.exe`                                   |
-  | `.sh`             | bash（Git Bash / WSL），见下文              |
+  | `.sh`             | bash（Git Bash，见下文）                    |
 
 ## 在 Windows 上运行 `.sh` script judge
 
@@ -24,10 +24,17 @@ skill-up 原生支持 Windows。本页说明哪些功能可用、当前的限制
 
 1. `SKILL_UP_BASH` 环境变量（指向 `bash.exe` 的明确路径）；
 2. `PATH` 上的 `bash`；
-3. 知名安装位置 —— `C:\Program Files\Git\bin\bash.exe` 以及 WSL 的 `bash.exe`。
+3. 知名 Git Bash 安装位置 —— `C:\Program Files\Git\bin\bash.exe` 与
+   `C:\Program Files (x86)\Git\bin\bash.exe`。
 
 若都找不到，script judge 会以明确的错误失败。请安装
 [Git for Windows](https://git-scm.com/download/win) 或设置 `SKILL_UP_BASH`。
+
+`C:\Windows\System32\bash.exe`（WSL shim）会在三个步骤里都被主动忽略 ——
+即使通过 `SKILL_UP_BASH` 显式指向或它在 PATH 上排在前面，因为它期望 Linux
+风格的 `/mnt/c/...` 路径，而 skill-up 传入的是 Windows 路径，会静默失败。
+需要走 WSL 的用户请自行处理路径翻译并把 `SKILL_UP_BASH` 指向非 WSL 的 bash，
+或者直接在 WSL 内运行 skill-up（见下文「推荐工作流」）。
 
 ## Windows 上的 OpenSandbox runtime
 

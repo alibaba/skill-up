@@ -36,6 +36,21 @@ type scriptPlan struct {
 // translation between the runtime-side path and the script's view of it.
 func identityEnvPath(p string) string { return p }
 
+// quoteWindowsThroughBash wraps shellquote.QuoteWindows but also escapes the
+// two characters that stay live inside bash's double quotes -- the dollar
+// sign and the backtick -- so a script-judge command remains safe when
+// NoneRuntime.Exec routes it through bash -c on Windows (Git Bash is
+// preferred when available). cmd /d /c receives an extra leading backslash
+// before those characters in the rare cases they appear in paths, which
+// Windows path normalization collapses transparently, so the same quoting
+// works on both shells.
+func quoteWindowsThroughBash(s string) string {
+	q := shellquote.QuoteWindows(s)
+	q = strings.ReplaceAll(q, "$", `\$`)
+	q = strings.ReplaceAll(q, "`", "\\`")
+	return q
+}
+
 // planScript determines how to execute scriptPath in a runtime whose commands
 // run on targetGOOS.
 //
@@ -68,7 +83,7 @@ func planWindowsScript(scriptPath string) (scriptPlan, error) {
 			uploadName: "script.ps1",
 			command: func(remoteScript string) string {
 				return "powershell -NoProfile -ExecutionPolicy Bypass -File " +
-					shellquote.QuoteWindows(remoteScript)
+					quoteWindowsThroughBash(remoteScript)
 			},
 			envPath: identityEnvPath,
 		}, nil
@@ -79,7 +94,7 @@ func planWindowsScript(scriptPath string) (scriptPlan, error) {
 				// `/d` disables HKLM/HKCU AutoRun so the host's
 				// `Command Processor\AutoRun` cannot inject commands ahead
 				// of the script and make judge results non-deterministic.
-				return "cmd /d /c " + shellquote.QuoteWindows(remoteScript)
+				return "cmd /d /c " + quoteWindowsThroughBash(remoteScript)
 			},
 			envPath: identityEnvPath,
 		}, nil
@@ -95,9 +110,9 @@ func planWindowsScript(scriptPath string) (scriptPlan, error) {
 		// POSIX honors via shebang aren't silently dropped when we invoke
 		// bash explicitly on Windows.
 		_, opts := parseShebang(readShebang(scriptPath))
-		bashArgs := []string{shellquote.QuoteWindows(bash)}
+		bashArgs := []string{quoteWindowsThroughBash(bash)}
 		for _, o := range opts {
-			bashArgs = append(bashArgs, shellquote.QuoteWindows(o))
+			bashArgs = append(bashArgs, quoteWindowsThroughBash(o))
 		}
 		return scriptPlan{
 			uploadName: "script.sh",
@@ -106,7 +121,7 @@ func planWindowsScript(scriptPath string) (scriptPlan, error) {
 				// keep EVAL_TRANSCRIPT_PATH in that form (see envPath
 				// below) so POSIX tools inside the script can `cat` it.
 				args := append([]string{}, bashArgs...)
-				args = append(args, shellquote.QuoteWindows(filepath.ToSlash(remoteScript)))
+				args = append(args, quoteWindowsThroughBash(filepath.ToSlash(remoteScript)))
 				return strings.Join(args, " ")
 			},
 			envPath: filepath.ToSlash,
@@ -143,7 +158,7 @@ func removeDirCommand(targetGOOS, dir string) string {
 	if targetGOOS == osWindows {
 		// `/d` matches the script-judge cmd invocations so AutoRun cannot
 		// run between Exec calls.
-		return "cmd /d /c rd /s /q " + shellquote.QuoteWindows(dir)
+		return "cmd /d /c rd /s /q " + quoteWindowsThroughBash(dir)
 	}
 	return "rm -rf " + shellquote.QuotePOSIX(dir)
 }

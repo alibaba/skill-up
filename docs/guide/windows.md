@@ -18,7 +18,7 @@ limitations, and the recommended workflow.
   | ----------------- | ------------------------------------------- |
   | `.ps1`            | PowerShell                                  |
   | `.cmd` / `.bat`   | `cmd.exe`                                   |
-  | `.sh`             | bash (Git Bash / WSL), see below            |
+  | `.sh`             | bash (Git Bash; see below)                  |
 
 ## Running `.sh` script judges on Windows
 
@@ -27,11 +27,19 @@ this order:
 
 1. the `SKILL_UP_BASH` environment variable (an explicit path to `bash.exe`);
 2. `bash` on `PATH`;
-3. well-known locations — `C:\Program Files\Git\bin\bash.exe` and the WSL
-   `bash.exe`.
+3. well-known Git Bash install locations —
+   `C:\Program Files\Git\bin\bash.exe` and
+   `C:\Program Files (x86)\Git\bin\bash.exe`.
 
 If none is found the script judge fails with a clear error. Install
 [Git for Windows](https://git-scm.com/download/win) or set `SKILL_UP_BASH`.
+
+The WSL shim at `C:\Windows\System32\bash.exe` is intentionally rejected at
+all three steps (override, PATH, well-known) because it expects Linux-format
+`/mnt/c/...` paths and silently fails on the Windows-style paths skill-up
+generates. Users who want to drive script judges through WSL must arrange
+path translation upstream and point `SKILL_UP_BASH` at a non-WSL bash — or
+simply run skill-up inside WSL itself (see "Recommended workflow" below).
 
 ## OpenSandbox runtime on Windows
 
