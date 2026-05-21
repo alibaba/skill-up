@@ -21,8 +21,13 @@ import (
 const (
 	noneDirMode  = 0o755
 	noneFileMode = 0o600
-	// noneExecWaitDelay is the grace period Wait allows for I/O to drain after
-	// a command's context is cancelled before it forcibly closes the pipes.
+	// noneExecWaitDelay bounds how long Exec waits after ctx-cancel before
+	// forcibly closing the child's stdio pipes. On POSIX,
+	// configureProcessGroup kills the whole tree on cancellation so a short
+	// grace is enough. On Windows there is no process group equivalent and
+	// a Git Bash grandchild (ping/sleep/git) can still hold the stderr pipe;
+	// this delay ultimately closes it so the pipe-reader goroutines unblock
+	// and Exec returns within the deadline.
 	noneExecWaitDelay = 2 * time.Second
 )
 
@@ -186,10 +191,9 @@ func (r *NoneRuntime) Exec(ctx context.Context, command string, opts ExecOptions
 	// kill the whole group on cancellation, so a timed-out command's
 	// descendants do not outlive it.
 	configureProcessGroup(cmd)
-	// WaitDelay bounds how long Wait blocks after the context is cancelled:
-	// without it, a killed command whose grandchildren still hold the stdout
-	// pipe (e.g. a backgrounded `sleep`) makes Exec hang until those children
-	// exit, so a context deadline would not actually be enforced.
+	// Bound how long Wait blocks after ctx-cancel so a child holding the
+	// stdio pipes can't pin Exec past the deadline. See noneExecWaitDelay
+	// above for the per-OS reasoning.
 	cmd.WaitDelay = noneExecWaitDelay
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd

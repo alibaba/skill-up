@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alibaba/skill-up/internal/platform"
 	evalruntime "github.com/alibaba/skill-up/internal/runtime"
 )
 
@@ -26,7 +27,7 @@ type scriptJudgeCase struct {
 
 // script returns the upload name and body appropriate for the host OS.
 func (tc scriptJudgeCase) script() (name, body string) {
-	if runtime.GOOS == osWindows {
+	if runtime.GOOS == platform.GOOSWindows {
 		return "check.cmd", tc.windowsScript
 	}
 	return "check.sh", tc.posixScript
@@ -118,7 +119,7 @@ func TestScriptJudge_StderrCaptured(t *testing.T) {
 func TestScriptJudge_Timeout(t *testing.T) {
 	dir := t.TempDir()
 	name, body := "slow.sh", "#!/bin/sh\nsleep 10\nexit 0\n"
-	if runtime.GOOS == osWindows {
+	if runtime.GOOS == platform.GOOSWindows {
 		// ping -n 11 to a local address waits ~10s without needing console
 		// input (unlike `timeout`).
 		name, body = "slow.cmd", "@echo off\r\nping -n 11 127.0.0.1 >nul\r\nexit /b 0\r\n"
@@ -161,7 +162,7 @@ func TestScriptJudge_EnvVarsInjected(t *testing.T) {
 	name, body := "check_env.sh", "#!/bin/sh\n"+
 		"echo \"transcript=$EVAL_TRANSCRIPT_PATH final=$EVAL_FINAL_MESSAGE exit=$EVAL_EXIT_CODE\"\n"+
 		"exit 0\n"
-	if runtime.GOOS == osWindows {
+	if runtime.GOOS == platform.GOOSWindows {
 		name, body = "check_env.cmd", "@echo off\r\n"+
 			"echo transcript=%EVAL_TRANSCRIPT_PATH% final=%EVAL_FINAL_MESSAGE% exit=%EVAL_EXIT_CODE%\r\n"+
 			"exit /b 0\r\n"

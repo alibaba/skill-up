@@ -13,6 +13,15 @@ import (
 // install locations.
 const BashEnvOverride = "SKILL_UP_BASH"
 
+// GOOS-value constants that callers across packages compare against
+// runtime.GOOS / Runtime.TargetGOOS(). Centralizing them avoids string
+// literals duplicated across the OS-dispatch sites.
+const (
+	GOOSWindows = "windows"
+	GOOSLinux   = "linux"
+	GOOSDarwin  = "darwin"
+)
+
 // HostShell describes the shell that NoneRuntime.Exec will use on the
 // current host. Callers that need to quote arguments for the same shell or
 // inject extra environment variables it depends on should reach for Quote

@@ -104,9 +104,11 @@ func (j *ScriptJudge) evaluateInRuntime(ctx context.Context, rt evalruntime.Runt
 	}
 	// Translate the transcript path into the script interpreter's preferred
 	// form (e.g. forward slashes for `.sh` running under Git Bash so POSIX
-	// tools can `cat "$EVAL_TRANSCRIPT_PATH"`).
+	// tools can `cat "$EVAL_TRANSCRIPT_PATH"`). Every plan returned by
+	// planScript sets envPath (identity on POSIX, ToSlash on Windows .sh),
+	// so the function is always safe to invoke.
 	transcriptEnv := remoteTranscript
-	if remoteTranscript != "" && plan.envPath != nil {
+	if remoteTranscript != "" {
 		transcriptEnv = plan.envPath(remoteTranscript)
 	}
 	result, err := rt.Exec(ctx, command, evalruntime.ExecOptions{

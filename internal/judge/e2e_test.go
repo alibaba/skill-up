@@ -35,6 +35,7 @@ import (
 	"testing"
 
 	"github.com/alibaba/skill-up/internal/config"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
 
@@ -632,7 +633,7 @@ else
   exit 1
 fi
 `
-	if runtime.GOOS == osWindows {
+	if runtime.GOOS == platform.GOOSWindows {
 		scriptName, scriptContent = "eval_check.cmd", "@echo off\r\n"+
 			"echo %EVAL_FINAL_MESSAGE% | findstr /C:\"bug\" >nul\r\n"+
 			"if %errorlevel%==0 (\r\n"+

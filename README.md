@@ -144,6 +144,11 @@ make build
 go build -o bin/skill-up ./cmd/skill-up
 ```
 
+**Windows users**: skill-up runs natively on Windows. See
+[Windows Support](docs/guide/windows.md) for the recommended workflow,
+known limitations (notably: native agent CLI execution requires Git
+Bash), and the PowerShell tooling under `scripts/windows/`.
+
 ## Quick Start
 
 ### 1. Create Eval Config

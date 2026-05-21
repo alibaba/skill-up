@@ -262,7 +262,7 @@ jobs:
 
       - name: Upload e2e workspace artifacts
         if: always() && steps.secrets.outputs.available == 'true' && hashFiles('e2e-artifacts/**') != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v5
         with:
           name: e2e-workspaces
           path: e2e-artifacts/
@@ -385,7 +385,7 @@ jobs:
 
       - name: Upload OpenSandbox server log
         if: always() && steps.secrets.outputs.available == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v5
         with:
           name: opensandbox-server-log
           path: ${{ runner.temp }}/opensandbox-server.log
@@ -394,7 +394,7 @@ jobs:
 
       - name: Upload opensandbox e2e workspace artifacts
         if: always() && steps.secrets.outputs.available == 'true' && hashFiles('e2e-opensandbox-artifacts/**') != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v5
         with:
           name: e2e-opensandbox-workspaces
           path: e2e-opensandbox-artifacts/

@@ -7,6 +7,7 @@ import (
 	goruntime "runtime"
 	"testing"
 
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
@@ -18,7 +19,7 @@ import (
 // native Windows is intentionally out of scope; users go through WSL2.
 func skipIfNoPOSIXShell(t *testing.T) {
 	t.Helper()
-	if goruntime.GOOS == "windows" {
+	if goruntime.GOOS == platform.GOOSWindows {
 		t.Skip("POSIX-shell agent template; native Windows agent execution is unsupported (use WSL2)")
 	}
 }
@@ -322,10 +323,10 @@ func TestCheckCommandForOS(t *testing.T) {
 	}{
 		{"posix unchanged", "command -v codex", "linux", "command -v codex"},
 		{"darwin unchanged", "command -v claude", "darwin", "command -v claude"},
-		{"windows translates", "command -v codex", "windows", "where codex"},
-		{"windows redirects /dev/null", "command -v codex >/dev/null 2>&1", "windows", "where codex >nul 2>&1"},
-		{"windows stderr /dev/null", "command -v claude 2>/dev/null", "windows", "where claude 2>nul"},
-		{"windows non-command form unchanged", "codex --version", "windows", "codex --version"},
+		{"windows translates", "command -v codex", platform.GOOSWindows, "where codex"},
+		{"windows redirects /dev/null", "command -v codex >/dev/null 2>&1", platform.GOOSWindows, "where codex >nul 2>&1"},
+		{"windows stderr /dev/null", "command -v claude 2>/dev/null", platform.GOOSWindows, "where claude 2>nul"},
+		{"windows non-command form unchanged", "codex --version", platform.GOOSWindows, "codex --version"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -22,7 +22,9 @@ We welcome bug reports, feature requests, documentation improvements, and code c
    ```
    On Windows, `make` is unavailable by default — use the PowerShell scripts
    in `scripts/windows/` (`verify.ps1`, `lint-tools.ps1`, `hooks.ps1`) and the
-   standard `go build` / `go test -race ./...` commands. See the
+   standard `go build` / `go test -race ./...` commands. The `make e2e`
+   equivalent is `go test -tags e2e -v ./e2e` (with the same env vars the
+   Makefile target sets). See the
    [Windows support guide](docs/guide/windows.md).
 5. Commit using **Conventional Commits** (enforced by `.githooks/commit-msg`). See the *Commit Message* section below for the allowed types and examples.
 6. Push your branch to your fork and open a Pull Request against `main`. Fill out the PR template, link any related issues, and describe the user-visible impact.
