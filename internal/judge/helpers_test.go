@@ -121,6 +121,8 @@ func (m *mockJudgeTestRuntime) Close() error                                    
 func (m *mockJudgeTestRuntime) Workspace() string                                 { return "/tmp/test" }
 func (m *mockJudgeTestRuntime) RequiresProcessSandbox() bool                      { return true }
 func (m *mockJudgeTestRuntime) MergeEnv(_ map[string]string)                      {}
+
+func (m *mockJudgeTestRuntime) TargetGOOS() string                                { return "linux" }
 func (m *mockJudgeTestRuntime) Start(_ context.Context) error                     { return nil }
 func (m *mockJudgeTestRuntime) Stop(_ context.Context) error                      { return nil }
 func (m *mockJudgeTestRuntime) UploadFile(_ context.Context, _, _ string) error   { return nil }

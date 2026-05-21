@@ -94,6 +94,12 @@ go test -race ./...
 - **`.ps1` script judges require a Windows target** — when the runtime target
   is POSIX (for example the `opensandbox` Linux sandbox), only `.sh` scripts
   are supported.
+- **`cmd.exe` expands `%VAR%` inside arguments** — when no bash is discovered
+  and the `cmd /d /s /c` fallback shell runs, literal `%NAME%` substrings
+  inside command arguments are still expanded by cmd. There is no reliable
+  command-line escape for this. Do not interpolate untrusted strings into
+  shell commands. Install Git Bash (which skill-up auto-discovers) to avoid
+  the cmd fallback entirely.
 
 ## Recommended workflow
 

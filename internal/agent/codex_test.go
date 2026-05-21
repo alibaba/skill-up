@@ -1038,3 +1038,5 @@ func (r *codexTestRuntime) MergeEnv(env map[string]string) {
 	}
 	maps.Copy(r.mergedEnv, env)
 }
+
+func (r *codexTestRuntime) TargetGOOS() string { return "linux" }

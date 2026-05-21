@@ -429,3 +429,5 @@ func (r *qoderTestRuntime) MergeEnv(env map[string]string) {
 	}
 	maps.Copy(r.mergedEnv, env)
 }
+
+func (r *qoderTestRuntime) TargetGOOS() string { return "linux" }

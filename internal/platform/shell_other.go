@@ -5,16 +5,33 @@ package platform
 import (
 	"context"
 	"os/exec"
+
+	"github.com/alibaba/skill-up/internal/shellquote"
 )
 
-// NewShellCmd builds an *exec.Cmd that runs command through the host shell.
-// The caller is responsible for setting Dir, Env, and the output streams.
+// Host returns the descriptor of the shell NoneRuntime.Exec will use on the
+// current host: how to launch a command, how to quote an argument for that
+// shell, and any extra environment variables the shell needs to behave
+// predictably.
 //
-// On POSIX hosts the shell is bash when available, otherwise sh.
-func NewShellCmd(ctx context.Context, command string) *exec.Cmd {
+// Centralizing all three lets callers (the script-judge planner especially)
+// pick a quoter that matches the shell actually launched, without
+// re-deriving the shell choice independently.
+//
+// On POSIX the shell is bash when discoverable, sh otherwise. POSIX
+// single-quoting is correct in both cases.
+func Host() HostShell {
+	bash, hasBash := DiscoverBash()
 	shell := "sh"
-	if bash, ok := DiscoverBash(); ok {
+	if hasBash {
 		shell = bash
 	}
-	return exec.CommandContext(ctx, shell, "-c", command)
+	return HostShell{
+		Cmd: func(ctx context.Context, command string) *exec.Cmd {
+			return exec.CommandContext(ctx, shell, "-c", command)
+		},
+		Quote:  shellquote.QuotePOSIX,
+		IsBash: hasBash,
+		Bash:   bash,
+	}
 }

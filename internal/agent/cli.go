@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
 	"time"
@@ -152,22 +153,30 @@ func (a *CLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messag
 	return sessionResult, nil
 }
 
+// commandVRegexp matches a POSIX `command -v <binary> [rest]` check. The
+// regex form (vs strings.CutPrefix) lets us capture the binary separately
+// from any trailing redirect or pipe, and supports surrounding whitespace
+// the way a real shell would.
+var commandVRegexp = regexp.MustCompile(`^\s*command\s+-v\s+(\S+)(\s.*)?$`)
+
 // checkCommandForOS adapts a POSIX `command -v X` availability check to the
 // target OS. Windows cmd.exe has no `command` builtin; `where` is the
 // equivalent. Common POSIX-only redirect targets (`/dev/null`) are rewritten
 // to their cmd equivalent (`nul`) so a quiet probe like
-// `command -v codex >/dev/null 2>&1` continues to silence its output instead
-// of failing to open the missing /dev/null path. Other command forms are
-// returned unchanged.
+// `command -v codex >/dev/null 2>&1` continues to silence its output
+// instead of failing to open the missing /dev/null path. Other command
+// forms are returned unchanged.
 func checkCommandForOS(checkCmd, goos string) string {
 	if goos != "windows" {
 		return checkCmd
 	}
-	if rest, ok := strings.CutPrefix(checkCmd, "command -v "); ok {
-		rest = strings.ReplaceAll(rest, "/dev/null", "nul")
-		return "where " + rest
+	m := commandVRegexp.FindStringSubmatch(checkCmd)
+	if m == nil {
+		return checkCmd
 	}
-	return checkCmd
+	binary, rest := m[1], m[2]
+	rest = strings.ReplaceAll(rest, "/dev/null", "nul")
+	return "where " + binary + rest
 }
 
 // Check verifies the agent executable is available.
@@ -176,7 +185,7 @@ func (a *CLIAgent) Check(ctx context.Context, rt Runtime) error {
 	if checkCmd == "" {
 		return fmt.Errorf("CheckCmd not configured for agent %s", a.Name())
 	}
-	checkCmd = checkCommandForOS(checkCmd, runtime.TargetGOOS(rt))
+	checkCmd = checkCommandForOS(checkCmd, rt.TargetGOOS())
 
 	result, err := rt.Exec(ctx, checkCmd, a.mergeExecOptionsEnv(ctx, ExecOptions{}, nil, nil))
 	if err != nil {

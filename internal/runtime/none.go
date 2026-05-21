@@ -180,7 +180,8 @@ func (r *NoneRuntime) Exec(ctx context.Context, command string, opts ExecOptions
 	defer span.End()
 	startTime := time.Now()
 
-	cmd := platform.NewShellCmd(ctx, command)
+	shell := platform.Host()
+	cmd := shell.Cmd(ctx, command)
 	// Run in a dedicated process group (POSIX only — no-op on Windows) and
 	// kill the whole group on cancellation, so a timed-out command's
 	// descendants do not outlive it.
@@ -201,15 +202,10 @@ func (r *NoneRuntime) Exec(ctx context.Context, command string, opts ExecOptions
 	)
 
 	env := mergeEnv(r.cfg.Env, opts.Env)
-	if goruntime.GOOS == "windows" {
-		// Git Bash / MSYS rewrites `/x`-shaped argv entries as POSIX paths
-		// before invoking native Windows binaries, so `bash -c "cmd /d /c
-		// X"` reaches cmd.exe as `cmd "C:/Program Files/Git/d" ...` and
-		// cmd drops into an interactive prompt because it never sees its
-		// switches. These two env vars are the standard MSYS / MSYS2
-		// opt-outs; they are no-ops when bash is not the launched shell.
-		env = append(env, "MSYS_NO_PATHCONV=1", "MSYS2_ARG_CONV_EXCL=*")
-	}
+	// The shell descriptor may need its own env tweaks (MSYS_NO_PATHCONV on
+	// Windows-bash, ...) — append them once here so the same "use bash →
+	// disable MSYS argv rewrite" decision lives in a single place.
+	env = append(env, shell.Env...)
 	cmd.Env = env
 
 	var stdout, stderr bytes.Buffer

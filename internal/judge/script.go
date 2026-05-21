@@ -74,7 +74,7 @@ func (j *ScriptJudge) runtime(ctx context.Context) (evalruntime.Runtime, func(),
 }
 
 func (j *ScriptJudge) evaluateInRuntime(ctx context.Context, rt evalruntime.Runtime, in Input, timeout time.Duration) (*Result, error) {
-	targetGOOS := evalruntime.TargetGOOS(rt)
+	targetGOOS := rt.TargetGOOS()
 	plan, err := planScript(j.ScriptPath, targetGOOS)
 	if err != nil {
 		return nil, fmt.Errorf("script execution failed: %w", err)

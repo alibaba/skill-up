@@ -98,6 +98,8 @@ func (m *mockRuntime) Close() error                                    { return 
 func (m *mockRuntime) Workspace() string                               { return m.workspace }
 func (m *mockRuntime) RequiresProcessSandbox() bool                    { return true }
 func (m *mockRuntime) MergeEnv(_ map[string]string)                    {}
+
+func (m *mockRuntime) TargetGOOS() string                              { return "linux" }
 func (m *mockRuntime) Start(_ context.Context) error                   { return nil }
 func (m *mockRuntime) Stop(_ context.Context) error                    { return nil }
 func (m *mockRuntime) UploadFile(_ context.Context, _, _ string) error { return nil }

@@ -83,6 +83,10 @@ go test -race ./...
   完整的 agent 评测，请预先自行安装 Node.js 和对应的 agent CLI，或使用 WSL2。
 - **`.ps1` script judge 需要 Windows 目标** —— 当 runtime 目标是 POSIX
   （例如 `opensandbox` 的 Linux 沙箱）时，仅支持 `.sh` 脚本。
+- **`cmd.exe` 会展开参数里的 `%VAR%`** —— 当宿主未发现 bash、回退到
+  `cmd /d /s /c` 时，参数中的 `%NAME%` 子串仍会被 cmd 展开，命令行层面没有
+  可靠的转义办法。不要把不可信字符串拼接到 shell 命令中。安装 Git Bash
+  （skill-up 会自动发现）可完全避开此回退路径。
 
 ## 推荐工作流
 

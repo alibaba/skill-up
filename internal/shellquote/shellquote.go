@@ -47,12 +47,3 @@ func QuoteWindows(s string) string {
 	b.WriteByte('"')
 	return b.String()
 }
-
-// QuoteFor quotes s for the shell of the given GOOS: Windows rules for
-// "windows", POSIX rules otherwise.
-func QuoteFor(goos, s string) string {
-	if goos == "windows" {
-		return QuoteWindows(s)
-	}
-	return QuotePOSIX(s)
-}

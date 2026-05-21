@@ -3,6 +3,7 @@ package judge
 import (
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 
@@ -27,51 +28,31 @@ func TestPlanScript_POSIXTarget(t *testing.T) {
 	}
 }
 
-// TestWindowsQuoter verifies that the quoter selected by windowsQuoter()
-// applies the bash double-quote escapes only when bash is discoverable.
-// On the typical CI host bash is on PATH (Git Bash), so every \ / " / $ /
-// backtick byte in the input is escaped; bash then decodes them back to the
-// original, and cmd later collapses the resulting `\\` runs via Windows
-// path normalization. On the rare host without bash we get plain
-// QuoteWindows output (no extra escapes that would corrupt the cmd-literal
-// path).
-func TestWindowsQuoter(t *testing.T) {
-	quote := windowsQuoter()
-	got := quote(`C:\tmp\$VAR\script.cmd`)
-	if _, ok := platform.DiscoverBash(); ok {
-		// Every \ doubled (\\), and $ escaped (\$). Original bytes
-		// re-emerge after bash decodes the double-quoted string.
+// TestHostShellQuote verifies the quoter selected by platform.Host() per
+// host OS. POSIX hosts always use QuotePOSIX (single quotes). Windows hosts
+// use bash-double-quote escapes when bash is discoverable (every \ / " /
+// $ / backtick doubled so bash decodes them back to the original byte) and
+// plain QuoteWindows otherwise.
+func TestHostShellQuote(t *testing.T) {
+	shell := platform.Host()
+	got := shell.Quote(`C:\tmp\$VAR\script.cmd`)
+	if goruntime.GOOS != "windows" {
+		want := `'C:\tmp\$VAR\script.cmd'`
+		if got != want {
+			t.Fatalf("posix shell.Quote = %q, want %q", got, want)
+		}
+		return
+	}
+	if shell.IsBash {
 		want := `"C:\\tmp\\\$VAR\\script.cmd"`
 		if got != want {
-			t.Fatalf("with bash: quoter(%q) = %q, want %q", `C:\tmp\$VAR\script.cmd`, got, want)
+			t.Fatalf("windows+bash shell.Quote = %q, want %q", got, want)
 		}
 	} else {
 		want := `"C:\tmp\$VAR\script.cmd"`
 		if got != want {
-			t.Fatalf("without bash: quoter(%q) = %q, want %q", `C:\tmp\$VAR\script.cmd`, got, want)
+			t.Fatalf("windows+cmd shell.Quote = %q, want %q", got, want)
 		}
-	}
-}
-
-func TestQuoteForBashDoubleQuote(t *testing.T) {
-	tests := []struct {
-		name, in, want string
-	}{
-		{"plain", `plain`, `"plain"`},
-		{"with space", `a b`, `"a b"`},
-		// Every \ doubled; a literal \$ in the input becomes \\\$.
-		{"backslash", `C:\tmp\file`, `"C:\\tmp\\file"`},
-		{"dollar at start", `$VAR`, `"\$VAR"`},
-		{"backslash+dollar", `C:\tmp\$VAR\file`, `"C:\\tmp\\\$VAR\\file"`},
-		{"backtick", "a`b", "\"a\\`b\""},
-		{"interior quote", `a"b`, `"a\"b"`},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := quoteForBashDoubleQuote(tt.in); got != tt.want {
-				t.Fatalf("quoteForBashDoubleQuote(%q) = %q, want %q", tt.in, got, tt.want)
-			}
-		})
 	}
 }
 
@@ -150,7 +131,7 @@ func TestPlanWindowsScript(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plan, err := planWindowsScript(tt.scriptPath)
+			plan, err := planWindowsScript(tt.scriptPath, platform.Host())
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -170,7 +151,7 @@ func TestPlanWindowsScript_UnknownInterpreter(t *testing.T) {
 	if err := os.WriteFile(scriptPath, []byte("echo hi\n"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	_, err := planWindowsScript(scriptPath)
+	_, err := planWindowsScript(scriptPath, platform.Host())
 	if err == nil || !strings.Contains(err.Error(), "cannot determine interpreter") {
 		t.Fatalf("expected cannot-determine-interpreter error, got: %v", err)
 	}
@@ -179,7 +160,7 @@ func TestPlanWindowsScript_UnknownInterpreter(t *testing.T) {
 // TestPlanWindowsScript_ShellScript covers the .sh branch, whose outcome
 // depends on whether bash is discoverable on the host running the test.
 func TestPlanWindowsScript_ShellScript(t *testing.T) {
-	plan, err := planWindowsScript(`C:\skill\check.sh`)
+	plan, err := planWindowsScript(`C:\skill\check.sh`, platform.Host())
 	if _, ok := platform.DiscoverBash(); ok {
 		if err != nil {
 			t.Fatalf("bash is available but planning failed: %v", err)
@@ -245,7 +226,7 @@ func TestCleanupCommand_POSIX(t *testing.T) {
 }
 
 func TestCleanupCommand_Windows(t *testing.T) {
-	plan, err := planWindowsScript(`C:\skill\check.ps1`)
+	plan, err := planWindowsScript(`C:\skill\check.ps1`, platform.Host())
 	if err != nil {
 		t.Fatalf("planWindowsScript: %v", err)
 	}

@@ -118,22 +118,15 @@ type Runtime interface {
 	Workspace() string
 	// RequiresProcessSandbox reports whether agents should enable their own process sandbox.
 	RequiresProcessSandbox() bool
-}
-
-// TargetOSer is an optional Runtime capability that reports the GOOS of the
-// environment where Exec runs commands. NoneRuntime executes on the host, so
-// it reports runtime.GOOS; OpenSandboxRuntime always targets a Linux sandbox.
-type TargetOSer interface {
+	// TargetGOOS reports the GOOS value of the environment where Exec
+	// runs commands. NoneRuntime executes on the host so it returns
+	// runtime.GOOS; OpenSandboxRuntime always returns "linux" because
+	// it executes inside a Linux sandbox. Implementations must return a
+	// non-empty value -- callers (most importantly the script-judge
+	// planner) use it to choose between POSIX and Windows command shapes,
+	// and silently defaulting to "linux" would mask configuration
+	// mistakes in any future Windows-targeting runtime.
 	TargetGOOS() string
-}
-
-// TargetGOOS reports the GOOS of rt's execution environment. Runtimes that do
-// not implement TargetOSer are assumed to target Linux.
-func TargetGOOS(rt Runtime) string {
-	if t, ok := rt.(TargetOSer); ok {
-		return t.TargetGOOS()
-	}
-	return "linux"
 }
 
 // FileReadSeeker combines io.ReadSeeker for file access.

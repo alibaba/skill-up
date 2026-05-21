@@ -40,45 +40,6 @@ type scriptPlan struct {
 // translation between the runtime-side path and the script's view of it.
 func identityEnvPath(p string) string { return p }
 
-// windowsQuoter returns the quoter that matches the shell NoneRuntime.Exec
-// will pick on the current Windows host. When a usable bash is discoverable
-// commands route through `bash -c`, so we use double-quote-with-bash-escapes
-// (every \, ", $, ` doubled): bash decodes them back to the original byte,
-// and cmd later collapses the resulting `\\` runs through normal Windows
-// path normalization. When bash is unavailable the command runs under
-// `cmd /d /s /c` which already treats \, $, ` literally, so plain
-// QuoteWindows is correct -- bash-style escapes there would corrupt the
-// literal path (and cmd cannot escape `%VAR%` expansion regardless).
-func windowsQuoter() func(string) string {
-	if _, ok := platform.DiscoverBash(); ok {
-		return quoteForBashDoubleQuote
-	}
-	return shellquote.QuoteWindows
-}
-
-// quoteForBashDoubleQuote returns s wrapped in double quotes with every
-// character that bash treats as active inside double quotes escaped with a
-// backslash. The four actives are \, ", $, `. After bash decodes the
-// resulting string each of those bytes is delivered intact to the program
-// bash spawns (cmd / powershell / a second bash), so a path like
-// `C:\tmp\$foo\script.ps1` survives the bash -c hop without losing the
-// backslash before `$`. The cmd-fallback path is not affected because we
-// only choose this quoter when bash was discovered.
-func quoteForBashDoubleQuote(s string) string {
-	var b strings.Builder
-	b.Grow(len(s) + 2)
-	b.WriteByte('"')
-	for i := 0; i < len(s); i++ { //nolint:intrange // hot loop on bytes, no slicing tricks
-		c := s[i]
-		if c == '\\' || c == '"' || c == '$' || c == '`' {
-			b.WriteByte('\\')
-		}
-		b.WriteByte(c)
-	}
-	b.WriteByte('"')
-	return b.String()
-}
-
 // planScript determines how to execute scriptPath in a runtime whose commands
 // run on targetGOOS.
 //
@@ -99,22 +60,24 @@ func planScript(scriptPath, targetGOOS string) (scriptPlan, error) {
 			envPath: identityEnvPath,
 		}, nil
 	}
-	return planWindowsScript(scriptPath)
+	return planWindowsScript(scriptPath, platform.Host())
 }
 
-func planWindowsScript(scriptPath string) (scriptPlan, error) {
+func planWindowsScript(scriptPath string, shell platform.HostShell) (scriptPlan, error) {
 	ext := strings.ToLower(filepath.Ext(scriptPath))
 	if ext == "" {
 		ext = shebangExtension(scriptPath)
 	}
 
-	// Pick a quoter that matches the shell NoneRuntime.Exec will use on
-	// this host -- once per plan so every command we emit (script run +
-	// cleanup) goes through the same shell semantics.
-	quote := windowsQuoter()
+	// Every command we emit (script run + cleanup) is quoted with the host
+	// shell's own quoter so the same shell semantics applies end to end.
+	// shell.Quote already accounts for bash-vs-cmd selection -- there is no
+	// second discovery here, ruling out the chance of the two decisions
+	// disagreeing.
+	quote := shell.Quote
 	winCleanup := func(dir string) string {
-		// `/d /s /c` matches NewShellCmd's cmd fallback so the strip rule
-		// behaves the same way for the inner command.
+		// `/d /s /c` matches the cmd fallback in platform.Host so the
+		// strip rule behaves the same way for the inner command.
 		return "cmd /d /s /c rd /s /q " + quote(dir)
 	}
 
@@ -138,8 +101,7 @@ func planWindowsScript(scriptPath string) (scriptPlan, error) {
 			envPath:        identityEnvPath,
 		}, nil
 	case ".sh", ".bash":
-		bash, ok := platform.DiscoverBash()
-		if !ok {
+		if !shell.IsBash {
 			return scriptPlan{}, fmt.Errorf(
 				"script judge: .sh script requires bash on Windows; install Git Bash or set %s",
 				platform.BashEnvOverride)
@@ -149,7 +111,7 @@ func planWindowsScript(scriptPath string) (scriptPlan, error) {
 		// POSIX honors via shebang aren't silently dropped when we invoke
 		// bash explicitly on Windows.
 		_, opts := parseShebang(readShebang(scriptPath))
-		bashArgs := []string{quote(bash)}
+		bashArgs := []string{quote(shell.Bash)}
 		for _, o := range opts {
 			bashArgs = append(bashArgs, quote(o))
 		}

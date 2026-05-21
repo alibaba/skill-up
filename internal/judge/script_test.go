@@ -257,6 +257,8 @@ func (r *scriptJudgeRuntime) Workspace() string            { return r.workspace 
 func (r *scriptJudgeRuntime) RequiresProcessSandbox() bool { return true }
 func (r *scriptJudgeRuntime) MergeEnv(_ map[string]string) {}
 
+func (r *scriptJudgeRuntime) TargetGOOS() string           { return "linux" }
+
 func (r *scriptJudgeRuntime) UploadFile(_ context.Context, _, targetPath string) error {
 	r.uploads = append(r.uploads, targetPath)
 	return nil

@@ -41,12 +41,3 @@ func TestQuoteWindows(t *testing.T) {
 		})
 	}
 }
-
-func TestQuoteFor(t *testing.T) {
-	if got := QuoteFor("windows", "a b"); got != `"a b"` {
-		t.Errorf("QuoteFor(windows) = %q", got)
-	}
-	if got := QuoteFor("linux", "a b"); got != "'a b'" {
-		t.Errorf("QuoteFor(linux) = %q", got)
-	}
-}

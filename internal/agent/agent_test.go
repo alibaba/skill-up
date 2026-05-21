@@ -281,6 +281,7 @@ func (r *probeMergeTestRuntime) MergeEnv(env map[string]string) {
 	}
 	maps.Copy(r.merged, env)
 }
+func (r *probeMergeTestRuntime) TargetGOOS() string { return "linux" }
 
 func TestProbeAndMergePATH_HappyPath(t *testing.T) {
 	t.Parallel()
