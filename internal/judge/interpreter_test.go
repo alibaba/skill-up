@@ -236,6 +236,29 @@ func TestCleanupCommand_Windows(t *testing.T) {
 	}
 }
 
+// .sh on Windows cleans up via bash `rm -rf` rather than dispatching to cmd,
+// avoiding the bash -> cmd hop that the .ps1/.cmd/.bat paths necessarily take.
+func TestCleanupCommand_Windows_ShellScriptUsesBashRm(t *testing.T) {
+	if _, ok := platform.DiscoverBash(); !ok {
+		t.Skip("requires bash to plan a .sh Windows script")
+	}
+	plan, err := planWindowsScript(`C:\skill\check.sh`, platform.Host())
+	if err != nil {
+		t.Fatalf("planWindowsScript: %v", err)
+	}
+	got := plan.cleanupCommand(`C:\tmp\d`)
+	if !strings.HasPrefix(got, "rm -rf ") {
+		t.Fatalf("windows .sh cleanupCommand = %q, want prefix %q", got, "rm -rf ")
+	}
+	if strings.Contains(got, "cmd /") {
+		t.Fatalf("windows .sh cleanupCommand should not invoke cmd, got %q", got)
+	}
+	// Note: filepath.ToSlash is a no-op when this test runs on a POSIX host
+	// (separator is `/`, no backslashes to convert), so we cannot assert the
+	// forward-slash form here. On a real Windows host the production code
+	// path converts the backslashes; behaviour is exercised by Windows CI.
+}
+
 func TestJudgeTempDir(t *testing.T) {
 	if d := judgeTempDir("linux"); !strings.HasPrefix(d, "/tmp/skill-up-judge-") {
 		t.Fatalf("posix judgeTempDir = %q, want /tmp/skill-up-judge- prefix", d)

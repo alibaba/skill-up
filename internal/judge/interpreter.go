@@ -13,9 +13,6 @@ import (
 	"github.com/alibaba/skill-up/internal/shellquote"
 )
 
-// osWindows is the GOOS value for Windows targets.
-const osWindows = "windows"
-
 // scriptPlan describes how the script judge uploads and runs an evaluation
 // script in a runtime whose commands execute on a particular target OS.
 type scriptPlan struct {
@@ -47,7 +44,7 @@ func identityEnvPath(p string) string { return p }
 // and run via its own shebang. Windows targets dispatch to an interpreter
 // based on the file extension (or shebang when the extension is absent).
 func planScript(scriptPath, targetGOOS string) (scriptPlan, error) {
-	if targetGOOS != osWindows {
+	if targetGOOS != platform.GOOSWindows {
 		return scriptPlan{
 			uploadName: "script",
 			command: func(remoteScript string) string {
@@ -75,9 +72,11 @@ func planWindowsScript(scriptPath string, shell platform.HostShell) (scriptPlan,
 	// second discovery here, ruling out the chance of the two decisions
 	// disagreeing.
 	quote := shell.Quote
+	// .ps1 / .cmd / .bat all execute through cmd.exe, so cleanup through cmd
+	// keeps quoting / strip semantics inside one shell. The `/d /s /c` flags
+	// match the cmd fallback in platform.Host so the strip rule behaves the
+	// same way for the inner command.
 	winCleanup := func(dir string) string {
-		// `/d /s /c` matches the cmd fallback in platform.Host so the
-		// strip rule behaves the same way for the inner command.
 		return "cmd /d /s /c rd /s /q " + quote(dir)
 	}
 
@@ -125,8 +124,15 @@ func planWindowsScript(scriptPath string, shell platform.HostShell) (scriptPlan,
 				args = append(args, quote(filepath.ToSlash(remoteScript)))
 				return strings.Join(args, " ")
 			},
-			cleanupCommand: winCleanup,
-			envPath:        filepath.ToSlash,
+			// Stay inside bash for cleanup too. The .sh case already runs
+			// through bash -c, and Git Bash's rm understands the
+			// forward-slash form of the Windows temp dir natively, so
+			// `rm -rf <forward-slash dir>` avoids the bash -> cmd hop the
+			// other extensions go through.
+			cleanupCommand: func(dir string) string {
+				return "rm -rf " + quote(filepath.ToSlash(dir))
+			},
+			envPath: filepath.ToSlash,
 		}, nil
 	default:
 		return scriptPlan{}, fmt.Errorf(
@@ -140,7 +146,7 @@ func planWindowsScript(scriptPath string, shell platform.HostShell) (scriptPlan,
 // judge run, appropriate for the target OS.
 func judgeTempDir(targetGOOS string) string {
 	name := fmt.Sprintf("skill-up-judge-%d", time.Now().UnixNano())
-	if targetGOOS == osWindows {
+	if targetGOOS == platform.GOOSWindows {
 		return filepath.Join(os.TempDir(), name)
 	}
 	return path.Join("/tmp", name)
@@ -148,7 +154,7 @@ func judgeTempDir(targetGOOS string) string {
 
 // joinForGOOS joins path elements using the separator of the target OS.
 func joinForGOOS(targetGOOS string, elem ...string) string {
-	if targetGOOS == osWindows {
+	if targetGOOS == platform.GOOSWindows {
 		return filepath.Join(elem...)
 	}
 	return path.Join(elem...)
