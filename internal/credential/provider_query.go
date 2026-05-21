@@ -77,14 +77,11 @@ func (r *Resolver) HasProvider(name string) bool {
 // `provider/` prefix and returns the canonical (provider, name) pair the
 // CLI should store on `evalCfg.Engine.Model`.
 //
-// The split happens iff the prefix is a configured provider — per
-// Resolver.HasProvider, or any of the extraConfigured predicates. Extra
-// predicates exist so call sites with CLI-time signals (`--api-key`,
-// `engine.model.base_url`) can extend "configured" without duplicating
-// the SplitN logic. Otherwise the slashed string is treated as an opaque
-// model identifier the upstream API expects verbatim — typical for
-// internal anthropic-proxy gateways that register models under
-// `anthropic_modelscope/deepseek-v4-pro` keys.
+// The split happens iff the prefix is a configured provider per
+// Resolver.HasProvider. Otherwise the slashed string is treated as an
+// opaque model identifier the upstream API expects verbatim — typical
+// for internal anthropic-proxy gateways that register models under keys
+// like `anthropic_modelscope/deepseek-v4-pro`.
 //
 // Two interpretations this disambiguates:
 //
@@ -95,19 +92,20 @@ func (r *Resolver) HasProvider(name string) bool {
 //     (`anthropic_modelscope/deepseek-v4-pro` registered as-is on an
 //     internal proxy).
 //
+// CLI-time signals (`--api-key`, `engine.model.base_url`) deliberately
+// do NOT influence this decision. They were once wired in as "implicit
+// provider configured" hints, but that forced a split on flows like
+// `--api-key K --model anthropic_modelscope/deepseek-v4-pro` and broke
+// literal-id pass-through. Users who really mean namespace semantics
+// should configure the provider via env / credentials.yaml; the
+// HasProvider probe then preserves the split.
+//
 // Emits a debug log on the collapse path so operators can see the
 // disambiguation choice in trace output. The split path stays silent —
 // that's the common, expected case.
 //
 // raw == "" returns ("", "").
-//
-// Engine-awareness: not currently required — every supported engine
-// agrees that "stored config exists" is the right disambiguation signal.
-// If a future engine needs a different policy (e.g. codex's
-// runProviderConfig wanting a wider notion of configured), pass an
-// engine-specific predicate via extraConfigured; until then keeping the
-// core check engine-free avoids leaking agent concerns into credential.
-func ResolveModelRef(raw string, resolver *Resolver, extraConfigured ...func(prefix string) bool) (provider, name string) {
+func ResolveModelRef(raw string, resolver *Resolver) (provider, name string) {
 	if raw == "" {
 		return "", ""
 	}
@@ -117,11 +115,6 @@ func ResolveModelRef(raw string, resolver *Resolver, extraConfigured ...func(pre
 	}
 	if resolver.HasProvider(parts[0]) {
 		return parts[0], parts[1]
-	}
-	for _, extra := range extraConfigured {
-		if extra != nil && extra(parts[0]) {
-			return parts[0], parts[1]
-		}
 	}
 	upper := strings.ToUpper(parts[0])
 	logging.Debugf(

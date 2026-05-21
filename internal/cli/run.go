@@ -232,13 +232,13 @@ func loadCredentialsAndAgent(cmd *cobra.Command, evalCfg *config.EvalConfig) (ag
 	// (e.g. anthropic-proxy gateways registering models under
 	// `anthropic_modelscope/deepseek-v4-pro`) than a credential-namespace
 	// prefix the agent should peel off.
-	collapseUnconfiguredProviderSplit(evalCfg, resolver, cliModel, cliAPIKey)
+	collapseUnconfiguredProviderSplit(evalCfg, resolver, cliModel)
 
 	runnerParams := credential.ResolveRunnerInitParams(
 		evalCfg.Engine.Name,
 		evalCfg.Engine.Model,
 		resolver,
-		normalizeCLIModelOverride(cliModel, resolver, cliAPIKey, evalCfg.Engine.Model.BaseURL),
+		normalizeCLIModelOverride(cliModel, resolver),
 		cliAPIKey,
 	)
 
@@ -411,37 +411,11 @@ func evaluateOptionsFromFlags(cmd *cobra.Command) (runner.EvaluateOptions, error
 	}, nil
 }
 
-// resolveModelRefWithCLIHints wraps credential.ResolveModelRef with two
-// extra "provider is configured" signals that ResolveModelRef itself
-// intentionally ignores (it stays focused on persisted/env-resident
-// config):
-//
-//   - cliAPIKey: the user is supplying credentials via `--api-key`, so
-//     whatever provider sits in `prefix` is implicitly configured by that
-//     key. applyCLIOverrides requires a non-empty Provider to apply the
-//     CLI key, so the split must be preserved.
-//   - evalBaseURL: the user has set `engine.model.base_url` in eval.yaml,
-//     which is itself a concrete provider-configuration signal (the
-//     gateway endpoint is bound to that provider namespace).
-//
-// Either signal upgrades any prefix to "configured", regardless of
-// resolver/env state. Wired through ResolveModelRef's extraConfigured
-// predicate so the SplitN / collapse logic stays in one place.
-func resolveModelRefWithCLIHints(modelFlag string, resolver *credential.Resolver, cliAPIKey, evalBaseURL string) (provider, name string) {
-	if cliAPIKey == "" && evalBaseURL == "" {
-		return credential.ResolveModelRef(modelFlag, resolver)
-	}
-	cliHintConfigured := func(_ string) bool { return true }
-	return credential.ResolveModelRef(modelFlag, resolver, cliHintConfigured)
-}
-
-// collapseUnconfiguredProviderSplit re-runs the disambiguation
-// (resolveModelRefWithCLIHints, which delegates to
-// credential.ResolveModelRef) against the loaded resolver to undo the
-// optimistic split that resolveEvalConfig performs on
-// `--model provider/name` when the provider half turns out to be
-// unconfigured. See ResolveModelRef for the rationale and the debug log
-// emitted on collapse.
+// collapseUnconfiguredProviderSplit re-runs credential.ResolveModelRef
+// against the loaded resolver to undo the optimistic split that
+// resolveEvalConfig performs on `--model provider/name` when the provider
+// half turns out to be unconfigured. See ResolveModelRef for the
+// rationale and the debug log emitted on collapse.
 //
 // Gate: only runs when `cliModel` contains `/`. eval.yaml-sourced pairs
 // (where the user wrote provider and name as separate YAML keys) reach
@@ -449,8 +423,19 @@ func resolveModelRefWithCLIHints(modelFlag string, resolver *credential.Resolver
 // user-authored explicit configuration, often relying on a CLI's
 // persisted login state with no env footprint.
 //
+// CLI-hint signals (`--api-key`, `engine.model.base_url`) were once used
+// to FORCE a split through, but that broke `--api-key K --model literal_
+// opaque/id` flows (proxy-registered ids like
+// `anthropic_modelscope/deepseek-v4-pro`). credential.applyCLIOverrides
+// no longer requires a non-empty Provider to apply the CLI key — each
+// agent routes cfg.APIKey via its own hardcoded env (ANTHROPIC_API_KEY /
+// OPENAI_API_KEY) regardless of Provider — so the literal-id case now
+// passes through correctly. Users who really mean `provider as namespace`
+// should configure that provider via env / credentials.yaml; that signal
+// alone is enough for ResolveModelRef to preserve the split.
+//
 // Safe no-op when Provider is empty or already collapsed.
-func collapseUnconfiguredProviderSplit(evalCfg *config.EvalConfig, resolver *credential.Resolver, cliModel, cliAPIKey string) {
+func collapseUnconfiguredProviderSplit(evalCfg *config.EvalConfig, resolver *credential.Resolver, cliModel string) {
 	if evalCfg == nil {
 		return
 	}
@@ -462,7 +447,7 @@ func collapseUnconfiguredProviderSplit(evalCfg *config.EvalConfig, resolver *cre
 	if !strings.Contains(cliModel, "/") {
 		return
 	}
-	newProvider, newName := resolveModelRefWithCLIHints(provider+"/"+name, resolver, cliAPIKey, evalCfg.Engine.Model.BaseURL)
+	newProvider, newName := credential.ResolveModelRef(provider+"/"+name, resolver)
 	evalCfg.Engine.Model.Provider = newProvider
 	evalCfg.Engine.Model.Name = newName
 }
@@ -619,17 +604,15 @@ func formatModelRef(provider, name string) string {
 
 // normalizeCLIModelOverride returns the bare model identifier from a
 // `--model` flag value, peeling off any `provider/` prefix only when the
-// prefix is a configured provider — including the cliAPIKey / evalBaseURL
-// CLI-side signals. See credential.ResolveModelRef and
-// resolveModelRefWithCLIHints for the disambiguation rationale; this is
-// the cliModel-side caller, kept in lockstep with
-// collapseUnconfiguredProviderSplit so applyCLIOverrides never receives a
-// model identifier that contradicts the post-collapse evalCfg state.
-func normalizeCLIModelOverride(modelFlag string, resolver *credential.Resolver, cliAPIKey, evalBaseURL string) string {
+// prefix is a configured provider per credential.ResolveModelRef. Kept
+// in lockstep with collapseUnconfiguredProviderSplit so applyCLIOverrides
+// never receives a model identifier that contradicts the post-collapse
+// evalCfg state.
+func normalizeCLIModelOverride(modelFlag string, resolver *credential.Resolver) string {
 	if modelFlag == "" {
 		return modelFlag
 	}
-	_, name := resolveModelRefWithCLIHints(modelFlag, resolver, cliAPIKey, evalBaseURL)
+	_, name := credential.ResolveModelRef(modelFlag, resolver)
 	return name
 }
 
