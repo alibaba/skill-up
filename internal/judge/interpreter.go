@@ -266,11 +266,22 @@ func parseShebang(body string) (string, []string) {
 }
 
 // envValueTakingShortFlags lists GNU env short flags that consume a separate
-// value token after them in a shebang. The long forms accept `--name=value`
-// so they self-contain their value and don't need to be listed here.
+// value token after them in a shebang.
 var envValueTakingShortFlags = map[string]bool{
 	"-u": true, // --unset NAME
 	"-C": true, // --chdir DIR
+}
+
+// envValueTakingLongFlags lists GNU env long flags that accept their value
+// as the next token (the `--name=value` form is self-contained and handled
+// by the generic `strings.HasPrefix(f, "-")` skip arm).
+var envValueTakingLongFlags = map[string]bool{
+	"--unset":          true,
+	"--chdir":          true,
+	"--argv0":          true,
+	"--block-signal":   true,
+	"--default-signal": true,
+	"--ignore-signal":  true,
 }
 
 // parseEnvShebang processes the args after `env` in a shebang line.
@@ -308,9 +319,10 @@ func parseEnvShebang(args []string) (string, []string) {
 				rest += strings.Join(args[i+1:], " ")
 			}
 			return splitStringInterpreter(rest)
-		case envValueTakingShortFlags[f]:
-			// Consume the flag and its value (e.g. `-u VAR`, `-C DIR`) so
-			// the value token does not get mistaken for the interpreter.
+		case envValueTakingShortFlags[f], envValueTakingLongFlags[f]:
+			// Consume the flag and its separate value token (e.g.
+			// `-u VAR`, `-C DIR`, `--unset FOO`, `--chdir /tmp`) so the
+			// value token does not get mistaken for the interpreter.
 			i += 2
 		case strings.HasPrefix(f, "-"):
 			// Self-contained env flag (-i, --ignore-environment,
@@ -414,6 +426,19 @@ func tokenizeStepDouble(s *tokenizerState, c, next byte) {
 	s.started = true
 }
 
+// envSWhitespaceEscapes lists the env -S backslash escapes that decode to a
+// whitespace character. In unquoted context they act as token separators --
+// most importantly `\_`, which is the documented way to embed a space
+// inside an env -S body without surrounding quotes (e.g. `bash\_-eu`).
+var envSWhitespaceEscapes = map[byte]bool{
+	'_': true, // space
+	't': true,
+	'n': true,
+	'r': true,
+	'v': true,
+	'f': true,
+}
+
 func tokenizeStepUnquoted(s *tokenizerState, c, next byte) {
 	switch c {
 	case ' ', '\t', '\n', '\v', '\r', '\f':
@@ -425,11 +450,17 @@ func tokenizeStepUnquoted(s *tokenizerState, c, next byte) {
 		s.inDouble = true
 		s.started = true
 	case '\\':
-		if next != 0 {
+		if next == 0 {
+			return
+		}
+		if envSWhitespaceEscapes[next] {
+			// Whitespace escape: ends the current token without writing.
+			s.flush()
+		} else {
 			s.cur.WriteByte(next)
-			s.skipNext = true
 			s.started = true
 		}
+		s.skipNext = true
 	default:
 		s.cur.WriteByte(c)
 		s.started = true

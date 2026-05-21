@@ -94,9 +94,17 @@ func TestParseShebang(t *testing.T) {
 		// value token so it does not get mistaken for the interpreter.
 		{"env -u VAR bash", "/usr/bin/env -u FOO bash -eu", "bash", []string{"-eu"}},
 		{"env -C DIR bash", "/usr/bin/env -C /tmp bash", "bash", []string{}},
+		// Long-form value-taking flags in split form too (the =NAME form
+		// is already handled by the generic "starts with -" skip arm).
+		{"env --unset split", "/usr/bin/env --unset FOO bash -eu", "bash", []string{"-eu"}},
+		{"env --chdir split", "/usr/bin/env --chdir /tmp bash", "bash", []string{}},
 		// env -S with quoted bash -c "..." must preserve the quoted arg
 		// as one token instead of breaking it on whitespace.
 		{"env -S bash -c quoted", `/usr/bin/env -S bash -c "echo ok"`, "bash", []string{"-c", "echo ok"}},
+		// env -S \_ (backslash-underscore) is the documented separator
+		// for embedding a space inside the split-string body.
+		{"env -S backslash space", `/usr/bin/env -S bash\_-eu`, "bash", []string{"-eu"}},
+		{"env -S backslash tab", `/usr/bin/env -S bash\t-eu`, "bash", []string{"-eu"}},
 		{"only env flags", "/usr/bin/env -S", "", nil},
 	}
 	for _, tt := range tests {
