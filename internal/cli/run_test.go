@@ -1203,6 +1203,7 @@ func TestCollapseUnconfiguredProviderSplit_CollapsesWhenProviderUnknown(t *testi
 	for _, key := range []string{
 		"ANTHROPIC_MODELSCOPE_API_KEY",
 		"ANTHROPIC_MODELSCOPE_BASE_URL",
+		"ANTHROPIC_MODELSCOPE_PERSONAL_ACCESS_TOKEN",
 	} {
 		if err := os.Unsetenv(key); err != nil {
 			t.Fatal(err)
@@ -1213,7 +1214,8 @@ func TestCollapseUnconfiguredProviderSplit_CollapsesWhenProviderUnknown(t *testi
 	cfg.Engine.Model.Provider = "anthropic_modelscope"
 	cfg.Engine.Model.Name = "deepseek-v4-pro"
 
-	collapseUnconfiguredProviderSplit(cfg, credential.NewResolver(""))
+	collapseUnconfiguredProviderSplit(cfg, credential.NewResolver(""),
+		"anthropic_modelscope/deepseek-v4-pro", "")
 
 	if cfg.Engine.Model.Provider != "" {
 		t.Fatalf("Provider = %q, want \"\" (collapsed)", cfg.Engine.Model.Provider)
@@ -1234,7 +1236,8 @@ func TestCollapseUnconfiguredProviderSplit_KeepsSplitWhenProviderConfigured(t *t
 	cfg.Engine.Model.Provider = "dashscope"
 	cfg.Engine.Model.Name = "claude-sonnet-4-6"
 
-	collapseUnconfiguredProviderSplit(cfg, credential.NewResolver(""))
+	collapseUnconfiguredProviderSplit(cfg, credential.NewResolver(""),
+		"dashscope/claude-sonnet-4-6", "")
 
 	// `provider: dashscope, name: claude-sonnet-4-6` is the credential-namespace
 	// usage — DASHSCOPE_* env routes auth, the bare claude model id is what
@@ -1254,9 +1257,85 @@ func TestCollapseUnconfiguredProviderSplit_NoopOnEmptyProvider(t *testing.T) {
 	cfg.Engine.Model.Provider = ""
 	cfg.Engine.Model.Name = "claude-opus-4-7"
 
-	collapseUnconfiguredProviderSplit(cfg, nil)
+	collapseUnconfiguredProviderSplit(cfg, nil, "claude-opus-4-7", "")
 
 	if cfg.Engine.Model.Provider != "" || cfg.Engine.Model.Name != "claude-opus-4-7" {
 		t.Fatalf("unexpected mutation: %+v", cfg.Engine.Model)
+	}
+}
+
+func TestCollapseUnconfiguredProviderSplit_KeepsEvalYamlPairWhenCliModelHasNoSlash(t *testing.T) {
+	// Not parallel: depends on absence of anthropic env to force the
+	// "would-be-collapsed" precondition.
+	for _, key := range []string{
+		"ANTHROPIC_API_KEY",
+		"ANTHROPIC_BASE_URL",
+		"ANTHROPIC_PERSONAL_ACCESS_TOKEN",
+	} {
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := config.DefaultEvalConfig()
+	cfg.Engine.Model.Provider = "anthropic"
+	cfg.Engine.Model.Name = "claude-sonnet-4-6"
+
+	// cliModel is empty (or bare) — the provider/name pair came from
+	// eval.yaml's separate keys, not from a `--model X/Y` split. Even with
+	// no resolver/env configuration, a user-authored YAML pair like this
+	// (e.g. relying on `claude` CLI's persisted login state) must be left
+	// alone — collapsing would rewrite the bare claude model id into
+	// `anthropic/claude-sonnet-4-6`, which the upstream API rejects.
+	collapseUnconfiguredProviderSplit(cfg, credential.NewResolver(""), "", "")
+
+	if cfg.Engine.Model.Provider != "anthropic" || cfg.Engine.Model.Name != "claude-sonnet-4-6" {
+		t.Fatalf("eval.yaml-sourced pair was rewritten: %+v", cfg.Engine.Model)
+	}
+}
+
+func TestCollapseUnconfiguredProviderSplit_KeepsSplitWhenCliAPIKeyProvided(t *testing.T) {
+	// Not parallel: depends on absence of dashscope env so resolver/env
+	// alone would have collapsed.
+	for _, key := range []string{
+		"DASHSCOPE_API_KEY",
+		"DASHSCOPE_BASE_URL",
+		"DASHSCOPE_PERSONAL_ACCESS_TOKEN",
+	} {
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := config.DefaultEvalConfig()
+	cfg.Engine.Model.Provider = "dashscope"
+	cfg.Engine.Model.Name = "claude-sonnet-4-6"
+
+	// User passes `--api-key K --model dashscope/claude-sonnet-4-6` with no
+	// env / credentials.yaml. `K` IS the dashscope credential — collapsing
+	// to Provider="" would make credential.applyCLIOverrides drop the CLI
+	// key (it requires non-empty Provider).
+	collapseUnconfiguredProviderSplit(cfg, credential.NewResolver(""),
+		"dashscope/claude-sonnet-4-6", "sk-cli-test")
+
+	if cfg.Engine.Model.Provider != "dashscope" || cfg.Engine.Model.Name != "claude-sonnet-4-6" {
+		t.Fatalf("split was collapsed despite --api-key: %+v", cfg.Engine.Model)
+	}
+}
+
+func TestCollapseUnconfiguredProviderSplit_KeepsSplitWhenQoderPATIsConfig(t *testing.T) {
+	// Not parallel: relies on QODER_PERSONAL_ACCESS_TOKEN env, which is the
+	// canonical Qoder credential — must count as "configured" for collapse.
+	t.Setenv("QODER_PERSONAL_ACCESS_TOKEN", "qpat-test")
+
+	cfg := config.DefaultEvalConfig()
+	cfg.Engine.Model.Provider = "qoder"
+	cfg.Engine.Model.Name = "auto"
+
+	collapseUnconfiguredProviderSplit(cfg, credential.NewResolver(""),
+		"qoder/auto", "")
+
+	if cfg.Engine.Model.Provider != "qoder" || cfg.Engine.Model.Name != "auto" {
+		t.Fatalf("qoder split was collapsed despite PAT env: %+v", cfg.Engine.Model)
 	}
 }

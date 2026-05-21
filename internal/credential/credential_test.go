@@ -521,3 +521,12 @@ func TestProviderConfigured_FalseWhenNoEnvAndNoResolverEntry(t *testing.T) {
 		t.Fatalf("ProviderConfigured returned true for fully unconfigured provider")
 	}
 }
+
+func TestProviderConfigured_TrueWhenPersonalAccessTokenEnvSet(t *testing.T) {
+	// Qoder authenticates via QODER_PERSONAL_ACCESS_TOKEN (no API_KEY/BASE_URL),
+	// so its presence must also count as "configured".
+	t.Setenv("QODER_PERSONAL_ACCESS_TOKEN", "qpat-test")
+	if !ProviderConfigured("qoder", nil) {
+		t.Fatalf("ProviderConfigured returned false when QODER_PERSONAL_ACCESS_TOKEN is set")
+	}
+}

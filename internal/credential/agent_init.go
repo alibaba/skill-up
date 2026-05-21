@@ -236,7 +236,11 @@ func lookupProviderEnv(provider string, kind scopedValueKind) (value, envVar str
 
 // ProviderConfigured reports whether the caller has supplied a configuration
 // path for this provider — i.e. the credential resolver has an entry for it,
-// or `<PROVIDER>_API_KEY` / `<PROVIDER>_BASE_URL` is set in the process env.
+// or one of `<PROVIDER>_API_KEY` / `<PROVIDER>_BASE_URL` /
+// `<PROVIDER>_PERSONAL_ACCESS_TOKEN` is set in the process env. The PAT env
+// is the canonical Qoder credential (see EnvQoderPersonalAccessToken /
+// QoderCLIAgent.CheckCredentials), so probing it makes qoder-only-via-PAT
+// setups count as configured.
 //
 // This is used to disambiguate the two valid interpretations of a slashed
 // `--model provider/name` input:
@@ -250,7 +254,11 @@ func lookupProviderEnv(provider string, kind scopedValueKind) (value, envVar str
 //     (e.g. `anthropic_modelscope/deepseek-v4-pro` registered as-is on an
 //     internal anthropic-proxy gateway). Callers can treat it as opaque.
 //
-// Returns false for empty provider input.
+// Note: this helper intentionally does NOT consider CLI overrides such as
+// `--api-key`; the CLI layer treats those as a separate "configured via
+// CLI" signal when deciding whether to collapse a tentative split, so that
+// `ProviderConfigured` itself stays purely about persisted/env-resident
+// configuration. Returns false for empty provider input.
 func ProviderConfigured(provider string, resolver *Resolver) bool {
 	if provider == "" {
 		return false
@@ -264,6 +272,11 @@ func ProviderConfigured(provider string, resolver *Resolver) bool {
 		return true
 	}
 	if _, _, ok := lookupProviderEnv(provider, valueBaseURL); ok {
+		return true
+	}
+	// QODER_PERSONAL_ACCESS_TOKEN-style auth: provider-scoped PAT env that
+	// some engines (Qoder) use instead of `<PROVIDER>_API_KEY`.
+	if v := os.Getenv(strings.ToUpper(provider) + "_PERSONAL_ACCESS_TOKEN"); v != "" {
 		return true
 	}
 	return false
