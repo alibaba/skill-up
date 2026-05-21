@@ -462,8 +462,9 @@ func collapseUnconfiguredProviderSplit(evalCfg *config.EvalConfig, resolver *cre
 	if !strings.Contains(cliModel, "/") {
 		return
 	}
-	evalCfg.Engine.Model.Provider, evalCfg.Engine.Model.Name =
-		resolveModelRefWithCLIHints(provider+"/"+name, resolver, cliAPIKey, evalCfg.Engine.Model.BaseURL)
+	newProvider, newName := resolveModelRefWithCLIHints(provider+"/"+name, resolver, cliAPIKey, evalCfg.Engine.Model.BaseURL)
+	evalCfg.Engine.Model.Provider = newProvider
+	evalCfg.Engine.Model.Name = newName
 }
 
 // resolveEvalConfig resolves the engine name and ensures evalCfg is non-nil.
