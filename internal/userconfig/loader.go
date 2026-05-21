@@ -1,7 +1,7 @@
 // Discovery layers for user config (lowest to highest precedence):
 //
 //  1. embed     — the empty Config{} (no vendor defaults baked in).
-//  2. user      — $SKILL_EVAL_CONFIG, else $XDG_CONFIG_HOME/skill-up/config.yaml,
+//  2. user      — $SKILL_UP_CONFIG, else $XDG_CONFIG_HOME/skill-up/config.yaml,
 //                 else ~/.config/skill-up/config.yaml. Missing = silent skip.
 //  3. project   — $WorkingDir/.skill-up.yaml. Missing = silent skip.
 //  4. explicit  — opts.ExplicitPath. Missing = ERROR.
@@ -22,7 +22,7 @@ import (
 )
 
 // ConfigEnvVar overrides the user-layer config path.
-const ConfigEnvVar = "SKILL_EVAL_CONFIG"
+const ConfigEnvVar = "SKILL_UP_CONFIG"
 
 // ProjectConfigFile is the per-project config file name (in WorkingDir).
 const ProjectConfigFile = ".skill-up.yaml"

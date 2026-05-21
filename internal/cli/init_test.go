@@ -23,7 +23,7 @@ func TestInit_TemplateContainsAllSections(t *testing.T) {
 	t.Parallel()
 	want := []string{
 		"schema_version: v1alpha1",
-		"kind: SkillEvalConfig",
+		"kind: SkillUpConfig",
 		"telemetry:",
 		"traces:",
 		"# resource_attributes:",
@@ -95,7 +95,7 @@ func TestInit_ConfigSourceCopiedToLocal(t *testing.T) {
 	t.Chdir(tmp)
 
 	source := filepath.Join(tmp, "source.yaml")
-	sourceContent := "# my custom comment\nschema_version: v1alpha1\nkind: SkillEvalConfig\ntelemetry:\n  service_name: custom\n"
+	sourceContent := "# my custom comment\nschema_version: v1alpha1\nkind: SkillUpConfig\ntelemetry:\n  service_name: custom\n"
 	if err := os.WriteFile(source, []byte(sourceContent), 0o600); err != nil {
 		t.Fatalf("write source: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestInit_ConfigSourcePrint(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
 	source := filepath.Join(tmp, "source.yaml")
-	sourceContent := "schema_version: v1alpha1\nkind: SkillEvalConfig\n# kept comment\n"
+	sourceContent := "schema_version: v1alpha1\nkind: SkillUpConfig\n# kept comment\n"
 	if err := os.WriteFile(source, []byte(sourceContent), 0o600); err != nil {
 		t.Fatalf("write source: %v", err)
 	}

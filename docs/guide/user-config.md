@@ -21,12 +21,12 @@ embed (empty)
   < explicit  (--config <path>)
 ```
 
-| Layer      | Path                                                                                                       | Missing |
-| :--------- | :--------------------------------------------------------------------------------------------------------- | :------ |
-| `embed`    | empty `Config{}` — no vendor defaults baked in                                                              | always  |
-| `user`     | `$SKILL_EVAL_CONFIG`, else `$XDG_CONFIG_HOME/skill-up/config.yaml`, else `~/.config/skill-up/config.yaml`   | skipped |
-| `project`  | `$PWD/.skill-up.yaml`                                                                                       | skipped |
-| `explicit` | `--config <path>` passed to any command                                                                     | error   |
+| Layer      | Path                                                                                                    | Missing |
+| :--------- | :------------------------------------------------------------------------------------------------------ | :------ |
+| `embed`    | empty `Config{}` — no vendor defaults baked in                                                          | always  |
+| `user`     | `$SKILL_UP_CONFIG`, else `$XDG_CONFIG_HOME/skill-up/config.yaml`, else `~/.config/skill-up/config.yaml` | skipped |
+| `project`  | `$PWD/.skill-up.yaml`                                                                                   | skipped |
+| `explicit` | `--config <path>` passed to any command                                                                 | error   |
 
 A missing or corrupt `user`/`project` file is downgraded to a `warning:` on
 stderr — the command keeps running with whatever layers loaded. A missing or
@@ -42,7 +42,7 @@ rather than replaced wholesale.
 
 ```yaml
 schema_version: v1alpha1
-kind: SkillEvalConfig
+kind: SkillUpConfig
 
 telemetry:
   service_name: skill-up                              # OTEL_SERVICE_NAME
@@ -128,7 +128,7 @@ skill-up init --config ./team-config.yaml --print
 
 ```yaml
 schema_version: v1alpha1
-kind: SkillEvalConfig
+kind: SkillUpConfig
 telemetry:
   service_name: skill-up
   traces_exporter: otlp
@@ -147,7 +147,7 @@ Now every `skill-up run` exports traces without touching env vars.
 
 ```yaml
 schema_version: v1alpha1
-kind: SkillEvalConfig
+kind: SkillUpConfig
 runtime_kwargs:
   opensandbox:
     base_url: http://sandbox.internal:9090

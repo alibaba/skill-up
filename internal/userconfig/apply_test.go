@@ -98,10 +98,10 @@ func TestMergeKwargs_NilEval(t *testing.T) {
 	}
 }
 
-func TestApplyEnv_PassesThroughSkillEvalEnvFromUserEnvMap(t *testing.T) {
+func TestApplyEnv_PassesThroughSkillUpEnvFromUserEnvMap(t *testing.T) {
 	// Project-routing attribute envs are not in the schema -- downstream
 	// vendor bundles set them through the generic env: map. Verify pass-through.
-	const key = "SKILL_EVAL_OTEL_RESOURCE_ATTRIBUTES"
+	const key = "SKILL_UP_OTEL_RESOURCE_ATTRIBUTES"
 	t.Setenv(key, "")
 	_ = os.Unsetenv(key)
 

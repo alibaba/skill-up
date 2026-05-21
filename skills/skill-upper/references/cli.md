@@ -14,25 +14,25 @@ skill-up run [path] [flags]
 
 ### 参数
 
-| 参数 | 说明 |
-| --- | --- |
+| 参数   | 说明                                                             |
+| ------ | ---------------------------------------------------------------- |
 | `path` | `eval.yaml` 的路径。省略时默认在当前目录下查找 `evals/eval.yaml` |
 
 ### Flags
 
-| Flag | 默认 | 说明 |
-| --- | --- | --- |
-| `--auto` | `false` | 自动检测 `evals/` 目录，支持直接消费 Anthropic `evals.json` |
-| `--include-case-name` | — | 只运行匹配的用例（glob，可多次） |
-| `--exclude-case-name` | — | 排除匹配的用例（glob，可多次） |
-| `--format` | — | 附加报告格式：`junit` / `html`（可多次）。`result.json` 始终写入；`--format junit` 生成 `report.xml`；`--format html` 生成 `report.html`；`--format json` 对 `result.json` 为冗余 |
-| `--output-dir` | eval.yaml 同级目录 | 报告和产物的输出目录 |
-| `--iteration` | `0`（auto） | 总运行次数。`0` = 自动：在最后一个已有 `iteration-N/` 之后追加一轮；正整数 = 显式运行 N 轮，产物写入 `iteration-1/` … `iteration-N/` |
-| `--engine` | 配置中的值 | 覆盖 Engine 名称 |
-| `--model` | 配置中的值 | 覆盖模型（格式：`provider/name`） |
-| `--parallelism` | 配置中的值 | 覆盖 `cases.parallelism`，临时调整用例并行数，取值 1–256 |
-| `--api-key` | — | 传入 API Key（优先级高于环境变量） |
-| `-v, --verbose` | `0` | 日志详细程度：`info` 默认；`-v` 为 `debug`；`-vv` / `--verbose=2` 为 `trace` |
+| Flag                  | 默认               | 说明                                                                                                                                                                              |
+| --------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--auto`              | `false`            | 自动检测 `evals/` 目录，支持直接消费 Anthropic `evals.json`                                                                                                                       |
+| `--include-case-name` | —                  | 只运行匹配的用例（glob，可多次）                                                                                                                                                  |
+| `--exclude-case-name` | —                  | 排除匹配的用例（glob，可多次）                                                                                                                                                    |
+| `--format`            | —                  | 附加报告格式：`junit` / `html`（可多次）。`result.json` 始终写入；`--format junit` 生成 `report.xml`；`--format html` 生成 `report.html`；`--format json` 对 `result.json` 为冗余 |
+| `--output-dir`        | eval.yaml 同级目录 | 报告和产物的输出目录                                                                                                                                                              |
+| `--iteration`         | `0`（auto）        | 总运行次数。`0` = 自动：在最后一个已有 `iteration-N/` 之后追加一轮；正整数 = 显式运行 N 轮，产物写入 `iteration-1/` … `iteration-N/`                                              |
+| `--engine`            | 配置中的值         | 覆盖 Engine 名称                                                                                                                                                                  |
+| `--model`             | 配置中的值         | 覆盖模型（格式：`provider/name`）                                                                                                                                                 |
+| `--parallelism`       | 配置中的值         | 覆盖 `cases.parallelism`，临时调整用例并行数，取值 1–256                                                                                                                          |
+| `--api-key`           | —                  | 传入 API Key（优先级高于环境变量）                                                                                                                                                |
+| `-v, --verbose`       | `0`                | 日志详细程度：`info` 默认；`-v` 为 `debug`；`-vv` / `--verbose=2` 为 `trace`                                                                                                      |
 
 ### 退出码
 
@@ -96,10 +96,10 @@ skill-up list-cases [path to eval.yaml]
 skill-up report <path to result.json> [flags]
 ```
 
-| Flag | 默认 | 说明 |
-| --- | --- | --- |
-| `--format` | `json` | `json` / `junit` / `html`（可多次） |
-| `--output-dir` | result.json 同级 | 输出目录 |
+| Flag           | 默认             | 说明                                |
+| -------------- | ---------------- | ----------------------------------- |
+| `--format`     | `json`           | `json` / `junit` / `html`（可多次） |
+| `--output-dir` | result.json 同级 | 输出目录                            |
 
 ```bash
 skill-up report result.json --format html
@@ -116,8 +116,8 @@ skill-up report result.json --format json --format junit --format html --output-
 skill-up import <evals.json> [flags]
 ```
 
-| Flag | 默认 | 说明 |
-| --- | --- | --- |
+| Flag       | 默认            | 说明     |
+| ---------- | --------------- | -------- |
 | `--output` | evals.json 同级 | 输出目录 |
 
 `import` 与 `run --auto` 的区别：`import` 是一次性格式转换；`run --auto` 运行时直接读 `evals.json`，不落 YAML。
@@ -132,14 +132,14 @@ skill-up import <evals.json> [flags]
 skill-up init [flags]
 ```
 
-| Flag | 说明 |
-| --- | --- |
-| `--local` | 写入 `$PWD/.skill-up.yaml`（与 `--config` 互斥） |
-| `--print` | 打印模板到 stdout，不写文件 |
-| `--force` | 覆盖已存在文件 |
-| `--config <path>` | 显式目标路径（需与 `--local` 二选一） |
+| Flag              | 说明                                             |
+| ----------------- | ------------------------------------------------ |
+| `--local`         | 写入 `$PWD/.skill-up.yaml`（与 `--config` 互斥） |
+| `--print`         | 打印模板到 stdout，不写文件                      |
+| `--force`         | 覆盖已存在文件                                   |
+| `--config <path>` | 显式目标路径（需与 `--local` 二选一）            |
 
-默认路径：`$XDG_CONFIG_HOME/skill-up/config.yaml` 或 `~/.config/skill-up/config.yaml`。发现链中还支持环境变量 `SKILL_EVAL_CONFIG` 指向用户配置文件。
+默认路径：`$XDG_CONFIG_HOME/skill-up/config.yaml` 或 `~/.config/skill-up/config.yaml`。发现链中还支持环境变量 `SKILL_UP_CONFIG` 指向用户配置文件。
 
 ---
 

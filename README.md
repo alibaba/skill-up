@@ -213,12 +213,12 @@ skill-up auto-loads an optional user-level config that supplies default OpenTele
 embed (empty) < user (~/.config/skill-up/config.yaml) < project ($PWD/.skill-up.yaml) < explicit (--config)
 ```
 
-| Source     | Path                                                                                                      |
-| ---------- | --------------------------------------------------------------------------------------------------------- |
-| `embed`    | empty `Config{}` — no vendor defaults baked in                                                            |
-| `user`     | `$SKILL_EVAL_CONFIG`, else `$XDG_CONFIG_HOME/skill-up/config.yaml`, else `~/.config/skill-up/config.yaml` |
-| `project`  | `$PWD/.skill-up.yaml`                                                                                     |
-| `explicit` | `--config <path>` (must exist)                                                                            |
+| Source     | Path                                                                                                    |
+| ---------- | ------------------------------------------------------------------------------------------------------- |
+| `embed`    | empty `Config{}` — no vendor defaults baked in                                                          |
+| `user`     | `$SKILL_UP_CONFIG`, else `$XDG_CONFIG_HOME/skill-up/config.yaml`, else `~/.config/skill-up/config.yaml` |
+| `project`  | `$PWD/.skill-up.yaml`                                                                                   |
+| `explicit` | `--config <path>` (must exist)                                                                          |
 
 Missing files at the `user` and `project` layers are silently skipped; a missing `--config` path is a hard error. A corrupt config at any layer also fails the run.
 
@@ -241,7 +241,7 @@ preserved. Without `--config`, `init` writes a commented YAML template.
 
 ```yaml
 schema_version: v1alpha1
-kind: SkillEvalConfig
+kind: SkillUpConfig
 
 telemetry:
   service_name: skill-up                              # OTEL_SERVICE_NAME

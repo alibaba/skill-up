@@ -19,7 +19,7 @@ func TestCLI_InitPrint(t *testing.T) {
 	}
 	for _, want := range []string{
 		"schema_version: v1alpha1",
-		"kind: SkillEvalConfig",
+		"kind: SkillUpConfig",
 		"telemetry:",
 		"# runtime_kwargs:",
 	} {
@@ -61,7 +61,7 @@ func TestCLI_InitConfigSourceCopied(t *testing.T) {
 
 	tmp := t.TempDir()
 	source := filepath.Join(tmp, "source.yaml")
-	sourceContent := "# my custom header\nschema_version: v1alpha1\nkind: SkillEvalConfig\ntelemetry:\n  service_name: from-source\n"
+	sourceContent := "# my custom header\nschema_version: v1alpha1\nkind: SkillUpConfig\ntelemetry:\n  service_name: from-source\n"
 	if err := os.WriteFile(source, []byte(sourceContent), 0o600); err != nil {
 		t.Fatalf("write source: %v", err)
 	}

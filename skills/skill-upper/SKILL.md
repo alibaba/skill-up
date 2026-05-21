@@ -1,6 +1,6 @@
 ---
 name: skill-upper
-description: 'Set up, run, and interpret Agent Skill evaluations (evals) with the skill-up CLI / 使用 skill-up CLI 给 Agent Skill 搭建和运行评测. Use when the user asks to evaluate, test, regress, or verify a Skill; add evals or cases; write eval.yaml/case.yaml; run skill-up run/validate/list-cases/report/import/init; or migrate from Anthropic evals.json. Handles Skill discovery, evals scaffolding, judge authoring, credentials, user config, validation, runs, and reports.'
+description: "Set up, run, and interpret Agent Skill evaluations (evals) with the skill-up CLI / 使用 skill-up CLI 给 Agent Skill 搭建和运行评测. Use when the user asks to evaluate, test, regress, or verify a Skill; add evals or cases; write eval.yaml/case.yaml; run skill-up run/validate/list-cases/report/import/init; or migrate from Anthropic evals.json. Handles Skill discovery, evals scaffolding, judge authoring, credentials, user config, validation, runs, and reports."
 ---
 
 # use-skill-up-cli
@@ -99,7 +99,7 @@ skill-up init --print
 skill-up init --force
 ```
 
-Precedence (low → high): embedded empty defaults < user config < project `.skill-up.yaml` < `--config`. `SKILL_EVAL_CONFIG` can point at the user config file (env var name is historical). See the upstream README "User config".
+Precedence (low → high): embedded empty defaults < user config < project `.skill-up.yaml` < `--config`. `SKILL_UP_CONFIG` can point at the user config file (env var name is historical). See the upstream README "User config".
 
 ### Step 1: Locate the target Skill
 
@@ -158,17 +158,17 @@ For `opensandbox`, also ensure `OPENSANDBOX_API_KEY` (and related env) as needed
 skill-up run <skill-root>/evals/eval.yaml
 ```
 
-| Scenario | Command |
-|---|---|
-| Subset | `--include-case-name "basic-*"` |
-| Exclude | `--exclude-case-name "*-flaky"` |
-| HTML report | `--format html` |
-| Engine override | `--engine codex --model openai/gpt-4` |
-| Parallelism | `--parallelism 4` (1–256) |
-| Anthropic JSON | `--auto` |
-| N rounds | `--iteration 3` |
-| Auto-append after last iteration | `--iteration 0` (default behavior) |
-| Verbose | `-v`, `-vv` |
+| Scenario                         | Command                               |
+| -------------------------------- | ------------------------------------- |
+| Subset                           | `--include-case-name "basic-*"`       |
+| Exclude                          | `--exclude-case-name "*-flaky"`       |
+| HTML report                      | `--format html`                       |
+| Engine override                  | `--engine codex --model openai/gpt-4` |
+| Parallelism                      | `--parallelism 4` (1–256)             |
+| Anthropic JSON                   | `--auto`                              |
+| N rounds                         | `--iteration 3`                       |
+| Auto-append after last iteration | `--iteration 0` (default behavior)    |
+| Verbose                          | `-v`, `-vv`                           |
 
 Exit `0` = all passed; `1` = failure or error — suitable for CI.
 
@@ -183,17 +183,17 @@ Summarize: pass rate and timing; for failures, case id, assertion `text`, and `e
 
 ## Command quick reference
 
-| Command | Purpose |
-|---|---|
-| `skill-up validate <eval.yaml>` | Validate before `run`. |
-| `skill-up list-cases <eval.yaml>` | List cases. |
-| `skill-up run [eval.yaml]` | Run evals. |
-| `skill-up run --auto` | Run from `evals/evals.json`. |
-| `skill-up report <result.json> --format html` | Re-render reports. |
-| `skill-up import <evals.json>` | Convert Anthropic format to YAML. |
-| `skill-up init` | Write user-config template. |
-| `skill-up debug judge <input.json>` | Debug judge. |
-| `skill-up debug report <input.json>` | Debug report. |
+| Command                                       | Purpose                           |
+| --------------------------------------------- | --------------------------------- |
+| `skill-up validate <eval.yaml>`               | Validate before `run`.            |
+| `skill-up list-cases <eval.yaml>`             | List cases.                       |
+| `skill-up run [eval.yaml]`                    | Run evals.                        |
+| `skill-up run --auto`                         | Run from `evals/evals.json`.      |
+| `skill-up report <result.json> --format html` | Re-render reports.                |
+| `skill-up import <evals.json>`                | Convert Anthropic format to YAML. |
+| `skill-up init`                               | Write user-config template.       |
+| `skill-up debug judge <input.json>`           | Debug judge.                      |
+| `skill-up debug report <input.json>`          | Debug report.                     |
 
 Full flags: `references/cli.md`.
 

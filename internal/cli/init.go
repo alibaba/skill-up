@@ -128,7 +128,7 @@ const initTemplateContent = `# skill-up user config -- auto-loaded by every comm
 # Use ` + "`skill-up init --print`" + ` to regenerate this template.
 
 schema_version: v1alpha1
-kind: SkillEvalConfig
+kind: SkillUpConfig
 
 # OpenTelemetry defaults. Each key maps to a well-known OTEL_* env var.
 # Values are only applied if the corresponding env var is not already set.
