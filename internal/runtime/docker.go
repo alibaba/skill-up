@@ -118,6 +118,40 @@ func (r *DockerRuntime) Create(ctx context.Context) error {
 		return fmt.Errorf("docker runtime: generate container name: %w", err)
 	}
 
+	args := r.buildCreateArgs(name)
+	stdout, stderr, exitCode, err := r.run(ctx, r.cli, args...)
+	if err != nil || exitCode != 0 {
+		return dockerCLIErr(stderr, exitCode, err, "docker create failed")
+	}
+	id := strings.TrimSpace(stdout)
+	if id == "" {
+		id = name
+	}
+	r.containerID = id
+
+	_, startStderr, startExit, startErr := r.run(ctx, r.cli, "start", id)
+	if startErr != nil || startExit != 0 {
+		if r.rollbackRemove(ctx, id) == nil {
+			r.containerID = ""
+		}
+		return dockerCLIErr(startStderr, startExit, startErr, "docker start %s failed", id)
+	}
+	r.started = true
+
+	if _, mkStderr, mkExit, mkErr := r.run(ctx, r.cli, "exec", id, "mkdir", "-p", r.workspace); mkErr != nil || mkExit != 0 {
+		if r.rollbackRemove(ctx, id) == nil {
+			r.containerID = ""
+			r.started = false
+		}
+		return dockerCLIErr(mkStderr, mkExit, mkErr, "docker exec mkdir -p %s failed", r.workspace)
+	}
+	return nil
+}
+
+// buildCreateArgs assembles the `docker create` argument list from the
+// runtime's configuration. Extracted from Create to keep cyclomatic
+// complexity manageable.
+func (r *DockerRuntime) buildCreateArgs(name string) []string {
 	args := []string{
 		"create",
 		"--name", name,
@@ -129,18 +163,6 @@ func (r *DockerRuntime) Create(ctx context.Context) error {
 	for k, v := range r.cfg.Env {
 		args = append(args, "--env", k+"="+v)
 	}
-	// Persistent entrypoint so exec calls can attach. `sleep infinity` is
-	// supported in busybox 1.30+, Alpine 3.10+, Debian/Ubuntu coreutils,
-	// and most distroless bases; users with stricter base images can
-	// override via environment.entrypoint.
-	//
-	// Docker treats positional args after the image as CMD, NOT as an
-	// ENTRYPOINT override. If the image already declares an ENTRYPOINT
-	// (e.g. `python`, `java -jar app.jar`), our `sleep infinity` would
-	// arrive as arguments to that entrypoint and the container would
-	// exit immediately. Using `--entrypoint` explicitly replaces the
-	// image's entrypoint with the user's chosen binary, and any
-	// remaining args go into the CMD slot.
 	entry := r.cfg.Entrypoint
 	if len(entry) == 0 {
 		entry = []string{"sleep", "infinity"}
@@ -150,48 +172,7 @@ func (r *DockerRuntime) Create(ctx context.Context) error {
 	if len(entry) > 1 {
 		args = append(args, entry[1:]...)
 	}
-
-	stdout, stderr, exitCode, err := r.run(ctx, r.cli, args...)
-	if err != nil || exitCode != 0 {
-		return dockerCLIErr(stderr, exitCode, err, "docker create failed")
-	}
-	id := strings.TrimSpace(stdout)
-	if id == "" {
-		// `docker create --name X` echoes the long ID on success; if it
-		// doesn't, fall back to the name we chose so Close can still
-		// reach the container.
-		id = name
-	}
-	r.containerID = id
-
-	// Start the container so Exec / docker cp work immediately. If start
-	// fails, tear down the half-created container to avoid leaking it on
-	// the host; otherwise the error returned to the caller would leave a
-	// "Created"-state container hanging around forever.
-	_, startStderr, startExit, startErr := r.run(ctx, r.cli, "start", id)
-	if startErr != nil || startExit != 0 {
-		if r.rollbackRemove(ctx, id) == nil {
-			r.containerID = ""
-		}
-		return dockerCLIErr(startStderr, startExit, startErr, "docker start %s failed", id)
-	}
-	r.started = true
-
-	// Defensively create the workspace dir. `--workdir` creates the dir
-	// for `docker run`, but in the `create + start` two-step the
-	// directory is only guaranteed to exist when the first exec runs
-	// with `--workdir` — and if it doesn't, that first exec errors out
-	// with an opaque "no such file or directory" message. mkdir -p
-	// here surfaces any real failure (read-only fs, permissions) right
-	// at Create() time instead.
-	if _, mkStderr, mkExit, mkErr := r.run(ctx, r.cli, "exec", id, "mkdir", "-p", r.workspace); mkErr != nil || mkExit != 0 {
-		if r.rollbackRemove(ctx, id) == nil {
-			r.containerID = ""
-			r.started = false
-		}
-		return dockerCLIErr(mkStderr, mkExit, mkErr, "docker exec mkdir -p %s failed", r.workspace)
-	}
-	return nil
+	return args
 }
 
 // rollbackRemove tears down a half-created container after a failure in
@@ -202,11 +183,12 @@ func (r *DockerRuntime) Create(ctx context.Context) error {
 // error if cleanup failed (in which case the caller should retain
 // containerID so a subsequent Close can retry).
 func (r *DockerRuntime) rollbackRemove(_ context.Context, id string) error {
+	//nolint:contextcheck // Intentionally detached: parent cancellation must not skip cleanup.
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), dockerCleanupTimeout)
 	defer cancel()
 	_, stderr, exitCode, err := r.run(cleanupCtx, r.cli, "rm", "-f", id)
 	if err != nil || exitCode != 0 {
-		logging.Debugf("DockerRuntime.rollbackRemove: rm -f %s failed (exit=%d): %s", id, exitCode, strings.TrimSpace(stderr))
+		logging.DebugContextf(cleanupCtx, "DockerRuntime.rollbackRemove: rm -f %s failed (exit=%d): %s", id, exitCode, strings.TrimSpace(stderr))
 		return dockerCLIErr(stderr, exitCode, err, "docker rm -f %s failed during rollback", id)
 	}
 	return nil
@@ -432,13 +414,20 @@ func (r *DockerRuntime) Exec(ctx context.Context, command string, opts ExecOptio
 	span.SetAttributes(attribute.Int("process.exit_code", result.ExitCode))
 	observability.RecordRuntimeExec(ctx, result.ExitCode, time.Since(startTime).Milliseconds())
 
+	return result, classifyExecResult(ctx, result, err, command)
+}
+
+// classifyExecResult determines whether a docker exec invocation should
+// surface as an error (infra fault, context timeout) or as a normal non-zero
+// exit that the evaluator scores via ExitCode alone.
+func classifyExecResult(ctx context.Context, result ExecResult, err error, command string) error {
 	switch {
 	case result.ExitCode == -1 && ctx.Err() != nil:
 		logging.ErrorContextf(ctx, "docker exec killed by context (%v); command: %s", ctx.Err(), maskCommand(command))
 		if result.Stderr != "" {
 			logNonZeroStderr(ctx, result.ExitCode, result.Stderr)
 		}
-		return result, ctx.Err()
+		return ctx.Err()
 	case result.ExitCode != 0:
 		logNonZeroExit(ctx, result.ExitCode, command)
 		if result.Stderr != "" {
@@ -448,24 +437,13 @@ func (r *DockerRuntime) Exec(ctx context.Context, command string, opts ExecOptio
 		logging.WarnContextf(ctx, "stderr: %s", result.Stderr)
 	}
 
-	// Two distinct failure modes need to surface as errors so the
-	// evaluator routes them through its infra-retry path instead of the
-	// ordinary FAIL path:
-	//
-	//   1. r.run itself returned err — docker CLI couldn't run, or the
-	//      parent context was cancelled / timed out.
-	//   2. docker exec returned a non-zero exit AND stderr looks like a
-	//      daemon / OCI runtime fault (missing container, runtime exec
-	//      failed, etc) — see dockerExecLayerError. A user command that
-	//      legitimately exits non-zero must NOT be wrapped; the
-	//      evaluator inspects ExitCode for those.
 	if err != nil {
-		return result, dockerCLIErr(result.Stderr, result.ExitCode, err, "docker exec failed")
+		return dockerCLIErr(result.Stderr, result.ExitCode, err, "docker exec failed")
 	}
 	if result.ExitCode != 0 && dockerExecLayerError(result.Stderr, result.ExitCode) {
-		return result, dockerCLIErr(result.Stderr, result.ExitCode, nil, "docker exec layer failure")
+		return dockerCLIErr(result.Stderr, result.ExitCode, nil, "docker exec layer failure")
 	}
-	return result, nil
+	return nil
 }
 
 // Workspace returns the in-container workspace path. Unlike NoneRuntime, this
