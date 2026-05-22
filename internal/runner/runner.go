@@ -309,12 +309,16 @@ func (r *Runner) writeGroupedCaseArtifacts(ws *report.IterationWorkspace, groupe
 }
 
 // writeFormattedReports generates report files for each requested format.
-// "json" is silently skipped because result.json is always written by the caller.
+// Note: result.json is always written by the caller as the raw data source;
+// "json" here additionally produces report.json for consistency with other formats.
 func writeFormattedReports(ctx context.Context, iterDir string, formats []string, input report.Input) error {
 	for _, format := range formats {
 		switch format {
 		case "json":
-			// result.json already written; skip.
+			reporter := &report.JSONReporter{OutputPath: filepath.Join(iterDir, "report.json")}
+			if err := reporter.Write(ctx, input); err != nil {
+				return fmt.Errorf("write json report: %w", err)
+			}
 		case "junit":
 			reporter := &report.JUnitReporter{OutputPath: filepath.Join(iterDir, "report.xml")}
 			if err := reporter.Write(ctx, input); err != nil {
