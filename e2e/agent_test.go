@@ -876,6 +876,117 @@ report:
 	}
 }
 
+// TestAgent_ClaudeCode_DockerRuntime exercises the claude_code engine inside a
+// local Docker container. This is the full-pipeline e2e for the docker runtime:
+// evaluator → docker create/start → npm install claude-code → agent.Run inside
+// container → docker cp results → judge → result.json.
+func TestAgent_ClaudeCode_DockerRuntime(t *testing.T) {
+	skipIfNotFullE2E(t)
+
+	if out, err := exec.Command("docker", "info").CombinedOutput(); err != nil {
+		t.Skipf("docker daemon not available: %v\n%s", err, out)
+	}
+
+	modelAPIKey := os.Getenv("ANTHROPIC_API_KEY")
+	if modelAPIKey == "" {
+		t.Skip("ANTHROPIC_API_KEY not set, skipping claude_code docker test")
+	}
+	modelBaseURL := os.Getenv("ANTHROPIC_BASE_URL")
+	if modelBaseURL == "" {
+		t.Skip("ANTHROPIC_BASE_URL not set, skipping claude_code docker test")
+	}
+	modelName := os.Getenv("ANTHROPIC_MODEL")
+	if modelName == "" {
+		t.Skip("ANTHROPIC_MODEL not set, skipping claude_code docker test")
+	}
+
+	evalDir := t.TempDir()
+	writeFile(t, filepath.Join(evalDir, "SKILL.md"), "# ClaudeCode Docker E2E\n")
+	writeFile(t, filepath.Join(evalDir, "evals", "cases", "ok.yaml"), `id: ok
+title: ClaudeCode Docker smoke
+input:
+  prompt: Reply with exactly "hello world" and nothing else.
+constraints:
+  timeout_seconds: 600
+  max_turns: 1
+expect:
+  must_not_contain:
+    - __skill_up_forbidden__
+`)
+
+	evalPath := filepath.Join(evalDir, "evals", "eval.yaml")
+	writeFile(t, evalPath, `schema_version: v1alpha1
+environment:
+  type: docker
+  image: node:22
+  workspace_mount: /workspace
+mcp:
+  servers: []
+skills: []
+engine:
+  name: claude_code
+  model:
+    provider: anthropic
+    name: `+modelName+`
+cases:
+  files:
+    - evals/cases/ok.yaml
+  defaults:
+    timeout_seconds: 600
+    max_turns: 1
+  parallelism: 1
+  retry_policy:
+    max_retries: 0
+benchmark:
+  enabled: false
+judge:
+  type: rule_based
+  rule_based:
+    must_contain:
+      - "hello"
+report:
+  formats: [json]
+  artifacts: [transcript]
+`)
+
+	outputDir := t.TempDir()
+	preserveWorkspaceArtifacts(t, outputDir)
+	result := Run(t, RunConfig{
+		Timeout: 10 * 60e9,
+		Env: []string{
+			"ANTHROPIC_API_KEY=" + modelAPIKey,
+			"ANTHROPIC_BASE_URL=" + modelBaseURL,
+		},
+	}, "run", evalPath, "--output-dir", outputDir)
+
+	if result.ExitCode == ExitCodeTimeout {
+		t.Skip("claude_code docker run timed out")
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("claude_code docker run failed: exit=%d\nstdout=%s\nstderr=%s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+
+	resultPath := filepath.Join(outputDir, "iteration-1", "result.json")
+	data, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("failed to read result.json: %v", err)
+	}
+	if !strings.Contains(string(data), `"engine_name": "claude_code"`) {
+		t.Fatalf("result.json missing engine_name claude_code:\n%s", string(data))
+	}
+	if !strings.Contains(string(data), `"status": "PASS"`) {
+		t.Logf("result.json (LLM may not match expect checks):\n%s", string(data))
+	}
+	responsePath := filepath.Join(outputDir, "iteration-1", "ok", "with_skill", "outputs", "response.md")
+	response, err := os.ReadFile(responsePath)
+	if err != nil {
+		t.Fatalf("failed to read response.md: %v", err)
+	}
+	if strings.TrimSpace(string(response)) == "" {
+		t.Fatalf("response.md is empty")
+	}
+}
+
 // TestAgent_ClaudeCode_WithAPIKey tests claude-code with real API key.
 func TestAgent_ClaudeCode_WithAPIKey(t *testing.T) {
 	t.Parallel()
