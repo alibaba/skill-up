@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"path"
 	"strings"
 )
 
@@ -46,13 +47,11 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 		errs = append(errs, "environment.type must be one of: none, opensandbox, docker")
 	}
 
-	// environment.image is required for the docker runtime — without it,
-	// `skill-up validate` would pass and only fail later at run time when
-	// NewDockerRuntime constructs the container. Catch it at the preflight
-	// gate instead. opensandbox has its own image-or-sandbox-template
-	// fallback so it stays permissive here.
-	if cfg.Environment.Type == runtimeTypeDocker && strings.TrimSpace(cfg.Environment.Image) == "" {
-		errs = append(errs, "environment.image is required when environment.type is docker")
+	// Docker-runtime fields that would otherwise silently pass `skill-up
+	// validate` and only fail later when NewDockerRuntime constructs the
+	// container — catch them at the preflight gate.
+	if cfg.Environment.Type == runtimeTypeDocker {
+		errs = append(errs, validateDockerEnvironment(cfg.Environment)...)
 	}
 
 	errs = append(errs, validateNetworkPolicy(cfg.Environment)...)
@@ -172,6 +171,32 @@ func (v *Validator) ValidateAll(result *EvalResult) error {
 
 func isValidRuntimeType(t string) bool {
 	return t == runtimeTypeNone || t == runtimeTypeOpenSandbox || t == runtimeTypeDocker
+}
+
+// validateDockerEnvironment collects preflight errors for fields the docker
+// runtime would otherwise reject only at NewDockerRuntime construction time.
+// Keep this in sync with the parallel checks in internal/runtime/docker.go
+// — both layers enforce, but catching it here turns a runtime-error CI
+// failure into a clean validate-step failure.
+func validateDockerEnvironment(env Environment) []string {
+	var errs []string
+
+	// environment.image: required (opensandbox has its own image-or-
+	// sandbox-template fallback, docker does not).
+	if strings.TrimSpace(env.Image) == "" {
+		errs = append(errs, "environment.image is required when environment.type is docker")
+	}
+
+	// environment.workspace_mount: optional, but when set must be
+	// absolute — `docker create --workdir <relative>` is rejected, and
+	// our Upload/Download paths treat relative values as joined under
+	// the workspace which makes no sense if the workspace itself isn't
+	// absolute.
+	if mount := strings.TrimSpace(env.WorkspaceMount); mount != "" && !path.IsAbs(mount) {
+		errs = append(errs, fmt.Sprintf("environment.workspace_mount must be absolute when environment.type is docker, got %q", mount))
+	}
+
+	return errs
 }
 
 func isValidJudgeType(t string) bool {
