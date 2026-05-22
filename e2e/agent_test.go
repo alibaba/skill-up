@@ -920,6 +920,8 @@ environment:
   type: docker
   image: node:22
   workspace_mount: /workspace
+  setup_steps:
+    - run: npm install -g --include=optional @anthropic-ai/claude-code
 mcp:
   servers: []
 skills: []
