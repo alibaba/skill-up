@@ -383,9 +383,9 @@ func (r *DockerRuntime) Exec(ctx context.Context, command string, opts ExecOptio
 	}
 	if !path.IsAbs(cwd) {
 		cwd = path.Join(r.workspace, cwd)
-	}
-	if !isSubPath(r.workspace, cwd) {
-		return ExecResult{}, fmt.Errorf("docker runtime: cwd %q escapes workspace %q", opts.Cwd, r.workspace)
+		if !isSubPath(r.workspace, cwd) {
+			return ExecResult{}, fmt.Errorf("docker runtime: cwd %q escapes workspace %q", opts.Cwd, r.workspace)
+		}
 	}
 	args = append(args, "--workdir", cwd)
 	// mergeEnv covers cfg.Env + opts.Env, but here we want to keep the

@@ -590,6 +590,27 @@ func TestDockerRuntime_ExecRejectsWorkdirEscape(t *testing.T) {
 	}
 }
 
+func TestDockerRuntime_ExecAllowsAbsoluteCwd(t *testing.T) {
+	t.Parallel()
+	script := append(createScript("abc"),
+		scriptedCall{match: "exec", response: fakeDockerResponse{stdout: "ok"}},
+	)
+	fd := newFakeDocker(t, script)
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	_, err := r.Exec(context.Background(), "id", ExecOptions{Cwd: "/"})
+	if err != nil {
+		t.Fatalf("absolute cwd should be allowed, got %v", err)
+	}
+	args := fd.callArgs(createCallCount)
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--workdir /") {
+		t.Errorf("expected --workdir /; got %v", args)
+	}
+}
+
 func TestDockerRuntime_ExecPropagatesNonZeroExit(t *testing.T) {
 	t.Parallel()
 	script := append(createScript("abc"),
