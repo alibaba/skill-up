@@ -579,7 +579,7 @@ func applyRuntimeTypeOverride(evalCfg *config.EvalConfig, cmd *cobra.Command) er
 		return fmt.Errorf("--runtime none is incompatible with network_policy %q (none cannot enforce network isolation)", evalCfg.Environment.NetworkPolicy)
 	}
 	if value == "docker" && strings.TrimSpace(evalCfg.Environment.Image) == "" {
-		return fmt.Errorf("--runtime docker requires environment.image to be set in the eval config")
+		return errors.New("--runtime docker requires environment.image to be set in the eval config")
 	}
 	evalCfg.Environment.Type = value
 	return nil
