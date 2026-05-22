@@ -392,14 +392,24 @@ func (r *DockerRuntime) Exec(ctx context.Context, command string, opts ExecOptio
 	// container's own env (PATH, HOME, ...) intact and just layer the
 	// caller-supplied vars on top — so pass only the merged overlay to
 	// docker, not the full host env.
+	//
+	// PATH requires special handling: docker --env sets values literally
+	// (no variable expansion), so "$HOME/.local/bin:$PATH" would become
+	// the literal string. Instead, prepend an `export PATH=...` line to
+	// the command so expansion happens inside the container's shell.
+	var pathPrefix string
 	for _, kv := range overlayEnvList(r.cfg.Env, opts.Env) {
+		if k, v, _ := strings.Cut(kv, "="); k == "PATH" && strings.Contains(v, "$") {
+			pathPrefix = "export PATH=\"" + v + "\"\n"
+			continue
+		}
 		args = append(args, "--env", kv)
 	}
 	// Use `sh -c` rather than `bash -c` so the docker runtime works on
 	// minimal base images (alpine, distroless, busybox, plain debian
 	// without bash). All shell snippets the rest of the codebase ships
 	// (setup_steps, judge scripts, agent commands) are POSIX-compatible.
-	args = append(args, id, "sh", "-c", command)
+	args = append(args, id, "sh", "-c", pathPrefix+command)
 	span.SetAttributes(
 		attribute.String("process.command", command),
 		attribute.String("process.cwd", cwd),

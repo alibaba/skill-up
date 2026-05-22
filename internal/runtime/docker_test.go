@@ -577,6 +577,42 @@ func TestDockerRuntime_ExecPassesCwdEnvAndCommand(t *testing.T) {
 	}
 }
 
+func TestDockerRuntime_ExecExpandsPATHInCommand(t *testing.T) {
+	t.Parallel()
+	script := append(createScript("abc"),
+		scriptedCall{match: "exec", response: fakeDockerResponse{stdout: "ok", exitCode: 0}},
+	)
+	fd := newFakeDocker(t, script)
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	_, err := r.Exec(context.Background(), "echo hi", ExecOptions{
+		Env: map[string]string{
+			"PATH":    "$HOME/.local/bin:$PATH",
+			"API_KEY": "secret",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	args := fd.callArgs(createCallCount)
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "--env PATH=") {
+		t.Errorf("PATH with $ should NOT be passed via --env; got %v", args)
+	}
+	if !strings.Contains(joined, "--env API_KEY=secret") {
+		t.Errorf("expected --env API_KEY=secret; got %v", args)
+	}
+	cmd := args[len(args)-1]
+	if !strings.HasPrefix(cmd, "export PATH=\"$HOME/.local/bin:$PATH\"\n") {
+		t.Errorf("expected PATH export prepended to command; got command: %q", cmd)
+	}
+	if !strings.HasSuffix(cmd, "echo hi") {
+		t.Errorf("expected original command at end; got command: %q", cmd)
+	}
+}
+
 func TestDockerRuntime_ExecRejectsWorkdirEscape(t *testing.T) {
 	t.Parallel()
 	fd := newFakeDocker(t, createScript("abc"))
