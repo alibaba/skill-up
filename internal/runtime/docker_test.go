@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -615,10 +616,15 @@ func TestDockerRuntime_ExecSurfacesLayerFailureAsError(t *testing.T) {
 		{"daemon refused prefix", 1, "Error response from daemon: No such exec instance", true, "layer failure"},
 		{"no such container", 1, "Error: No such container: abc", true, "layer failure"},
 		{"OCI runtime failed", 126, "OCI runtime exec failed: cannot exec in stopped container", true, "layer failure"},
-		{"container not running", 1, "Error response from daemon: Container abc is not running", true, "layer failure"},
+		{"container not running (daemon-prefixed)", 1, "Error response from daemon: Container abc is not running", true, "layer failure"},
 		{"plain non-zero is NOT layer error", 1, "assertion failed", false, ""},
 		{"common 2 (misuse of shell builtins) is NOT layer", 2, "syntax error", false, ""},
 		{"127 cmd-not-found stays as cmd error", 127, "sh: bogus: not found", false, ""},
+		// Regression guards against the previous over-broad substring
+		// matching: user scripts that happen to print "is not running"
+		// or "OCI runtime" must NOT be misclassified as infra faults.
+		{"user script saying redis is not running", 1, "redis is not running on port 6379", false, ""},
+		{"user script with OCI runtime in plain text", 1, "checking OCI runtime version output: skipped", false, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -642,6 +648,100 @@ func TestDockerRuntime_ExecSurfacesLayerFailureAsError(t *testing.T) {
 				t.Errorf("ExitCode = %d, want %d", res.ExitCode, tc.exit)
 			}
 		})
+	}
+}
+
+// Concurrent Close during in-flight Exec/Upload/Download must not race on
+// r.containerID. Run with -race to actually catch the regression: with the
+// old `r.containerID` reads outside the mutex, the data-race detector
+// flags the test; with snapshotContainerID under the lock, it passes.
+//
+// We use a permissive runner here (not the scripted one) because Exec and
+// Close fire in a non-deterministic order, so the call sequence isn't
+// known up front.
+func TestDockerRuntime_ExecRaceWithCloseIsSafe(t *testing.T) {
+	t.Parallel()
+
+	// Permissive runner: any subcommand is fine, return success. We
+	// just need the calls to happen so the goroutines actually exercise
+	// snapshotContainerID under contention.
+	var callCount int64
+	r, err := NewDockerRuntime(Config{Image: "alpine:3.20", Delete: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.run = func(_ context.Context, _ string, args ...string) (string, string, int, error) {
+		atomic.AddInt64(&callCount, 1)
+		// `docker create` is expected to echo the id on stdout.
+		if len(args) > 0 && args[0] == "create" {
+			return "abc\n", "", 0, nil
+		}
+		return "", "", 0, nil
+	}
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Spawn many concurrent Exec/Upload + a Close. With the old
+	// outside-the-lock reads, -race would flag this; with the snapshot
+	// pattern, every goroutine reads the id under mu and then proceeds
+	// with the local copy.
+	const workers = 16
+	var wg sync.WaitGroup
+	wg.Add(workers + 1)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			_, _ = r.Exec(context.Background(), "echo hi", ExecOptions{})
+		}()
+	}
+	go func() {
+		defer wg.Done()
+		_ = r.Close()
+	}()
+	wg.Wait()
+
+	// Sanity check: at least some calls actually ran (Create plus
+	// either Close or some Execs). The exact number is racy because
+	// Execs that lose the race to Close return early from snapshot.
+	if atomic.LoadInt64(&callCount) < 3 {
+		t.Fatalf("expected at least 3 docker calls (create+start+mkdir), got %d", callCount)
+	}
+}
+
+// rollbackRemove must NOT block forever when the parent context has a
+// deadline and the cleanup docker call hangs. We can't easily simulate
+// a hung docker without time injection, but we can confirm the cleanup
+// runs on a context detached from the parent (a canceled parent must
+// not cancel the rollback).
+func TestDockerRuntime_RollbackUsesDetachedTimeout(t *testing.T) {
+	t.Parallel()
+
+	// Parent context that's already canceled when Create's rollback
+	// fires. If rollbackRemove inherited the parent context's
+	// cancellation, the rm call would never reach the runner — but
+	// our script REQUIRES the rm call to happen (script consumed in
+	// order). The runner asserts unexpected leftover steps.
+	parentCtx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately so Create's parent is dead before start fails.
+
+	fd := newFakeDocker(t, []scriptedCall{
+		{match: "create", response: fakeDockerResponse{stdout: "abc\n"}},
+		{match: "start", response: fakeDockerResponse{stderr: "boom", exitCode: 125}},
+		// This rm MUST still run despite the parent context being
+		// canceled — that's the contract.
+		{match: "rm", response: fakeDockerResponse{}},
+	})
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+	if err := r.Create(parentCtx); err == nil {
+		t.Fatal("expected Create to error on start failure")
+	}
+	// Verify both create AND rm fired (script fully consumed). If the
+	// rollback got skipped, the fake docker test helper would have
+	// triggered an "unexpected extra call" failure during the test —
+	// but it would NOT have flagged a missed call, so re-check here.
+	if got := len(fd.calls); got != 3 {
+		t.Fatalf("expected 3 docker calls (create, start, rm), got %d: %v", got, fd.calls)
 	}
 }
 

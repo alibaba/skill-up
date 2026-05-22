@@ -25,6 +25,13 @@ const (
 	dockerDefaultWorkspace = "/workspace"
 	dockerDirMode          = 0o755
 	dockerNameRandomBytes  = 6
+	// dockerCleanupTimeout bounds best-effort rollback / preserve-path
+	// stops so a hung daemon can't keep the runtime mutex held forever.
+	// Long enough for a normal `docker rm -f` (a few seconds) plus some
+	// margin for an overloaded daemon; short enough that Create or Close
+	// still returns to its caller within a useful window even on a stuck
+	// daemon.
+	dockerCleanupTimeout = 30 * time.Second
 )
 
 // dockerCommandRunner is the seam unit tests use to capture or fake the
@@ -164,8 +171,11 @@ func (r *DockerRuntime) Create(ctx context.Context) error {
 	_, startStderr, startExit, startErr := r.run(ctx, r.cli, "start", id)
 	if startErr != nil || startExit != 0 {
 		// best-effort cleanup; ignore failure here since we already have
-		// a more informative error to return.
-		_, _, _, _ = r.run(context.WithoutCancel(ctx), r.cli, "rm", "-f", id)
+		// a more informative error to return. Bounded by dockerCleanupTimeout
+		// so a hung daemon can't keep r.mu held forever — without the
+		// timeout, context.WithoutCancel drops the parent deadline and a
+		// stuck docker would deadlock Create indefinitely.
+		r.rollbackRemove(ctx, id)
 		r.containerID = ""
 		return dockerCLIErr(startStderr, startExit, startErr, "docker start %s failed", id)
 	}
@@ -179,12 +189,24 @@ func (r *DockerRuntime) Create(ctx context.Context) error {
 	// here surfaces any real failure (read-only fs, permissions) right
 	// at Create() time instead.
 	if _, mkStderr, mkExit, mkErr := r.run(ctx, r.cli, "exec", id, "mkdir", "-p", r.workspace); mkErr != nil || mkExit != 0 {
-		_, _, _, _ = r.run(context.WithoutCancel(ctx), r.cli, "rm", "-f", id)
+		r.rollbackRemove(ctx, id)
 		r.containerID = ""
 		r.started = false
 		return dockerCLIErr(mkStderr, mkExit, mkErr, "docker exec mkdir -p %s failed", r.workspace)
 	}
 	return nil
+}
+
+// rollbackRemove tears down a half-created container after a failure in
+// Create. Detached from the caller's context so cancellation/deadline of
+// the original call doesn't skip cleanup, but bounded by dockerCleanupTimeout
+// so a wedged daemon still releases the runtime mutex within a usable
+// window. The cleanup is best-effort: any error is swallowed because we
+// already have a more informative one to return to the caller.
+func (r *DockerRuntime) rollbackRemove(_ context.Context, id string) {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), dockerCleanupTimeout)
+	defer cancel()
+	_, _, _, _ = r.run(cleanupCtx, r.cli, "rm", "-f", id)
 }
 
 // Close removes the container (when cfg.Delete is true) or just stops it.
@@ -261,14 +283,15 @@ func (r *DockerRuntime) Stop(ctx context.Context) error {
 // UploadFile copies a single file from the host into the container.
 // targetPath may be relative to the workspace or an absolute container path.
 func (r *DockerRuntime) UploadFile(ctx context.Context, sourcePath, targetPath string) error {
-	if err := r.ensureCreated(); err != nil {
+	id, err := r.snapshotContainerID()
+	if err != nil {
 		return err
 	}
 	target := r.remotePath(targetPath)
-	if err := r.ensureRemoteDir(ctx, path.Dir(target)); err != nil {
+	if err := r.ensureRemoteDir(ctx, id, path.Dir(target)); err != nil {
 		return err
 	}
-	_, stderr, exitCode, err := r.run(ctx, r.cli, "cp", sourcePath, r.containerID+":"+target)
+	_, stderr, exitCode, err := r.run(ctx, r.cli, "cp", sourcePath, id+":"+target)
 	if err != nil || exitCode != 0 {
 		return dockerCLIErr(stderr, exitCode, err, "docker cp %s -> %s failed", sourcePath, target)
 	}
@@ -277,17 +300,18 @@ func (r *DockerRuntime) UploadFile(ctx context.Context, sourcePath, targetPath s
 
 // UploadDir recursively copies a directory tree from the host into the container.
 func (r *DockerRuntime) UploadDir(ctx context.Context, sourceDir, targetDir string) error {
-	if err := r.ensureCreated(); err != nil {
+	id, err := r.snapshotContainerID()
+	if err != nil {
 		return err
 	}
 	target := r.remotePath(targetDir)
-	if err := r.ensureRemoteDir(ctx, target); err != nil {
+	if err := r.ensureRemoteDir(ctx, id, target); err != nil {
 		return err
 	}
 	// `docker cp <srcDir>/. <ctr>:<dst>` copies contents into dst, which
 	// matches the UploadDir contract (host srcDir tree → container dst tree).
 	src := strings.TrimRight(sourceDir, string(filepath.Separator)) + string(filepath.Separator) + "."
-	_, stderr, exitCode, err := r.run(ctx, r.cli, "cp", src, r.containerID+":"+target)
+	_, stderr, exitCode, err := r.run(ctx, r.cli, "cp", src, id+":"+target)
 	if err != nil || exitCode != 0 {
 		return dockerCLIErr(stderr, exitCode, err, "docker cp -r %s -> %s failed", sourceDir, target)
 	}
@@ -296,14 +320,15 @@ func (r *DockerRuntime) UploadDir(ctx context.Context, sourceDir, targetDir stri
 
 // DownloadFile copies a single file from the container to the host.
 func (r *DockerRuntime) DownloadFile(ctx context.Context, sourcePath, targetPath string) error {
-	if err := r.ensureCreated(); err != nil {
+	id, err := r.snapshotContainerID()
+	if err != nil {
 		return err
 	}
 	source := r.remotePath(sourcePath)
 	if err := os.MkdirAll(filepath.Dir(targetPath), dockerDirMode); err != nil {
 		return fmt.Errorf("docker runtime: create local target dir: %w", err)
 	}
-	_, stderr, exitCode, err := r.run(ctx, r.cli, "cp", r.containerID+":"+source, targetPath)
+	_, stderr, exitCode, err := r.run(ctx, r.cli, "cp", id+":"+source, targetPath)
 	if err != nil || exitCode != 0 {
 		return dockerCLIErr(stderr, exitCode, err, "docker cp %s -> %s failed", source, targetPath)
 	}
@@ -312,7 +337,8 @@ func (r *DockerRuntime) DownloadFile(ctx context.Context, sourcePath, targetPath
 
 // DownloadDir recursively copies a directory from the container to the host.
 func (r *DockerRuntime) DownloadDir(ctx context.Context, sourceDir, targetDir string) error {
-	if err := r.ensureCreated(); err != nil {
+	id, err := r.snapshotContainerID()
+	if err != nil {
 		return err
 	}
 	source := r.remotePath(sourceDir)
@@ -321,7 +347,7 @@ func (r *DockerRuntime) DownloadDir(ctx context.Context, sourceDir, targetDir st
 	}
 	// `<ctr>:<srcDir>/.` → host targetDir copies contents into targetDir.
 	src := strings.TrimRight(source, "/") + "/."
-	_, stderr, exitCode, err := r.run(ctx, r.cli, "cp", r.containerID+":"+src, targetDir)
+	_, stderr, exitCode, err := r.run(ctx, r.cli, "cp", id+":"+src, targetDir)
 	if err != nil || exitCode != 0 {
 		return dockerCLIErr(stderr, exitCode, err, "docker cp -r %s -> %s failed", source, targetDir)
 	}
@@ -330,7 +356,8 @@ func (r *DockerRuntime) DownloadDir(ctx context.Context, sourceDir, targetDir st
 
 // Exec runs a bash command inside the container.
 func (r *DockerRuntime) Exec(ctx context.Context, command string, opts ExecOptions) (ExecResult, error) {
-	if err := r.ensureCreated(); err != nil {
+	id, err := r.snapshotContainerID()
+	if err != nil {
 		return ExecResult{}, err
 	}
 
@@ -364,7 +391,7 @@ func (r *DockerRuntime) Exec(ctx context.Context, command string, opts ExecOptio
 	// minimal base images (alpine, distroless, busybox, plain debian
 	// without bash). All shell snippets the rest of the codebase ships
 	// (setup_steps, judge scripts, agent commands) are POSIX-compatible.
-	args = append(args, r.containerID, "sh", "-c", command)
+	args = append(args, id, "sh", "-c", command)
 	span.SetAttributes(
 		attribute.String("process.command", command),
 		attribute.String("process.cwd", cwd),
@@ -429,20 +456,32 @@ func (r *DockerRuntime) RequiresProcessSandbox() bool {
 	return false
 }
 
-func (r *DockerRuntime) ensureCreated() error {
+// snapshotContainerID returns the current container id under the mutex,
+// so callers can use the captured local value through the rest of their
+// method without racing a concurrent Close. The lock is released on
+// return — `docker exec` / `docker cp` may take many seconds and holding
+// the lock for their duration would serialise every operation on the
+// runtime. If Close fires while exec/cp is in flight, the captured id
+// becomes stale and docker returns a "No such container" error, which
+// dockerExecLayerError catches and surfaces as a layer fault — much
+// better than a panic on a half-cleared field.
+func (r *DockerRuntime) snapshotContainerID() (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.containerID == "" {
-		return errors.New("docker runtime: container not created (call Create first)")
+		return "", errors.New("docker runtime: container not created (call Create first)")
 	}
-	return nil
+	return r.containerID, nil
 }
 
-func (r *DockerRuntime) ensureRemoteDir(ctx context.Context, dir string) error {
+// ensureRemoteDir takes an explicit container id rather than reading
+// r.containerID so callers can keep using the snapshot captured under the
+// mutex at the top of their method. Avoids a second lock-and-read race.
+func (r *DockerRuntime) ensureRemoteDir(ctx context.Context, id, dir string) error {
 	if dir == "" || dir == "/" {
 		return nil
 	}
-	_, stderr, exitCode, err := r.run(ctx, r.cli, "exec", r.containerID, "mkdir", "-p", dir)
+	_, stderr, exitCode, err := r.run(ctx, r.cli, "exec", id, "mkdir", "-p", dir)
 	if err != nil || exitCode != 0 {
 		return dockerCLIErr(stderr, exitCode, err, "docker exec mkdir -p %s failed", dir)
 	}
@@ -484,14 +523,22 @@ func dockerCLIErr(stderr string, exitCode int, err error, format string, args ..
 //	126 — container exists but the command cannot be invoked
 //	127 — command not found inside the container
 //
-// Plus stderr prefixes that mean "this never reached the user's command":
+// Plus daemon-emitted stderr that means "this never reached the user's
+// command". Match prefixes only (not bare substrings) so a user script
+// that legitimately prints e.g. `redis is not running` and exits 1 isn't
+// misclassified as an infra fault.
 //
-//	"Error response from daemon:"  — daemon refused
+//	"Error response from daemon:"  — daemon refused (covers the
+//	                                  stopped-container variant
+//	                                  "Error response from daemon:
+//	                                  Container X is not running")
 //	"Error: No such container"     — container vanished
-//	"OCI runtime exec failed"      — runtime couldn't set up the process
+//	"OCI runtime exec failed:"     — runtime couldn't set up the
+//	                                  process (always emitted with the
+//	                                  trailing colon by runc/crun)
 //
-// We check both: 125 alone is unambiguous, and the prefixes catch cases
-// where the daemon mapped its failure to a different exit code.
+// 125 alone is unambiguous; the prefixes catch cases where the daemon
+// mapped its failure to a different exit code.
 func dockerExecLayerError(stderr string, exitCode int) bool {
 	if exitCode == 125 {
 		return true
@@ -500,8 +547,7 @@ func dockerExecLayerError(stderr string, exitCode int) bool {
 	switch {
 	case strings.HasPrefix(s, "Error response from daemon:"),
 		strings.HasPrefix(s, "Error: No such container"),
-		strings.Contains(s, "OCI runtime exec failed"),
-		strings.Contains(s, "is not running"):
+		strings.HasPrefix(s, "OCI runtime exec failed:"):
 		return true
 	}
 	return false
