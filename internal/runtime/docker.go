@@ -223,7 +223,10 @@ func (r *DockerRuntime) Close() error {
 
 	if !shouldDelete {
 		logging.Debugf("DockerRuntime.Close: skipping rm, container preserved: %s", id)
-		_, _, _, _ = r.run(ctx, r.cli, "stop", "--time", "5", id)
+		_, stderr, exitCode, err := r.run(ctx, r.cli, "stop", "--time", "5", id)
+		if err != nil || exitCode != 0 {
+			return dockerCLIErr(stderr, exitCode, err, "docker stop %s failed (preserve path)", id)
+		}
 		r.mu.Lock()
 		r.containerID = ""
 		r.started = false
