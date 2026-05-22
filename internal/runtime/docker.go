@@ -161,6 +161,9 @@ func (r *DockerRuntime) buildCreateArgs(name string) []string {
 		args = append(args, "--network", "none")
 	}
 	for k, v := range r.cfg.Env {
+		if k == "PATH" && strings.Contains(v, "$") {
+			continue
+		}
 		args = append(args, "--env", k+"="+v)
 	}
 	entry := r.cfg.Entrypoint
@@ -574,12 +577,10 @@ func dockerCLIErr(stderr string, exitCode int, err error, format string, args ..
 //	                                            failure (TCP/TLS-backed
 //	                                            daemons in particular).
 //
-// 125 alone is unambiguous; the prefixes catch cases where the daemon
-// mapped its failure to a different exit code.
+// Exit code 125 combined with daemon/OCI stderr is a definitive layer
+// fault. Without confirming stderr, a user command that exits 125 would
+// be misclassified.
 func dockerExecLayerError(stderr string, exitCode int) bool {
-	if exitCode == 125 {
-		return true
-	}
 	s := strings.TrimSpace(stderr)
 	switch {
 	case strings.HasPrefix(s, "Error response from daemon:"),
@@ -587,6 +588,8 @@ func dockerExecLayerError(stderr string, exitCode int) bool {
 		strings.HasPrefix(s, "OCI runtime exec failed:"),
 		strings.HasPrefix(s, "Cannot connect to the Docker daemon"),
 		strings.HasPrefix(s, "error during connect:"):
+		return true
+	case exitCode == 125 && s == "":
 		return true
 	}
 	return false

@@ -39,7 +39,7 @@ const (
 )
 
 // validRuntimeTypes lists the environment.type values accepted by --runtime.
-var validRuntimeTypes = []string{"none", "opensandbox"}
+var validRuntimeTypes = []string{"none", "opensandbox", "docker"}
 
 type verbosityValue int
 
@@ -99,7 +99,7 @@ func init() {
 	runCmd.Flags().StringArray("format", nil, "Report format (json, junit, html). Can be specified multiple times. Default: json")
 	runCmd.Flags().String("output-dir", "", "Directory for report/artifact outputs. Default: <skill-name>-workspace alongside the skill directory")
 	runCmd.Flags().String("engine", "", "Override engine name")
-	runCmd.Flags().String(runtimeFlagName, "", "Override environment.type (none, opensandbox)")
+	runCmd.Flags().String(runtimeFlagName, "", "Override environment.type (none, opensandbox, docker)")
 	runCmd.Flags().String("model", "", "Override model (accepts either a bare model name or provider/name)")
 	runCmd.Flags().String("api-key", "", "API key for the model provider")
 	runCmd.Flags().Int("parallelism", 0, "Override cases.parallelism. Must be between 1 and 256 when specified")

@@ -1008,7 +1008,7 @@ func TestApplyRunConfigOverrides_RuntimeTypeRejectsInvalid(t *testing.T) {
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String(runtimeFlagName, "", "")
-	if err := cmd.Flags().Set(runtimeFlagName, "docker"); err != nil {
+	if err := cmd.Flags().Set(runtimeFlagName, "podman"); err != nil {
 		t.Fatalf("set runtime: %v", err)
 	}
 
