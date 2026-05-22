@@ -146,7 +146,7 @@ func (r *DockerRuntime) Create(ctx context.Context) error {
 
 	stdout, stderr, exitCode, err := r.run(ctx, r.cli, args...)
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("docker create failed (exit=%d): %s: %w", exitCode, strings.TrimSpace(stderr), err)
+		return dockerCLIErr(stderr, exitCode, err, "docker create failed")
 	}
 	id := strings.TrimSpace(stdout)
 	if id == "" {
@@ -167,7 +167,7 @@ func (r *DockerRuntime) Create(ctx context.Context) error {
 		// a more informative error to return.
 		_, _, _, _ = r.run(context.WithoutCancel(ctx), r.cli, "rm", "-f", id)
 		r.containerID = ""
-		return fmt.Errorf("docker start %s failed (exit=%d): %s: %w", id, startExit, strings.TrimSpace(startStderr), startErr)
+		return dockerCLIErr(startStderr, startExit, startErr, "docker start %s failed", id)
 	}
 	r.started = true
 
@@ -182,7 +182,7 @@ func (r *DockerRuntime) Create(ctx context.Context) error {
 		_, _, _, _ = r.run(context.WithoutCancel(ctx), r.cli, "rm", "-f", id)
 		r.containerID = ""
 		r.started = false
-		return fmt.Errorf("docker exec mkdir -p %s failed (exit=%d): %s: %w", r.workspace, mkExit, strings.TrimSpace(mkStderr), mkErr)
+		return dockerCLIErr(mkStderr, mkExit, mkErr, "docker exec mkdir -p %s failed", r.workspace)
 	}
 	return nil
 }
@@ -216,7 +216,7 @@ func (r *DockerRuntime) Close() error {
 	if err != nil || exitCode != 0 {
 		// Leave r.containerID / r.started intact so the caller can retry
 		// Close after the transient docker / daemon error clears.
-		return fmt.Errorf("docker rm -f %s failed (exit=%d): %s: %w", id, exitCode, strings.TrimSpace(stderr), err)
+		return dockerCLIErr(stderr, exitCode, err, "docker rm -f %s failed", id)
 	}
 	r.containerID = ""
 	r.started = false
@@ -236,7 +236,7 @@ func (r *DockerRuntime) Start(ctx context.Context) error {
 	}
 	_, stderr, exitCode, err := r.run(ctx, r.cli, "start", r.containerID)
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("docker start %s failed (exit=%d): %s: %w", r.containerID, exitCode, strings.TrimSpace(stderr), err)
+		return dockerCLIErr(stderr, exitCode, err, "docker start %s failed", r.containerID)
 	}
 	r.started = true
 	return nil
@@ -252,7 +252,7 @@ func (r *DockerRuntime) Stop(ctx context.Context) error {
 	}
 	_, stderr, exitCode, err := r.run(ctx, r.cli, "stop", "--time", "5", r.containerID)
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("docker stop %s failed (exit=%d): %s: %w", r.containerID, exitCode, strings.TrimSpace(stderr), err)
+		return dockerCLIErr(stderr, exitCode, err, "docker stop %s failed", r.containerID)
 	}
 	r.started = false
 	return nil
@@ -270,7 +270,7 @@ func (r *DockerRuntime) UploadFile(ctx context.Context, sourcePath, targetPath s
 	}
 	_, stderr, exitCode, err := r.run(ctx, r.cli, "cp", sourcePath, r.containerID+":"+target)
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("docker cp %s -> %s failed (exit=%d): %s: %w", sourcePath, target, exitCode, strings.TrimSpace(stderr), err)
+		return dockerCLIErr(stderr, exitCode, err, "docker cp %s -> %s failed", sourcePath, target)
 	}
 	return nil
 }
@@ -289,7 +289,7 @@ func (r *DockerRuntime) UploadDir(ctx context.Context, sourceDir, targetDir stri
 	src := strings.TrimRight(sourceDir, string(filepath.Separator)) + string(filepath.Separator) + "."
 	_, stderr, exitCode, err := r.run(ctx, r.cli, "cp", src, r.containerID+":"+target)
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("docker cp -r %s -> %s failed (exit=%d): %s: %w", sourceDir, target, exitCode, strings.TrimSpace(stderr), err)
+		return dockerCLIErr(stderr, exitCode, err, "docker cp -r %s -> %s failed", sourceDir, target)
 	}
 	return nil
 }
@@ -305,7 +305,7 @@ func (r *DockerRuntime) DownloadFile(ctx context.Context, sourcePath, targetPath
 	}
 	_, stderr, exitCode, err := r.run(ctx, r.cli, "cp", r.containerID+":"+source, targetPath)
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("docker cp %s -> %s failed (exit=%d): %s: %w", source, targetPath, exitCode, strings.TrimSpace(stderr), err)
+		return dockerCLIErr(stderr, exitCode, err, "docker cp %s -> %s failed", source, targetPath)
 	}
 	return nil
 }
@@ -323,7 +323,7 @@ func (r *DockerRuntime) DownloadDir(ctx context.Context, sourceDir, targetDir st
 	src := strings.TrimRight(source, "/") + "/."
 	_, stderr, exitCode, err := r.run(ctx, r.cli, "cp", r.containerID+":"+src, targetDir)
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("docker cp -r %s -> %s failed (exit=%d): %s: %w", source, targetDir, exitCode, strings.TrimSpace(stderr), err)
+		return dockerCLIErr(stderr, exitCode, err, "docker cp -r %s -> %s failed", source, targetDir)
 	}
 	return nil
 }
@@ -396,11 +396,22 @@ func (r *DockerRuntime) Exec(ctx context.Context, command string, opts ExecOptio
 		logging.WarnContextf(ctx, "stderr: %s", result.Stderr)
 	}
 
-	// docker exec returns its own non-zero exit when the container is gone
-	// or the command failed to start; surface the error to callers without
-	// mistaking it for a script-level non-zero exit.
-	if err != nil && exitCode <= 0 {
-		return result, fmt.Errorf("docker exec failed: %w", err)
+	// Two distinct failure modes need to surface as errors so the
+	// evaluator routes them through its infra-retry path instead of the
+	// ordinary FAIL path:
+	//
+	//   1. r.run itself returned err — docker CLI couldn't run, or the
+	//      parent context was cancelled / timed out.
+	//   2. docker exec returned a non-zero exit AND stderr looks like a
+	//      daemon / OCI runtime fault (missing container, runtime exec
+	//      failed, etc) — see dockerExecLayerError. A user command that
+	//      legitimately exits non-zero must NOT be wrapped; the
+	//      evaluator inspects ExitCode for those.
+	if err != nil {
+		return result, dockerCLIErr(result.Stderr, result.ExitCode, err, "docker exec failed")
+	}
+	if result.ExitCode != 0 && dockerExecLayerError(result.Stderr, result.ExitCode) {
+		return result, dockerCLIErr(result.Stderr, result.ExitCode, nil, "docker exec layer failure")
 	}
 	return result, nil
 }
@@ -433,7 +444,7 @@ func (r *DockerRuntime) ensureRemoteDir(ctx context.Context, dir string) error {
 	}
 	_, stderr, exitCode, err := r.run(ctx, r.cli, "exec", r.containerID, "mkdir", "-p", dir)
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("docker exec mkdir -p %s failed (exit=%d): %s: %w", dir, exitCode, strings.TrimSpace(stderr), err)
+		return dockerCLIErr(stderr, exitCode, err, "docker exec mkdir -p %s failed", dir)
 	}
 	return nil
 }
@@ -445,6 +456,55 @@ func (r *DockerRuntime) remotePath(p string) string {
 		return c
 	}
 	return path.Join(r.workspace, c)
+}
+
+// dockerCLIErr formats a "docker CLI invocation failed" error. The CLI exits
+// non-zero with err==nil for ordinary process failures (runDockerCommand
+// returns err only when docker itself couldn't run), so a blind `%w, err`
+// renders `%!w(<nil>)` and breaks errors.Unwrap downstream. This helper
+// conditionally appends `: %w` only when there's a real error to wrap.
+func dockerCLIErr(stderr string, exitCode int, err error, format string, args ...any) error {
+	cleanStderr := strings.TrimSpace(stderr)
+	args = append(args, exitCode, cleanStderr)
+	if err == nil {
+		return fmt.Errorf(format+" (exit=%d): %s", args...)
+	}
+	return fmt.Errorf(format+" (exit=%d): %s: %w", append(args, err)...)
+}
+
+// dockerExecLayerError reports whether stderr from a non-zero `docker exec`
+// looks like a daemon / OCI runtime fault rather than the user's command
+// exiting non-zero on its own. These need to surface as Exec errors so the
+// evaluator's infra-fault retry path triggers instead of treating them as
+// ordinary FAIL results.
+//
+// docker exec exit-code conventions:
+//
+//	125 — daemon-level error (couldn't accept the exec request at all)
+//	126 — container exists but the command cannot be invoked
+//	127 — command not found inside the container
+//
+// Plus stderr prefixes that mean "this never reached the user's command":
+//
+//	"Error response from daemon:"  — daemon refused
+//	"Error: No such container"     — container vanished
+//	"OCI runtime exec failed"      — runtime couldn't set up the process
+//
+// We check both: 125 alone is unambiguous, and the prefixes catch cases
+// where the daemon mapped its failure to a different exit code.
+func dockerExecLayerError(stderr string, exitCode int) bool {
+	if exitCode == 125 {
+		return true
+	}
+	s := strings.TrimSpace(stderr)
+	switch {
+	case strings.HasPrefix(s, "Error response from daemon:"),
+		strings.HasPrefix(s, "Error: No such container"),
+		strings.Contains(s, "OCI runtime exec failed"),
+		strings.Contains(s, "is not running"):
+		return true
+	}
+	return false
 }
 
 func dockerContainerName() (string, error) {

@@ -598,6 +598,74 @@ func TestDockerRuntime_ExecPropagatesNonZeroExit(t *testing.T) {
 	}
 }
 
+// Exec must surface docker-layer failures as errors (container vanished,
+// daemon refused the exec), not as ordinary non-zero exits — otherwise the
+// evaluator routes them through the normal FAIL path and skips its
+// infra-fault retry handling.
+func TestDockerRuntime_ExecSurfacesLayerFailureAsError(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		exit     int
+		stderr   string
+		wantErr  bool
+		wantText string
+	}{
+		{"exit 125 is daemon-layer", 125, "", true, "layer failure"},
+		{"daemon refused prefix", 1, "Error response from daemon: No such exec instance", true, "layer failure"},
+		{"no such container", 1, "Error: No such container: abc", true, "layer failure"},
+		{"OCI runtime failed", 126, "OCI runtime exec failed: cannot exec in stopped container", true, "layer failure"},
+		{"container not running", 1, "Error response from daemon: Container abc is not running", true, "layer failure"},
+		{"plain non-zero is NOT layer error", 1, "assertion failed", false, ""},
+		{"common 2 (misuse of shell builtins) is NOT layer", 2, "syntax error", false, ""},
+		{"127 cmd-not-found stays as cmd error", 127, "sh: bogus: not found", false, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			script := append(createScript("abc"),
+				scriptedCall{match: "exec", response: fakeDockerResponse{stderr: tc.stderr, exitCode: tc.exit}},
+			)
+			fd := newFakeDocker(t, script)
+			r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+			if err := r.Create(context.Background()); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			res, err := r.Exec(context.Background(), "x", ExecOptions{})
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("wantErr=%v, got err=%v", tc.wantErr, err)
+			}
+			if tc.wantErr && !strings.Contains(err.Error(), tc.wantText) {
+				t.Fatalf("err = %v, want substring %q", err, tc.wantText)
+			}
+			if res.ExitCode != tc.exit {
+				t.Errorf("ExitCode = %d, want %d", res.ExitCode, tc.exit)
+			}
+		})
+	}
+}
+
+// dockerCLIErr formats cleanly whether or not a wrapped error is present.
+// Without this, `%w, nil` renders as `%!w(<nil>)` and pollutes diagnostics.
+func TestDockerCLIErr_FormattingWithAndWithoutWrap(t *testing.T) {
+	t.Parallel()
+	// No wrapped err — must not contain %!w or <nil>.
+	clean := dockerCLIErr("boom\n", 7, nil, "docker something failed for %s", "x")
+	got := clean.Error()
+	if strings.Contains(got, "%!w") || strings.Contains(got, "<nil>") {
+		t.Fatalf("nil-wrap leaked: %q", got)
+	}
+	if !strings.Contains(got, "docker something failed for x") || !strings.Contains(got, "exit=7") || !strings.Contains(got, "boom") {
+		t.Errorf("unexpected message: %q", got)
+	}
+
+	// With a wrapped err — errors.Is must find it.
+	wrapped := dockerCLIErr("ignored", 0, context.Canceled, "docker did fail")
+	if !errors.Is(wrapped, context.Canceled) {
+		t.Fatalf("expected wrapped err to be unwrappable to context.Canceled, got %v", wrapped)
+	}
+}
+
 func TestDockerRuntime_ExecSurfacesStartupErrorWhenNoExit(t *testing.T) {
 	t.Parallel()
 	bad := errors.New("dial unix /var/run/docker.sock: no such file")
