@@ -182,8 +182,9 @@ func (r *DockerRuntime) buildCreateArgs(name string) []string {
 // window. Returns nil when the container was successfully removed, or an
 // error if cleanup failed (in which case the caller should retain
 // containerID so a subsequent Close can retry).
+//
+//nolint:contextcheck // Intentionally detached: parent cancellation must not skip cleanup.
 func (r *DockerRuntime) rollbackRemove(_ context.Context, id string) error {
-	//nolint:contextcheck // Intentionally detached: parent cancellation must not skip cleanup.
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), dockerCleanupTimeout)
 	defer cancel()
 	_, stderr, exitCode, err := r.run(cleanupCtx, r.cli, "rm", "-f", id)
