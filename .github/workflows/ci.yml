@@ -350,6 +350,43 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  e2e-docker:
+    name: E2E (docker runtime)
+    runs-on: ubuntu-latest
+    # Container lifecycle + image pull on a clean runner; comfortably under
+    # 15 min in practice but leave headroom for Docker Hub rate-limit retries.
+    timeout-minutes: 20
+    # No API keys / LLM credentials needed: these tests drive the docker
+    # runtime against a real daemon directly, no agent or model in the loop.
+    # That also means they run on fork PRs, unlike the other two e2e jobs.
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      - name: Verify docker is available
+        # ubuntu-latest runners ship docker pre-installed and running; this
+        # makes the dependency explicit so the failure mode is obvious if
+        # GitHub ever changes the image.
+        run: |
+          docker version
+          docker info
+
+      - name: Pre-pull base image
+        # Pre-pulling outside the test binary keeps the per-test timeouts
+        # tight and surfaces registry / rate-limit issues as their own step
+        # rather than a misleading test failure.
+        run: docker pull alpine:3.20
+
+      - name: Run docker integration tests
+        # `docker_integration` is the build tag added in internal/runtime/
+        # docker_integration_test.go. Tests skip cleanly if the daemon is
+        # missing, so this command is also safe to run locally.
+        run: go test -tags docker_integration -timeout 600s -count=1 -v ./internal/runtime/
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
