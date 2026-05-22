@@ -119,11 +119,11 @@ Configuration includes `UseServerProxy`, `ReadyTimeout`, `SandboxTimeout`, `Kwar
 
 Runs the eval inside a local Docker container — container-level isolation (filesystem, process, network) without any remote service dependency.
 
-- `Create`: `docker create --name skill-up-<rand> --workdir <workspace> [--network none] [--env K=V]... <image> sleep infinity`. The `sleep infinity` entrypoint keeps the container alive so subsequent `exec` calls can attach; override via `environment.entrypoint`.
-- `Start` / `Stop`: `docker start` / `docker stop --time 5`; both idempotent.
-- `Close`: `docker rm -f` when `Config.Delete=true`; otherwise just `docker stop` so the user can inspect the container.
+- `Create`: `docker create --name skill-up-<rand> --workdir <workspace> [--network none] [--env K=V]... --entrypoint sleep <image> infinity`, followed by `docker start` and a `mkdir -p <workspace>` exec so the runtime is fully ready when Create returns. The `--entrypoint sleep ... infinity` shape keeps the container alive even on images that ship their own ENTRYPOINT (passing `sleep infinity` as positional args would otherwise be appended to that entrypoint and the container would exit immediately). Override the keep-alive command via `environment.entrypoint` — its first element becomes `--entrypoint`, remaining elements become CMD args after the image. Half-created containers are rolled back with `docker rm -f` if start or the workspace mkdir fails.
+- `Stop`: `docker stop --time 5`.
+- `Close`: `docker rm -f` when `Config.Delete=true`; otherwise just `docker stop` so the user can inspect the container. On rm failure the container handle is **retained** so the caller can retry `Close()` after a transient daemon hiccup instead of silently leaking the container.
 - `UploadFile` / `UploadDir` / `DownloadFile` / `DownloadDir`: implemented via `docker cp`. `UploadDir` and `DownloadDir` use the `src/.` trailing-dot form so the *contents* of `src` are copied into the destination (matching the existing `UploadDir`/`DownloadDir` contracts).
-- `Exec`: `docker exec --workdir <cwd> [--env K=V]... <container> bash -c <command>`. `Cwd` may be relative (joined under `Workspace()`) or absolute. Caller-supplied env layers on top of `cfg.Env`, then on top of the container's own env (so `PATH`, `HOME`, etc. in the image remain intact).
+- `Exec`: `docker exec --workdir <cwd> [--env K=V]... <container> sh -c <command>`. `sh` (not `bash`) is used so the runtime works on minimal base images (alpine, distroless, busybox). `Cwd` may be relative (joined under `Workspace()`) or absolute. Caller-supplied env layers on top of `cfg.Env`; values are passed **literally** — there's intentionally no host-env `$VAR` expansion, because expanding container-relative variables like `PATH` against the host would clobber the image's own value.
 - `RequiresProcessSandbox()`: returns `false` — the container already isolates the agent's processes.
 - Workspace defaults to `/workspace` and must be an absolute path.
 

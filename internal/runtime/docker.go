@@ -126,12 +126,23 @@ func (r *DockerRuntime) Create(ctx context.Context) error {
 	// supported in busybox 1.30+, Alpine 3.10+, Debian/Ubuntu coreutils,
 	// and most distroless bases; users with stricter base images can
 	// override via environment.entrypoint.
+	//
+	// Docker treats positional args after the image as CMD, NOT as an
+	// ENTRYPOINT override. If the image already declares an ENTRYPOINT
+	// (e.g. `python`, `java -jar app.jar`), our `sleep infinity` would
+	// arrive as arguments to that entrypoint and the container would
+	// exit immediately. Using `--entrypoint` explicitly replaces the
+	// image's entrypoint with the user's chosen binary, and any
+	// remaining args go into the CMD slot.
 	entry := r.cfg.Entrypoint
 	if len(entry) == 0 {
 		entry = []string{"sleep", "infinity"}
 	}
+	args = append(args, "--entrypoint", entry[0])
 	args = append(args, r.cfg.Image)
-	args = append(args, entry...)
+	if len(entry) > 1 {
+		args = append(args, entry[1:]...)
+	}
 
 	stdout, stderr, exitCode, err := r.run(ctx, r.cli, args...)
 	if err != nil || exitCode != 0 {
@@ -177,6 +188,12 @@ func (r *DockerRuntime) Create(ctx context.Context) error {
 }
 
 // Close removes the container (when cfg.Delete is true) or just stops it.
+//
+// On the rm path the container handle is kept until rm -f reports success —
+// if the daemon hiccups, the caller can re-invoke Close on the same runtime
+// to retry cleanup. The preserve path (cfg.Delete=false) intentionally
+// clears the handle because the user has opted out of cleanup; the
+// container is theirs to manage from there.
 func (r *DockerRuntime) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -186,19 +203,23 @@ func (r *DockerRuntime) Close() error {
 	}
 	ctx := context.Background()
 	id := r.containerID
-	r.containerID = ""
-	r.started = false
 
 	if !r.cfg.Delete {
 		logging.Debugf("DockerRuntime.Close: skipping rm, container preserved: %s", id)
 		// best-effort stop; ignore error so the user can still attach.
 		_, _, _, _ = r.run(ctx, r.cli, "stop", "--time", "5", id)
+		r.containerID = ""
+		r.started = false
 		return nil
 	}
 	_, stderr, exitCode, err := r.run(ctx, r.cli, "rm", "-f", id)
 	if err != nil || exitCode != 0 {
+		// Leave r.containerID / r.started intact so the caller can retry
+		// Close after the transient docker / daemon error clears.
 		return fmt.Errorf("docker rm -f %s failed (exit=%d): %s: %w", id, exitCode, strings.TrimSpace(stderr), err)
 	}
+	r.containerID = ""
+	r.started = false
 	return nil
 }
 
@@ -339,7 +360,11 @@ func (r *DockerRuntime) Exec(ctx context.Context, command string, opts ExecOptio
 	for _, kv := range overlayEnvList(r.cfg.Env, opts.Env) {
 		args = append(args, "--env", kv)
 	}
-	args = append(args, r.containerID, "bash", "-c", command)
+	// Use `sh -c` rather than `bash -c` so the docker runtime works on
+	// minimal base images (alpine, distroless, busybox, plain debian
+	// without bash). All shell snippets the rest of the codebase ships
+	// (setup_steps, judge scripts, agent commands) are POSIX-compatible.
+	args = append(args, r.containerID, "sh", "-c", command)
 	span.SetAttributes(
 		attribute.String("process.command", command),
 		attribute.String("process.cwd", cwd),
@@ -431,19 +456,26 @@ func dockerContainerName() (string, error) {
 }
 
 // overlayEnvList returns just the union of persistentEnv and callEnv as
-// KEY=VALUE strings (callEnv wins on key conflicts). Variable expansion uses
-// the host environment, mirroring mergeEnv's semantics for opts.Env values
-// that reference $VAR — so users can pass `KEY=${HOST_VAR}` and have it
-// resolve before the value lands inside the container.
+// KEY=VALUE strings (callEnv wins on key conflicts). Values are passed
+// LITERALLY — no host-env expansion happens here.
+//
+// Expanding `$VAR` against the host's environment before passing the value
+// to `docker --env` is dangerous: it silently rewrites container-relative
+// variables like PATH/HOME/USER with whatever the host's value happens to
+// be, which breaks command lookup inside otherwise valid images (e.g.
+// passing `PATH=$PATH:/tooling` would clobber the image's PATH with the
+// macOS `/opt/homebrew/...`).
+//
+// Users who genuinely need a host value forwarded into the container
+// should write the literal expansion themselves at the call site, or use
+// a setup_step that sources it inside the container.
 func overlayEnvList(persistentEnv, callEnv map[string]string) []string {
 	overlay := mergeEnvMaps(persistentEnv, callEnv)
 	if len(overlay) == 0 {
 		return nil
 	}
-	baseEnv := envMapFromList(os.Environ())
-	expanded := expandEnvMap(baseEnv, overlay)
-	out := make([]string, 0, len(expanded))
-	for k, v := range expanded {
+	out := make([]string, 0, len(overlay))
+	for k, v := range overlay {
 		out = append(out, k+"="+v)
 	}
 	return out

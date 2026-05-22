@@ -189,14 +189,19 @@ func TestDockerRuntime_CreatePassesNetworkAndEnvAndImage(t *testing.T) {
 	if !strings.Contains(joined, "--env FOO=bar") {
 		t.Errorf("create should pass --env FOO=bar; got %v", args)
 	}
-	// Image must appear before the entrypoint argv. Find the image and
-	// confirm `sleep infinity` follows it.
+	// Default entrypoint must be passed via the `--entrypoint sleep`
+	// flag (otherwise it lands in CMD and gets ignored when the image
+	// has its own ENTRYPOINT), and `infinity` must appear after the
+	// image as the CMD arg.
+	if !strings.Contains(joined, "--entrypoint sleep") {
+		t.Errorf("expected --entrypoint sleep for default entrypoint; got %v", args)
+	}
 	imgIdx := indexOf(args, "ubuntu:22.04")
 	if imgIdx < 0 {
 		t.Fatalf("image not in args: %v", args)
 	}
-	if imgIdx+2 >= len(args) || args[imgIdx+1] != "sleep" || args[imgIdx+2] != "infinity" {
-		t.Errorf("expected default entrypoint `sleep infinity` after image; got tail %v", args[imgIdx:])
+	if imgIdx+1 >= len(args) || args[imgIdx+1] != "infinity" {
+		t.Errorf("expected `infinity` as CMD after image; got tail %v", args[imgIdx:])
 	}
 	if !strings.Contains(joined, "--workdir "+dockerDefaultWorkspace) {
 		t.Errorf("create should set --workdir to workspace; got %v", args)
@@ -226,12 +231,50 @@ func TestDockerRuntime_CreateUsesCustomEntrypoint(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	args := fd.callArgs(0)
-	tail := args[len(args)-4:]
-	want := []string{"/usr/bin/env", "tail", "-f", "/dev/null"}
+	// User-supplied Entrypoint[0] becomes --entrypoint, remaining
+	// elements become CMD args after the image. This is what actually
+	// overrides the image's ENTRYPOINT — appending positional args
+	// after the image only sets CMD, which is masked when the image
+	// declares ENTRYPOINT.
+	if !strings.Contains(strings.Join(args, " "), "--entrypoint /usr/bin/env") {
+		t.Errorf("expected --entrypoint /usr/bin/env; got %v", args)
+	}
+	imgIdx := indexOf(args, "alpine:3.20")
+	if imgIdx < 0 {
+		t.Fatalf("image not in args: %v", args)
+	}
+	tail := args[imgIdx+1:]
+	want := []string{"tail", "-f", "/dev/null"}
+	if len(tail) != len(want) {
+		t.Fatalf("CMD tail = %v, want %v", tail, want)
+	}
 	for i, v := range want {
 		if tail[i] != v {
-			t.Fatalf("entrypoint tail = %v, want %v", tail, want)
+			t.Fatalf("CMD tail = %v, want %v", tail, want)
 		}
+	}
+}
+
+// Single-element Entrypoint should produce --entrypoint X with no trailing
+// CMD args after the image. This is the common "I just want to override
+// the image's entrypoint with a long-lived sleep binary" case.
+func TestDockerRuntime_CreateUsesSingleArgCustomEntrypoint(t *testing.T) {
+	t.Parallel()
+	fd := newFakeDocker(t, createScript("abc"))
+	r := newDockerRuntimeForTest(t, Config{
+		Image:      "alpine:3.20",
+		Entrypoint: []string{"/bin/cat"},
+	}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	args := fd.callArgs(0)
+	if !strings.Contains(strings.Join(args, " "), "--entrypoint /bin/cat") {
+		t.Errorf("expected --entrypoint /bin/cat; got %v", args)
+	}
+	imgIdx := indexOf(args, "alpine:3.20")
+	if imgIdx == -1 || imgIdx != len(args)-1 {
+		t.Errorf("image should be the last arg with no CMD; got args %v", args)
 	}
 }
 
@@ -267,6 +310,36 @@ func TestDockerRuntime_CreateRollsBackOnStartFailure(t *testing.T) {
 	}
 	if r.started {
 		t.Fatal("started should be false after rollback")
+	}
+}
+
+// Close must keep r.containerID set when `docker rm -f` errors, so the
+// caller can retry Close after a transient daemon hiccup instead of
+// silently leaking the container on the host.
+func TestDockerRuntime_CloseKeepsContainerIDOnRmFailure(t *testing.T) {
+	t.Parallel()
+	script := append(createScript("abc"),
+		scriptedCall{match: "rm", response: fakeDockerResponse{stderr: "daemon busy", exitCode: 1}},
+		scriptedCall{match: "rm", response: fakeDockerResponse{}}, // retry succeeds
+	)
+	fd := newFakeDocker(t, script)
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20", Delete: true}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := r.Close(); err == nil {
+		t.Fatal("expected Close to surface rm failure")
+	}
+	if r.containerID != "abc" {
+		t.Fatalf("containerID should be retained on rm failure, got %q", r.containerID)
+	}
+	// Retrying Close after the transient error must actually invoke rm
+	// again and clear the handle on success.
+	if err := r.Close(); err != nil {
+		t.Fatalf("retry Close: %v", err)
+	}
+	if r.containerID != "" {
+		t.Fatalf("containerID should be cleared after successful retry, got %q", r.containerID)
 	}
 }
 
@@ -495,9 +568,11 @@ func TestDockerRuntime_ExecPassesCwdEnvAndCommand(t *testing.T) {
 	if !strings.Contains(joined, "--env GLOBAL=yes") {
 		t.Errorf("expected --env GLOBAL=yes from cfg.Env; got %v", args)
 	}
-	// Command must be the last token, after `bash -c`.
-	if args[len(args)-3] != "bash" || args[len(args)-2] != "-c" || args[len(args)-1] != "echo hi" {
-		t.Fatalf("expected ... bash -c \"echo hi\" at tail, got %v", args)
+	// Command must be the last token, after `sh -c` (not bash — many
+	// base images don't ship bash). All shell snippets the rest of the
+	// codebase emits are POSIX-compatible.
+	if args[len(args)-3] != "sh" || args[len(args)-2] != "-c" || args[len(args)-1] != "echo hi" {
+		t.Fatalf("expected ... sh -c \"echo hi\" at tail, got %v", args)
 	}
 }
 

@@ -46,6 +46,15 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 		errs = append(errs, "environment.type must be one of: none, opensandbox, docker")
 	}
 
+	// environment.image is required for the docker runtime — without it,
+	// `skill-up validate` would pass and only fail later at run time when
+	// NewDockerRuntime constructs the container. Catch it at the preflight
+	// gate instead. opensandbox has its own image-or-sandbox-template
+	// fallback so it stays permissive here.
+	if cfg.Environment.Type == runtimeTypeDocker && strings.TrimSpace(cfg.Environment.Image) == "" {
+		errs = append(errs, "environment.image is required when environment.type is docker")
+	}
+
 	errs = append(errs, validateNetworkPolicy(cfg.Environment)...)
 
 	// engine.name is required

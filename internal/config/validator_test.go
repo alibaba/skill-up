@@ -607,6 +607,23 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "docker without image is rejected at validation",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type: "docker",
+				},
+				Engine: EngineConfig{
+					Name: "claude_code",
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "environment.image is required when environment.type is docker",
+		},
+		{
 			name: "valid docker with deny_all network policy",
 			cfg: &EvalConfig{
 				SchemaVersion: "v1alpha1",
