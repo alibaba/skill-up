@@ -224,11 +224,21 @@ func loadCredentialsAndAgent(cmd *cobra.Command, evalCfg *config.EvalConfig) (ag
 		return nil, nil, credential.AgentInitParams{}, fmt.Errorf("failed to load credentials: %w", err)
 	}
 
+	// `--model provider/name` was tentatively split into Provider+Name by
+	// resolveEvalConfig (before the resolver was loaded). Now that we know
+	// which providers actually have configuration, collapse the split back
+	// when the provider is unknown: in that case the slashed string is more
+	// likely a literal model identifier the upstream API expects verbatim
+	// (e.g. anthropic-proxy gateways registering models under
+	// `anthropic_modelscope/deepseek-v4-pro`) than a credential-namespace
+	// prefix the agent should peel off.
+	collapseUnconfiguredProviderSplit(evalCfg, resolver, cliModel)
+
 	runnerParams := credential.ResolveRunnerInitParams(
 		evalCfg.Engine.Name,
 		evalCfg.Engine.Model,
 		resolver,
-		normalizeCLIModelOverride(cliModel),
+		normalizeCLIModelOverride(cliModel, resolver),
 		cliAPIKey,
 	)
 
@@ -401,6 +411,47 @@ func evaluateOptionsFromFlags(cmd *cobra.Command) (runner.EvaluateOptions, error
 	}, nil
 }
 
+// collapseUnconfiguredProviderSplit re-runs credential.ResolveModelRef
+// against the loaded resolver to undo the optimistic split that
+// resolveEvalConfig performs on `--model provider/name` when the provider
+// half turns out to be unconfigured. See ResolveModelRef for the
+// rationale and the debug log emitted on collapse.
+//
+// Gate: only runs when `cliModel` contains `/`. eval.yaml-sourced pairs
+// (where the user wrote provider and name as separate YAML keys) reach
+// here without `/` in cliModel and must be preserved — they are
+// user-authored explicit configuration, often relying on a CLI's
+// persisted login state with no env footprint.
+//
+// CLI-hint signals (`--api-key`, `engine.model.base_url`) were once used
+// to FORCE a split through, but that broke `--api-key K --model literal_
+// opaque/id` flows (proxy-registered ids like
+// `anthropic_modelscope/deepseek-v4-pro`). credential.applyCLIOverrides
+// no longer requires a non-empty Provider to apply the CLI key — each
+// agent routes cfg.APIKey via its own hardcoded env (ANTHROPIC_API_KEY /
+// OPENAI_API_KEY) regardless of Provider — so the literal-id case now
+// passes through correctly. Users who really mean `provider as namespace`
+// should configure that provider via env / credentials.yaml; that signal
+// alone is enough for ResolveModelRef to preserve the split.
+//
+// Safe no-op when Provider is empty or already collapsed.
+func collapseUnconfiguredProviderSplit(evalCfg *config.EvalConfig, resolver *credential.Resolver, cliModel string) {
+	if evalCfg == nil {
+		return
+	}
+	provider := evalCfg.Engine.Model.Provider
+	name := evalCfg.Engine.Model.Name
+	if provider == "" || name == "" {
+		return
+	}
+	if !strings.Contains(cliModel, "/") {
+		return
+	}
+	newProvider, newName := credential.ResolveModelRef(provider+"/"+name, resolver)
+	evalCfg.Engine.Model.Provider = newProvider
+	evalCfg.Engine.Model.Name = newName
+}
+
 // resolveEvalConfig resolves the engine name and ensures evalCfg is non-nil.
 func resolveEvalConfig(evalCfg *config.EvalConfig, engineName string, cmd *cobra.Command) *config.EvalConfig {
 	if engineName == "" {
@@ -551,15 +602,18 @@ func formatModelRef(provider, name string) string {
 	}
 }
 
-func normalizeCLIModelOverride(modelFlag string) string {
+// normalizeCLIModelOverride returns the bare model identifier from a
+// `--model` flag value, peeling off any `provider/` prefix only when the
+// prefix is a configured provider per credential.ResolveModelRef. Kept
+// in lockstep with collapseUnconfiguredProviderSplit so applyCLIOverrides
+// never receives a model identifier that contradicts the post-collapse
+// evalCfg state.
+func normalizeCLIModelOverride(modelFlag string, resolver *credential.Resolver) string {
 	if modelFlag == "" {
 		return modelFlag
 	}
-	parts := strings.SplitN(modelFlag, "/", modelFormatParts)
-	if len(parts) == modelFormatParts && parts[0] != "" && parts[1] != "" {
-		return parts[1]
-	}
-	return modelFlag
+	_, name := credential.ResolveModelRef(modelFlag, resolver)
+	return name
 }
 
 func isDirectory(pathname string) bool {

@@ -171,10 +171,13 @@ func applyCLIOverrides(params *AgentInitParams, cliModel string, cliAPIKey strin
 	if cliAPIKey == "" {
 		return
 	}
-	if params.Provider == "" {
-		logging.Warnf("kind=%s engine=%s ignored.api_key reason=provider_required_for_cli_override", params.Kind, params.Engine)
-		return
-	}
+	// Provider-empty was previously a hard guard ("provider_required_for_cli_override"),
+	// but that was a defensive paranoia, not a structural requirement. Each agent routes
+	// cfg.APIKey to its own hardcoded env (claude_code → ANTHROPIC_API_KEY,
+	// codex → OPENAI_API_KEY, see BaseAgent.credentialEnvVars), so the key reaches
+	// upstream correctly regardless of Provider. Dropping it here broke the
+	// `--api-key K --model literal_opaque/id` flow, where ResolveModelRef
+	// rightly returns Provider="" because the prefix isn't a configured namespace.
 	params.APIKey = cliAPIKey
 	params.APIKeySource = ValueSourceCLI
 }
@@ -233,6 +236,10 @@ func lookupProviderEnv(provider string, kind scopedValueKind) (value, envVar str
 	}
 	return value, envVar, true
 }
+
+// Provider-existence and slashed-model disambiguation helpers live in
+// provider_query.go (Resolver.HasProvider, ResolveModelRef) so that
+// agent_init.go stays focused on AgentInitParams construction.
 
 func setResolvedValue(params *AgentInitParams, kind scopedValueKind, value string, source ValueSource) {
 	switch kind {

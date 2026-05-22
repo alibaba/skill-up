@@ -304,22 +304,25 @@ func TestResolveRunnerInitParams_LogsCLIAPIKeySource(t *testing.T) {
 	}
 }
 
-func TestResolveRunnerInitParams_WarnsWhenCLIAPIKeyHasNoProvider(t *testing.T) {
-	output := captureLogOutput(t, func() {
-		params := ResolveRunnerInitParams("codex", config.ModelConfig{
-			Name: "gpt-5.4",
-		}, nil, "", "sk-cli-openai")
+func TestResolveRunnerInitParams_CLIAPIKeyAppliesWithoutProvider(t *testing.T) {
+	// `--api-key K` must apply even when Provider is empty (e.g. user
+	// passed `--model literal_opaque/id` and the prefix is not a
+	// configured namespace, so ResolveModelRef returned Provider="").
+	// Each agent routes cfg.APIKey via its own hardcoded env
+	// (ANTHROPIC_API_KEY / OPENAI_API_KEY), so the key reaches upstream
+	// correctly regardless of Provider. Previously this case was dropped
+	// with a provider_required_for_cli_override warning — that guard was
+	// defensive paranoia, not a structural requirement, and it broke
+	// literal-opaque-id flows.
+	params := ResolveRunnerInitParams("codex", config.ModelConfig{
+		Name: "gpt-5.4",
+	}, nil, "", "sk-cli-openai")
 
-		if params.APIKey != "" {
-			t.Fatalf("APIKey = %q, want empty when provider is missing", params.APIKey)
-		}
-	})
-
-	if !strings.Contains(output, "ignored.api_key") {
-		t.Fatalf("expected ignored api-key warning, got %q", output)
+	if params.APIKey != "sk-cli-openai" {
+		t.Fatalf("APIKey = %q, want sk-cli-openai (CLI key must apply even with empty Provider)", params.APIKey)
 	}
-	if !strings.Contains(output, "provider_required_for_cli_override") {
-		t.Fatalf("expected provider-required warning reason, got %q", output)
+	if params.APIKeySource != ValueSourceCLI {
+		t.Fatalf("APIKeySource = %v, want ValueSourceCLI", params.APIKeySource)
 	}
 }
 
@@ -467,3 +470,6 @@ func TestResolveRunnerInitParams_UsesGenericProviderScopedEnv(t *testing.T) {
 		t.Fatalf("unexpected base-url resolution: %#v", params)
 	}
 }
+
+// HasProvider / ResolveModelRef tests live in provider_query_test.go now
+// that those helpers were extracted out of agent_init.go.

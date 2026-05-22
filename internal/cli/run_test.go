@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/alibaba/skill-up/internal/config"
+	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/evaluator"
 	"github.com/alibaba/skill-up/internal/judge"
 	"github.com/alibaba/skill-up/internal/userconfig"
@@ -21,6 +22,13 @@ import (
 const agentJudgeType = "agent_judge"
 
 const testRuntimeOpenSandbox = "opensandbox"
+
+// Test fixtures for the provider/model split disambiguation suite.
+const (
+	testProviderDashscope = "dashscope"
+	testModelClaudeSonnet = "claude-sonnet-4-6"
+	testModelRefDashscope = testProviderDashscope + "/" + testModelClaudeSonnet
+)
 
 func TestRunCommand_UsesUsageAwareArgs(t *testing.T) {
 	t.Parallel()
@@ -1136,9 +1144,12 @@ func TestApplyRunConfigOverrides_RejectsInvalidParallelism(t *testing.T) {
 }
 
 func TestNormalizeCLIModelOverride_StripsProviderPrefix(t *testing.T) {
+	// "anthropic" is hardcoded as always-configured in HasProvider (the
+	// upstream API only accepts bare model ids), so this test no longer
+	// needs to set ANTHROPIC_API_KEY.
 	t.Parallel()
 
-	if got := normalizeCLIModelOverride("anthropic/auto"); got != "auto" {
+	if got := normalizeCLIModelOverride("anthropic/auto", nil); got != "auto" {
 		t.Fatalf("normalizeCLIModelOverride() = %q, want auto", got)
 	}
 }
@@ -1146,8 +1157,28 @@ func TestNormalizeCLIModelOverride_StripsProviderPrefix(t *testing.T) {
 func TestNormalizeCLIModelOverride_PreservesRawModel(t *testing.T) {
 	t.Parallel()
 
-	if got := normalizeCLIModelOverride("claude-sonnet-4-6"); got != "claude-sonnet-4-6" {
-		t.Fatalf("normalizeCLIModelOverride() = %q, want claude-sonnet-4-6", got)
+	if got := normalizeCLIModelOverride(testModelClaudeSonnet, nil); got != testModelClaudeSonnet {
+		t.Fatalf("normalizeCLIModelOverride() = %q, want %s", got, testModelClaudeSonnet)
+	}
+}
+
+func TestNormalizeCLIModelOverride_UnconfiguredProviderKeepsFullString(t *testing.T) {
+	// Not parallel: unsets env to make sure the provider half is unknown.
+	for _, key := range []string{
+		"ANTHROPIC_MODELSCOPE_API_KEY",
+		"ANTHROPIC_MODELSCOPE_BASE_URL",
+	} {
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Anthropic-proxy gateways register models under provider/name identifiers
+	// (e.g. ducky's `anthropic_modelscope/deepseek-v4-pro`); stripping the
+	// prefix would defeat the un-split in collapseUnconfiguredProviderSplit.
+	got := normalizeCLIModelOverride("anthropic_modelscope/deepseek-v4-pro", nil)
+	if got != "anthropic_modelscope/deepseek-v4-pro" {
+		t.Fatalf("normalizeCLIModelOverride() = %q, want anthropic_modelscope/deepseek-v4-pro", got)
 	}
 }
 
@@ -1173,5 +1204,163 @@ func TestFilterCases(t *testing.T) {
 	}
 	if filtered[0].ID != "advanced-feature" {
 		t.Errorf("expected advanced-feature, got %s", filtered[0].ID)
+	}
+}
+
+func TestCollapseUnconfiguredProviderSplit_CollapsesWhenProviderUnknown(t *testing.T) {
+	// Not parallel: depends on the absence of any anthropic_modelscope env.
+	for _, key := range []string{
+		"ANTHROPIC_MODELSCOPE_API_KEY",
+		"ANTHROPIC_MODELSCOPE_BASE_URL",
+	} {
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := config.DefaultEvalConfig()
+	cfg.Engine.Model.Provider = "anthropic_modelscope"
+	cfg.Engine.Model.Name = "deepseek-v4-pro"
+
+	collapseUnconfiguredProviderSplit(cfg, credential.NewResolver(""),
+		"anthropic_modelscope/deepseek-v4-pro")
+
+	if cfg.Engine.Model.Provider != "" {
+		t.Fatalf("Provider = %q, want \"\" (collapsed)", cfg.Engine.Model.Provider)
+	}
+	// Anthropic-proxy gateways need the full identifier; the un-split must
+	// glue the original `provider/name` back together so it reaches the
+	// upstream API verbatim.
+	if cfg.Engine.Model.Name != "anthropic_modelscope/deepseek-v4-pro" {
+		t.Fatalf("Name = %q, want anthropic_modelscope/deepseek-v4-pro", cfg.Engine.Model.Name)
+	}
+}
+
+func TestCollapseUnconfiguredProviderSplit_KeepsSplitWhenProviderConfigured(t *testing.T) {
+	// Not parallel: relies on DASHSCOPE_API_KEY env to mark provider as configured.
+	t.Setenv("DASHSCOPE_API_KEY", "sk-test")
+
+	cfg := config.DefaultEvalConfig()
+	cfg.Engine.Model.Provider = testProviderDashscope
+	cfg.Engine.Model.Name = testModelClaudeSonnet
+
+	collapseUnconfiguredProviderSplit(cfg, credential.NewResolver(""), testModelRefDashscope)
+
+	// `provider: dashscope, name: claude-sonnet-4-6` is the credential-namespace
+	// usage — DASHSCOPE_* env routes auth, the bare claude model id is what
+	// the upstream Anthropic-compatible endpoint expects. Must not collapse.
+	if cfg.Engine.Model.Provider != testProviderDashscope {
+		t.Fatalf("Provider = %q, want %s", cfg.Engine.Model.Provider, testProviderDashscope)
+	}
+	if cfg.Engine.Model.Name != testModelClaudeSonnet {
+		t.Fatalf("Name = %q, want %s", cfg.Engine.Model.Name, testModelClaudeSonnet)
+	}
+}
+
+func TestCollapseUnconfiguredProviderSplit_NoopOnEmptyProvider(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.DefaultEvalConfig()
+	cfg.Engine.Model.Provider = ""
+	cfg.Engine.Model.Name = "claude-opus-4-7"
+
+	collapseUnconfiguredProviderSplit(cfg, nil, "claude-opus-4-7")
+
+	if cfg.Engine.Model.Provider != "" || cfg.Engine.Model.Name != "claude-opus-4-7" {
+		t.Fatalf("unexpected mutation: %+v", cfg.Engine.Model)
+	}
+}
+
+type collapsePreservesSplitCase struct {
+	name      string
+	unsetEnvs []string
+	setEnvs   map[string]string
+	provider  string
+	modelName string
+	baseURL   string
+	cliModel  string
+	failMsg   string
+}
+
+var collapsePreservesSplitCases = []collapsePreservesSplitCase{
+	{
+		name: "EvalYamlPairWhenCliModelHasNoSlash",
+		// Non-framework, unconfigured provider so the only thing keeping
+		// the split is the cliModel-has-no-slash guard (eval.yaml-sourced
+		// pairs must not be rewritten).
+		unsetEnvs: []string{
+			"ANTHROPIC_MODELSCOPE_API_KEY",
+			"ANTHROPIC_MODELSCOPE_BASE_URL",
+		},
+		provider:  "anthropic_modelscope",
+		modelName: "deepseek-v4-pro",
+		cliModel:  "",
+		failMsg:   "eval.yaml-sourced pair was rewritten",
+	},
+	{
+		name: "QoderPATIsConfig",
+		// QODER_PERSONAL_ACCESS_TOKEN is the canonical Qoder credential —
+		// must count as "configured" for collapse.
+		setEnvs:   map[string]string{"QODER_PERSONAL_ACCESS_TOKEN": "qpat-fixture"},
+		provider:  "qoder",
+		modelName: "auto",
+		cliModel:  "qoder/auto",
+		failMsg:   "qoder split was collapsed despite PAT env",
+	},
+	{
+		name: "AnthropicFrameworkDefaultWithoutEnv",
+		// `--model anthropic/X` with no env (relying on `claude` CLI's
+		// persisted login state): "anthropic" is a framework default that
+		// MUST stay split. The upstream Anthropic API only knows bare
+		// model ids; collapsing would be rejected.
+		unsetEnvs: []string{
+			"ANTHROPIC_API_KEY",
+			"ANTHROPIC_BASE_URL",
+		},
+		provider:  "anthropic",
+		modelName: testModelClaudeSonnet,
+		cliModel:  "anthropic/" + testModelClaudeSonnet,
+		failMsg:   "anthropic CLI split was collapsed despite framework-default status",
+	},
+}
+
+// TestCollapseUnconfiguredProviderSplit_PreservesSplit exercises the
+// paths that must NOT collapse a `provider/name` pair: eval.yaml-sourced
+// pairs (no cliModel slash), Qoder PAT env, framework-default providers
+// (anthropic) relying on persisted CLI login state. Each subtest arranges
+// the credential surface so collapse-via-resolver alone would otherwise
+// fire, then asserts the pair survives.
+//
+// Note: --api-key and engine.model.base_url were once "preserve" signals,
+// but that forced literal-opaque-id flows (`--model X/Y` where X isn't a
+// configured namespace) to be wrongly split. CLI key now applies even
+// with Provider="" (applyCLIOverrides no longer requires it), so the
+// safer default is to let ResolveModelRef collapse when no persisted
+// provider config exists. See TestCollapseUnconfiguredProviderSplit_
+// CollapsesEvenWithCLIAPIKey for the flipped behavior.
+func TestCollapseUnconfiguredProviderSplit_PreservesSplit(t *testing.T) {
+	for _, tc := range collapsePreservesSplitCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Not parallel: env mutations are process-global.
+			for _, key := range tc.unsetEnvs {
+				if err := os.Unsetenv(key); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for k, v := range tc.setEnvs {
+				t.Setenv(k, v)
+			}
+
+			cfg := config.DefaultEvalConfig()
+			cfg.Engine.Model.Provider = tc.provider
+			cfg.Engine.Model.Name = tc.modelName
+			cfg.Engine.Model.BaseURL = tc.baseURL
+
+			collapseUnconfiguredProviderSplit(cfg, credential.NewResolver(""), tc.cliModel)
+
+			if cfg.Engine.Model.Provider != tc.provider || cfg.Engine.Model.Name != tc.modelName {
+				t.Fatalf("%s: %+v", tc.failMsg, cfg.Engine.Model)
+			}
+		})
 	}
 }
