@@ -577,6 +577,19 @@ func TestDockerRuntime_ExecPassesCwdEnvAndCommand(t *testing.T) {
 	}
 }
 
+func TestDockerRuntime_ExecRejectsWorkdirEscape(t *testing.T) {
+	t.Parallel()
+	fd := newFakeDocker(t, createScript("abc"))
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	_, err := r.Exec(context.Background(), "id", ExecOptions{Cwd: "../../etc"})
+	if err == nil || !strings.Contains(err.Error(), "escapes workspace") {
+		t.Fatalf("expected workspace-escape error, got %v", err)
+	}
+}
+
 func TestDockerRuntime_ExecPropagatesNonZeroExit(t *testing.T) {
 	t.Parallel()
 	script := append(createScript("abc"),
@@ -742,6 +755,25 @@ func TestDockerRuntime_RollbackUsesDetachedTimeout(t *testing.T) {
 	// but it would NOT have flagged a missed call, so re-check here.
 	if got := len(fd.calls); got != 3 {
 		t.Fatalf("expected 3 docker calls (create, start, rm), got %d: %v", got, fd.calls)
+	}
+}
+
+// When rollbackRemove itself fails (daemon down, rm times out), Create must
+// retain containerID so the caller can still reach the container via Close.
+func TestDockerRuntime_CreateRetainsIDWhenRollbackFails(t *testing.T) {
+	t.Parallel()
+	fd := newFakeDocker(t, []scriptedCall{
+		{match: "create", response: fakeDockerResponse{stdout: "abc\n"}},
+		{match: "start", response: fakeDockerResponse{stderr: "no cgroups", exitCode: 125}},
+		{match: "rm", response: fakeDockerResponse{stderr: "daemon down", exitCode: 1}},
+	})
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+	err := r.Create(context.Background())
+	if err == nil {
+		t.Fatal("expected Create to fail")
+	}
+	if r.containerID != "abc" {
+		t.Fatalf("containerID should be retained when rollback fails, got %q", r.containerID)
 	}
 }
 

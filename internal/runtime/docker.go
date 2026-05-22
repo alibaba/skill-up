@@ -170,13 +170,9 @@ func (r *DockerRuntime) Create(ctx context.Context) error {
 	// "Created"-state container hanging around forever.
 	_, startStderr, startExit, startErr := r.run(ctx, r.cli, "start", id)
 	if startErr != nil || startExit != 0 {
-		// best-effort cleanup; ignore failure here since we already have
-		// a more informative error to return. Bounded by dockerCleanupTimeout
-		// so a hung daemon can't keep r.mu held forever — without the
-		// timeout, context.WithoutCancel drops the parent deadline and a
-		// stuck docker would deadlock Create indefinitely.
-		r.rollbackRemove(ctx, id)
-		r.containerID = ""
+		if r.rollbackRemove(ctx, id) == nil {
+			r.containerID = ""
+		}
 		return dockerCLIErr(startStderr, startExit, startErr, "docker start %s failed", id)
 	}
 	r.started = true
@@ -189,9 +185,10 @@ func (r *DockerRuntime) Create(ctx context.Context) error {
 	// here surfaces any real failure (read-only fs, permissions) right
 	// at Create() time instead.
 	if _, mkStderr, mkExit, mkErr := r.run(ctx, r.cli, "exec", id, "mkdir", "-p", r.workspace); mkErr != nil || mkExit != 0 {
-		r.rollbackRemove(ctx, id)
-		r.containerID = ""
-		r.started = false
+		if r.rollbackRemove(ctx, id) == nil {
+			r.containerID = ""
+			r.started = false
+		}
 		return dockerCLIErr(mkStderr, mkExit, mkErr, "docker exec mkdir -p %s failed", r.workspace)
 	}
 	return nil
@@ -201,12 +198,18 @@ func (r *DockerRuntime) Create(ctx context.Context) error {
 // Create. Detached from the caller's context so cancellation/deadline of
 // the original call doesn't skip cleanup, but bounded by dockerCleanupTimeout
 // so a wedged daemon still releases the runtime mutex within a usable
-// window. The cleanup is best-effort: any error is swallowed because we
-// already have a more informative one to return to the caller.
-func (r *DockerRuntime) rollbackRemove(_ context.Context, id string) {
+// window. Returns nil when the container was successfully removed, or an
+// error if cleanup failed (in which case the caller should retain
+// containerID so a subsequent Close can retry).
+func (r *DockerRuntime) rollbackRemove(_ context.Context, id string) error {
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), dockerCleanupTimeout)
 	defer cancel()
-	_, _, _, _ = r.run(cleanupCtx, r.cli, "rm", "-f", id)
+	_, stderr, exitCode, err := r.run(cleanupCtx, r.cli, "rm", "-f", id)
+	if err != nil || exitCode != 0 {
+		logging.Debugf("DockerRuntime.rollbackRemove: rm -f %s failed (exit=%d): %s", id, exitCode, strings.TrimSpace(stderr))
+		return dockerCLIErr(stderr, exitCode, err, "docker rm -f %s failed during rollback", id)
+	}
+	return nil
 }
 
 // Close removes the container (when cfg.Delete is true) or just stops it.
@@ -216,67 +219,86 @@ func (r *DockerRuntime) rollbackRemove(_ context.Context, id string) {
 // to retry cleanup. The preserve path (cfg.Delete=false) intentionally
 // clears the handle because the user has opted out of cleanup; the
 // container is theirs to manage from there.
+//
+// Close uses a bounded context (dockerCleanupTimeout) so a wedged daemon
+// cannot block the caller indefinitely.
 func (r *DockerRuntime) Close() error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	if r.containerID == "" {
+		r.mu.Unlock()
 		return nil
 	}
-	ctx := context.Background()
 	id := r.containerID
+	shouldDelete := r.cfg.Delete
+	r.mu.Unlock()
 
-	if !r.cfg.Delete {
+	ctx, cancel := context.WithTimeout(context.Background(), dockerCleanupTimeout)
+	defer cancel()
+
+	if !shouldDelete {
 		logging.Debugf("DockerRuntime.Close: skipping rm, container preserved: %s", id)
-		// best-effort stop; ignore error so the user can still attach.
 		_, _, _, _ = r.run(ctx, r.cli, "stop", "--time", "5", id)
+		r.mu.Lock()
 		r.containerID = ""
 		r.started = false
+		r.mu.Unlock()
 		return nil
 	}
 	_, stderr, exitCode, err := r.run(ctx, r.cli, "rm", "-f", id)
+	r.mu.Lock()
 	if err != nil || exitCode != 0 {
-		// Leave r.containerID / r.started intact so the caller can retry
-		// Close after the transient docker / daemon error clears.
+		r.mu.Unlock()
 		return dockerCLIErr(stderr, exitCode, err, "docker rm -f %s failed", id)
 	}
 	r.containerID = ""
 	r.started = false
+	r.mu.Unlock()
 	return nil
 }
 
 // Start starts the container if it is not already running.
 func (r *DockerRuntime) Start(ctx context.Context) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	if r.containerID == "" {
+		r.mu.Unlock()
 		return errors.New("docker runtime: Start called before Create")
 	}
 	if r.started {
+		r.mu.Unlock()
 		return nil
 	}
-	_, stderr, exitCode, err := r.run(ctx, r.cli, "start", r.containerID)
+	id := r.containerID
+	r.mu.Unlock()
+
+	_, stderr, exitCode, err := r.run(ctx, r.cli, "start", id)
 	if err != nil || exitCode != 0 {
-		return dockerCLIErr(stderr, exitCode, err, "docker start %s failed", r.containerID)
+		return dockerCLIErr(stderr, exitCode, err, "docker start %s failed", id)
 	}
+
+	r.mu.Lock()
 	r.started = true
+	r.mu.Unlock()
 	return nil
 }
 
 // Stop stops the container with a graceful timeout. Idempotent.
 func (r *DockerRuntime) Stop(ctx context.Context) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	if r.containerID == "" || !r.started {
+		r.mu.Unlock()
 		return nil
 	}
-	_, stderr, exitCode, err := r.run(ctx, r.cli, "stop", "--time", "5", r.containerID)
+	id := r.containerID
+	r.mu.Unlock()
+
+	_, stderr, exitCode, err := r.run(ctx, r.cli, "stop", "--time", "5", id)
 	if err != nil || exitCode != 0 {
-		return dockerCLIErr(stderr, exitCode, err, "docker stop %s failed", r.containerID)
+		return dockerCLIErr(stderr, exitCode, err, "docker stop %s failed", id)
 	}
+
+	r.mu.Lock()
 	r.started = false
+	r.mu.Unlock()
 	return nil
 }
 
@@ -378,6 +400,9 @@ func (r *DockerRuntime) Exec(ctx context.Context, command string, opts ExecOptio
 	}
 	if !path.IsAbs(cwd) {
 		cwd = path.Join(r.workspace, cwd)
+	}
+	if !isSubPath(r.workspace, cwd) {
+		return ExecResult{}, fmt.Errorf("docker runtime: cwd %q escapes workspace %q", opts.Cwd, r.workspace)
 	}
 	args = append(args, "--workdir", cwd)
 	// mergeEnv covers cfg.Env + opts.Env, but here we want to keep the
@@ -497,6 +522,17 @@ func (r *DockerRuntime) remotePath(p string) string {
 	return path.Join(r.workspace, c)
 }
 
+// isSubPath reports whether child is equal to parent or is a subdirectory
+// of parent. Both paths are cleaned before comparison.
+func isSubPath(parent, child string) bool {
+	p := path.Clean(parent)
+	c := path.Clean(child)
+	if c == p {
+		return true
+	}
+	return strings.HasPrefix(c, p+"/")
+}
+
 // dockerCLIErr formats a "docker CLI invocation failed" error. The CLI exits
 // non-zero with err==nil for ordinary process failures (runDockerCommand
 // returns err only when docker itself couldn't run), so a blind `%w, err`
@@ -528,14 +564,26 @@ func dockerCLIErr(stderr string, exitCode int, err error, format string, args ..
 // that legitimately prints e.g. `redis is not running` and exits 1 isn't
 // misclassified as an infra fault.
 //
-//	"Error response from daemon:"  — daemon refused (covers the
-//	                                  stopped-container variant
-//	                                  "Error response from daemon:
-//	                                  Container X is not running")
-//	"Error: No such container"     — container vanished
-//	"OCI runtime exec failed:"     — runtime couldn't set up the
-//	                                  process (always emitted with the
-//	                                  trailing colon by runc/crun)
+//	"Error response from daemon:"            — daemon refused (covers
+//	                                            the stopped-container
+//	                                            variant "Error response
+//	                                            from daemon: Container
+//	                                            X is not running")
+//	"Error: No such container"               — container vanished
+//	"OCI runtime exec failed:"               — runtime couldn't set
+//	                                            up the process (always
+//	                                            emitted with the
+//	                                            trailing colon by
+//	                                            runc/crun)
+//	"Cannot connect to the Docker daemon"    — CLI couldn't reach the
+//	                                            daemon at all (daemon
+//	                                            down, wrong socket path,
+//	                                            permission denied on
+//	                                            socket); always prefix.
+//	"error during connect:"                  — newer docker CLI variant
+//	                                            of the same disconnect
+//	                                            failure (TCP/TLS-backed
+//	                                            daemons in particular).
 //
 // 125 alone is unambiguous; the prefixes catch cases where the daemon
 // mapped its failure to a different exit code.
@@ -547,7 +595,9 @@ func dockerExecLayerError(stderr string, exitCode int) bool {
 	switch {
 	case strings.HasPrefix(s, "Error response from daemon:"),
 		strings.HasPrefix(s, "Error: No such container"),
-		strings.HasPrefix(s, "OCI runtime exec failed:"):
+		strings.HasPrefix(s, "OCI runtime exec failed:"),
+		strings.HasPrefix(s, "Cannot connect to the Docker daemon"),
+		strings.HasPrefix(s, "error during connect:"):
 		return true
 	}
 	return false

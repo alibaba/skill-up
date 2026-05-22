@@ -405,8 +405,8 @@ func TestIntegration_DenyAllNetworkBlocksEgress(t *testing.T) {
 // TestIntegration_CustomEntrypointActuallyReplaces verifies that a
 // user-supplied Entrypoint is wired via `--entrypoint` and actually
 // replaces the image's own entrypoint (rather than being appended as CMD
-// and silently ignored). Uses `cat` as the long-lived entrypoint — it
-// blocks on stdin so the container stays up.
+// and silently ignored). Uses `tail -f /dev/null` as a long-lived
+// alternative to the default `sleep infinity`.
 //
 // Inspecting the container's Config.Entrypoint via `docker inspect`
 // confirms the override survives, regardless of what entrypoint the base
@@ -414,7 +414,7 @@ func TestIntegration_DenyAllNetworkBlocksEgress(t *testing.T) {
 func TestIntegration_CustomEntrypointActuallyReplaces(t *testing.T) {
 	ensureImage(t)
 	r := newIntegrationRuntime(t, Config{
-		Entrypoint: []string{"/bin/cat"},
+		Entrypoint: []string{"tail", "-f", "/dev/null"},
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -427,45 +427,13 @@ func TestIntegration_CustomEntrypointActuallyReplaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("docker inspect: %v", err)
 	}
-	if !strings.Contains(string(out), "/bin/cat") {
-		t.Fatalf("Config.Entrypoint did not record /bin/cat override: %s", out)
+	if !strings.Contains(string(out), "tail") {
+		t.Fatalf("Config.Entrypoint did not record custom override: %s", out)
 	}
 }
 
-// TestIntegration_RetainsIDOnRmFailure is the integration counterpart of
-// the unit test for Close's retry-friendly behaviour. We can't easily
-// induce a transient docker daemon error from outside, so we simulate it
-// by having Close hit a container that we removed under its feet — a
-// real-world equivalent — and then confirm the container handle is
-// retained so a second Close can converge.
-//
-// (This one is mostly a smoke test against the actual CLI exit codes;
-// the unit test owns the contract assertions.)
-func TestIntegration_CloseRetainsIDOnRmFailure(t *testing.T) {
-	ensureImage(t)
-	r := newIntegrationRuntime(t, Config{})
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if err := r.Create(ctx); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	id := r.containerID
-
-	// Remove the container behind the runtime's back. The next Close
-	// call's `docker rm -f` will fail with "No such container".
-	if out, err := exec.CommandContext(ctx, "docker", "rm", "-f", id).CombinedOutput(); err != nil {
-		t.Fatalf("external rm: %v\n%s", err, out)
-	}
-
-	if err := r.Close(); err == nil {
-		t.Fatal("expected Close to error against missing container")
-	}
-	if r.containerID != id {
-		t.Fatalf("containerID should be retained after rm failure, got %q want %q", r.containerID, id)
-	}
-	// Manually clear so the t.Cleanup Close is a no-op (the container is
-	// already gone; we just need the runtime to forget it).
-	r.containerID = ""
-	r.started = false
-}
+// NOTE: The integration equivalent of TestDockerRuntime_CloseKeepsContainerIDOnRmFailure
+// is intentionally absent. `docker rm -f <nonexistent>` is idempotent (exit 0)
+// in real Docker, so there is no way to induce an rm failure from outside the
+// daemon without actually crashing/stopping the daemon. The unit test owns
+// this contract via fakeDocker.
