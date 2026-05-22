@@ -17,6 +17,7 @@ const (
 const (
 	runtimeTypeNone        = "none"
 	runtimeTypeOpenSandbox = "opensandbox"
+	runtimeTypeDocker      = "docker"
 )
 
 // Validator checks eval and case documents against the v1alpha1 schema.
@@ -40,9 +41,9 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 
 	// environment.type is required
 	if cfg.Environment.Type == "" {
-		errs = append(errs, "environment.type is required (none, opensandbox)")
+		errs = append(errs, "environment.type is required (none, opensandbox, docker)")
 	} else if !isValidRuntimeType(cfg.Environment.Type) {
-		errs = append(errs, "environment.type must be one of: none, opensandbox")
+		errs = append(errs, "environment.type must be one of: none, opensandbox, docker")
 	}
 
 	errs = append(errs, validateNetworkPolicy(cfg.Environment)...)
@@ -161,7 +162,7 @@ func (v *Validator) ValidateAll(result *EvalResult) error {
 }
 
 func isValidRuntimeType(t string) bool {
-	return t == runtimeTypeNone || t == runtimeTypeOpenSandbox
+	return t == runtimeTypeNone || t == runtimeTypeOpenSandbox || t == runtimeTypeDocker
 }
 
 func isValidJudgeType(t string) bool {
@@ -180,7 +181,14 @@ func validateNetworkPolicy(env Environment) []string {
 		return []string{"network_policy must be one of: deny_all, allow_declared"}
 	}
 	if env.Type == runtimeTypeNone {
-		return []string{"network_policy requires environment.type opensandbox (none cannot enforce network isolation)"}
+		return []string{"network_policy requires environment.type opensandbox or docker (none cannot enforce network isolation)"}
+	}
+	// docker runtime currently implements only deny_all (via --network=none).
+	// allow_declared needs an egress proxy / iptables sidecar that is not
+	// yet in place. Reject early so users do not get a silent "all egress
+	// allowed" container at run time.
+	if env.Type == runtimeTypeDocker && policy == "allow_declared" {
+		return []string{"network_policy: allow_declared is not supported for environment.type docker (use deny_all or opensandbox)"}
 	}
 
 	var errs []string

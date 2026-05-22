@@ -181,6 +181,8 @@ func NewRuntime(cfg Config) (Runtime, error) {
 		return &NoneRuntime{cfg: cfg}, nil
 	case "opensandbox":
 		return NewOpenSandboxRuntime(cfg)
+	case "docker":
+		return NewDockerRuntime(cfg)
 	default:
 		return nil, errors.New("unknown runtime type: " + cfg.Type)
 	}

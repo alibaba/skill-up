@@ -21,7 +21,7 @@ type EvalConfig struct {
 
 // Environment defines the runtime environment for evaluation.
 type Environment struct {
-	Type                  string            `yaml:"type"` // none, opensandbox
+	Type                  string            `yaml:"type"` // none, opensandbox, docker
 	Image                 string            `yaml:"image,omitempty"`
 	SandboxTemplate       string            `yaml:"sandbox_template,omitempty"`
 	WorkspaceMount        string            `yaml:"workspace_mount,omitempty"`

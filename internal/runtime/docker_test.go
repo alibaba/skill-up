@@ -1,0 +1,618 @@
+package runtime
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+)
+
+// fakeDockerCall is one captured invocation of the docker CLI.
+type fakeDockerCall struct {
+	args []string
+}
+
+// fakeDockerResponse drives what the fake CLI returns for a given call.
+type fakeDockerResponse struct {
+	stdout   string
+	stderr   string
+	exitCode int
+	err      error
+}
+
+// newFakeDocker returns a dockerCommandRunner that records every call and
+// answers each according to the supplied script (in order). The first arg
+// passed to docker (the subcommand) is asserted against script[i].match
+// when match is non-empty, so a typo in the implementation is caught loudly.
+type scriptedCall struct {
+	match    string // expected first arg (subcommand); empty = any
+	response fakeDockerResponse
+}
+
+type fakeDocker struct {
+	mu     sync.Mutex
+	calls  []fakeDockerCall
+	script []scriptedCall
+	idx    int
+	t      *testing.T
+}
+
+func newFakeDocker(t *testing.T, script []scriptedCall) *fakeDocker {
+	t.Helper()
+	return &fakeDocker{script: script, t: t}
+}
+
+func (f *fakeDocker) runner() dockerCommandRunner {
+	return func(_ context.Context, name string, args ...string) (string, string, int, error) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if name != "docker" {
+			f.t.Fatalf("unexpected docker binary name %q", name)
+		}
+		f.calls = append(f.calls, fakeDockerCall{args: append([]string(nil), args...)})
+		if f.idx >= len(f.script) {
+			f.t.Fatalf("unexpected extra docker call #%d: %v", f.idx, args)
+		}
+		step := f.script[f.idx]
+		f.idx++
+		if step.match != "" && (len(args) == 0 || args[0] != step.match) {
+			f.t.Fatalf("expected docker subcommand %q at step %d, got %v", step.match, f.idx-1, args)
+		}
+		return step.response.stdout, step.response.stderr, step.response.exitCode, step.response.err
+	}
+}
+
+func (f *fakeDocker) callArgs(i int) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls[i].args
+}
+
+func newDockerRuntimeForTest(t *testing.T, cfg Config, fd *fakeDocker) *DockerRuntime {
+	t.Helper()
+	if cfg.Image == "" {
+		cfg.Image = "alpine:3.20"
+	}
+	r, err := NewDockerRuntime(cfg)
+	if err != nil {
+		t.Fatalf("NewDockerRuntime: %v", err)
+	}
+	r.run = fd.runner()
+	return r
+}
+
+// createScript returns the canonical scripted-call sequence that Create
+// performs (docker create → docker start → docker exec mkdir -p workspace).
+// Test scripts prepend this before the steps they actually want to exercise.
+// id is the container ID echoed back by the fake create call.
+func createScript(id string) []scriptedCall {
+	return []scriptedCall{
+		{match: "create", response: fakeDockerResponse{stdout: id + "\n"}},
+		{match: "start", response: fakeDockerResponse{}},
+		{match: "exec", response: fakeDockerResponse{}}, // workspace mkdir -p
+	}
+}
+
+// createCallCount is how many scripted calls createScript consumes; tests
+// add this to local offsets so they reference the right post-Create call.
+const createCallCount = 3
+
+func TestNewDockerRuntime_RequiresImage(t *testing.T) {
+	t.Parallel()
+	if _, err := NewDockerRuntime(Config{}); err == nil {
+		t.Fatal("expected error when image is missing")
+	}
+}
+
+func TestNewDockerRuntime_RejectsAllowDeclared(t *testing.T) {
+	t.Parallel()
+	_, err := NewDockerRuntime(Config{Image: "alpine:3.20", NetworkPolicy: "allow_declared"})
+	if err == nil || !strings.Contains(err.Error(), "allow_declared") {
+		t.Fatalf("expected allow_declared rejection, got %v", err)
+	}
+}
+
+func TestNewDockerRuntime_RequiresAbsoluteWorkspace(t *testing.T) {
+	t.Parallel()
+	_, err := NewDockerRuntime(Config{Image: "alpine:3.20", WorkspaceMount: "rel/path"})
+	if err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("expected absolute-path rejection, got %v", err)
+	}
+}
+
+func TestDockerRuntime_RequiresProcessSandboxFalse(t *testing.T) {
+	t.Parallel()
+	r, err := NewDockerRuntime(Config{Image: "alpine:3.20"})
+	if err != nil {
+		t.Fatalf("NewDockerRuntime: %v", err)
+	}
+	if r.RequiresProcessSandbox() {
+		t.Fatal("docker runtime should not require additional process sandbox")
+	}
+}
+
+func TestDockerRuntime_WorkspaceDefault(t *testing.T) {
+	t.Parallel()
+	r, err := NewDockerRuntime(Config{Image: "alpine:3.20"})
+	if err != nil {
+		t.Fatalf("NewDockerRuntime: %v", err)
+	}
+	if r.Workspace() != dockerDefaultWorkspace {
+		t.Fatalf("Workspace = %q, want %q", r.Workspace(), dockerDefaultWorkspace)
+	}
+}
+
+func TestDockerRuntime_CreateAndCloseDeletesContainer(t *testing.T) {
+	t.Parallel()
+	script := append(createScript("deadbeef"),
+		scriptedCall{match: "rm", response: fakeDockerResponse{}},
+	)
+	fd := newFakeDocker(t, script)
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20", Delete: true}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if r.containerID != "deadbeef" {
+		t.Fatalf("containerID = %q, want %q", r.containerID, "deadbeef")
+	}
+	if !r.started {
+		t.Fatal("Create should leave container started")
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	rmArgs := fd.callArgs(createCallCount)
+	if rmArgs[0] != "rm" || rmArgs[1] != "-f" || rmArgs[2] != "deadbeef" {
+		t.Fatalf("unexpected rm args: %v", rmArgs)
+	}
+}
+
+func TestDockerRuntime_CreatePassesNetworkAndEnvAndImage(t *testing.T) {
+	t.Parallel()
+	fd := newFakeDocker(t, createScript("abc"))
+	r := newDockerRuntimeForTest(t, Config{
+		Image:         "ubuntu:22.04",
+		NetworkPolicy: "deny_all",
+		Env:           map[string]string{"FOO": "bar"},
+	}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	args := fd.callArgs(0)
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--network none") {
+		t.Errorf("create should set --network none for deny_all; got %v", args)
+	}
+	if !strings.Contains(joined, "--env FOO=bar") {
+		t.Errorf("create should pass --env FOO=bar; got %v", args)
+	}
+	// Image must appear before the entrypoint argv. Find the image and
+	// confirm `sleep infinity` follows it.
+	imgIdx := indexOf(args, "ubuntu:22.04")
+	if imgIdx < 0 {
+		t.Fatalf("image not in args: %v", args)
+	}
+	if imgIdx+2 >= len(args) || args[imgIdx+1] != "sleep" || args[imgIdx+2] != "infinity" {
+		t.Errorf("expected default entrypoint `sleep infinity` after image; got tail %v", args[imgIdx:])
+	}
+	if !strings.Contains(joined, "--workdir "+dockerDefaultWorkspace) {
+		t.Errorf("create should set --workdir to workspace; got %v", args)
+	}
+}
+
+func TestDockerRuntime_CreateOmitsNetworkArgsWithoutPolicy(t *testing.T) {
+	t.Parallel()
+	fd := newFakeDocker(t, createScript("abc"))
+	r := newDockerRuntimeForTest(t, Config{Image: "ubuntu:22.04"}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if strings.Contains(strings.Join(fd.callArgs(0), " "), "--network") {
+		t.Errorf("no network flag expected when NetworkPolicy is unset; got %v", fd.callArgs(0))
+	}
+}
+
+func TestDockerRuntime_CreateUsesCustomEntrypoint(t *testing.T) {
+	t.Parallel()
+	fd := newFakeDocker(t, createScript("abc"))
+	r := newDockerRuntimeForTest(t, Config{
+		Image:      "alpine:3.20",
+		Entrypoint: []string{"/usr/bin/env", "tail", "-f", "/dev/null"},
+	}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	args := fd.callArgs(0)
+	tail := args[len(args)-4:]
+	want := []string{"/usr/bin/env", "tail", "-f", "/dev/null"}
+	for i, v := range want {
+		if tail[i] != v {
+			t.Fatalf("entrypoint tail = %v, want %v", tail, want)
+		}
+	}
+}
+
+func TestDockerRuntime_CreateFailsSurfacesStderr(t *testing.T) {
+	t.Parallel()
+	fd := newFakeDocker(t, []scriptedCall{
+		{match: "create", response: fakeDockerResponse{stderr: "image not found", exitCode: 1}},
+	})
+	r := newDockerRuntimeForTest(t, Config{Image: "missing:tag"}, fd)
+	err := r.Create(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "image not found") {
+		t.Fatalf("expected stderr in error, got %v", err)
+	}
+}
+
+// If `docker create` succeeds but `docker start` fails, Create must rm -f
+// the half-created container so it doesn't leak on the host.
+func TestDockerRuntime_CreateRollsBackOnStartFailure(t *testing.T) {
+	t.Parallel()
+	fd := newFakeDocker(t, []scriptedCall{
+		{match: "create", response: fakeDockerResponse{stdout: "abc\n"}},
+		{match: "start", response: fakeDockerResponse{stderr: "no permission", exitCode: 125}},
+		{match: "rm", response: fakeDockerResponse{}}, // cleanup
+	})
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+	err := r.Create(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "no permission") {
+		t.Fatalf("expected start failure, got %v", err)
+	}
+	// Runtime state was reset so a retry is possible.
+	if r.containerID != "" {
+		t.Fatalf("containerID should be cleared on rollback, got %q", r.containerID)
+	}
+	if r.started {
+		t.Fatal("started should be false after rollback")
+	}
+}
+
+// If the workspace mkdir after start fails, Create must also rm -f the
+// running container — partial state on the host is worse than no state.
+func TestDockerRuntime_CreateRollsBackOnWorkspaceMkdirFailure(t *testing.T) {
+	t.Parallel()
+	fd := newFakeDocker(t, []scriptedCall{
+		{match: "create", response: fakeDockerResponse{stdout: "abc\n"}},
+		{match: "start", response: fakeDockerResponse{}},
+		{match: "exec", response: fakeDockerResponse{stderr: "read-only fs", exitCode: 1}},
+		{match: "rm", response: fakeDockerResponse{}}, // cleanup
+	})
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+	err := r.Create(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "read-only fs") {
+		t.Fatalf("expected mkdir failure, got %v", err)
+	}
+	if r.containerID != "" {
+		t.Fatalf("containerID should be cleared on rollback, got %q", r.containerID)
+	}
+}
+
+func TestDockerRuntime_CloseSkipsRmWhenDeleteFalse(t *testing.T) {
+	t.Parallel()
+	script := append(createScript("abc"),
+		scriptedCall{match: "stop", response: fakeDockerResponse{}},
+	)
+	fd := newFakeDocker(t, script)
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20", Delete: false}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	stop := fd.callArgs(createCallCount)
+	if stop[0] != "stop" {
+		t.Fatalf("expected stop, got %v", stop)
+	}
+}
+
+func TestDockerRuntime_StartStopAndIdempotency(t *testing.T) {
+	t.Parallel()
+	// Create already starts; further Start calls are no-ops. Then Stop,
+	// followed by Close which rm -f's the (stopped) container.
+	script := append(createScript("abc"),
+		scriptedCall{match: "stop", response: fakeDockerResponse{}},
+		scriptedCall{match: "rm", response: fakeDockerResponse{}},
+	)
+	fd := newFakeDocker(t, script)
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20", Delete: true}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// Already started by Create; this Start must be a no-op (consumes no
+	// extra scripted call).
+	if err := r.Start(context.Background()); err != nil {
+		t.Fatalf("Start (idempotent after Create): %v", err)
+	}
+	if err := r.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	// Second Stop is also a no-op when not started.
+	if err := r.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop (idempotent): %v", err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestDockerRuntime_StartFailsBeforeCreate(t *testing.T) {
+	t.Parallel()
+	fd := newFakeDocker(t, nil)
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+	if err := r.Start(context.Background()); err == nil {
+		t.Fatal("Start before Create should error")
+	}
+}
+
+func TestDockerRuntime_UploadFileEnsuresParentDir(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src.txt")
+	if err := os.WriteFile(src, []byte("hi"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := append(createScript("abc"),
+		scriptedCall{match: "exec", response: fakeDockerResponse{}}, // upload's mkdir -p
+		scriptedCall{match: "cp", response: fakeDockerResponse{}},
+	)
+	fd := newFakeDocker(t, script)
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := r.UploadFile(context.Background(), src, "sub/dst.txt"); err != nil {
+		t.Fatalf("UploadFile: %v", err)
+	}
+	mkdir := fd.callArgs(createCallCount)
+	if mkdir[0] != "exec" || mkdir[len(mkdir)-3] != "mkdir" || mkdir[len(mkdir)-2] != "-p" {
+		t.Fatalf("expected exec mkdir -p, got %v", mkdir)
+	}
+	if mkdir[len(mkdir)-1] != dockerDefaultWorkspace+"/sub" {
+		t.Fatalf("mkdir target = %q, want %q", mkdir[len(mkdir)-1], dockerDefaultWorkspace+"/sub")
+	}
+	cp := fd.callArgs(createCallCount + 1)
+	want := "abc:" + dockerDefaultWorkspace + "/sub/dst.txt"
+	if cp[len(cp)-1] != want {
+		t.Fatalf("cp dest = %q, want %q", cp[len(cp)-1], want)
+	}
+	if cp[len(cp)-2] != src {
+		t.Fatalf("cp src = %q, want %q", cp[len(cp)-2], src)
+	}
+}
+
+func TestDockerRuntime_DownloadFileWritesLocalDir(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	dst := filepath.Join(tmp, "nested", "out.txt")
+	script := append(createScript("abc"),
+		scriptedCall{match: "cp", response: fakeDockerResponse{}},
+	)
+	fd := newFakeDocker(t, script)
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := r.DownloadFile(context.Background(), "/abs/file.txt", dst); err != nil {
+		t.Fatalf("DownloadFile: %v", err)
+	}
+	if _, err := os.Stat(filepath.Dir(dst)); err != nil {
+		t.Fatalf("target dir was not created: %v", err)
+	}
+	cp := fd.callArgs(createCallCount)
+	if cp[len(cp)-2] != "abc:/abs/file.txt" {
+		t.Fatalf("cp src = %q, want %q", cp[len(cp)-2], "abc:/abs/file.txt")
+	}
+	if cp[len(cp)-1] != dst {
+		t.Fatalf("cp dst = %q, want %q", cp[len(cp)-1], dst)
+	}
+}
+
+func TestDockerRuntime_UploadDirUsesDotSyntax(t *testing.T) {
+	t.Parallel()
+	src := t.TempDir()
+	script := append(createScript("abc"),
+		scriptedCall{match: "exec", response: fakeDockerResponse{}}, // ensure dest dir
+		scriptedCall{match: "cp", response: fakeDockerResponse{}},
+	)
+	fd := newFakeDocker(t, script)
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := r.UploadDir(context.Background(), src, "into"); err != nil {
+		t.Fatalf("UploadDir: %v", err)
+	}
+	cp := fd.callArgs(createCallCount + 1)
+	wantSrc := src + string(filepath.Separator) + "."
+	if cp[len(cp)-2] != wantSrc {
+		t.Fatalf("cp src = %q, want %q", cp[len(cp)-2], wantSrc)
+	}
+	wantDst := "abc:" + dockerDefaultWorkspace + "/into"
+	if cp[len(cp)-1] != wantDst {
+		t.Fatalf("cp dst = %q, want %q", cp[len(cp)-1], wantDst)
+	}
+}
+
+func TestDockerRuntime_DownloadDirUsesDotSyntax(t *testing.T) {
+	t.Parallel()
+	dst := t.TempDir()
+	script := append(createScript("abc"),
+		scriptedCall{match: "cp", response: fakeDockerResponse{}},
+	)
+	fd := newFakeDocker(t, script)
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := r.DownloadDir(context.Background(), "outputs", dst); err != nil {
+		t.Fatalf("DownloadDir: %v", err)
+	}
+	cp := fd.callArgs(createCallCount)
+	wantSrc := "abc:" + dockerDefaultWorkspace + "/outputs/."
+	if cp[len(cp)-2] != wantSrc {
+		t.Fatalf("cp src = %q, want %q", cp[len(cp)-2], wantSrc)
+	}
+	if cp[len(cp)-1] != dst {
+		t.Fatalf("cp dst = %q, want %q", cp[len(cp)-1], dst)
+	}
+}
+
+func TestDockerRuntime_ExecPassesCwdEnvAndCommand(t *testing.T) {
+	t.Parallel()
+	script := append(createScript("abc"),
+		scriptedCall{match: "exec", response: fakeDockerResponse{stdout: "ok", exitCode: 0}},
+	)
+	fd := newFakeDocker(t, script)
+	r := newDockerRuntimeForTest(t, Config{
+		Image: "alpine:3.20",
+		Env:   map[string]string{"GLOBAL": "yes"},
+	}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	res, err := r.Exec(context.Background(), "echo hi", ExecOptions{
+		Cwd: "sub",
+		Env: map[string]string{"FOO": "bar"},
+	})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if res.ExitCode != 0 || res.Stdout != "ok" {
+		t.Fatalf("unexpected result %+v", res)
+	}
+	args := fd.callArgs(createCallCount)
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--workdir "+dockerDefaultWorkspace+"/sub") {
+		t.Errorf("expected workdir join under workspace; got %v", args)
+	}
+	if !strings.Contains(joined, "--env FOO=bar") {
+		t.Errorf("expected --env FOO=bar; got %v", args)
+	}
+	if !strings.Contains(joined, "--env GLOBAL=yes") {
+		t.Errorf("expected --env GLOBAL=yes from cfg.Env; got %v", args)
+	}
+	// Command must be the last token, after `bash -c`.
+	if args[len(args)-3] != "bash" || args[len(args)-2] != "-c" || args[len(args)-1] != "echo hi" {
+		t.Fatalf("expected ... bash -c \"echo hi\" at tail, got %v", args)
+	}
+}
+
+func TestDockerRuntime_ExecPropagatesNonZeroExit(t *testing.T) {
+	t.Parallel()
+	script := append(createScript("abc"),
+		scriptedCall{match: "exec", response: fakeDockerResponse{stderr: "boom", exitCode: 42}},
+	)
+	fd := newFakeDocker(t, script)
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	res, err := r.Exec(context.Background(), "false", ExecOptions{})
+	if err != nil {
+		t.Fatalf("Exec: unexpected error %v", err)
+	}
+	if res.ExitCode != 42 {
+		t.Fatalf("ExitCode = %d, want 42", res.ExitCode)
+	}
+	if res.Stderr != "boom" {
+		t.Fatalf("Stderr = %q, want %q", res.Stderr, "boom")
+	}
+}
+
+func TestDockerRuntime_ExecSurfacesStartupErrorWhenNoExit(t *testing.T) {
+	t.Parallel()
+	bad := errors.New("dial unix /var/run/docker.sock: no such file")
+	script := append(createScript("abc"),
+		scriptedCall{match: "exec", response: fakeDockerResponse{exitCode: -1, err: bad}},
+	)
+	fd := newFakeDocker(t, script)
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	_, err := r.Exec(context.Background(), "true", ExecOptions{})
+	if err == nil || !strings.Contains(err.Error(), "docker exec failed") {
+		t.Fatalf("expected wrapped docker exec error, got %v", err)
+	}
+}
+
+func TestDockerRuntime_NewRuntimeWiresDocker(t *testing.T) {
+	t.Parallel()
+	rt, err := NewRuntime(Config{Type: "docker", Image: "alpine:3.20"})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	if _, ok := rt.(*DockerRuntime); !ok {
+		t.Fatalf("NewRuntime returned %T, want *DockerRuntime", rt)
+	}
+}
+
+func indexOf(ss []string, want string) int {
+	for i, v := range ss {
+		if v == want {
+			return i
+		}
+	}
+	return -1
+}
+
+// Sanity check that the dockerCommandRunner signature actually behaves the
+// way the production helper does — exec error with no real exit becomes -1
+// + the error from classifyExecError. This guards against accidental
+// reshuffling of the contract DockerRuntime relies on.
+func TestRunDockerCommand_NonexistentBinarySurfaces(t *testing.T) {
+	t.Parallel()
+	_, _, exit, err := runDockerCommand(context.Background(), "/nonexistent/skill-up-docker-fake-binary", "version")
+	if err == nil {
+		t.Fatal("expected error when running nonexistent binary")
+	}
+	if exit != -1 {
+		t.Fatalf("exitCode = %d, want -1", exit)
+	}
+	if !strings.Contains(err.Error(), "no such file") && !strings.Contains(err.Error(), "not found") && !strings.Contains(err.Error(), "executable file not found") {
+		// Different OSes phrase this differently; just make sure we got
+		// *some* useful diagnostic.
+		t.Logf("note: runDockerCommand surfaced error: %v", err)
+	}
+}
+
+// Ensure dockerContainerName returns unique, prefixed names.
+func TestDockerContainerName(t *testing.T) {
+	t.Parallel()
+	seen := map[string]bool{}
+	for i := range 32 {
+		n, err := dockerContainerName()
+		if err != nil {
+			t.Fatalf("name: %v", err)
+		}
+		if !strings.HasPrefix(n, "skill-up-") {
+			t.Fatalf("name %q missing prefix", n)
+		}
+		if seen[n] {
+			t.Fatalf("duplicate name %q on iter %d", n, i)
+		}
+		seen[n] = true
+	}
+}
+
+// overlayEnvList must respect callEnv-wins ordering.
+func TestOverlayEnvList_CallEnvWins(t *testing.T) {
+	t.Parallel()
+	got := overlayEnvList(map[string]string{"A": "1", "B": "2"}, map[string]string{"B": "override"})
+	// build a map for assertion since order is non-deterministic
+	m := map[string]string{}
+	for _, kv := range got {
+		k, v, _ := strings.Cut(kv, "=")
+		m[k] = v
+	}
+	if m["A"] != "1" || m["B"] != "override" {
+		t.Fatalf("unexpected env overlay: %v", m)
+	}
+}
+
+// Compile-time check: DockerRuntime satisfies Runtime.
+var _ Runtime = (*DockerRuntime)(nil)

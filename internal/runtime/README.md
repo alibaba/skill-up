@@ -115,11 +115,35 @@ Connects to a remote sandbox environment:
 
 Configuration includes `UseServerProxy`, `ReadyTimeout`, `SandboxTimeout`, `Kwargs`, etc. OpenSandbox authentication is handled inside the runtime implementation, which reads `OPENSANDBOX_API_KEY`; non-sensitive runtime parameters are passed through `Kwargs`, e.g. `base_url` and a JSON-string-encoded `extensions`.
 
+### DockerRuntime (Local Container Mode)
+
+Runs the eval inside a local Docker container — container-level isolation (filesystem, process, network) without any remote service dependency.
+
+- `Create`: `docker create --name skill-up-<rand> --workdir <workspace> [--network none] [--env K=V]... <image> sleep infinity`. The `sleep infinity` entrypoint keeps the container alive so subsequent `exec` calls can attach; override via `environment.entrypoint`.
+- `Start` / `Stop`: `docker start` / `docker stop --time 5`; both idempotent.
+- `Close`: `docker rm -f` when `Config.Delete=true`; otherwise just `docker stop` so the user can inspect the container.
+- `UploadFile` / `UploadDir` / `DownloadFile` / `DownloadDir`: implemented via `docker cp`. `UploadDir` and `DownloadDir` use the `src/.` trailing-dot form so the *contents* of `src` are copied into the destination (matching the existing `UploadDir`/`DownloadDir` contracts).
+- `Exec`: `docker exec --workdir <cwd> [--env K=V]... <container> bash -c <command>`. `Cwd` may be relative (joined under `Workspace()`) or absolute. Caller-supplied env layers on top of `cfg.Env`, then on top of the container's own env (so `PATH`, `HOME`, etc. in the image remain intact).
+- `RequiresProcessSandbox()`: returns `false` — the container already isolates the agent's processes.
+- Workspace defaults to `/workspace` and must be an absolute path.
+
+**Requirements**: a working `docker` CLI on PATH and a usable Docker daemon. The runtime does not pull images on its own — pre-pull or use an image already available locally.
+
+**Network policy**:
+
+| Policy | Behavior |
+|-------|----------|
+| (unset) | Default bridge network (full egress). |
+| `deny_all` | `docker create --network=none`; no network access at all. |
+| `allow_declared` | **Not supported yet** — rejected at validation and at `NewDockerRuntime`. FQDN-level egress filtering requires an egress proxy or in-container iptables sidecar that is out of scope for the initial implementation. Use `opensandbox` if you need this. |
+
+**Security note**: `Workspace()` returns the in-container path. Unlike `NoneRuntime`, the host cannot access it directly — all data movement must go through Upload/Download. Absolute `targetPath` values in Upload* refer to absolute *container* paths, not host paths.
+
 ## Configuration
 
 ```go
 type Config struct {
-    Type           string            // "none" | "opensandbox"
+    Type           string            // "none" | "opensandbox" | "docker"
     Image          string            // Sandbox image (for opensandbox mode)
     WorkspaceMount string            // Workspace mount path
     Env            map[string]string // Environment variables
