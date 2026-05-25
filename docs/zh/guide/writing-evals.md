@@ -63,7 +63,7 @@ schema_version: v1alpha1          # 固定值，不可省略
 
 # ========== 2. 运行环境 ==========
 environment:
-  type: none                      # 支持 none / opensandbox
+  type: none                      # 支持 none / opensandbox / docker
 
 # ========== 3. MCP 工具 ==========
 mcp:
@@ -185,6 +185,7 @@ tool_responses:
 | :-----------: | :----------------------------: | :------------------------------: |
 | `none`        | 纯文本 I/O，无文件系统依赖      | 命令路由、知识问答、文本生成     |
 | `opensandbox` | 需要远程沙箱服务                | 代码审查、项目生成、脚本执行     |
+| `docker`      | 本地容器隔离，无需远程服务       | 自定义工具链、可复现 CI、离线环境 |
 
 > **建议**：如果你的 Skill 不涉及文件操作，使用 `none` 可以省去沙箱准备时间。
 
@@ -217,6 +218,37 @@ environment:
 | `kwargs.extensions` | JSON 字符串形式的 OpenSandbox 扩展配置 |
 | `kwargs.request_timeout_seconds` | OpenSandbox SDK 请求超时时间 |
 | `kwargs.file_transfer_parallelism` | 目录下载并发度 |
+
+#### Docker 配置
+
+使用 `environment.type: docker` 时，Agent 在本地 Docker 容器中运行，提供容器级别的隔离（文件系统、进程、网络），无需任何远程服务。
+
+**前置条件：** 需要 `docker` CLI 在 PATH 中，且 Docker daemon 正在运行。runtime 不会自动拉取镜像，请提前执行 `docker pull <image>`。
+
+```yaml
+environment:
+  type: docker
+  image: node:22                    # 必填 — 需提前拉取到本地
+  workspace_mount: /workspace       # 默认：/workspace
+  env:
+    NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
+  setup_steps:
+    - run: npm install -g typescript
+  entrypoint: ["sleep", "infinity"] # 覆盖容器 entrypoint（默认：sleep infinity）
+```
+
+常用配置项：
+
+| 字段 | 说明 |
+| --- | --- |
+| `image` | **必填。** Docker 镜像名称，需在本地可用（使用 `docker pull` 预拉取） |
+| `workspace_mount` | 容器内工作区路径，默认 `/workspace`，必须为绝对路径 |
+| `env` | 注入容器命令执行环境的变量 |
+| `setup_steps` | 容器启动后执行的初始化命令 |
+| `entrypoint` | 覆盖容器的 ENTRYPOINT，默认 `["sleep", "infinity"]` |
+| `network_policy` | `deny_all` 以 `--network=none` 创建容器（无网络访问）；`allow_declared` 暂不支持，需要 FQDN 级别出口过滤请使用 `opensandbox` |
+
+> **建议：** Docker runtime 适合需要自定义系统包、特定语言运行时、或离线/隔离环境的评测。如需远程托管沙箱，请使用 `opensandbox`。
 
 ---
 

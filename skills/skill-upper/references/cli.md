@@ -29,6 +29,7 @@ skill-up run [path] [flags]
 | `--output-dir`        | eval.yaml 同级目录 | 报告和产物的输出目录                                                                                                                                                              |
 | `--iteration`         | `0`（auto）        | 总运行次数。`0` = 自动：在最后一个已有 `iteration-N/` 之后追加一轮；正整数 = 显式运行 N 轮，产物写入 `iteration-1/` … `iteration-N/`                                              |
 | `--engine`            | 配置中的值         | 覆盖 Engine 名称                                                                                                                                                                  |
+| `--runtime`           | 配置中的值         | 覆盖 `environment.type`（`none`、`opensandbox`、`docker`）                                                                                                                        |
 | `--model`             | 配置中的值         | 覆盖模型（格式：`provider/name`）                                                                                                                                                 |
 | `--parallelism`       | 配置中的值         | 覆盖 `cases.parallelism`，临时调整用例并行数，取值 1–256                                                                                                                          |
 | `--api-key`           | —                  | 传入 API Key（优先级高于环境变量）                                                                                                                                                |

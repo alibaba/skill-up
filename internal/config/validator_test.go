@@ -589,6 +589,115 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			wantErr: true,
 			errMsg:  "network_policy requires environment.type opensandbox",
 		},
+		{
+			name: "valid docker runtime type",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:  "docker",
+					Image: "alpine:3.20",
+				},
+				Engine: EngineConfig{
+					Name: "claude_code",
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "docker without image is rejected at validation",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type: "docker",
+				},
+				Engine: EngineConfig{
+					Name: "claude_code",
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "environment.image is required when environment.type is docker",
+		},
+		{
+			name: "docker with relative workspace_mount is rejected at validation",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:           "docker",
+					Image:          "alpine:3.20",
+					WorkspaceMount: "rel/path",
+				},
+				Engine: EngineConfig{
+					Name: "claude_code",
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "environment.workspace_mount must be absolute when environment.type is docker",
+		},
+		{
+			name: "docker with absolute workspace_mount is valid",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:           "docker",
+					Image:          "alpine:3.20",
+					WorkspaceMount: "/work",
+				},
+				Engine: EngineConfig{
+					Name: "claude_code",
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid docker with deny_all network policy",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:          "docker",
+					Image:         "alpine:3.20",
+					NetworkPolicy: "deny_all",
+				},
+				Engine: EngineConfig{
+					Name: "claude_code",
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "docker with allow_declared is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:          "docker",
+					Image:         "alpine:3.20",
+					NetworkPolicy: "allow_declared",
+					AllowedEgress: []string{"pypi.org"},
+				},
+				Engine: EngineConfig{
+					Name: "claude_code",
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "allow_declared is not supported for environment.type docker",
+		},
 	}
 
 	for _, tt := range tests {

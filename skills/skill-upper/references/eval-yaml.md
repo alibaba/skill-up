@@ -8,7 +8,7 @@
 schema_version: v1alpha1
 
 environment:
-  type: none                      # none | opensandbox
+  type: none                      # none | opensandbox | docker
 
 mcp:
   servers:
@@ -55,6 +55,7 @@ report:
 | --- | --- | --- |
 | `none` | 纯文本 I/O、不强依赖沙箱 | 冷启动最快 |
 | `opensandbox` | 需要远程沙箱（文件、命令执行等） | 需 `OPENSANDBOX_API_KEY`；服务地址等可放在 `environment.kwargs` 或 `OPENSANDBOX_BASE_URL` |
+| `docker` | 本地容器隔离，无需远程服务 | 需本地 `docker` CLI 和 Docker daemon；镜像需提前拉取 |
 
 ### OpenSandbox 示例
 
@@ -72,6 +73,22 @@ environment:
 ```
 
 常用 `kwargs`：`base_url`、`extensions`（JSON 字符串）、`request_timeout_seconds`、`file_transfer_parallelism` 等。鉴权密钥来自环境变量 `OPENSANDBOX_API_KEY`。
+
+### Docker 示例
+
+```yaml
+environment:
+  type: docker
+  image: node:22                    # 必填，需提前 docker pull
+  workspace_mount: /workspace       # 默认 /workspace
+  env:
+    NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
+  setup_steps:
+    - run: npm install -g typescript
+  entrypoint: ["sleep", "infinity"] # 默认 sleep infinity
+```
+
+前置条件：本地 `docker` CLI 和 Docker daemon。`network_policy: deny_all` 以 `--network=none` 创建容器；`allow_declared` 暂不支持。
 
 
 ## MCP

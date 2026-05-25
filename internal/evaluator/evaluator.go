@@ -809,6 +809,7 @@ func (e *defaultEvaluator) prepareRuntimeForCase(ctx context.Context, caseCfg *c
 		return nil, fmt.Errorf("failed to create runtime: %w", err)
 	}
 	if err := rt.Create(ctx); err != nil {
+		_ = rt.Close()
 		return nil, fmt.Errorf("failed to create runtime workspace: %w", err)
 	}
 	if err := e.setupCaseEnvironment(ctx, rt, caseCfg, configName, ag, mcpCfg); err != nil {

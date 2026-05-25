@@ -63,7 +63,7 @@ schema_version: v1alpha1          # Fixed value, required
 
 # ========== 2. Runtime environment ==========
 environment:
-  type: none                      # none / opensandbox
+  type: none                      # none / opensandbox / docker
 
 # ========== 3. MCP servers ==========
 mcp:
@@ -185,6 +185,7 @@ Environment-variable references support both `${VAR}` and full-value `$VAR` form
 | :-----------: | :-----------------------------------------------: | :-----------------------------------------: |
 | `none`        | Plain-text I/O, no filesystem dependencies        | Command routing, Q&A, text generation       |
 | `opensandbox` | Requires a remote sandbox service                  | Code review, project scaffolding, scripting |
+| `docker`      | Local container isolation, no remote dependency    | Custom toolchains, reproducible CI, offline |
 
 > **Tip:** if your Skill does not touch the filesystem, `none` avoids sandbox provisioning and is significantly faster.
 
@@ -217,6 +218,37 @@ Common fields:
 | `kwargs.extensions` | OpenSandbox extension config as a JSON string. |
 | `kwargs.request_timeout_seconds` | Request timeout for the OpenSandbox SDK. |
 | `kwargs.file_transfer_parallelism` | Concurrency for directory download. |
+
+#### Docker configuration
+
+When `environment.type: docker` is used, the agent runs inside a local Docker container. This provides container-level isolation (filesystem, process, network) without any remote service dependency.
+
+**Prerequisites:** a working `docker` CLI on PATH and a running Docker daemon. The runtime does not pull images automatically — run `docker pull <image>` beforehand.
+
+```yaml
+environment:
+  type: docker
+  image: node:22                    # Required — must be pre-pulled locally
+  workspace_mount: /workspace       # Default: /workspace
+  env:
+    NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
+  setup_steps:
+    - run: npm install -g typescript
+  entrypoint: ["sleep", "infinity"] # Override container entrypoint (default: sleep infinity)
+```
+
+Common fields:
+
+| Field | Description |
+| --- | --- |
+| `image` | **Required.** Docker image name. Must be available locally (pre-pull with `docker pull`). |
+| `workspace_mount` | Workspace path inside the container; defaults to `/workspace`. Must be absolute. |
+| `env` | Environment variables injected into container commands. |
+| `setup_steps` | Init commands executed inside the container after it starts. |
+| `entrypoint` | Override the container's ENTRYPOINT. Defaults to `["sleep", "infinity"]`. |
+| `network_policy` | `deny_all` creates the container with `--network=none` (no network access). `allow_declared` is not yet supported — use `opensandbox` if you need FQDN-level egress filtering. |
+
+> **Tip:** Docker runtime is a good fit for evaluations that need custom system packages, specific language runtimes, or offline/air-gapped environments. For remote sandboxing with managed infrastructure, use `opensandbox` instead.
 
 ---
 

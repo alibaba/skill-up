@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"path"
 	"strings"
 )
 
@@ -17,6 +18,7 @@ const (
 const (
 	runtimeTypeNone        = "none"
 	runtimeTypeOpenSandbox = "opensandbox"
+	runtimeTypeDocker      = "docker"
 )
 
 // Validator checks eval and case documents against the v1alpha1 schema.
@@ -40,9 +42,16 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 
 	// environment.type is required
 	if cfg.Environment.Type == "" {
-		errs = append(errs, "environment.type is required (none, opensandbox)")
+		errs = append(errs, "environment.type is required (none, opensandbox, docker)")
 	} else if !isValidRuntimeType(cfg.Environment.Type) {
-		errs = append(errs, "environment.type must be one of: none, opensandbox")
+		errs = append(errs, "environment.type must be one of: none, opensandbox, docker")
+	}
+
+	// Docker-runtime fields that would otherwise silently pass `skill-up
+	// validate` and only fail later when NewDockerRuntime constructs the
+	// container — catch them at the preflight gate.
+	if cfg.Environment.Type == runtimeTypeDocker {
+		errs = append(errs, validateDockerEnvironment(cfg.Environment)...)
 	}
 
 	errs = append(errs, validateNetworkPolicy(cfg.Environment)...)
@@ -161,7 +170,33 @@ func (v *Validator) ValidateAll(result *EvalResult) error {
 }
 
 func isValidRuntimeType(t string) bool {
-	return t == runtimeTypeNone || t == runtimeTypeOpenSandbox
+	return t == runtimeTypeNone || t == runtimeTypeOpenSandbox || t == runtimeTypeDocker
+}
+
+// validateDockerEnvironment collects preflight errors for fields the docker
+// runtime would otherwise reject only at NewDockerRuntime construction time.
+// Keep this in sync with the parallel checks in internal/runtime/docker.go
+// — both layers enforce, but catching it here turns a runtime-error CI
+// failure into a clean validate-step failure.
+func validateDockerEnvironment(env Environment) []string {
+	var errs []string
+
+	// environment.image: required (opensandbox has its own image-or-
+	// sandbox-template fallback, docker does not).
+	if strings.TrimSpace(env.Image) == "" {
+		errs = append(errs, "environment.image is required when environment.type is docker")
+	}
+
+	// environment.workspace_mount: optional, but when set must be
+	// absolute — `docker create --workdir <relative>` is rejected, and
+	// our Upload/Download paths treat relative values as joined under
+	// the workspace which makes no sense if the workspace itself isn't
+	// absolute.
+	if mount := strings.TrimSpace(env.WorkspaceMount); mount != "" && !path.IsAbs(mount) {
+		errs = append(errs, fmt.Sprintf("environment.workspace_mount must be absolute when environment.type is docker, got %q", mount))
+	}
+
+	return errs
 }
 
 func isValidJudgeType(t string) bool {
@@ -180,7 +215,14 @@ func validateNetworkPolicy(env Environment) []string {
 		return []string{"network_policy must be one of: deny_all, allow_declared"}
 	}
 	if env.Type == runtimeTypeNone {
-		return []string{"network_policy requires environment.type opensandbox (none cannot enforce network isolation)"}
+		return []string{"network_policy requires environment.type opensandbox or docker (none cannot enforce network isolation)"}
+	}
+	// docker runtime currently implements only deny_all (via --network=none).
+	// allow_declared needs an egress proxy / iptables sidecar that is not
+	// yet in place. Reject early so users do not get a silent "all egress
+	// allowed" container at run time.
+	if env.Type == runtimeTypeDocker && policy == "allow_declared" {
+		return []string{"network_policy: allow_declared is not supported for environment.type docker (use deny_all or opensandbox)"}
 	}
 
 	var errs []string

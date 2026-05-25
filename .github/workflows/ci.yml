@@ -350,6 +350,91 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  e2e-docker:
+    name: E2E (docker runtime)
+    runs-on: ubuntu-latest
+    # Container lifecycle + image pull on a clean runner; comfortably under
+    # 15 min in practice but leave headroom for Docker Hub rate-limit retries.
+    timeout-minutes: 20
+    # No API keys / LLM credentials needed: these tests drive the docker
+    # runtime against a real daemon directly, no agent or model in the loop.
+    # That also means they run on fork PRs, unlike the other two e2e jobs.
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      - name: Verify docker is available
+        # ubuntu-latest runners ship docker pre-installed and running; this
+        # makes the dependency explicit so the failure mode is obvious if
+        # GitHub ever changes the image.
+        run: |
+          docker version
+          docker info
+
+      - name: Pre-pull base image
+        # Pre-pulling outside the test binary keeps the per-test timeouts
+        # tight and surfaces registry / rate-limit issues as their own step
+        # rather than a misleading test failure.
+        run: docker pull alpine:3.20
+
+      - name: Run docker integration tests
+        # `docker_integration` is the build tag added in internal/runtime/
+        # docker_integration_test.go. Tests skip cleanly if the daemon is
+        # missing, so this command is also safe to run locally.
+        run: go test -tags docker_integration -timeout 600s -count=1 -v ./internal/runtime/
+
+  e2e-docker-full:
+    name: E2E (docker runtime, full LLM)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check secret availability
+        id: secrets
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+        run: |
+          if [ -z "$DASHSCOPE_API_KEY" ]; then
+            echo "::notice::Skipping docker full e2e: DASHSCOPE_API_KEY not provisioned (likely a fork PR)."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-go@v6
+        if: steps.secrets.outputs.available == 'true'
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      - name: Pre-pull Docker image
+        if: steps.secrets.outputs.available == 'true'
+        run: docker pull node:22
+
+      - name: Run docker full e2e
+        if: steps.secrets.outputs.available == 'true'
+        run: go test -tags e2e -timeout 1800s -count=1 -v -run TestAgent_ClaudeCode_DockerRuntime ./e2e
+        env:
+          SKILL_UP_FULL_E2E: "1"
+          SKILL_UP_E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-docker-full-artifacts
+          ANTHROPIC_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          ANTHROPIC_BASE_URL: https://dashscope.aliyuncs.com/apps/anthropic
+          ANTHROPIC_MODEL: qwen3.6-plus
+
+      - name: Upload docker full e2e artifacts
+        if: always() && steps.secrets.outputs.available == 'true' && hashFiles('e2e-docker-full-artifacts/**') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-docker-full-workspaces
+          path: e2e-docker-full-artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
