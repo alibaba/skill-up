@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/alibaba/skill-up/internal/agent"
 	"github.com/alibaba/skill-up/internal/logging"
@@ -29,7 +30,7 @@ func TestAgentJudge_AllPass(t *testing.T) {
 	ag := &mockJudgeTestAgent{output: output}
 	rt := &mockJudgeTestRuntime{}
 
-	j := NewAgentJudge(ag, rt, "test-model", []string{"output identifies the bug", "no false positives", "actionable suggestion"}, nil)
+	j := NewAgentJudge(ag, rt, "test-model", []string{"output identifies the bug", "no false positives", "actionable suggestion"}, nil, 0)
 	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
 	assertNoError(t, err)
 	assertStatus(t, r, StatusPass)
@@ -61,14 +62,14 @@ func TestAgentJudge_PartialPass_AboveThreshold(t *testing.T) {
 	rt := &mockJudgeTestRuntime{}
 
 	// 2/3 = 0.667, threshold default 0.7 → FAIL
-	j := NewAgentJudge(ag, rt, "test-model", []string{"c1", "c2", "c3"}, nil)
+	j := NewAgentJudge(ag, rt, "test-model", []string{"c1", "c2", "c3"}, nil, 0)
 	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
 	assertNoError(t, err)
 	assertStatus(t, r, StatusFail) // 0.667 < 0.7
 
 	// With lower threshold 0.6 → PASS
 	threshold := 0.6
-	j2 := NewAgentJudge(ag, rt, "test-model", []string{"c1", "c2", "c3"}, &threshold)
+	j2 := NewAgentJudge(ag, rt, "test-model", []string{"c1", "c2", "c3"}, &threshold, 0)
 	r2, err := j2.Evaluate(context.Background(), Input{FinalMessage: "test"})
 	assertNoError(t, err)
 	assertStatus(t, r2, StatusPass) // 0.667 >= 0.6
@@ -86,7 +87,7 @@ func TestAgentJudge_AllFail(t *testing.T) {
 	ag := &mockJudgeTestAgent{output: output}
 	rt := &mockJudgeTestRuntime{}
 
-	j := NewAgentJudge(ag, rt, "test-model", []string{"c1", "c2"}, nil)
+	j := NewAgentJudge(ag, rt, "test-model", []string{"c1", "c2"}, nil, 0)
 	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
 	assertNoError(t, err)
 	assertStatus(t, r, StatusFail)
@@ -109,7 +110,7 @@ func TestAgentJudge_ThresholdExactlyMet(t *testing.T) {
 
 	// 1/2 = 0.5, threshold = 0.5 → PASS (>=)
 	threshold := 0.5
-	j := NewAgentJudge(ag, rt, "test-model", []string{"c1", "c2"}, &threshold)
+	j := NewAgentJudge(ag, rt, "test-model", []string{"c1", "c2"}, &threshold, 0)
 	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
 	assertNoError(t, err)
 	assertStatus(t, r, StatusPass)
@@ -123,7 +124,7 @@ func TestAgentJudge_AgentError(t *testing.T) {
 	ag := &mockJudgeTestAgent{err: errors.New("API rate limit exceeded")}
 	rt := &mockJudgeTestRuntime{}
 
-	j := NewAgentJudge(ag, rt, "test-model", []string{"c1"}, nil)
+	j := NewAgentJudge(ag, rt, "test-model", []string{"c1"}, nil, 0)
 	_, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
 	if err == nil {
 		t.Fatal("expected error from agent")
@@ -146,7 +147,7 @@ func TestAgentJudge_AgentError_PreservesSession(t *testing.T) {
 	}
 	rt := &mockJudgeTestRuntime{}
 
-	j := NewAgentJudge(ag, rt, "test-model", []string{"c1"}, nil)
+	j := NewAgentJudge(ag, rt, "test-model", []string{"c1"}, nil, 0)
 	_, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
 	if err == nil {
 		t.Fatal("expected error from agent")
@@ -167,7 +168,7 @@ func TestAgentJudge_RecoversTimedOutSessionWithValidJSON(t *testing.T) {
 	}
 	rt := &mockJudgeTestRuntime{}
 
-	j := NewAgentJudge(ag, rt, "test-model", []string{"c1"}, nil)
+	j := NewAgentJudge(ag, rt, "test-model", []string{"c1"}, nil, 0)
 	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
 	assertNoError(t, err)
 	assertStatus(t, r, StatusPass)
@@ -188,7 +189,7 @@ func TestAgentJudge_RecoveryLogsWarning(t *testing.T) {
 	rt := &mockJudgeTestRuntime{}
 
 	captured := captureLogOutput(t, func() {
-		j := NewAgentJudge(ag, rt, "test-model", []string{"c1"}, nil)
+		j := NewAgentJudge(ag, rt, "test-model", []string{"c1"}, nil, 0)
 		_, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
 		assertNoError(t, err)
 	})
@@ -208,7 +209,7 @@ func TestAgentJudge_CanceledSessionDoesNotRecover(t *testing.T) {
 	}
 	rt := &mockJudgeTestRuntime{}
 
-	j := NewAgentJudge(ag, rt, "test-model", []string{"c1"}, nil)
+	j := NewAgentJudge(ag, rt, "test-model", []string{"c1"}, nil, 0)
 	_, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
 	if err == nil {
 		t.Fatal("expected error for canceled judge run")
@@ -233,7 +234,7 @@ func TestAgentJudge_RecoversNonZeroExitWithValidJSON(t *testing.T) {
 	}
 	rt := &mockJudgeTestRuntime{}
 
-	j := NewAgentJudge(ag, rt, "test-model", []string{"c1"}, nil)
+	j := NewAgentJudge(ag, rt, "test-model", []string{"c1"}, nil, 0)
 	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
 	assertNoError(t, err)
 	assertStatus(t, r, StatusFail)
@@ -250,7 +251,7 @@ func TestAgentJudge_EmptyCriteria(t *testing.T) {
 	ag := &mockJudgeTestAgent{}
 	rt := &mockJudgeTestRuntime{}
 
-	j := NewAgentJudge(ag, rt, "test-model", []string{}, nil)
+	j := NewAgentJudge(ag, rt, "test-model", []string{}, nil, 0)
 	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
 	assertNoError(t, err)
 	assertStatus(t, r, StatusPass)
@@ -267,7 +268,7 @@ func TestAgentJudge_EvidencePreserved(t *testing.T) {
 	ag := &mockJudgeTestAgent{output: output}
 	rt := &mockJudgeTestRuntime{}
 
-	j := NewAgentJudge(ag, rt, "test-model", []string{"identified the bug"}, nil)
+	j := NewAgentJudge(ag, rt, "test-model", []string{"identified the bug"}, nil, 0)
 	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
 	assertNoError(t, err)
 	if len(r.AssertionResults) != 1 {
@@ -299,14 +300,14 @@ func TestAgentJudge_CustomThreshold(t *testing.T) {
 	// 3/4 = 0.75
 	// threshold 0.8 → FAIL
 	threshold := 0.8
-	j := NewAgentJudge(ag, rt, "test-model", []string{"c1", "c2", "c3", "c4"}, &threshold)
+	j := NewAgentJudge(ag, rt, "test-model", []string{"c1", "c2", "c3", "c4"}, &threshold, 0)
 	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
 	assertNoError(t, err)
 	assertStatus(t, r, StatusFail)
 
 	// threshold 0.75 → PASS
 	threshold2 := 0.75
-	j2 := NewAgentJudge(ag, rt, "test-model", []string{"c1", "c2", "c3", "c4"}, &threshold2)
+	j2 := NewAgentJudge(ag, rt, "test-model", []string{"c1", "c2", "c3", "c4"}, &threshold2, 0)
 	r2, err := j2.Evaluate(context.Background(), Input{FinalMessage: "test"})
 	assertNoError(t, err)
 	assertStatus(t, r2, StatusPass)
@@ -402,7 +403,7 @@ func TestAgentJudge_PartialResults_ReturnsError(t *testing.T) {
 	ag := &mockJudgeTestAgent{output: output}
 	rt := &mockJudgeTestRuntime{}
 
-	j := NewAgentJudge(ag, rt, "test-model", []string{"c1", "c2", "c3"}, nil)
+	j := NewAgentJudge(ag, rt, "test-model", []string{"c1", "c2", "c3"}, nil, 0)
 	_, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
 	if err == nil {
 		t.Fatal("expected error for partial criterion results")
@@ -421,7 +422,7 @@ func TestAgentJudge_EmptyResults_ReturnsError(t *testing.T) {
 	ag := &mockJudgeTestAgent{output: output}
 	rt := &mockJudgeTestRuntime{}
 
-	j := NewAgentJudge(ag, rt, "test-model", []string{"c1", "c2"}, nil)
+	j := NewAgentJudge(ag, rt, "test-model", []string{"c1", "c2"}, nil, 0)
 	_, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
 	if err == nil {
 		t.Fatal("expected error for empty criterion results")
@@ -443,7 +444,7 @@ func TestAgentJudge_EmptyEvidence_ReturnsError(t *testing.T) {
 	ag := &mockJudgeTestAgent{output: output}
 	rt := &mockJudgeTestRuntime{}
 
-	j := NewAgentJudge(ag, rt, "test-model", []string{"c1", "c2"}, nil)
+	j := NewAgentJudge(ag, rt, "test-model", []string{"c1", "c2"}, nil, 0)
 	_, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
 	if err == nil {
 		t.Fatal("expected error for empty evidence")
@@ -451,6 +452,97 @@ func TestAgentJudge_EmptyEvidence_ReturnsError(t *testing.T) {
 	if !strings.Contains(err.Error(), "empty evidence") {
 		t.Fatalf("unexpected error message: %v", err)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// TimeoutSeconds wiring
+// ---------------------------------------------------------------------------
+
+func TestAgentJudge_TimeoutSeconds_AppliesDeadline(t *testing.T) {
+	ag := &mockJudgeTestAgent{
+		output:   buildMockAgentOutput([]CriterionResult{{Criterion: "c1", Passed: true, Evidence: "ok"}}),
+		runDelay: 500 * time.Millisecond,
+	}
+	rt := &mockJudgeTestRuntime{}
+
+	j := NewAgentJudge(ag, rt, "test-model", []string{"c1"}, nil, 1) // 1s budget should beat the 500ms delay
+	deadline, ok := assertEvaluatesWithDeadline(t, j, ag)
+	if !ok {
+		t.Fatalf("expected agent ctx to have a deadline when TimeoutSeconds=1")
+	}
+	if d := time.Until(deadline); d <= 0 || d > time.Second {
+		t.Fatalf("deadline %v not within (0,1s] from now", d)
+	}
+}
+
+func TestAgentJudge_TimeoutSeconds_ZeroDoesNotShortenParentCtx(t *testing.T) {
+	ag := &mockJudgeTestAgent{output: buildMockAgentOutput([]CriterionResult{{Criterion: "c1", Passed: true, Evidence: "ok"}})}
+	rt := &mockJudgeTestRuntime{}
+
+	j := NewAgentJudge(ag, rt, "test-model", []string{"c1"}, nil, 0)
+	if _, err := j.Evaluate(context.Background(), Input{FinalMessage: "x"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ag.observedDeadlineOK {
+		t.Fatalf("expected no deadline on inner ctx when TimeoutSeconds=0, got %v", ag.observedDeadline)
+	}
+}
+
+func TestAgentJudge_TimeoutSeconds_DeadlineKillsSlowAgent(t *testing.T) {
+	ag := &mockJudgeTestAgent{
+		output:   buildMockAgentOutput([]CriterionResult{{Criterion: "c1", Passed: true, Evidence: "ok"}}),
+		runDelay: 2 * time.Second,
+	}
+	rt := &mockJudgeTestRuntime{}
+
+	j := NewAgentJudge(ag, rt, "test-model", []string{"c1"}, nil, 1) // 1s budget, agent takes 2s
+	start := time.Now()
+	_, err := j.Evaluate(context.Background(), Input{FinalMessage: "x"})
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatalf("expected error when agent exceeds judge timeout")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected wrapped context.DeadlineExceeded, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "judge timeout 1s via judge.timeout_seconds") {
+		t.Fatalf("expected judge timeout annotation in error, got %v", err)
+	}
+	if elapsed > 1500*time.Millisecond {
+		t.Fatalf("Evaluate ran %v, expected to abort near the 1s deadline", elapsed)
+	}
+}
+
+func TestAgentJudge_TimeoutSeconds_ParentTimeoutNotAnnotatedAsJudgeTimeout(t *testing.T) {
+	ag := &mockJudgeTestAgent{
+		output:   buildMockAgentOutput([]CriterionResult{{Criterion: "c1", Passed: true, Evidence: "ok"}}),
+		runDelay: 2 * time.Second,
+	}
+	rt := &mockJudgeTestRuntime{}
+
+	// Judge has a generous 10s budget; the parent ctx is the binding deadline at 200ms.
+	j := NewAgentJudge(ag, rt, "test-model", []string{"c1"}, nil, 10)
+	parentCtx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	_, err := j.Evaluate(parentCtx, Input{FinalMessage: "x"})
+	if err == nil {
+		t.Fatalf("expected error when parent ctx expires")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected wrapped context.DeadlineExceeded, got %v", err)
+	}
+	if strings.Contains(err.Error(), "judge.timeout_seconds") {
+		t.Fatalf("parent-ctx deadline must not be labelled as judge timeout, got %v", err)
+	}
+}
+
+func assertEvaluatesWithDeadline(t *testing.T, j *AgentJudge, ag *mockJudgeTestAgent) (time.Time, bool) {
+	t.Helper()
+	if _, err := j.Evaluate(context.Background(), Input{FinalMessage: "x"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return ag.observedDeadline, ag.observedDeadlineOK
 }
 
 // ---------------------------------------------------------------------------

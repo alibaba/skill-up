@@ -324,7 +324,12 @@ func TestExecuteCase_PassesAgentArtifactDir(t *testing.T) {
 	}
 }
 
-func TestExecuteCase_AgentTimeoutWithRecoveredResultContinuesJudge(t *testing.T) {
+// Strict-budget regression: an agent run that returns context.DeadlineExceeded
+// must surface as ERROR regardless of whether the partial sessionResult would
+// have satisfied the judge. Previously this case was salvaged by re-running
+// the judge against the truncated transcript; that behaviour is intentionally
+// removed so the case timeout strictly bounds agent + judge together.
+func TestExecuteCase_AgentTimeoutWithPartialResultStillErrors(t *testing.T) {
 	e := newTestEvaluator(EvalOptions{
 		Agent: &mockAgent{name: "test"},
 		EvalCfg: &config.EvalConfig{
@@ -338,8 +343,8 @@ func TestExecuteCase_AgentTimeoutWithRecoveredResultContinuesJudge(t *testing.T)
 	})
 
 	caseCfg := &config.CaseConfig{
-		ID:    "case-timeout-recover",
-		Title: "Recovered timeout result",
+		ID:    "case-timeout-no-salvage",
+		Title: "Timed-out agent is not salvaged through judge",
 		Input: config.Input{Prompt: "hello"},
 	}
 
@@ -355,11 +360,11 @@ func TestExecuteCase_AgentTimeoutWithRecoveredResultContinuesJudge(t *testing.T)
 
 	result := e.executeCase(context.Background(), caseCfg, "with_skill", &mockRuntime{workspace: t.TempDir()}, ag)
 
-	if result.Status != judge.StatusPass {
-		t.Fatalf("expected PASS after recovering timed out agent result, got %s (err=%v)", result.Status, result.Error)
+	if result.Status != judge.StatusError {
+		t.Fatalf("expected ERROR (no salvage), got %s (err=%v)", result.Status, result.Error)
 	}
-	if result.Error != nil {
-		t.Fatalf("expected nil error after recovery, got %v", result.Error)
+	if result.Error == nil || !strings.Contains(result.Error.Error(), "agent execution failed") {
+		t.Fatalf("expected agent execution failed error, got %v", result.Error)
 	}
 }
 
@@ -391,14 +396,87 @@ func TestExecuteCase_AgentTimeoutWithoutRecoveredResultErrors(t *testing.T) {
 	}
 }
 
-func TestExecuteCase_RecoveredTimeoutWithoutJudgeStaysError(t *testing.T) {
+func TestExecuteCase_TimeoutErrorNamesConfigKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		evalDefault int
+		caseLimit   int
+		wantSource  string
+		wantSeconds int
+	}{
+		{
+			name:        "case constraint wins over eval default",
+			evalDefault: 60,
+			caseLimit:   1,
+			wantSource:  "case.constraints.timeout_seconds",
+			wantSeconds: 1,
+		},
+		{
+			name:        "eval default applies when case has none",
+			evalDefault: 1,
+			caseLimit:   0,
+			wantSource:  "cases.defaults.timeout_seconds",
+			wantSeconds: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			e := newTestEvaluator(EvalOptions{
+				Agent: &mockAgent{name: "test"},
+				EvalCfg: &config.EvalConfig{
+					Cases: config.CasesConfig{
+						Defaults: config.CaseDefaults{TimeoutSeconds: tt.evalDefault},
+					},
+				},
+			})
+
+			caseCfg := &config.CaseConfig{
+				ID:          "case-timeout-annotation",
+				Title:       "Timeout error names the configured knob",
+				Input:       config.Input{Prompt: "hello"},
+				Constraints: config.Constraints{TimeoutSeconds: tt.caseLimit},
+			}
+
+			ag := &mockAgent{
+				name: "test",
+				runFunc: func(ctx context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ []transcript.Message) (*agent.SessionResult, error) {
+					<-ctx.Done()
+					return &agent.SessionResult{ExitCode: -1}, ctx.Err()
+				},
+			}
+
+			result := e.executeCase(context.Background(), caseCfg, "with_skill", &mockRuntime{workspace: t.TempDir()}, ag)
+
+			if result.Status != judge.StatusError {
+				t.Fatalf("expected ERROR, got %s", result.Status)
+			}
+			if result.Error == nil {
+				t.Fatal("expected non-nil error")
+			}
+			if !errors.Is(result.Error, context.DeadlineExceeded) {
+				t.Fatalf("expected error chain to contain context.DeadlineExceeded, got %v", result.Error)
+			}
+			want := fmt.Sprintf("case timeout %ds via %s", tt.wantSeconds, tt.wantSource)
+			if !strings.Contains(result.Error.Error(), want) {
+				t.Fatalf("expected error to mention %q, got %v", want, result.Error)
+			}
+		})
+	}
+}
+
+func TestExecuteCase_TimeoutWithoutJudgeIsError(t *testing.T) {
 	e := newTestEvaluator(EvalOptions{
 		Agent: &mockAgent{name: "test"},
 	})
 
 	caseCfg := &config.CaseConfig{
 		ID:    "case-timeout-no-judge",
-		Title: "Recovered timeout without judge",
+		Title: "Timed-out agent without judge stays ERROR",
 		Input: config.Input{Prompt: "hello"},
 	}
 
@@ -461,19 +539,17 @@ func TestExecuteCase_AgentCanceledWithPartialResultErrors(t *testing.T) {
 	}
 }
 
-func TestExecuteCase_RecoveredTimeoutAgentJudgeUsesFreshContext(t *testing.T) {
-	parentCtx, cancel := context.WithCancel(context.Background())
-	cancel()
-
+// Strict-budget regression: when the agent run times out, agent_judge MUST
+// NOT be invoked against a fresh context to salvage a verdict. The old
+// behaviour (evaluator.evaluationContext rewrapping ctx with WithoutCancel)
+// is intentionally gone so the case timeout strictly bounds agent + judge.
+func TestExecuteCase_AgentTimeoutDoesNotInvokeAgentJudge(t *testing.T) {
+	judgeRuns := atomic.Int32{}
 	judgeAgent := &mockAgent{
 		name: "judge",
-		runFunc: func(ctx context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ []transcript.Message) (*agent.SessionResult, error) {
-			if ctx.Err() != nil {
-				return nil, fmt.Errorf("judge received canceled context: %w", ctx.Err())
-			}
-			return &agent.SessionResult{
-				FinalMessage: `{"passed":true,"summary":"ok","criteria":[{"name":"recovered","passed":true,"evidence":"ok"}]}`,
-			}, nil
+		runFunc: func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ []transcript.Message) (*agent.SessionResult, error) {
+			judgeRuns.Add(1)
+			return &agent.SessionResult{FinalMessage: `{"results":[{"criterion":"recovered","passed":true,"evidence":"ok"}]}`}, nil
 		},
 	}
 
@@ -482,7 +558,8 @@ func TestExecuteCase_RecoveredTimeoutAgentJudgeUsesFreshContext(t *testing.T) {
 		EvalCfg: &config.EvalConfig{
 			Engine: config.EngineConfig{Name: "mock"},
 			Judge: config.JudgeConfig{
-				Type: "agent_judge",
+				Type:     "agent_judge",
+				Criteria: []string{"recovered"},
 			},
 		},
 	})
@@ -494,11 +571,12 @@ func TestExecuteCase_RecoveredTimeoutAgentJudgeUsesFreshContext(t *testing.T) {
 	defer func() { agentDetectWithInitParams = origDetect }()
 
 	caseCfg := &config.CaseConfig{
-		ID:    "case-timeout-agent-judge",
-		Title: "Recovered timeout continues into agent judge",
+		ID:    "case-timeout-no-judge-salvage",
+		Title: "Timed-out agent does not invoke agent_judge",
 		Input: config.Input{Prompt: "hello"},
 		Judge: config.JudgeConfig{
-			Type: "agent_judge",
+			Type:     "agent_judge",
+			Criteria: []string{"recovered"},
 		},
 	}
 
@@ -512,13 +590,13 @@ func TestExecuteCase_RecoveredTimeoutAgentJudgeUsesFreshContext(t *testing.T) {
 		},
 	}
 
-	result := e.executeCase(parentCtx, caseCfg, "with_skill", &mockRuntime{workspace: t.TempDir()}, runAgent)
+	result := e.executeCase(context.Background(), caseCfg, "with_skill", &mockRuntime{workspace: t.TempDir()}, runAgent)
 
-	if result.Status != judge.StatusPass {
-		t.Fatalf("expected PASS after recovered timeout enters agent_judge with fresh context, got %s (err=%v)", result.Status, result.Error)
+	if result.Status != judge.StatusError {
+		t.Fatalf("expected ERROR (no salvage), got %s (err=%v)", result.Status, result.Error)
 	}
-	if result.Error != nil {
-		t.Fatalf("expected nil error, got %v", result.Error)
+	if got := judgeRuns.Load(); got != 0 {
+		t.Fatalf("agent_judge must not be invoked when the agent run timed out, got %d runs", got)
 	}
 }
 

@@ -417,6 +417,7 @@ judge:
     - "Does not flag correct code as a bug"
     - "Recommendations are actionable, not generic"
   pass_threshold: 0.7                        # Default 0.7
+  timeout_seconds: 60                        # Optional: bound a single judge call (0 = no judge-level deadline, parent case timeout still applies)
 ```
 
 > **Cost note:** `agent_judge` consumes additional tokens. Prefer `expect` or `rule_based` for deterministic checks and reserve `agent_judge` for assertions that genuinely require semantic understanding.

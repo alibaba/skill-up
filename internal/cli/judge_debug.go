@@ -309,7 +309,7 @@ func buildMockAgentJudge(cfg config.JudgeConfig, mockResults []judge.CriterionRe
 	}
 
 	ag := &mockJudgeAgent{results: mockResults}
-	return judge.NewAgentJudge(ag, nil, cfg.Model, cfg.Criteria, cfg.PassThreshold), nil
+	return judge.NewAgentJudge(ag, nil, cfg.Model, cfg.Criteria, cfg.PassThreshold, 0), nil
 }
 
 // ---------------------------------------------------------------------------

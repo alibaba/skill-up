@@ -201,7 +201,17 @@ func (r *NoneRuntime) Exec(ctx context.Context, command string, opts ExecOptions
 		// hit its deadline. -1 is a sentinel, not a real exit code, and
 		// attaching the full command source ("exited with code -1: set
 		// -e ...") misleads readers into chasing a script-level failure.
-		logging.ErrorContextf(ctx, "command killed by context (%v); command: %s", ctx.Err(), maskCommand(command))
+		// When this was specifically a deadline (not a manual cancel),
+		// include "deadline elapsed by Xs" so the surrounding logs make
+		// the timeout obvious and the higher layer's error wrapper can be
+		// correlated with this line.
+		reason := ctx.Err().Error()
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			if deadline, ok := ctx.Deadline(); ok {
+				reason = fmt.Sprintf("%s (deadline elapsed by %s)", reason, time.Since(deadline).Round(time.Millisecond))
+			}
+		}
+		logging.ErrorContextf(ctx, "command killed by context (%s); command: %s", reason, maskCommand(command))
 		if result.Stderr != "" {
 			logNonZeroStderr(ctx, result.ExitCode, result.Stderr)
 		}

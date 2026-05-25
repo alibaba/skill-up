@@ -417,6 +417,7 @@ judge:
     - "没有将正确代码误报为 bug"
     - "建议具有可操作性，不是泛泛而谈"
   pass_threshold: 0.7                        # 通过率阈值，默认 0.7
+  timeout_seconds: 60                        # 可选：限制单次 judge 调用时长（0 = 不加 judge 级 deadline，仍受 case timeout 约束）
 ```
 
 > **成本提示**：`agent_judge` 会消耗额外的 token。建议对关键断言先用 `expect` 或 `rule_based` 做确定性检查，只对需要语义理解的部分使用 `agent_judge`。

@@ -119,6 +119,45 @@ func TestNewJudge_AgentJudge_CustomThreshold(t *testing.T) {
 	}
 }
 
+// Regression: judge.timeout_seconds must reach AgentJudge through the factory.
+// Was silently dropped at one point when the parameter list was rewritten in
+// bulk and the factory call site got a hardcoded 0.
+func TestNewJudge_AgentJudge_PropagatesTimeoutSeconds(t *testing.T) {
+	cfg := config.JudgeConfig{
+		Type:           "agent_judge",
+		Model:          "test-model",
+		Criteria:       []string{"c1"},
+		TimeoutSeconds: intPtr(45),
+	}
+	j, err := NewJudge(cfg, &mockJudgeTestAgent{}, &mockJudgeTestRuntime{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	aj, ok := j.(*AgentJudge)
+	if !ok {
+		t.Fatalf("expected *AgentJudge, got %T", j)
+	}
+	if aj.TimeoutSeconds != 45 {
+		t.Errorf("expected TimeoutSeconds 45 from cfg, got %d", aj.TimeoutSeconds)
+	}
+}
+
+func TestNewJudge_AgentJudge_NilTimeoutSecondsDefaultsToZero(t *testing.T) {
+	cfg := config.JudgeConfig{
+		Type:     "agent_judge",
+		Model:    "test-model",
+		Criteria: []string{"c1"},
+	}
+	j, err := NewJudge(cfg, &mockJudgeTestAgent{}, &mockJudgeTestRuntime{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	aj := j.(*AgentJudge)
+	if aj.TimeoutSeconds != 0 {
+		t.Errorf("expected TimeoutSeconds 0 when unset, got %d", aj.TimeoutSeconds)
+	}
+}
+
 func TestNewJudge_AgentJudge_NilAgent(t *testing.T) {
 	cfg := config.JudgeConfig{Type: "agent_judge"}
 	_, err := NewJudge(cfg, nil, nil)
