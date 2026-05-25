@@ -38,7 +38,7 @@ func NewJudge(cfg config.JudgeConfig, ag agent.Agent, rt runtime.Runtime) (Judge
 		if ag == nil {
 			return nil, errors.New("agent_judge requires an Agent")
 		}
-		return NewAgentJudge(ag, rt, cfg.Model, cfg.Criteria, cfg.PassThreshold), nil
+		return NewAgentJudge(ag, rt, cfg.Model, cfg.Criteria, cfg.PassThreshold, derefInt(cfg.TimeoutSeconds)), nil
 
 	case "":
 		// No judge configured — return nil, caller should handle

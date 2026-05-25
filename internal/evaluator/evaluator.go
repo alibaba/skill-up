@@ -35,8 +35,6 @@ var (
 	agentDetectWithInitParams = agent.DetectAgentWithInitParams
 )
 
-const minRecoverableSessionTextLen = 16
-
 // ProgressObserver receives progress notifications during evaluation.
 // Implementations must be safe for concurrent use.
 type ProgressObserver interface {
@@ -265,9 +263,10 @@ func (e *defaultEvaluator) executeCase(ctx context.Context, caseCfg *config.Case
 
 	var result EvalResult
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		attemptCtx, cancel := withCaseTimeout(ctx, e.evalCfg.Cases.Defaults.TimeoutSeconds, caseCfg.Constraints.TimeoutSeconds)
+		attemptCtx, cancel, timeoutSource, timeoutSec := withCaseTimeout(ctx, e.evalCfg.Cases.Defaults.TimeoutSeconds, caseCfg.Constraints.TimeoutSeconds)
 		result = e.executeCaseOnce(attemptCtx, caseCfg, configName, overrideRT, overrideAgent)
 		cancel()
+		annotateCaseTimeoutError(&result, timeoutSource, timeoutSec)
 
 		retryReason, ok := retryReasonForResult(result)
 		if !ok || !retryAllowed(e.evalCfg.Cases.RetryPolicy, retryReason) || attempt == maxAttempts {
@@ -381,32 +380,27 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	if shouldReturn := e.handleExecutionResult(ctx, caseCfg, configName, startTime, &result, execErr); shouldReturn {
 		return result
 	}
-	recoveredExecution := execErr != nil
-	// A genuine non-zero exit without a Go-level execution error may still be
-	// handled by expect.exit_code or a configured judge. Recovered timeout/cancel
-	// paths also flow through here, but if nothing is configured to interpret the
-	// partial result they remain execution errors rather than ordinary FAILs.
-	if sessionResult != nil && sessionResult.ExitCode != 0 { //nolint:nestif // exit-code triage requires correlating multiple flags (expect / judge / recoveredExecution) before deciding the terminal status.
+	// A genuine non-zero exit may still be handled by expect.exit_code or a
+	// configured judge; otherwise it's just a FAIL. (handleExecutionResult
+	// already converted any execErr — including ctx.DeadlineExceeded — into
+	// an ERROR return above, so we're guaranteed execErr == nil here and the
+	// case timeout strictly bounds agent + judge as a single budget.)
+	if sessionResult != nil && sessionResult.ExitCode != 0 {
 		hasExitCodeCheck := caseCfg.Expect.ExitCode != nil
 		hasJudge := judgeCfg.Type != ""
 		if !hasExitCodeCheck && !hasJudge {
 			if result.DurationMs == 0 {
 				result.DurationMs = time.Since(startTime).Milliseconds()
 			}
-			if recoveredExecution {
-				result.Status = judge.StatusError
-				result.Error = fmt.Errorf("agent execution failed: %w", execErr)
-			} else {
-				result.Status = judge.StatusFail
-			}
+			result.Status = judge.StatusFail
 			result.Configuration = configName
-			logging.DebugContextf(ctx, "Evaluator: case %s agent exited with code %d (no expect.exit_code or judge), marking %s", caseCfg.ID, sessionResult.ExitCode, result.Status)
+			logging.DebugContextf(ctx, "Evaluator: case %s agent exited with code %d (no expect.exit_code or judge), marking FAIL", caseCfg.ID, sessionResult.ExitCode)
 			return result
 		}
 		logging.DebugContextf(ctx, "Evaluator: case %s agent exited with code %d, proceeding to evaluation", caseCfg.ID, sessionResult.ExitCode)
 	}
 
-	return e.evaluateCaseSession(e.evaluationContext(ctx, execErr), rt, caseCfg, configName, judgeCfg, turnsTotal, runAgent, sessionResult, &result)
+	return e.evaluateCaseSession(ctx, rt, caseCfg, configName, judgeCfg, turnsTotal, runAgent, sessionResult, &result)
 }
 
 //nolint:spancheck // caller owns the returned span and must end it.
@@ -658,15 +652,35 @@ func resolveJudgeScriptPath(skillDir string, judgeCfg config.JudgeConfig) config
 	return judgeCfg
 }
 
-func withCaseTimeout(ctx context.Context, defaultTimeoutSec, caseTimeoutSec int) (context.Context, context.CancelFunc) {
-	timeoutSec := caseTimeoutSec
-	if timeoutSec <= 0 {
-		timeoutSec = defaultTimeoutSec
+// annotateCaseTimeoutError attaches the configured case timeout and its
+// source config key to a result whose error chain contains
+// context.DeadlineExceeded. The annotation is purely informational; the
+// original DeadlineExceeded is preserved via %w so callers (and isTimeoutError)
+// still match it.
+func annotateCaseTimeoutError(result *EvalResult, source string, seconds int) {
+	if result == nil || result.Error == nil || source == "" || seconds <= 0 {
+		return
 	}
-	if timeoutSec <= 0 {
-		return ctx, func() {}
+	if !errors.Is(result.Error, context.DeadlineExceeded) {
+		return
 	}
-	return context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
+	result.Error = fmt.Errorf("%w (case timeout %ds via %s)", result.Error, seconds, source)
+}
+
+// withCaseTimeout returns a derived context bounded by the case-level
+// timeout, along with the resolved value and the config key that supplied it
+// (so timeout errors can name the knob users need to adjust). source/seconds
+// are empty/zero when no timeout is configured.
+func withCaseTimeout(ctx context.Context, defaultTimeoutSec, caseTimeoutSec int) (context.Context, context.CancelFunc, string, int) {
+	if caseTimeoutSec > 0 {
+		c, cancel := context.WithTimeout(ctx, time.Duration(caseTimeoutSec)*time.Second)
+		return c, cancel, "case.constraints.timeout_seconds", caseTimeoutSec
+	}
+	if defaultTimeoutSec > 0 {
+		c, cancel := context.WithTimeout(ctx, time.Duration(defaultTimeoutSec)*time.Second)
+		return c, cancel, "cases.defaults.timeout_seconds", defaultTimeoutSec
+	}
+	return ctx, func() {}, "", 0
 }
 
 func retryAllowed(policy config.RetryPolicy, reason string) bool {
@@ -691,9 +705,14 @@ func retryReasonForResult(result EvalResult) (string, bool) {
 	return "error", true
 }
 
+// handleExecutionResult finalises the EvalResult when the agent run returned an
+// error. Any execErr (including ctx.DeadlineExceeded) terminates the case as
+// ERROR: the case timeout is treated as a single budget for agent + judge, so
+// we do not try to salvage partial output by running the judge against a
+// truncated agent transcript.
 func (e *defaultEvaluator) handleExecutionResult(
-	ctx context.Context,
-	caseCfg *config.CaseConfig,
+	_ context.Context,
+	_ *config.CaseConfig,
 	configName string,
 	startTime time.Time,
 	result *EvalResult,
@@ -702,61 +721,13 @@ func (e *defaultEvaluator) handleExecutionResult(
 	if execErr == nil {
 		return false
 	}
-	if !canContinueAfterExecutionError(execErr, result.SessionResult) {
-		if result.DurationMs == 0 {
-			result.DurationMs = time.Since(startTime).Milliseconds()
-		}
-		result.Status = judge.StatusError
-		result.Error = fmt.Errorf("agent execution failed: %w", execErr)
-		result.Configuration = configName
-		return true
-	}
 	if result.DurationMs == 0 {
 		result.DurationMs = time.Since(startTime).Milliseconds()
 	}
-	logging.WarnContextf(
-		ctx,
-		"Runner: case %s (%s) continuing with recovered agent result after %v",
-		caseCfg.ID,
-		configName,
-		execErr,
-	)
-	return false
-}
-
-func (e *defaultEvaluator) evaluationContext(ctx context.Context, execErr error) context.Context {
-	if !isInterruptedError(execErr) || ctx.Err() == nil {
-		return ctx
-	}
-	return context.WithoutCancel(ctx)
-}
-
-func canContinueAfterExecutionError(err error, sessionResult *agent.SessionResult) bool {
-	return isInterruptedError(err) && hasRecoverableSessionResult(sessionResult)
-}
-
-func hasRecoverableSessionResult(sessionResult *agent.SessionResult) bool {
-	if sessionResult == nil {
-		return false
-	}
-	if hasRecoverableText(sessionResult.FinalMessage) {
-		return true
-	}
-	if hasRecoverableText(sessionResult.Transcript.FinalAssistantMessage()) {
-		return true
-	}
-	if sessionResult.Artifacts == nil {
-		return false
-	}
-	return hasRecoverableText(sessionResult.Artifacts.WorkspaceDiff)
-}
-
-func isInterruptedError(err error) bool {
-	return errors.Is(err, context.DeadlineExceeded)
-}
-
-func hasRecoverableText(text string) bool {
-	return len(strings.TrimSpace(text)) >= minRecoverableSessionTextLen
+	result.Status = judge.StatusError
+	result.Error = fmt.Errorf("agent execution failed: %w", execErr)
+	result.Configuration = configName
+	return true
 }
 
 func isTimeoutError(err error) bool {

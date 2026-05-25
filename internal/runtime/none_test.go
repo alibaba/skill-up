@@ -220,6 +220,53 @@ func TestNoneRuntime_ExecReturnsContextErrorOnTimeout(t *testing.T) {
 	}
 }
 
+func TestNoneRuntime_ExecLogsDeadlineDelta_OnTimeout(t *testing.T) {
+	rt := &NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	output := captureStdout(t, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		_, _ = rt.Exec(ctx, "sleep 1", ExecOptions{})
+	})
+
+	if !strings.Contains(output, "command killed by context (context deadline exceeded") {
+		t.Fatalf("expected timeout reason in log, got: %s", output)
+	}
+	if !strings.Contains(output, "deadline elapsed by") {
+		t.Fatalf("expected deadline-elapsed annotation in log, got: %s", output)
+	}
+}
+
+func TestNoneRuntime_ExecOmitsDeadlineDelta_OnManualCancel(t *testing.T) {
+	rt := &NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	output := captureStdout(t, func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			cancel()
+		}()
+		_, _ = rt.Exec(ctx, "sleep 1", ExecOptions{})
+	})
+
+	if !strings.Contains(output, "command killed by context (context canceled") {
+		t.Fatalf("expected cancel reason in log, got: %s", output)
+	}
+	// A manual cancel has no deadline; the negative-elapsed annotation must
+	// not appear (it would read "deadline elapsed by -…").
+	if strings.Contains(output, "deadline elapsed by") {
+		t.Fatalf("must not annotate deadline on manual cancel, got: %s", output)
+	}
+}
+
 func TestNoneRuntime_ExecAddsSpanCommandAttrs(t *testing.T) {
 	rt := &NoneRuntime{}
 	if err := rt.Create(context.Background()); err != nil {

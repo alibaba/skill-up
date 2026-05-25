@@ -437,7 +437,7 @@ func TestE2E_JudgePolymorphism_SameInputDifferentStrategies(t *testing.T) {
 	})
 	mockAg := &mockJudgeTestAgent{output: agentOutput}
 	mockRt := &mockJudgeTestRuntime{}
-	agentJudge := NewAgentJudge(mockAg, mockRt, "gpt-5.4", []string{"identified the bug", "provided fix suggestion"}, nil)
+	agentJudge := NewAgentJudge(mockAg, mockRt, "gpt-5.4", []string{"identified the bug", "provided fix suggestion"}, nil, 0)
 
 	ctx := context.Background()
 
@@ -715,7 +715,7 @@ func TestE2E_AgentJudge_WithExpect_ThresholdDecision(t *testing.T) {
 
 	// threshold 0.7 → 0.667 < 0.7 → FAIL.
 	judge1 := NewAgentJudge(mockAg, mockRt, "gpt-5.4",
-		[]string{"identified the bug type", "located the bug position", "provided fix suggestion"}, nil)
+		[]string{"identified the bug type", "located the bug position", "provided fix suggestion"}, nil, 0)
 	result1, err := runEvalPipeline(context.Background(), expectCfg, judge1, input)
 	assertNoError(t, err)
 	assertStatus(t, result1, StatusFail)
@@ -726,7 +726,7 @@ func TestE2E_AgentJudge_WithExpect_ThresholdDecision(t *testing.T) {
 	// threshold 0.6 → 0.667 >= 0.6 → PASS.
 	threshold := 0.6
 	judge2 := NewAgentJudge(mockAg, mockRt, "gpt-5.4",
-		[]string{"identified the bug type", "located the bug position", "provided fix suggestion"}, &threshold)
+		[]string{"identified the bug type", "located the bug position", "provided fix suggestion"}, &threshold, 0)
 	result2, err := runEvalPipeline(context.Background(), expectCfg, judge2, input)
 	assertNoError(t, err)
 	assertStatus(t, result2, StatusPass)

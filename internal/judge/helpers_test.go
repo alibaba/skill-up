@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/alibaba/skill-up/internal/agent"
 	"github.com/alibaba/skill-up/internal/runtime"
@@ -66,6 +67,17 @@ type mockJudgeTestAgent struct {
 	output    string
 	err       error
 	runResult *agent.SessionResult
+
+	// runDelay simulates a slow agent call by blocking on either the ctx
+	// deadline or the duration expiring, whichever happens first. Used by
+	// timeout tests; leave zero for the immediate-return default.
+	runDelay time.Duration
+
+	// observedDeadline captures whatever deadline the agent received on its
+	// last Run call, so tests can assert that AgentJudge applied
+	// TimeoutSeconds correctly. ok mirrors ctx.Deadline()'s second return.
+	observedDeadline   time.Time
+	observedDeadlineOK bool
 }
 
 func (m *mockJudgeTestAgent) Name() string { return "mock-judge-agent" }
@@ -86,7 +98,15 @@ func (m *mockJudgeTestAgent) Check(_ context.Context, _ runtime.Runtime) error {
 
 func (m *mockJudgeTestAgent) CheckCredentials(_ context.Context) error { return nil }
 
-func (m *mockJudgeTestAgent) Run(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ []transcript.Message) (*agent.SessionResult, error) {
+func (m *mockJudgeTestAgent) Run(ctx context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ []transcript.Message) (*agent.SessionResult, error) {
+	m.observedDeadline, m.observedDeadlineOK = ctx.Deadline()
+	if m.runDelay > 0 {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(m.runDelay):
+		}
+	}
 	if m.runResult != nil {
 		return m.runResult, m.err
 	}

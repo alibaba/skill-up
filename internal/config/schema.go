@@ -137,10 +137,11 @@ type JudgeConfig struct {
 	// Nil means "not configured", so the judge layer applies its default of 0.7.
 	// When set explicitly, the value must be in the inclusive range [0.0, 1.0].
 	PassThreshold *float64 `json:"pass_threshold,omitempty" yaml:"pass_threshold,omitempty"`
-	// TimeoutSeconds overrides the default script judge timeout.
-	// Nil means "not configured" — the global value is inherited (via MergeJudgeConfig).
-	// When set, 0 uses the judge package default; positive values set an explicit timeout.
-	// Only applicable when Type is "script".
+	// TimeoutSeconds bounds a single judge invocation in seconds (applied on
+	// top of any case-level timeout). Nil means "not configured" — the global
+	// value is inherited via MergeJudgeConfig. When set, the meaning of 0
+	// depends on judge type: script judges fall back to DefaultScriptTimeout
+	// (30s); agent_judge treats 0 as "no judge-level deadline".
 	TimeoutSeconds *int   `json:"timeout_seconds,omitempty" yaml:"timeout_seconds,omitempty"`
 	Success        []Rule `json:"success,omitempty"        yaml:"success,omitempty"`
 	Failure        []Rule `json:"failure,omitempty"        yaml:"failure,omitempty"`
