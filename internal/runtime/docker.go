@@ -422,6 +422,16 @@ func (r *DockerRuntime) Exec(ctx context.Context, command string, opts ExecOptio
 	var pathPrefix string
 	for _, kv := range overlayEnvList(r.cfg.Env, opts.Env) {
 		if k, v, _ := strings.Cut(kv, "="); k == "PATH" && strings.Contains(v, "$") {
+			// shellDoubleQuote escapes \ " `, but not $ — so $VAR
+			// expansion still works (intended), but $(...) command
+			// substitution would also still fire and silently
+			// execute arbitrary commands. Reject the substitution
+			// form rather than try to escape it (escaping $ would
+			// also kill the legitimate $VAR / ${VAR} expansion this
+			// branch exists for).
+			if strings.Contains(v, "$(") {
+				return ExecResult{}, fmt.Errorf("docker runtime: PATH %q contains command substitution $(...), which is not allowed", v)
+			}
 			pathPrefix = "export PATH=" + shellDoubleQuote(v) + "\n"
 			continue
 		}

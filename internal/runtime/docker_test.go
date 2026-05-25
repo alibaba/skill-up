@@ -654,6 +654,23 @@ func TestDockerRuntime_ExecExpandsPATHInCommand(t *testing.T) {
 	}
 }
 
+func TestDockerRuntime_ExecRejectsCommandSubstitutionInPATH(t *testing.T) {
+	t.Parallel()
+	fd := newFakeDocker(t, createScript("abc"))
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	_, err := r.Exec(context.Background(), "echo hi", ExecOptions{
+		Env: map[string]string{
+			"PATH": "$(touch /tmp/pwn):$PATH",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "command substitution") {
+		t.Fatalf("Exec with PATH=$(...) should fail with command-substitution error, got %v", err)
+	}
+}
+
 func TestDockerRuntime_ExecRejectsWorkdirEscape(t *testing.T) {
 	t.Parallel()
 	fd := newFakeDocker(t, createScript("abc"))
