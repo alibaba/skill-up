@@ -469,6 +469,53 @@ func TestExecuteCase_TimeoutErrorNamesConfigKey(t *testing.T) {
 	}
 }
 
+// Regression: a child deadline that fires while the case context still has
+// budget (e.g. judge.timeout_seconds shorter than cases.defaults.timeout_seconds)
+// must NOT be relabelled as a case timeout. Pointing users at the wrong YAML
+// knob is the exact problem this PR's error annotation is meant to prevent.
+func TestExecuteCase_ChildDeadlineNotMislabeledAsCaseTimeout(t *testing.T) {
+	e := newTestEvaluator(EvalOptions{
+		Agent: &mockAgent{name: "test"},
+		EvalCfg: &config.EvalConfig{
+			// Generous case budget — should never fire in this test.
+			Cases: config.CasesConfig{
+				Defaults: config.CaseDefaults{TimeoutSeconds: 60},
+			},
+		},
+	})
+
+	caseCfg := &config.CaseConfig{
+		ID:    "case-child-deadline",
+		Title: "Child deadline does not get a case-timeout label",
+		Input: config.Input{Prompt: "hello"},
+	}
+
+	// Agent returns DeadlineExceeded immediately from a fresh, expired child
+	// ctx. This simulates a tighter inner timeout (judge.timeout_seconds or
+	// any other layer) firing while the case ctx is still well within budget.
+	ag := &mockAgent{
+		name: "test",
+		runFunc: func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ []transcript.Message) (*agent.SessionResult, error) {
+			child, cancel := context.WithTimeout(context.Background(), 0)
+			defer cancel()
+			<-child.Done()
+			return &agent.SessionResult{ExitCode: -1}, child.Err()
+		},
+	}
+
+	result := e.executeCase(context.Background(), caseCfg, "with_skill", &mockRuntime{workspace: t.TempDir()}, ag)
+
+	if result.Status != judge.StatusError {
+		t.Fatalf("expected ERROR, got %s", result.Status)
+	}
+	if !errors.Is(result.Error, context.DeadlineExceeded) {
+		t.Fatalf("expected error chain to contain context.DeadlineExceeded, got %v", result.Error)
+	}
+	if strings.Contains(result.Error.Error(), "case timeout") {
+		t.Fatalf("case ctx did not fire, error must not be annotated with 'case timeout', got %v", result.Error)
+	}
+}
+
 func TestExecuteCase_TimeoutWithoutJudgeIsError(t *testing.T) {
 	e := newTestEvaluator(EvalOptions{
 		Agent: &mockAgent{name: "test"},

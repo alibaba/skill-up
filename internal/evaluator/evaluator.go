@@ -265,8 +265,13 @@ func (e *defaultEvaluator) executeCase(ctx context.Context, caseCfg *config.Case
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		attemptCtx, cancel, timeoutSource, timeoutSec := withCaseTimeout(ctx, e.evalCfg.Cases.Defaults.TimeoutSeconds, caseCfg.Constraints.TimeoutSeconds)
 		result = e.executeCaseOnce(attemptCtx, caseCfg, configName, overrideRT, overrideAgent)
+		// Snapshot the case ctx deadline state *before* cancel() so a tighter
+		// child deadline (e.g. judge.timeout_seconds) firing without the case
+		// ctx ever expiring isn't relabelled as a case timeout. cancel() would
+		// overwrite Err with Canceled and erase the signal.
+		caseDeadlineFired := errors.Is(attemptCtx.Err(), context.DeadlineExceeded)
 		cancel()
-		annotateCaseTimeoutError(&result, timeoutSource, timeoutSec)
+		annotateCaseTimeoutError(&result, timeoutSource, timeoutSec, caseDeadlineFired)
 
 		retryReason, ok := retryReasonForResult(result)
 		if !ok || !retryAllowed(e.evalCfg.Cases.RetryPolicy, retryReason) || attempt == maxAttempts {
@@ -654,11 +659,18 @@ func resolveJudgeScriptPath(skillDir string, judgeCfg config.JudgeConfig) config
 
 // annotateCaseTimeoutError attaches the configured case timeout and its
 // source config key to a result whose error chain contains
-// context.DeadlineExceeded. The annotation is purely informational; the
-// original DeadlineExceeded is preserved via %w so callers (and isTimeoutError)
-// still match it.
-func annotateCaseTimeoutError(result *EvalResult, source string, seconds int) {
+// context.DeadlineExceeded — but only when the case-level context itself
+// expired. A tighter child deadline (e.g. judge.timeout_seconds firing while
+// the case ctx still has budget) would otherwise be mislabeled as a case
+// timeout and point users at the wrong YAML knob. The caller passes
+// caseDeadlineFired as a pre-cancel snapshot to avoid that race. The original
+// DeadlineExceeded is preserved via %w so callers (and isTimeoutError) still
+// match it.
+func annotateCaseTimeoutError(result *EvalResult, source string, seconds int, caseDeadlineFired bool) {
 	if result == nil || result.Error == nil || source == "" || seconds <= 0 {
+		return
+	}
+	if !caseDeadlineFired {
 		return
 	}
 	if !errors.Is(result.Error, context.DeadlineExceeded) {
