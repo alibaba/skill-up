@@ -219,6 +219,172 @@ cases:
 	}
 }
 
+// nolint:funlen // table-driven matrix over the documented defaults; keeping
+// each case inline beats spreading them across helpers.
+func TestLoader_LoadEvalConfig_AppliesDefaults(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		evalYAML       string
+		wantTimeout    int
+		wantMaxTurns   int
+		wantParallel   int
+		wantWorkspace  string
+		wantReportFmts []string
+	}{
+		{
+			name: "omitted cases.defaults inherits 300s timeout and 10 turns",
+			evalYAML: `schema_version: v1alpha1
+cases:
+  files:
+    - evals/cases/test1.yaml
+`,
+			wantTimeout:    300,
+			wantMaxTurns:   10,
+			wantParallel:   1,
+			wantWorkspace:  "",
+			wantReportFmts: []string{"json"},
+		},
+		{
+			name: "partial cases.defaults keeps unspecified timeout at 300",
+			evalYAML: `schema_version: v1alpha1
+cases:
+  files:
+    - evals/cases/test1.yaml
+  defaults:
+    max_turns: 5
+`,
+			wantTimeout:    300,
+			wantMaxTurns:   5,
+			wantParallel:   1,
+			wantWorkspace:  "",
+			wantReportFmts: []string{"json"},
+		},
+		{
+			name: "explicit timeout overrides default",
+			evalYAML: `schema_version: v1alpha1
+cases:
+  files:
+    - evals/cases/test1.yaml
+  defaults:
+    timeout_seconds: 600
+`,
+			wantTimeout:    600,
+			wantMaxTurns:   10,
+			wantParallel:   1,
+			wantWorkspace:  "",
+			wantReportFmts: []string{"json"},
+		},
+		{
+			name: "explicit zero timeout falls back to documented default",
+			evalYAML: `schema_version: v1alpha1
+cases:
+  files:
+    - evals/cases/test1.yaml
+  defaults:
+    timeout_seconds: 0
+`,
+			wantTimeout:    300,
+			wantMaxTurns:   10,
+			wantParallel:   1,
+			wantWorkspace:  "",
+			wantReportFmts: []string{"json"},
+		},
+		{
+			name: "explicit negative timeout opts out of the deadline",
+			evalYAML: `schema_version: v1alpha1
+cases:
+  files:
+    - evals/cases/test1.yaml
+  defaults:
+    timeout_seconds: -1
+`,
+			wantTimeout:    -1,
+			wantMaxTurns:   10,
+			wantParallel:   1,
+			wantWorkspace:  "",
+			wantReportFmts: []string{"json"},
+		},
+		{
+			name: "user-supplied report.formats replaces default",
+			evalYAML: `schema_version: v1alpha1
+cases:
+  files:
+    - evals/cases/test1.yaml
+report:
+  formats: [json, junit, html]
+`,
+			wantTimeout:    300,
+			wantMaxTurns:   10,
+			wantParallel:   1,
+			wantWorkspace:  "",
+			wantReportFmts: []string{"json", "junit", "html"},
+		},
+		{
+			name: "user-supplied workspace_mount is preserved (not auto-defaulted)",
+			evalYAML: `schema_version: v1alpha1
+environment:
+  type: none
+  workspace_mount: /custom
+cases:
+  files:
+    - evals/cases/test1.yaml
+`,
+			wantTimeout:    300,
+			wantMaxTurns:   10,
+			wantParallel:   1,
+			wantWorkspace:  "/custom",
+			wantReportFmts: []string{"json"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tmpDir := t.TempDir()
+			evalPath := filepath.Join(tmpDir, "eval.yaml")
+			if err := os.WriteFile(evalPath, []byte(tt.evalYAML), 0o600); err != nil {
+				t.Fatalf("failed to write temp eval.yaml: %v", err)
+			}
+
+			cfg, err := NewLoader(evalPath).LoadEvalConfig()
+			if err != nil {
+				t.Fatalf("LoadEvalConfig failed: %v", err)
+			}
+
+			if cfg.Cases.Defaults.TimeoutSeconds != tt.wantTimeout {
+				t.Errorf("Cases.Defaults.TimeoutSeconds = %d, want %d", cfg.Cases.Defaults.TimeoutSeconds, tt.wantTimeout)
+			}
+			if cfg.Cases.Defaults.MaxTurns != tt.wantMaxTurns {
+				t.Errorf("Cases.Defaults.MaxTurns = %d, want %d", cfg.Cases.Defaults.MaxTurns, tt.wantMaxTurns)
+			}
+			if cfg.Cases.Parallelism != tt.wantParallel {
+				t.Errorf("Cases.Parallelism = %d, want %d", cfg.Cases.Parallelism, tt.wantParallel)
+			}
+			if cfg.Environment.WorkspaceMount != tt.wantWorkspace {
+				t.Errorf("Environment.WorkspaceMount = %q, want %q", cfg.Environment.WorkspaceMount, tt.wantWorkspace)
+			}
+			if !equalStringSlice(cfg.Report.Formats, tt.wantReportFmts) {
+				t.Errorf("Report.Formats = %v, want %v", cfg.Report.Formats, tt.wantReportFmts)
+			}
+		})
+	}
+}
+
+func equalStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestLoader_LoadCaseConfig(t *testing.T) {
 	t.Parallel()
 	content := `id: my-test-case

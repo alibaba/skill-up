@@ -57,7 +57,11 @@ func NewLoader(evalPath string) *Loader {
 	}
 }
 
-// LoadEvalConfig loads the eval.yaml file.
+// LoadEvalConfig loads the eval.yaml file and fills in the documented
+// implicit defaults (timeout_seconds, max_turns, parallelism, report.formats)
+// for fields the user omitted. Other unset fields keep their zero value so the
+// validator can still reject documents that omit required keys like
+// schema_version, environment.type, and engine.name.
 func (l *Loader) LoadEvalConfig() (*EvalConfig, error) {
 	data, err := os.ReadFile(l.evalPath)
 	if err != nil {
@@ -69,7 +73,30 @@ func (l *Loader) LoadEvalConfig() (*EvalConfig, error) {
 		return nil, fmt.Errorf("failed to parse eval.yaml: %w", err)
 	}
 
+	applyDocumentedDefaults(&cfg)
 	return &cfg, nil
+}
+
+// applyDocumentedDefaults fills the four implicit defaults documented in
+// README.md and docs/guide/getting-started.md, sourcing values from
+// defaults.yaml so the code and the documented values cannot drift apart.
+// Use -1 (or any negative value) to opt out of the case-level timeout —
+// withCaseTimeout treats <=0 as "no deadline", but 0 is reserved here for
+// "not configured, use default".
+func applyDocumentedDefaults(cfg *EvalConfig) {
+	d := DefaultEvalConfig()
+	if cfg.Cases.Defaults.TimeoutSeconds == 0 {
+		cfg.Cases.Defaults.TimeoutSeconds = d.Cases.Defaults.TimeoutSeconds
+	}
+	if cfg.Cases.Defaults.MaxTurns == 0 {
+		cfg.Cases.Defaults.MaxTurns = d.Cases.Defaults.MaxTurns
+	}
+	if cfg.Cases.Parallelism == 0 {
+		cfg.Cases.Parallelism = d.Cases.Parallelism
+	}
+	if cfg.Report.Formats == nil {
+		cfg.Report.Formats = d.Report.Formats
+	}
 }
 
 // LoadCaseConfig loads a single case file.
