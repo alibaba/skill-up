@@ -265,11 +265,15 @@ func (e *defaultEvaluator) executeCase(ctx context.Context, caseCfg *config.Case
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		attemptCtx, cancel, timeoutSource, timeoutSec := withCaseTimeout(ctx, e.evalCfg.Cases.Defaults.TimeoutSeconds, caseCfg.Constraints.TimeoutSeconds)
 		result = e.executeCaseOnce(attemptCtx, caseCfg, configName, overrideRT, overrideAgent)
-		// Snapshot the case ctx deadline state *before* cancel() so a tighter
-		// child deadline (e.g. judge.timeout_seconds) firing without the case
-		// ctx ever expiring isn't relabelled as a case timeout. cancel() would
-		// overwrite Err with Canceled and erase the signal.
-		caseDeadlineFired := errors.Is(attemptCtx.Err(), context.DeadlineExceeded)
+		// Snapshot both the case ctx and the parent ctx *before* cancel() so
+		// (a) cancel doesn't overwrite Err with Canceled and erase the signal,
+		// and (b) a parent-supplied deadline (e.g. a caller wrapping
+		// EvaluateAll in context.WithTimeout) firing through attemptCtx isn't
+		// relabelled as a case timeout — that would point users at the wrong
+		// YAML knob. A tighter child deadline (e.g. judge.timeout_seconds)
+		// gets the same protection because attemptCtx.Err() stays nil when
+		// the case-level deadline never fires.
+		caseDeadlineFired := errors.Is(attemptCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 		cancel()
 		annotateCaseTimeoutError(&result, timeoutSource, timeoutSec, caseDeadlineFired)
 
