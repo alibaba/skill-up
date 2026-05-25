@@ -152,7 +152,10 @@ func TestNewJudge_AgentJudge_NilTimeoutSecondsDefaultsToZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	aj := j.(*AgentJudge)
+	aj, ok := j.(*AgentJudge)
+	if !ok {
+		t.Fatalf("expected *AgentJudge, got %T", j)
+	}
 	if aj.TimeoutSeconds != 0 {
 		t.Errorf("expected TimeoutSeconds 0 when unset, got %d", aj.TimeoutSeconds)
 	}
