@@ -682,7 +682,10 @@ func TestDockerRuntime_ExecSurfacesLayerFailureAsError(t *testing.T) {
 		wantErr  bool
 		wantText string
 	}{
-		{"exit 125 is daemon-layer", 125, "", true, "layer failure"},
+		// exit 125 with empty stderr is NOT classified as infra: docker-container-exec(1)
+		// reserves 126/127 only; user commands (e.g. `sh -c 'exit 125'`) can legitimately
+		// exit 125 and must not be misrouted to infra-fault handling.
+		{"exit 125 with empty stderr is NOT layer", 125, "", false, ""},
 		{"daemon refused prefix", 1, "Error response from daemon: No such exec instance", true, "layer failure"},
 		{"no such container", 1, "Error: No such container: abc", true, "layer failure"},
 		{"OCI runtime failed", 126, "OCI runtime exec failed: cannot exec in stopped container", true, "layer failure"},

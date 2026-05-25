@@ -461,7 +461,7 @@ func classifyExecResult(ctx context.Context, result ExecResult, err error, comma
 	if err != nil {
 		return dockerCLIErr(result.Stderr, result.ExitCode, err, "docker exec failed")
 	}
-	if result.ExitCode != 0 && dockerExecLayerError(result.Stderr, result.ExitCode) {
+	if result.ExitCode != 0 && dockerExecLayerError(result.Stderr) {
 		return dockerCLIErr(result.Stderr, result.ExitCode, nil, "docker exec layer failure")
 	}
 	return nil
@@ -552,15 +552,8 @@ func dockerCLIErr(stderr string, exitCode int, err error, format string, args ..
 // evaluator's infra-fault retry path triggers instead of treating them as
 // ordinary FAIL results.
 //
-// docker exec exit-code conventions:
-//
-//	125 — daemon-level error (couldn't accept the exec request at all)
-//	126 — container exists but the command cannot be invoked
-//	127 — command not found inside the container
-//
-// Plus daemon-emitted stderr that means "this never reached the user's
-// command". Match prefixes only (not bare substrings) so a user script
-// that legitimately prints e.g. `redis is not running` and exits 1 isn't
+// Match prefixes only (not bare substrings) so a user script that
+// legitimately prints e.g. `redis is not running` and exits 1 isn't
 // misclassified as an infra fault.
 //
 //	"Error response from daemon:"            — daemon refused (covers
@@ -584,10 +577,12 @@ func dockerCLIErr(stderr string, exitCode int, err error, format string, args ..
 //	                                            failure (TCP/TLS-backed
 //	                                            daemons in particular).
 //
-// Exit code 125 combined with daemon/OCI stderr is a definitive layer
-// fault. Without confirming stderr, a user command that exits 125 would
-// be misclassified.
-func dockerExecLayerError(stderr string, exitCode int) bool {
+// Exit code is intentionally not used: docker-container-exec(1) only
+// reserves 126/127 for Docker's own use, and a user command that exits
+// 125 with empty stderr is indistinguishable from a daemon failure that
+// somehow emitted no stderr — be conservative and classify by stderr
+// only. Real daemon errors always print one of the prefixes above.
+func dockerExecLayerError(stderr string) bool {
 	s := strings.TrimSpace(stderr)
 	switch {
 	case strings.HasPrefix(s, "Error response from daemon:"),
@@ -595,8 +590,6 @@ func dockerExecLayerError(stderr string, exitCode int) bool {
 		strings.HasPrefix(s, "OCI runtime exec failed:"),
 		strings.HasPrefix(s, "Cannot connect to the Docker daemon"),
 		strings.HasPrefix(s, "error during connect:"):
-		return true
-	case exitCode == 125 && s == "":
 		return true
 	}
 	return false
