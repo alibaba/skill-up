@@ -458,6 +458,47 @@ func TestDockerRuntime_UploadFileEnsuresParentDir(t *testing.T) {
 	}
 }
 
+func TestDockerRuntime_UploadDownloadRejectsRelativePathEscape(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src.txt")
+	if err := os.WriteFile(src, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fd := newFakeDocker(t, createScript("abc"))
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	cases := []string{"../etc/shadow", "../../etc/passwd", "sub/../../escape"}
+	for _, p := range cases {
+		t.Run("UploadFile/"+p, func(t *testing.T) {
+			err := r.UploadFile(context.Background(), src, p)
+			if err == nil || !strings.Contains(err.Error(), "escapes workspace") {
+				t.Fatalf("UploadFile(%q) want escape error, got %v", p, err)
+			}
+		})
+		t.Run("UploadDir/"+p, func(t *testing.T) {
+			err := r.UploadDir(context.Background(), tmp, p)
+			if err == nil || !strings.Contains(err.Error(), "escapes workspace") {
+				t.Fatalf("UploadDir(%q) want escape error, got %v", p, err)
+			}
+		})
+		t.Run("DownloadFile/"+p, func(t *testing.T) {
+			err := r.DownloadFile(context.Background(), p, filepath.Join(tmp, "out"))
+			if err == nil || !strings.Contains(err.Error(), "escapes workspace") {
+				t.Fatalf("DownloadFile(%q) want escape error, got %v", p, err)
+			}
+		})
+		t.Run("DownloadDir/"+p, func(t *testing.T) {
+			err := r.DownloadDir(context.Background(), p, filepath.Join(tmp, "outd"))
+			if err == nil || !strings.Contains(err.Error(), "escapes workspace") {
+				t.Fatalf("DownloadDir(%q) want escape error, got %v", p, err)
+			}
+		})
+	}
+}
+
 func TestDockerRuntime_DownloadFileWritesLocalDir(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()

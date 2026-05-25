@@ -302,7 +302,10 @@ func (r *DockerRuntime) UploadFile(ctx context.Context, sourcePath, targetPath s
 	if err != nil {
 		return err
 	}
-	target := r.remotePath(targetPath)
+	target, err := r.remotePath(targetPath)
+	if err != nil {
+		return err
+	}
 	if err := r.ensureRemoteDir(ctx, id, path.Dir(target)); err != nil {
 		return err
 	}
@@ -319,7 +322,10 @@ func (r *DockerRuntime) UploadDir(ctx context.Context, sourceDir, targetDir stri
 	if err != nil {
 		return err
 	}
-	target := r.remotePath(targetDir)
+	target, err := r.remotePath(targetDir)
+	if err != nil {
+		return err
+	}
 	if err := r.ensureRemoteDir(ctx, id, target); err != nil {
 		return err
 	}
@@ -339,7 +345,10 @@ func (r *DockerRuntime) DownloadFile(ctx context.Context, sourcePath, targetPath
 	if err != nil {
 		return err
 	}
-	source := r.remotePath(sourcePath)
+	source, err := r.remotePath(sourcePath)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(targetPath), dockerDirMode); err != nil {
 		return fmt.Errorf("docker runtime: create local target dir: %w", err)
 	}
@@ -356,7 +365,10 @@ func (r *DockerRuntime) DownloadDir(ctx context.Context, sourceDir, targetDir st
 	if err != nil {
 		return err
 	}
-	source := r.remotePath(sourceDir)
+	source, err := r.remotePath(sourceDir)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(targetDir, dockerDirMode); err != nil {
 		return fmt.Errorf("docker runtime: create local target dir: %w", err)
 	}
@@ -416,9 +428,15 @@ func (r *DockerRuntime) Exec(ctx context.Context, command string, opts ExecOptio
 		args = append(args, "--env", kv)
 	}
 	// Use `sh -c` rather than `bash -c` so the docker runtime works on
-	// minimal base images (alpine, distroless, busybox, plain debian
-	// without bash). All shell snippets the rest of the codebase ships
-	// (setup_steps, judge scripts, agent commands) are POSIX-compatible.
+	// minimal base images (alpine, busybox, plain debian without bash).
+	// All shell snippets the rest of the codebase ships (setup_steps,
+	// judge scripts, agent commands) are POSIX-compatible.
+	//
+	// Shell-less images (distroless, scratch + a single binary) are NOT
+	// supported: skill-up's evaluation lifecycle (setup_steps, agent
+	// install, MCP install, judge scripts) is shell-driven end-to-end,
+	// so an image without /bin/sh isn't usable here even if Exec
+	// itself bypassed `sh -c`. Pick a base image with a POSIX shell.
 	args = append(args, id, "sh", "-c", pathPrefix+command)
 	span.SetAttributes(
 		attribute.String("process.command", command),
@@ -513,12 +531,21 @@ func (r *DockerRuntime) ensureRemoteDir(ctx context.Context, id, dir string) err
 }
 
 // remotePath returns p if absolute, otherwise joins it under r.workspace.
-func (r *DockerRuntime) remotePath(p string) string {
+// Relative inputs that escape the workspace via `..` are rejected — without
+// the isSubPath check, `path.Join("/workspace", "../etc/shadow")` normalizes
+// to `/etc/shadow`, letting Upload/Download cross the workspace boundary
+// while callers think they passed a relative path. Mirrors the cwd-escape
+// check in Exec.
+func (r *DockerRuntime) remotePath(p string) (string, error) {
 	c := path.Clean(p)
 	if path.IsAbs(c) {
-		return c
+		return c, nil
 	}
-	return path.Join(r.workspace, c)
+	joined := path.Join(r.workspace, c)
+	if !isSubPath(r.workspace, joined) {
+		return "", fmt.Errorf("docker runtime: relative path %q escapes workspace %q", p, r.workspace)
+	}
+	return joined, nil
 }
 
 // isSubPath reports whether child is equal to parent or is a subdirectory
