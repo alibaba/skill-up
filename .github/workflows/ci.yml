@@ -103,7 +103,7 @@ jobs:
           ref: badges
 
       - name: Download coverage badge artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: coverage-badge
           path: .github/badges/
