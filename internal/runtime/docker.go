@@ -131,19 +131,23 @@ func (r *DockerRuntime) Create(ctx context.Context) error {
 
 	_, startStderr, startExit, startErr := r.run(ctx, r.cli, "start", id)
 	if startErr != nil || startExit != 0 {
-		if r.rollbackRemove(ctx, id) == nil {
-			r.containerID = ""
+		primary := dockerCLIErr(startStderr, startExit, startErr, "docker start %s failed", id)
+		if rbErr := r.rollbackRemove(ctx, id); rbErr != nil {
+			return errors.Join(primary, rbErr)
 		}
-		return dockerCLIErr(startStderr, startExit, startErr, "docker start %s failed", id)
+		r.containerID = ""
+		return primary
 	}
 	r.started = true
 
 	if _, mkStderr, mkExit, mkErr := r.run(ctx, r.cli, "exec", id, "mkdir", "-p", r.workspace); mkErr != nil || mkExit != 0 {
-		if r.rollbackRemove(ctx, id) == nil {
-			r.containerID = ""
-			r.started = false
+		primary := dockerCLIErr(mkStderr, mkExit, mkErr, "docker exec mkdir -p %s failed", r.workspace)
+		if rbErr := r.rollbackRemove(ctx, id); rbErr != nil {
+			return errors.Join(primary, rbErr)
 		}
-		return dockerCLIErr(mkStderr, mkExit, mkErr, "docker exec mkdir -p %s failed", r.workspace)
+		r.containerID = ""
+		r.started = false
+		return primary
 	}
 	return nil
 }
@@ -406,7 +410,7 @@ func (r *DockerRuntime) Exec(ctx context.Context, command string, opts ExecOptio
 	var pathPrefix string
 	for _, kv := range overlayEnvList(r.cfg.Env, opts.Env) {
 		if k, v, _ := strings.Cut(kv, "="); k == "PATH" && strings.Contains(v, "$") {
-			pathPrefix = "export PATH=\"" + v + "\"\n"
+			pathPrefix = "export PATH=" + shellDoubleQuote(v) + "\n"
 			continue
 		}
 		args = append(args, "--env", kv)
