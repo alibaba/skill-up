@@ -19,6 +19,7 @@ import (
 
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/observability"
+	"github.com/alibaba/skill-up/internal/platform"
 )
 
 const (
@@ -245,6 +246,12 @@ func (r *DockerRuntime) Close() error {
 	r.mu.Unlock()
 	return nil
 }
+
+// Start starts the container if it is not already running.
+// TargetGOOS reports the GOOS of the container's guest OS. skill-up's
+// docker runtime currently provisions a Linux image, so commands executed
+// via `docker exec` run on a Linux guest regardless of the host platform.
+func (r *DockerRuntime) TargetGOOS() string { return platform.GOOSLinux }
 
 // Start starts the container if it is not already running.
 func (r *DockerRuntime) Start(ctx context.Context) error {
