@@ -13,7 +13,7 @@
       <img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" />
     </a>
     <a href="./.github/badges/coverage.json">
-      <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/alibaba/skill-up/main/.github/badges/coverage.json" alt="Coverage" />
+      <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/alibaba/skill-up/badges/.github/badges/coverage.json" alt="Coverage" />
     </a>
     <a href="https://go.dev/">
       <img src="https://img.shields.io/badge/go-%3E%3D1.25-blue" alt="Go Version" />
