@@ -205,10 +205,16 @@ func (r *NoneRuntime) Exec(ctx context.Context, command string, opts ExecOptions
 		if result.Stderr != "" {
 			logNonZeroStderr(ctx, result.ExitCode, result.Stderr)
 		}
+		if result.Stdout != "" {
+			logNonZeroStdout(ctx, result.ExitCode, result.Stdout)
+		}
 	case result.ExitCode != 0:
 		logNonZeroExit(ctx, result.ExitCode, command)
 		if result.Stderr != "" {
 			logNonZeroStderr(ctx, result.ExitCode, result.Stderr)
+		}
+		if result.Stdout != "" {
+			logNonZeroStdout(ctx, result.ExitCode, result.Stdout)
 		}
 	case result.Stderr != "":
 		logging.WarnContextf(ctx, "stderr: %s", result.Stderr)
@@ -266,6 +272,18 @@ func logNonZeroStderr(ctx context.Context, exitCode int, stderr string) {
 		return
 	}
 	logging.ErrorContextf(ctx, "stderr: %s", stderr)
+}
+
+// logNonZeroStdout surfaces captured stdout when a command exits non-zero.
+// Many tools write diagnostic context (build output, test failures, traces)
+// to stdout rather than stderr, so dropping it on failure leaves the user
+// with only the exit code and an empty stderr line.
+func logNonZeroStdout(ctx context.Context, exitCode int, stdout string) {
+	if exitCode == 1 {
+		logging.WarnContextf(ctx, "stdout: %s", stdout)
+		return
+	}
+	logging.ErrorContextf(ctx, "stdout: %s", stdout)
 }
 
 // Workspace returns the runtime workspace path on the host.
