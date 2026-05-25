@@ -521,10 +521,16 @@ func (r *OpenSandboxRuntime) Exec(ctx context.Context, command string, opts Exec
 		if result.Stderr != "" {
 			logNonZeroStderr(ctx, result.ExitCode, result.Stderr)
 		}
+		if result.Stdout != "" {
+			logNonZeroStdout(ctx, result.ExitCode, result.Stdout)
+		}
 	case result.ExitCode != 0:
 		logNonZeroExit(ctx, result.ExitCode, command)
 		if result.Stderr != "" {
 			logNonZeroStderr(ctx, result.ExitCode, result.Stderr)
+		}
+		if result.Stdout != "" {
+			logNonZeroStdout(ctx, result.ExitCode, result.Stdout)
 		}
 	case result.Stderr != "":
 		logging.WarnContextf(ctx, "stderr: %s", result.Stderr)

@@ -285,6 +285,24 @@ func TestNoneRuntime_ExecLogsExitCodeSeverity(t *testing.T) {
 	if !strings.Contains(errorOutput, "level=ERROR") {
 		t.Fatalf("expected error log for exit 5, got %q", errorOutput)
 	}
+
+	// Many CLIs (build tools, test runners) write the actual failure
+	// context to stdout, not stderr. Ensure that on non-zero exit we
+	// surface stdout so users don't see only an exit code with no
+	// explanation.
+	stdoutOnExit1 := captureStdout(t, func() {
+		_, _ = rt.Exec(context.Background(), "echo build-failed-on-stdout; exit 1", ExecOptions{})
+	})
+	if !strings.Contains(stdoutOnExit1, "stdout: build-failed-on-stdout") {
+		t.Fatalf("expected stdout to be logged on exit 1, got %q", stdoutOnExit1)
+	}
+
+	stdoutOnExit5 := captureStdout(t, func() {
+		_, _ = rt.Exec(context.Background(), "echo build-failed-on-stdout; exit 5", ExecOptions{})
+	})
+	if !strings.Contains(stdoutOnExit5, "stdout: build-failed-on-stdout") {
+		t.Fatalf("expected stdout to be logged on exit 5, got %q", stdoutOnExit5)
+	}
 }
 
 func assertSpanAttr(t *testing.T, attrs []attribute.KeyValue, key, want string) {

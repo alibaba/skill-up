@@ -476,11 +476,17 @@ func classifyExecResult(ctx context.Context, result ExecResult, err error, comma
 		if result.Stderr != "" {
 			logNonZeroStderr(ctx, result.ExitCode, result.Stderr)
 		}
+		if result.Stdout != "" {
+			logNonZeroStdout(ctx, result.ExitCode, result.Stdout)
+		}
 		return ctx.Err()
 	case result.ExitCode != 0:
 		logNonZeroExit(ctx, result.ExitCode, command)
 		if result.Stderr != "" {
 			logNonZeroStderr(ctx, result.ExitCode, result.Stderr)
+		}
+		if result.Stdout != "" {
+			logNonZeroStdout(ctx, result.ExitCode, result.Stdout)
 		}
 	case result.Stderr != "":
 		logging.WarnContextf(ctx, "stderr: %s", result.Stderr)
