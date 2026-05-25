@@ -473,24 +473,28 @@ func TestDockerRuntime_UploadDownloadRejectsRelativePathEscape(t *testing.T) {
 	cases := []string{"../etc/shadow", "../../etc/passwd", "sub/../../escape"}
 	for _, p := range cases {
 		t.Run("UploadFile/"+p, func(t *testing.T) {
+			t.Parallel()
 			err := r.UploadFile(context.Background(), src, p)
 			if err == nil || !strings.Contains(err.Error(), "escapes workspace") {
 				t.Fatalf("UploadFile(%q) want escape error, got %v", p, err)
 			}
 		})
 		t.Run("UploadDir/"+p, func(t *testing.T) {
+			t.Parallel()
 			err := r.UploadDir(context.Background(), tmp, p)
 			if err == nil || !strings.Contains(err.Error(), "escapes workspace") {
 				t.Fatalf("UploadDir(%q) want escape error, got %v", p, err)
 			}
 		})
 		t.Run("DownloadFile/"+p, func(t *testing.T) {
+			t.Parallel()
 			err := r.DownloadFile(context.Background(), p, filepath.Join(tmp, "out"))
 			if err == nil || !strings.Contains(err.Error(), "escapes workspace") {
 				t.Fatalf("DownloadFile(%q) want escape error, got %v", p, err)
 			}
 		})
 		t.Run("DownloadDir/"+p, func(t *testing.T) {
+			t.Parallel()
 			err := r.DownloadDir(context.Background(), p, filepath.Join(tmp, "outd"))
 			if err == nil || !strings.Contains(err.Error(), "escapes workspace") {
 				t.Fatalf("DownloadDir(%q) want escape error, got %v", p, err)
