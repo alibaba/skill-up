@@ -28,6 +28,16 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 		done <- copyErr
 	}()
 
+	cleaned := false
+	defer func() {
+		if cleaned {
+			return
+		}
+		_ = w.Close()
+		os.Stdout = orig
+		_ = r.Close()
+	}()
+
 	runErr := fn()
 	_ = w.Close()
 	os.Stdout = orig
@@ -35,6 +45,7 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 		t.Fatalf("copy stdout: %v", copyErr)
 	}
 	_ = r.Close()
+	cleaned = true
 
 	return buf.String(), runErr
 }

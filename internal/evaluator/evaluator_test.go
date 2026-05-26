@@ -477,6 +477,8 @@ func TestSerializeTranscriptWritesJSONAndCleanupRemovesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("serializeTranscript returned error: %v", err)
 	}
+	t.Cleanup(cleanup)
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read transcript: %v", err)
