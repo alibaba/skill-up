@@ -288,17 +288,24 @@ type codexProviderConfig struct {
 }
 
 func (a *CodexAgent) runProviderConfig(ctx context.Context) codexProviderConfig {
-	if a.Cfg.ModelProvider == "" {
-		return codexProviderConfig{BaseURL: a.Cfg.BaseURL}
-	}
-	// When OPENAI_BASE_URL (or DASHSCOPE_BASE_URL routed via provider env)
-	// resolves to a non-default endpoint, route codex to it via a *distinct*
-	// provider entry. We can't reuse the literal "openai" name because codex
-	// ships a built-in provider config under that key and merging the override
-	// onto it is unreliable across codex versions — codex keeps using its
-	// bundled api.openai.com endpoint. A unique key forces codex to construct
-	// a brand-new provider definition from the -c flags alone.
-	if a.Cfg.ModelProvider == agentProviderOpenAI {
+	// Empty provider + non-empty BaseURL is the same situation as
+	// provider="openai" + non-empty BaseURL: the caller pointed codex at a
+	// non-default endpoint without naming a distinct provider. Both cases
+	// must synthesise the "skill-up-openai" override so codex emits a full
+	// `model_providers.skill-up-openai.{base_url,env_key,wire_api}` config —
+	// the legacy single `-c openai_base_url=...` fallback below is silently
+	// ignored by codex (it keeps using its bundled api.openai.com endpoint
+	// with wire_api="responses"), which makes any /chat/completions-only
+	// upstream (idealab, dashscope OpenAI-compat, …) return 400 from
+	// `codex_api::endpoint::responses`. wire_api="chat" forces codex onto
+	// /chat/completions instead.
+	//
+	// We can't reuse the literal "openai" name because codex ships a
+	// built-in provider config under that key and merging the override
+	// onto it is unreliable across codex versions. A unique key forces
+	// codex to construct a brand-new provider definition from the -c
+	// flags alone.
+	if a.Cfg.ModelProvider == "" || a.Cfg.ModelProvider == agentProviderOpenAI {
 		if a.Cfg.BaseURL == "" {
 			return codexProviderConfig{}
 		}
@@ -436,26 +443,23 @@ func buildCodexRunCmdWithLastMessage(instruction, model string, provider codexPr
 }
 
 func codexProviderFlags(provider codexProviderConfig) string {
-	if provider.Name != "" {
-		flags := " -c " + shellQuote("model_provider="+strconv.Quote(provider.Name))
-		if provider.Label != "" {
-			flags += " -c " + shellQuote("model_providers."+provider.Name+".name="+strconv.Quote(provider.Label))
-		}
-		if provider.BaseURL != "" {
-			flags += " -c " + shellQuote("model_providers."+provider.Name+".base_url="+strconv.Quote(provider.BaseURL))
-		}
-		if provider.EnvKey != "" {
-			flags += " -c " + shellQuote("model_providers."+provider.Name+".env_key="+strconv.Quote(provider.EnvKey))
-		}
-		if provider.WireAPI != "" {
-			flags += " -c " + shellQuote("model_providers."+provider.Name+".wire_api="+strconv.Quote(provider.WireAPI))
-		}
-		return flags
+	if provider.Name == "" {
+		return ""
+	}
+	flags := " -c " + shellQuote("model_provider="+strconv.Quote(provider.Name))
+	if provider.Label != "" {
+		flags += " -c " + shellQuote("model_providers."+provider.Name+".name="+strconv.Quote(provider.Label))
 	}
 	if provider.BaseURL != "" {
-		return " -c " + shellQuote("openai_base_url="+strconv.Quote(provider.BaseURL))
+		flags += " -c " + shellQuote("model_providers."+provider.Name+".base_url="+strconv.Quote(provider.BaseURL))
 	}
-	return ""
+	if provider.EnvKey != "" {
+		flags += " -c " + shellQuote("model_providers."+provider.Name+".env_key="+strconv.Quote(provider.EnvKey))
+	}
+	if provider.WireAPI != "" {
+		flags += " -c " + shellQuote("model_providers."+provider.Name+".wire_api="+strconv.Quote(provider.WireAPI))
+	}
+	return flags
 }
 
 func codexCustomProviderUnavailableReason(provider, baseURL string) string {

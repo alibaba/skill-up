@@ -130,13 +130,50 @@ func TestBuildCodexRunCmd(t *testing.T) {
 	}
 }
 
-func TestBuildCodexRunCmdWithBaseURL(t *testing.T) {
+// TestCodexRunProviderConfig_EmptyProviderWithBaseURLOverridesBuiltin pins the
+// post-fix behavior for `ModelProvider="" + BaseURL=<non-default>`: same as the
+// `ModelProvider="openai"` case, route through the synthetic "skill-up-openai"
+// override so codex emits a full `model_providers.skill-up-openai.{base_url,
+// env_key,wire_api=chat}` block. Regression guard for the prior buggy fallback
+// that emitted only `-c openai_base_url=...` (silently ignored by codex →
+// upstream got hit on /responses with the bundled provider's wire_api,
+// returning 400 against /chat/completions-only endpoints like idealab).
+func TestCodexRunProviderConfig_EmptyProviderWithBaseURLOverridesBuiltin(t *testing.T) {
 	t.Parallel()
 
-	cmd := buildCodexRunCmd("say hi", "gpt-5.4", codexProviderConfig{BaseURL: "https://openai.example.com/v1"}, codexProcessSandbox)
-	want := `codex exec --json --skip-git-repo-check --sandbox workspace-write -c 'openai_base_url="https://openai.example.com/v1"' -m 'gpt-5.4' 'say hi'`
-	if cmd != want {
-		t.Fatalf("unexpected command:\nwant: %s\ngot:  %s", want, cmd)
+	ag := NewCodexAgent(Config{
+		ModelName: "gpt-5.2-1211-global",
+		BaseURL:   "https://idealab.alibaba-inc.com/api/openai/v1",
+	})
+
+	got := ag.runProviderConfig(context.Background())
+	if got.Name != codexOpenAIOverrideProvider {
+		t.Fatalf("provider name = %q, want %q", got.Name, codexOpenAIOverrideProvider)
+	}
+	if got.Label != codexOpenAIOverrideProvider {
+		t.Fatalf("provider label = %q, want %q", got.Label, codexOpenAIOverrideProvider)
+	}
+	if got.BaseURL != "https://idealab.alibaba-inc.com/api/openai/v1" {
+		t.Fatalf("base URL = %q, want idealab endpoint", got.BaseURL)
+	}
+	if got.EnvKey != credential.EnvOpenAIAPIKey {
+		t.Fatalf("env key = %q, want %q", got.EnvKey, credential.EnvOpenAIAPIKey)
+	}
+	if got.WireAPI != codexCustomWireAPI {
+		t.Fatalf("wire API = %q, want %q", got.WireAPI, codexCustomWireAPI)
+	}
+}
+
+// TestCodexRunProviderConfig_EmptyProviderEmptyBaseURL keeps the no-config
+// case explicit: when neither provider nor base URL is set, runProviderConfig
+// returns the zero value so codex falls back to its bundled defaults.
+func TestCodexRunProviderConfig_EmptyProviderEmptyBaseURL(t *testing.T) {
+	t.Parallel()
+
+	ag := NewCodexAgent(Config{ModelName: "gpt-5.2-1211-global"})
+
+	if got := ag.runProviderConfig(context.Background()); got.Name != "" || got.BaseURL != "" {
+		t.Fatalf("runProviderConfig() = %+v, want empty when both ModelProvider and BaseURL are unset", got)
 	}
 }
 
