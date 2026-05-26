@@ -280,6 +280,32 @@ func TestNoneRuntime_ExecOmitsDeadlineDelta_OnManualCancel(t *testing.T) {
 	}
 }
 
+func TestNoneRuntime_ExecKillsDescendantsOnTimeout(t *testing.T) {
+	t.Parallel()
+
+	rt := &NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	// A backgrounded descendant tries to write a marker 3s in; if the process
+	// group is killed on timeout it never runs.
+	_, err := rt.Exec(ctx, "(sleep 3 && touch leaked.txt) & sleep 10", ExecOptions{})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context deadline exceeded, got %v", err)
+	}
+
+	// Wait past the descendant's would-be write time.
+	time.Sleep(4 * time.Second)
+	if _, statErr := os.Stat(filepath.Join(rt.Workspace(), "leaked.txt")); statErr == nil {
+		t.Fatal("descendant process survived the timeout and wrote leaked.txt")
+	}
+}
+
 func TestNoneRuntime_ExecAddsSpanCommandAttrs(t *testing.T) {
 	rt := &NoneRuntime{}
 	if err := rt.Create(context.Background()); err != nil {
@@ -628,5 +654,29 @@ func TestNoneRuntime_MergeEnv_VisibleToSubsequentExec(t *testing.T) {
 	}
 	if res.Stdout != "visible" {
 		t.Fatalf("Exec saw SKILL_UP_MERGE_TEST=%q, want visible", res.Stdout)
+	}
+}
+
+func TestNoneRuntime_Exec_WaitDelayWithCleanExitIsSuccess(t *testing.T) {
+	// A process that exits 0 but leaves a background child holding stdout
+	// past WaitDelay must surface as a successful exec — not a hard error.
+	// Before the fix, classifyExecError returned (-1, exec.ErrWaitDelay)
+	// and built-in agents were reported as failed even after producing
+	// valid output.
+	rt := &NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	result, err := rt.Exec(context.Background(), `echo hello; (sleep 30 &); exit 0`, ExecOptions{})
+	if err != nil {
+		t.Fatalf("Exec: %v (WaitDelay must not surface as a hard error)", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0", result.ExitCode)
+	}
+	if !strings.Contains(result.Stdout, "hello") {
+		t.Fatalf("Stdout = %q, want it to contain the pre-WaitDelay output", result.Stdout)
 	}
 }

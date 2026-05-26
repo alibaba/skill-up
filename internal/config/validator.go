@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"path"
 	"strings"
+
+	"github.com/alibaba/skill-up/internal/agentkind"
 )
 
 // Judge type constants.
@@ -20,6 +22,20 @@ const (
 	runtimeTypeOpenSandbox = "opensandbox"
 	runtimeTypeDocker      = "docker"
 )
+
+// Custom engine transport constants.
+const (
+	customTransportLocal = "local"
+	customTransportHTTP  = "http"
+)
+
+// IsBuiltinEngineName reports whether name matches a built-in agent. A
+// built-in engine ignores any engine.custom block. The set of names is
+// defined once in internal/agentkind so the agent factory and config
+// validator share a single source of truth (no more "keep in sync" lists).
+func IsBuiltinEngineName(name string) bool {
+	return agentkind.IsBuiltin(name)
+}
 
 // Validator checks eval and case documents against the v1alpha1 schema.
 type Validator struct{}
@@ -60,6 +76,9 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	if cfg.Engine.Name == "" {
 		errs = append(errs, "engine.name is required")
 	}
+
+	// engine.custom validation is deferred to ResolveCustomEngineConfig, which
+	// runs after CLI overrides settle the final engine name.
 
 	// engine.model.provider and engine.model.name are optional.
 	// When omitted, the engine uses its local default model configuration.
@@ -167,6 +186,63 @@ func (v *Validator) ValidateAll(result *EvalResult) error {
 	}
 
 	return nil
+}
+
+// validateEngine checks engine.custom against the Custom Engine contract.
+// A non-built-in engine.name requires an engine.custom block; a built-in
+// engine.name ignores engine.custom entirely.
+func validateEngine(engine EngineConfig) []string {
+	if engine.Name == "" {
+		return nil
+	}
+	if IsBuiltinEngineName(engine.Name) {
+		return nil
+	}
+	if engine.Custom == nil {
+		return []string{fmt.Sprintf("unsupported agent %q: missing engine.custom", engine.Name)}
+	}
+	return validateCustomEngine(engine.Custom)
+}
+
+func validateCustomEngine(custom *CustomEngineConfig) []string {
+	var errs []string
+
+	// Only the local transport is implemented. The http transport is designed
+	// (see docs/design/custom-engine.md) but rejected here so `skill-up
+	// validate` does not approve a config that every run would fail.
+	switch custom.Transport {
+	case "":
+		errs = append(errs, "engine.custom.transport is required (local)")
+	case customTransportLocal:
+		if custom.Local == nil || custom.Local.Command == "" {
+			errs = append(errs, "engine.custom.local.command is required when transport is local")
+		}
+	case customTransportHTTP:
+		errs = append(errs, "engine.custom.transport: http is not yet implemented; use transport: local")
+	default:
+		errs = append(errs, fmt.Sprintf("engine.custom.transport must be \"local\" (got %q)", custom.Transport))
+	}
+
+	if custom.ResponseFormat != "" &&
+		custom.ResponseFormat != "session_result" && custom.ResponseFormat != "text" {
+		errs = append(errs, fmt.Sprintf("engine.custom.response_format must be one of: session_result, text (got %q)", custom.ResponseFormat))
+	}
+
+	if custom.TimeoutSeconds < 0 {
+		errs = append(errs, "engine.custom.timeout_seconds must be non-negative")
+	}
+
+	// kwargs are exposed to templates as ${kwargs.<key>}; a key that
+	// collides with a built-in template variable (e.g. `model`, `case_id`)
+	// would shadow or be shadowed by the built-in depending on overlay
+	// order. Reject the collision so the user fixes the name explicitly.
+	for k := range custom.Kwargs {
+		if IsBuiltinTemplateVar(k) {
+			errs = append(errs, fmt.Sprintf("engine.custom.kwargs key %q collides with a built-in template variable; rename it", k))
+		}
+	}
+
+	return errs
 }
 
 func isValidRuntimeType(t string) bool {

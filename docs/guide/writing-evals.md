@@ -127,6 +127,47 @@ report:
 skill-up run evals/eval.yaml --engine-kwarg bypass_sandbox=true
 ```
 
+### Custom Engine
+
+When `engine.name` is not one of the built-ins (`claude_code`, `codex`, `qodercli`), declare an `engine.custom` block so skill-up knows how to invoke your agent. Only `transport: local` is implemented today; `transport: http` is reserved and currently fails validation with "not yet implemented".
+
+```yaml
+engine:
+  name: my-agent
+  model:
+    provider: anthropic
+    name: claude-sonnet-4-6
+  custom:
+    transport: local             # local (implemented) | http (planned)
+    response_format: session_result   # session_result (default) | text
+    timeout_seconds: 300
+    env:                         # credentials and secrets — NEVER reference these in command/args
+      MY_AGENT_TOKEN: ${MY_AGENT_TOKEN}
+    kwargs:                      # non-secret knobs exposed as ${kwargs.<key>}
+      profile: production
+    local:
+      command: /opt/my-agent/bin/run
+      args:
+        - --input
+        - ${input_file}          # path to the SessionInput JSON skill-up writes
+        - --output
+        - ${output_file}         # path your agent should write its SessionResult JSON to
+      cwd: ${workspace}          # optional; confined to the runtime workspace
+      input_file: inputs/messages.json   # optional override (relative to workspace)
+      output_file: outputs/session-result.json   # optional override
+```
+
+Template variables available in `command` / `args` / `cwd` / `env` / `input_file` / `output_file`:
+`${workspace}`, `${input_file}`, `${output_file}`, `${model}`, `${model_provider}`, `${model_name}`, `${case_id}`, `${variant}`, `${max_turns}`, `${timeout_seconds}`, `${kwargs.<key>}`, plus environment variables via `${VAR}` / `${VAR:-default}` / `${VAR?error message}`.
+
+Secret-handling rules (enforced at config load):
+
+- `${api_key}` and any kwarg whose key looks like a credential (`token`, `secret`, `api_key`, `apiKey`, `bearerToken`, …) cannot be referenced from `command` / `args` / `cwd` / `input_file` / `output_file`. Pass them through `engine.custom.env`, where they reach your agent as process environment variables instead of leaking into process listings.
+- `${SOMEVAR:-...}` defaults that contain recognizable credential shapes (`sk-...`, `sk-ant-...`, `ghp_...`, `AIza...`, `AKIA...`, JWTs) are likewise rejected in command-line contexts.
+
+See `docs/design/custom-engine.md` for the full SessionInput / SessionResult schema your agent must conform to.
+
+
 ### MCP configuration
 
 MCP supports `mode: real` and `mode: mocked`. `real` installs a real MCP server into Agents such as `claude_code`, `qodercli`, or `codex`; `mocked` makes `internal/mcp` generate a local stdio mock server that is then installed into the Agent like any other MCP server.

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/observability"
@@ -41,9 +42,21 @@ type SessionResult struct {
 
 // SessionArtifacts holds artifacts produced during an agent session.
 type SessionArtifacts struct {
-	WorkspaceDiff  string   `json:"workspace_diff,omitempty"`
-	GeneratedFiles []string `json:"generated_files,omitempty"` // Runtime file paths, e.g. ["outputs/stdout.json", "outputs/transcript.jsonl"]
-	Logs           string   `json:"logs,omitempty"`
+	WorkspaceDiff  string         `json:"workspace_diff,omitempty"`
+	GeneratedFiles []string       `json:"generated_files,omitempty"` // Runtime file paths, e.g. ["outputs/stdout.json", "outputs/transcript.jsonl"]
+	Files          []ArtifactFile `json:"files,omitempty"`           // Structured artifact declarations (Custom Engine).
+	Logs           string         `json:"logs,omitempty"`
+}
+
+// ArtifactFile is a structured artifact declaration returned by an agent.
+// Exactly one of Path, URL, Content, ContentBase64 should be set.
+type ArtifactFile struct {
+	Name          string `json:"name"`
+	Path          string `json:"path,omitempty"`
+	URL           string `json:"url,omitempty"`
+	Content       string `json:"content,omitempty"`
+	ContentBase64 string `json:"content_base64,omitempty"`
+	ContentType   string `json:"content_type,omitempty"`
 }
 
 // Config configures the agent.
@@ -69,6 +82,9 @@ type Config struct {
 	// EngineConfig.Kwargs. Each agent reads only the keys it understands;
 	// unknown keys are ignored. See agent kwargs helpers in kwargs.go.
 	Kwargs map[string]string
+	// Custom carries the custom engine configuration when Name does not match
+	// a built-in agent. It is nil for built-in agents.
+	Custom *config.CustomEngineConfig
 }
 
 // Runtime is an alias for runtime.Runtime for agent package convenience.
@@ -187,6 +203,19 @@ func (a *BaseAgent) credentialEnvVars(apiKeyEnv, baseURLEnv string) map[string]s
 	}
 
 	return envVars
+}
+
+// installSkillDefault is the fallback skill installer used when an agent does
+// not configure its own InstallSkillCmd template. It installs the skill source
+// under a.Cfg.SkillPath (or the caller-supplied target). Defined on BaseAgent
+// so both CLIAgent and CustomAgent share it via embedding, without making
+// CustomAgent inherit the rest of CLIAgent.
+func (a *BaseAgent) installSkillDefault(ctx context.Context, rt Runtime, skillCfg runtime.SkillConfig) error {
+	target := skillCfg.Target
+	if target == "" && a.Cfg.SkillPath != "" {
+		target = filepath.Join(a.Cfg.SkillPath, filepath.Base(skillCfg.Source))
+	}
+	return installSkill(ctx, rt, skillCfg.Source, target)
 }
 
 func persistRuntimeArtifact(ctx context.Context, rt Runtime, targetPath, content string) error {

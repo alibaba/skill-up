@@ -3,16 +3,9 @@ package agent
 import (
 	"os"
 
+	"github.com/alibaba/skill-up/internal/agentkind"
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/logging"
-)
-
-const (
-	qoderCLIEngineAlias  = "qoder-cli"
-	qoderEngineAlias     = "qoder"
-	qoderCLIEngineName   = "qodercli"
-	claudeCodeEngineName = "claude-code"
-	claudeCodeAlias      = "claude_code"
 )
 
 // DetectAgent constructs an agent implementation for the given engine name.
@@ -22,13 +15,18 @@ func DetectAgent(engineName string, cfg Config) (Agent, error) {
 	}
 
 	switch engineName {
-	case qoderCLIEngineAlias, qoderEngineAlias, qoderCLIEngineName:
+	case agentkind.QoderCLIAlias, agentkind.QoderAlias, agentkind.QoderCLI:
 		return NewQoderCLIAgent(cfg), nil
-	case claudeCodeEngineName, claudeCodeAlias:
+	case agentkind.ClaudeCodeAlias, agentkind.ClaudeCode:
 		return NewClaudeCodeAgent(cfg), nil
-	case codexEngineName:
+	case agentkind.Codex:
 		return NewCodexAgent(cfg), nil
 	default:
+		// A non-built-in engine name is a Custom Engine when engine.custom
+		// is configured; otherwise it is unsupported.
+		if cfg.Custom != nil {
+			return NewCustomAgent(cfg), nil
+		}
 		return nil, &UnsupportedAgentError{Name: engineName}
 	}
 }
@@ -38,9 +36,11 @@ func DetectAgent(engineName string, cfg Config) (Agent, error) {
 // is forwarded as-is to the agent; each agent reads only the keys it understands.
 func DetectAgentWithInitParams(engineName string, params credential.AgentInitParams, kwargs map[string]string) (Agent, error) {
 	model := params.Model
-	// "auto" is a QoderCLI-specific model tier; strip it for other engines
-	// so downstream agents don't need to hard-code awareness of it.
-	if model == "auto" && !isQoderCLIEngine(engineName) {
+	// "auto" is a QoderCLI-specific model tier; strip it for other built-in
+	// engines so they don't need to hard-code awareness of it. A custom engine
+	// keeps the user's configured value — it is exposed verbatim via ${model}
+	// and SessionInput.model.
+	if model == "auto" && !isQoderCLIEngine(engineName) && params.Custom == nil {
 		model = ""
 	}
 
@@ -52,11 +52,12 @@ func DetectAgentWithInitParams(engineName string, params credential.AgentInitPar
 		BaseURL:       params.BaseURL,
 		EnvVars:       make(map[string]string),
 		Kwargs:        kwargs,
+		Custom:        params.Custom,
 	}
 	logUnknownEngineKwargs(engineName, kwargs)
 
 	switch engineName {
-	case qoderCLIEngineAlias, qoderEngineAlias, qoderCLIEngineName:
+	case agentkind.QoderCLIAlias, agentkind.QoderAlias, agentkind.QoderCLI:
 		// QODER_PERSONAL_ACCESS_TOKEN is qodercli's own auth credential, independent of the
 		// underlying model provider (e.g. anthropic). params.APIKey may hold a provider-scoped
 		// key (e.g. ANTHROPIC_API_KEY) which must not be forwarded as the qodercli token.
@@ -75,7 +76,7 @@ func DetectAgentWithInitParams(engineName string, params credential.AgentInitPar
 
 func isQoderCLIEngine(name string) bool {
 	switch name {
-	case qoderCLIEngineAlias, qoderEngineAlias, qoderCLIEngineName:
+	case agentkind.QoderCLIAlias, agentkind.QoderAlias, agentkind.QoderCLI:
 		return true
 	default:
 		return false

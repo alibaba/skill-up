@@ -186,6 +186,12 @@ func loadAndPrepareConfig(ctx context.Context, cmd *cobra.Command, args []string
 	if err := applyRunConfigOverrides(evalCfg, cmd); err != nil { //nolint:contextcheck // ctx accessed via cmd.Context() inside helpers
 		return nil, nil, nil, err
 	}
+	// The loader defers engine.custom env resolution and validation until the
+	// final engine name is known (it can be changed by --engine); process it
+	// now so an override is never blocked by an unrelated custom block.
+	if err := config.ResolveCustomEngineConfig(evalCfg); err != nil {
+		return nil, nil, nil, fmt.Errorf("engine config: %w", err)
+	}
 
 	modelRef := formatModelRef(evalCfg.Engine.Model.Provider, evalCfg.Engine.Model.Name)
 	span.SetAttributes(
@@ -240,6 +246,7 @@ func loadCredentialsAndAgent(cmd *cobra.Command, evalCfg *config.EvalConfig) (ag
 	runnerParams := credential.ResolveRunnerInitParams(
 		evalCfg.Engine.Name,
 		evalCfg.Engine.Model,
+		evalCfg.Engine.Custom,
 		resolver,
 		normalizeCLIModelOverride(cliModel, resolver),
 		cliAPIKey,

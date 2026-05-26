@@ -1,10 +1,13 @@
 package agent
 
-// UnsupportedAgentError is returned when an unknown agent type is requested.
+import "fmt"
+
+// UnsupportedAgentError is returned when an engine name matches no built-in
+// agent and no engine.custom configuration was supplied.
 type UnsupportedAgentError struct {
 	Name string
 }
 
 func (e *UnsupportedAgentError) Error() string {
-	return "unsupported agent: " + e.Name
+	return fmt.Sprintf("unsupported agent %q: missing engine.custom", e.Name)
 }
