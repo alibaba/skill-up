@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -202,8 +203,8 @@ func TestBaseAgentMergeExecOptionsEnvMergesRuntimeAndTelemetry(t *testing.T) {
 	if got := opts.Env["BASE_ONLY"]; got != "1" {
 		t.Fatalf("BASE_ONLY = %q, want preserved base env", got)
 	}
-	if got := opts.Env["PATH"]; got != agentExecutablePath {
-		t.Fatalf("PATH = %q, want agent executable path", got)
+	if _, ok := opts.Env["PATH"]; ok {
+		t.Fatalf("PATH should not be injected by mergeExecOptionsEnv; PATH now flows from runtime baseline via probeAndMergePATH. got %q", opts.Env["PATH"])
 	}
 	if got := opts.Env["OTEL_EXPORTER_OTLP_ENDPOINT"]; got != "http://call-collector:4318" {
 		t.Fatalf("OTEL_EXPORTER_OTLP_ENDPOINT = %q, want call env to override process env", got)
@@ -239,6 +240,80 @@ func TestMergeExecOptionsEnv_PreservesConfiguredPATH(t *testing.T) {
 
 	if got := opts.Env["PATH"]; got != "/call/bin" {
 		t.Fatalf("PATH = %q, want call env to override defaults", got)
+	}
+}
+
+// probeMergeTestRuntime captures probe Exec calls and MergeEnv calls so
+// TestProbeAndMergePATH can verify the helper's wiring without dragging
+// in a full agent test fixture.
+type probeMergeTestRuntime struct {
+	probeCmd    string
+	probeStdout string
+	probeExit   int
+	probeErr    error
+	merged      map[string]string
+}
+
+func (r *probeMergeTestRuntime) Create(context.Context) error                     { return nil }
+func (r *probeMergeTestRuntime) Close() error                                     { return nil }
+func (r *probeMergeTestRuntime) Start(context.Context) error                      { return nil }
+func (r *probeMergeTestRuntime) Stop(context.Context) error                       { return nil }
+func (r *probeMergeTestRuntime) UploadFile(context.Context, string, string) error { return nil }
+func (r *probeMergeTestRuntime) UploadDir(context.Context, string, string) error  { return nil }
+func (r *probeMergeTestRuntime) DownloadFile(context.Context, string, string) error {
+	return nil
+}
+func (r *probeMergeTestRuntime) DownloadDir(context.Context, string, string) error { return nil }
+func (r *probeMergeTestRuntime) Workspace() string                                 { return "" }
+func (r *probeMergeTestRuntime) RequiresProcessSandbox() bool                      { return false }
+func (r *probeMergeTestRuntime) Exec(_ context.Context, cmd string, _ ExecOptions) (ExecResult, error) {
+	r.probeCmd = cmd
+	return ExecResult{Stdout: r.probeStdout, ExitCode: r.probeExit}, r.probeErr
+}
+
+func (r *probeMergeTestRuntime) MergeEnv(env map[string]string) {
+	if r.merged == nil {
+		r.merged = make(map[string]string, len(env))
+	}
+	maps.Copy(r.merged, env)
+}
+
+func TestProbeAndMergePATH_HappyPath(t *testing.T) {
+	t.Parallel()
+	base := NewBaseAgent(Config{Name: "claude-code"})
+	rt := &probeMergeTestRuntime{probeStdout: "  /resolved/bin:/usr/bin\n"}
+
+	base.probeAndMergePATH(context.Background(), rt, `printf '%s' "$HOME/.local/bin:$PATH"`)
+
+	if rt.probeCmd != `printf '%s' "$HOME/.local/bin:$PATH"` {
+		t.Fatalf("probe cmd = %q, want the supplied probeCmd verbatim", rt.probeCmd)
+	}
+	if got := rt.merged["PATH"]; got != "/resolved/bin:/usr/bin" {
+		t.Fatalf("merged PATH = %q, want trimmed probe stdout", got)
+	}
+}
+
+func TestProbeAndMergePATH_SkipsMergeOnProbeFailure(t *testing.T) {
+	t.Parallel()
+	base := NewBaseAgent(Config{Name: "claude-code"})
+	rt := &probeMergeTestRuntime{probeExit: 127, probeStdout: "garbage"}
+
+	base.probeAndMergePATH(context.Background(), rt, `printf '%s' "$HOME/.local/bin:$PATH"`)
+
+	if rt.merged != nil {
+		t.Fatalf("MergeEnv should not have been called on probe failure; got %+v", rt.merged)
+	}
+}
+
+func TestProbeAndMergePATH_SkipsMergeOnEmptyStdout(t *testing.T) {
+	t.Parallel()
+	base := NewBaseAgent(Config{Name: "claude-code"})
+	rt := &probeMergeTestRuntime{probeStdout: "   \n"} // whitespace only
+
+	base.probeAndMergePATH(context.Background(), rt, `printf '%s' "$HOME/.local/bin:$PATH"`)
+
+	if rt.merged != nil {
+		t.Fatalf("MergeEnv should not have been called on empty probe stdout; got %+v", rt.merged)
 	}
 }
 

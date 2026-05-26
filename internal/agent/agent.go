@@ -114,7 +114,6 @@ const ExitCodeSignalKilled = -1
 const (
 	agentProviderOpenAI    = "openai"
 	agentProviderAnthropic = "anthropic"
-	agentExecutablePath    = "$HOME/.local/bin:$HOME/.nvm/current/bin:$PATH"
 )
 
 // NewBaseAgent creates a new BaseAgent with the given config.
@@ -258,12 +257,33 @@ func downloadSessionArtifact(ctx context.Context, rt Runtime, artifactDir, sessi
 }
 
 func (a *BaseAgent) mergeExecOptionsEnv(ctx context.Context, opts ExecOptions, envVars map[string]string, attrs map[string]string) ExecOptions {
-	merged := map[string]string{"PATH": agentExecutablePath}
+	merged := map[string]string{}
 	maps.Copy(merged, envVars)
 	maps.Copy(merged, opts.Env)
 	maps.Copy(merged, observability.AgentEnv(ctx, merged, attrs))
 	opts.Env = merged
 	return opts
+}
+
+// probeAndMergePATH runs probeCmd against rt and merges the literal result
+// into rt's env baseline under key "PATH". Each agent's Install calls this
+// with its own probeCmd (e.g. claudeCodeExecPathProbeCmd) so the resolved
+// PATH covers the directories where that agent's binaries actually live.
+//
+// On probe failure the runtime's default PATH stands and a warning is
+// logged; the install command still runs (its own bootstrap, if any, may
+// still succeed).
+func (a *BaseAgent) probeAndMergePATH(ctx context.Context, rt Runtime, probeCmd string) {
+	res, err := rt.Exec(ctx, probeCmd, ExecOptions{})
+	if err != nil || res.ExitCode != 0 {
+		logging.WarnContextf(ctx, "agent %s: PATH probe failed (err=%v exit=%d); using runtime default PATH", a.Name(), err, res.ExitCode)
+		return
+	}
+	path := strings.TrimSpace(res.Stdout)
+	if path == "" {
+		return
+	}
+	rt.MergeEnv(map[string]string{"PATH": path})
 }
 
 func (a *BaseAgent) buildAgentObservabilityAttrs(extra map[string]string) map[string]string {

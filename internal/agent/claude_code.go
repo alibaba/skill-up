@@ -26,6 +26,12 @@ type ClaudeCodeAgent struct {
 
 const claudeCodePackage = "@anthropic-ai/claude-code"
 
+// claudeCodeExecPathProbeCmd resolves both $HOME/.local/bin (where `npm
+// install -g` puts the claude binary via the bootstrap's npm_config_prefix)
+// and $HOME/.nvm/current/bin (where the node interpreter lives — claude's
+// `#!/usr/bin/env node` shebang needs to find node at exec time).
+const claudeCodeExecPathProbeCmd = `printf '%s' "$HOME/.local/bin:$HOME/.nvm/current/bin:$PATH"`
+
 // NewClaudeCodeAgent creates a new ClaudeCodeAgent.
 func NewClaudeCodeAgent(cfg Config) *ClaudeCodeAgent {
 	if cfg.Name == "" {
@@ -41,6 +47,8 @@ func NewClaudeCodeAgent(cfg Config) *ClaudeCodeAgent {
 
 // Install installs Claude Code when it is not already available in the runtime.
 func (a *ClaudeCodeAgent) Install(ctx context.Context, rt Runtime) error {
+	a.probeAndMergePATH(ctx, rt, claudeCodeExecPathProbeCmd)
+
 	opts := ExecOptions{Cwd: "/"}
 	opts = a.mergeExecOptionsEnv(ctx, opts, nil, nil)
 

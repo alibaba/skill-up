@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,8 +83,11 @@ func TestClaudeCodeInstall_UsesDefaultCommand(t *testing.T) {
 	if !strings.Contains(rt.lastCommand, "npm install -g --include=optional '"+claudeCodePackage+"'") {
 		t.Fatalf("install command does not install claude-code:\n%s", rt.lastCommand)
 	}
-	if got := rt.lastExecEnv["PATH"]; got != agentExecutablePath {
-		t.Fatalf("install PATH = %q, want agent executable path", got)
+	if _, ok := rt.lastExecEnv["PATH"]; ok {
+		t.Fatalf("install env should not carry PATH from agent; PATH flows via runtime baseline. got %q", rt.lastExecEnv["PATH"])
+	}
+	if got := rt.mergedEnv["PATH"]; got == "" {
+		t.Fatalf("expected probeAndMergePATH to populate runtime baseline with PATH; mergedEnv=%+v", rt.mergedEnv)
 	}
 	if got := rt.lastExecEnv[credential.EnvAnthropicAPIKey]; got != "" {
 		t.Fatalf("install env leaked %s = %q", credential.EnvAnthropicAPIKey, got)
@@ -700,11 +704,13 @@ func TestProviderRateLimitSignal_PrefersSessionFinalMessage(t *testing.T) {
 }
 
 type claudeCodeTestRuntime struct {
-	workspace   string
-	execResult  runtime.ExecResult
-	lastCommand string
-	lastExecEnv map[string]string
-	execCount   int
+	workspace           string
+	execResult          runtime.ExecResult
+	lastCommand         string
+	lastExecEnv         map[string]string
+	execCount           int
+	probeResponseStdout string            // canned stdout for PATH probe; defaults to a fake bin
+	mergedEnv           map[string]string // accumulates entries from MergeEnv calls
 }
 
 func (r *claudeCodeTestRuntime) Create(context.Context) error { return nil }
@@ -728,6 +734,16 @@ func (r *claudeCodeTestRuntime) DownloadDir(context.Context, string, string) err
 }
 
 func (r *claudeCodeTestRuntime) Exec(_ context.Context, command string, opts runtime.ExecOptions) (runtime.ExecResult, error) {
+	// Probe calls (printf '%s' "$HOME/...") are issued by agent.Install
+	// via probeAndMergePATH; respond with a canned literal PATH and do
+	// NOT record as the agent's own command.
+	if strings.HasPrefix(command, `printf '%s' "$HOME/`) {
+		stdout := r.probeResponseStdout
+		if stdout == "" {
+			stdout = "/fake/.local/bin:/fake/.nvm/current/bin:/usr/bin"
+		}
+		return runtime.ExecResult{Stdout: stdout}, nil
+	}
 	r.lastCommand = command
 	r.execCount++
 	if r.execCount == 1 {
@@ -741,4 +757,9 @@ func (r *claudeCodeTestRuntime) Workspace() string { return r.workspace }
 func (r *claudeCodeTestRuntime) RequiresProcessSandbox() bool {
 	return true
 }
-func (r *claudeCodeTestRuntime) MergeEnv(_ map[string]string) {}
+func (r *claudeCodeTestRuntime) MergeEnv(env map[string]string) {
+	if r.mergedEnv == nil {
+		r.mergedEnv = make(map[string]string, len(env))
+	}
+	maps.Copy(r.mergedEnv, env)
+}
