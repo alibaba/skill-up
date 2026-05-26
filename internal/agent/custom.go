@@ -507,9 +507,14 @@ func (a *CustomAgent) parseSessionResult(ctx context.Context, rt Runtime, opts E
 		turns = deriveTurns(trans)
 	}
 
+	// Engine and Model are engine-supplied untrusted strings that flow into
+	// result.json, judges, and OTel span attributes. Mask them too so a
+	// custom engine that echoes a credential into its self-identification
+	// fields cannot bypass the masking discipline applied to FinalMessage /
+	// Stderr / Transcript content above.
 	res := &SessionResult{
-		Engine:       firstNonEmpty(parsed.Engine, a.Name()),
-		Model:        firstNonEmpty(parsed.Model, formatAgentModel(a.Cfg.ModelProvider, a.Cfg.ModelName)),
+		Engine:       firstNonEmpty(a.maskAPIKey(parsed.Engine), a.Name()),
+		Model:        firstNonEmpty(a.maskAPIKey(parsed.Model), formatAgentModel(a.Cfg.ModelProvider, a.Cfg.ModelName)),
 		ExitCode:     *parsed.ExitCode,
 		DurationMs:   parsed.DurationMs,
 		Turns:        turns,

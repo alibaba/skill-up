@@ -174,6 +174,13 @@ func validatePassThreshold(threshold *float64) []string {
 }
 
 // ValidateAll validates an eval config and all its cases.
+//
+// NOTE: this does NOT validate the engine.custom block. That validation is
+// deferred to ResolveCustomEngineConfig because the final engine name is only
+// known after CLI overrides (e.g. --engine) settle, and a custom block must
+// only be enforced for non-built-in engines. Callers MUST also invoke
+// ResolveCustomEngineConfig after applying any CLI overrides; cli/run.go and
+// cli/validate.go both do this.
 func (v *Validator) ValidateAll(result *EvalResult) error {
 	if err := v.ValidateEvalConfig(result.Eval); err != nil {
 		return err
