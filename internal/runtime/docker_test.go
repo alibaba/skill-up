@@ -1013,3 +1013,26 @@ func TestOverlayEnvList_CallEnvWins(t *testing.T) {
 
 // Compile-time check: DockerRuntime satisfies Runtime.
 var _ Runtime = (*DockerRuntime)(nil)
+
+func TestDockerRuntime_MergeEnv_AppliesToSubsequentExec(t *testing.T) {
+	t.Parallel()
+	script := append(createScript("abc"),
+		scriptedCall{match: "exec", response: fakeDockerResponse{stdout: "ok"}},
+	)
+	fd := newFakeDocker(t, script)
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	r.MergeEnv(map[string]string{"FROM_MERGE": "1"})
+
+	if _, err := r.Exec(context.Background(), "true", ExecOptions{}); err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+
+	args := fd.callArgs(createCallCount)
+	if !strings.Contains(strings.Join(args, " "), "--env FROM_MERGE=1") {
+		t.Errorf("post-MergeEnv exec missing --env FROM_MERGE=1; got %v", args)
+	}
+}

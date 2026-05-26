@@ -247,6 +247,7 @@ func (r *scriptJudgeRuntime) Start(context.Context) error  { return nil }
 func (r *scriptJudgeRuntime) Stop(context.Context) error   { return nil }
 func (r *scriptJudgeRuntime) Workspace() string            { return r.workspace }
 func (r *scriptJudgeRuntime) RequiresProcessSandbox() bool { return true }
+func (r *scriptJudgeRuntime) MergeEnv(_ map[string]string) {}
 
 func (r *scriptJudgeRuntime) UploadFile(_ context.Context, _, targetPath string) error {
 	r.uploads = append(r.uploads, targetPath)

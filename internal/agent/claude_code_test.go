@@ -741,3 +741,4 @@ func (r *claudeCodeTestRuntime) Workspace() string { return r.workspace }
 func (r *claudeCodeTestRuntime) RequiresProcessSandbox() bool {
 	return true
 }
+func (r *claudeCodeTestRuntime) MergeEnv(_ map[string]string) {}

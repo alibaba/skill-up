@@ -397,3 +397,4 @@ func (r *qoderTestRuntime) Workspace() string { return r.workspace }
 func (r *qoderTestRuntime) RequiresProcessSandbox() bool {
 	return true
 }
+func (r *qoderTestRuntime) MergeEnv(_ map[string]string) {}

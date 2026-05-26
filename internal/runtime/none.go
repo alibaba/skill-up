@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,6 +36,19 @@ func (r *NoneRuntime) pathInWorkspaceOrAbs(p string) string {
 type NoneRuntime struct {
 	cfg       Config
 	workspace string
+}
+
+// MergeEnv layers entries into the runtime's persistent env baseline. See
+// Runtime.MergeEnv for the contract (callers MUST sequence MergeEnv before
+// any concurrent Exec; the intended use is a one-time setup step).
+func (r *NoneRuntime) MergeEnv(env map[string]string) {
+	if len(env) == 0 {
+		return
+	}
+	if r.cfg.Env == nil {
+		r.cfg.Env = make(map[string]string, len(env))
+	}
+	maps.Copy(r.cfg.Env, env)
 }
 
 // Create allocates the temporary workspace used by the runtime.

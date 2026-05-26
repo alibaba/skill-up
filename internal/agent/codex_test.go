@@ -1006,3 +1006,4 @@ func (r *codexTestRuntime) Workspace() string { return r.workspace }
 func (r *codexTestRuntime) RequiresProcessSandbox() bool {
 	return r.workspace != "opensandbox"
 }
+func (r *codexTestRuntime) MergeEnv(_ map[string]string) {}

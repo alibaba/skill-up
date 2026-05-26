@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path"
@@ -512,6 +513,21 @@ func (r *DockerRuntime) Workspace() string {
 // agent execution; agents do not need to enable their own process sandbox.
 func (r *DockerRuntime) RequiresProcessSandbox() bool {
 	return false
+}
+
+// MergeEnv layers entries into the runtime's persistent env baseline. See
+// Runtime.MergeEnv for the contract. Note: the container's entrypoint (e.g.
+// `sleep infinity`) is started with the env present at Create time, so
+// post-Create MergeEnv calls only affect subsequent `docker exec`
+// invocations, not the long-running entrypoint process.
+func (r *DockerRuntime) MergeEnv(env map[string]string) {
+	if len(env) == 0 {
+		return
+	}
+	if r.cfg.Env == nil {
+		r.cfg.Env = make(map[string]string, len(env))
+	}
+	maps.Copy(r.cfg.Env, env)
 }
 
 // snapshotContainerID returns the current container id under the mutex,

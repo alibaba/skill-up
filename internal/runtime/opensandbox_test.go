@@ -1090,3 +1090,21 @@ func (f *fakeOpenSandbox) RunCommandWithOpts(_ context.Context, req opensandbox.
 func intPtr(v int) *int {
 	return &v
 }
+
+func TestOpenSandboxRuntime_MergeEnv_AppliesToSubsequentExec(t *testing.T) {
+	rt := &OpenSandboxRuntime{
+		workspace: "/workspace",
+		sandbox: &fakeOpenSandbox{
+			execResult: &opensandbox.Execution{ExitCode: intPtr(0)},
+		},
+	}
+	rt.MergeEnv(map[string]string{"FROM_MERGE": "yes"})
+
+	if _, err := rt.Exec(context.Background(), "true", ExecOptions{}); err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	fake, _ := rt.sandbox.(*fakeOpenSandbox)
+	if got := fake.lastExec.Envs["FROM_MERGE"]; got != "yes" {
+		t.Fatalf("Envs[FROM_MERGE] = %q, want yes; got envs=%+v", got, fake.lastExec.Envs)
+	}
+}

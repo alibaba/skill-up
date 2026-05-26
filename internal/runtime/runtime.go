@@ -109,6 +109,13 @@ type Runtime interface {
 	DownloadDir(ctx context.Context, sourceDir, targetDir string) error
 
 	Exec(ctx context.Context, command string, opts ExecOptions) (ExecResult, error)
+	// MergeEnv layers entries onto the runtime's persistent env baseline
+	// (Config.Env). Subsequent Exec calls see these vars unless overridden
+	// by opts.Env. Used by orchestrators (e.g. the evaluator) to seed
+	// runtime-resolved values — for example the agent's PATH expanded
+	// against the target shell — without each Exec caller needing to
+	// know about them. Idempotent; later calls overwrite same-key values.
+	MergeEnv(env map[string]string)
 	Workspace() string
 	// RequiresProcessSandbox reports whether agents should enable their own process sandbox.
 	RequiresProcessSandbox() bool

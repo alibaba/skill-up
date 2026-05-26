@@ -579,3 +579,51 @@ func TestMaskCommand(t *testing.T) {
 		})
 	}
 }
+
+func TestNoneRuntime_MergeEnv(t *testing.T) {
+	t.Parallel()
+	rt := &NoneRuntime{}
+	rt.MergeEnv(map[string]string{"FOO": "1", "BAR": "2"})
+	if got := rt.cfg.Env["FOO"]; got != "1" {
+		t.Fatalf("FOO = %q, want 1", got)
+	}
+	if got := rt.cfg.Env["BAR"]; got != "2" {
+		t.Fatalf("BAR = %q, want 2", got)
+	}
+	// Second call overlays; later keys win.
+	rt.MergeEnv(map[string]string{"BAR": "overridden", "BAZ": "3"})
+	if got := rt.cfg.Env["BAR"]; got != "overridden" {
+		t.Fatalf("BAR after overlay = %q, want overridden", got)
+	}
+	if got := rt.cfg.Env["BAZ"]; got != "3" {
+		t.Fatalf("BAZ = %q, want 3", got)
+	}
+	if got := rt.cfg.Env["FOO"]; got != "1" {
+		t.Fatalf("FOO after overlay = %q, want 1 preserved", got)
+	}
+	// Empty map is a no-op.
+	rt.MergeEnv(nil)
+	rt.MergeEnv(map[string]string{})
+	if len(rt.cfg.Env) != 3 {
+		t.Fatalf("env length = %d, want 3 after no-op calls", len(rt.cfg.Env))
+	}
+}
+
+func TestNoneRuntime_MergeEnv_VisibleToSubsequentExec(t *testing.T) {
+	t.Parallel()
+	rt := &NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	rt.MergeEnv(map[string]string{"SKILL_UP_MERGE_TEST": "visible"})
+
+	res, err := rt.Exec(context.Background(), `printf '%s' "$SKILL_UP_MERGE_TEST"`, ExecOptions{})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if res.Stdout != "visible" {
+		t.Fatalf("Exec saw SKILL_UP_MERGE_TEST=%q, want visible", res.Stdout)
+	}
+}
