@@ -247,7 +247,6 @@ func (r *DockerRuntime) Close() error {
 	return nil
 }
 
-// Start starts the container if it is not already running.
 // TargetGOOS reports the GOOS of the container's guest OS. skill-up's
 // docker runtime currently provisions a Linux image, so commands executed
 // via `docker exec` run on a Linux guest regardless of the host platform.
