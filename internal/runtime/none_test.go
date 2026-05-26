@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -403,18 +402,21 @@ func TestNoneRuntime_ExecWithEnv(t *testing.T) {
 	}
 }
 
-func TestNoneRuntime_ExecExpandsPathFromRuntimeEnv(t *testing.T) {
-	bashPath, err := exec.LookPath("bash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	basePath := filepath.Dir(bashPath)
-	t.Setenv("PATH", basePath)
-
+// TestNoneRuntime_ForwardsEnvLiterally verifies that NoneRuntime forwards
+// $-bearing env values literally — matching the docker and opensandbox
+// runtimes. Callers that want shell expansion must resolve the value first
+// (see internal/agent.probeAndMergePATH) or prepend `export X=...` to the
+// command themselves. The runtime never expands.
+//
+// printf '%s' "$VAR" prints whatever string the runtime handed to the
+// shell. If the runtime pre-expanded $CUSTOM_BIN / $PATH the child would
+// see "/agent/bin:..." instead of the literal "$CUSTOM_BIN:$PATH".
+func TestNoneRuntime_ForwardsEnvLiterally(t *testing.T) {
 	rt := &NoneRuntime{cfg: Config{
 		Env: map[string]string{
-			"CUSTOM_BIN": "/agent/bin",
-			"PATH":       "$CUSTOM_BIN:$PATH",
+			"CUSTOM_BIN":      "/agent/bin",
+			"LITERAL_PATH":    "$CUSTOM_BIN:$PATH",
+			"ALSO_UNEXPANDED": "${HOME}/foo",
 		},
 	}}
 	if err := rt.Create(context.Background()); err != nil {
@@ -422,12 +424,13 @@ func TestNoneRuntime_ExecExpandsPathFromRuntimeEnv(t *testing.T) {
 	}
 	defer func() { _ = rt.Close() }()
 
-	result, err := rt.Exec(context.Background(), "printf %s \"$PATH\"", ExecOptions{})
+	result, err := rt.Exec(context.Background(), `printf '%s\n%s\n' "$LITERAL_PATH" "$ALSO_UNEXPANDED"`, ExecOptions{})
 	if err != nil {
 		t.Fatalf("Exec returned error: %v", err)
 	}
-	if got, want := result.Stdout, "/agent/bin:"+basePath; got != want {
-		t.Fatalf("PATH = %q, want %q", got, want)
+	want := "$CUSTOM_BIN:$PATH\n${HOME}/foo\n"
+	if result.Stdout != want {
+		t.Fatalf("env values should be passed literally; got %q want %q", result.Stdout, want)
 	}
 }
 

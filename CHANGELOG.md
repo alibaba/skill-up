@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `runtime.Runtime.MergeEnv(env)`: new interface method that lets
+  setup-time callers (notably each agent's `Install`) seed the runtime's
+  persistent env baseline. Subsequent `Exec` calls inherit these vars
+  unless overridden by `opts.Env`. Implementations are intended for
+  one-time setup; concurrent `MergeEnv`/`Exec` is not safe.
+
+### Changed
+- Agent layer no longer injects PATH into the env map. Each agent's
+  `Install` now probes the target shell for the resolved PATH (a
+  per-agent `printf '%s' "$HOME/..."` command) and merges the literal
+  result into the runtime's env baseline via `runtime.MergeEnv`.
+  Runtimes treat env keys uniformly — no key is special-cased anywhere.
+- `NoneRuntime` no longer expands `$VAR` / `${VAR}` in user-provided env
+  values (`environment.env` / `opts.Env`). Values forward literally,
+  matching docker and opensandbox. If your `eval.yaml` relied on
+  host-side expansion (e.g. `MY_VAR: "$HOME/foo"`), switch to a literal
+  value or `export` it inside a `setup_steps` step.
+- `environment.type: none`: the framework no longer force-prepends
+  `$HOME/.local/bin:$HOME/.nvm/current/bin:$PATH` to agent commands.
+  Because `ag.Install` is skipped for type=none, the new probe doesn't
+  run either; the host shell's PATH is used as-is. Add the dirs to
+  your shell rc if `claude` / `codex` / `qodercli` isn't already on it.
+
 ## [0.2.3] - 2026-05-27
 
 ### Added

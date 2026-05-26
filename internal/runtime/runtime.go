@@ -17,42 +17,21 @@ const (
 	ClaudeFileMode = 0o600
 )
 
+// mergeEnv returns the host env (os.Environ) with persistentEnv and callEnv
+// overlaid, in that order (callEnv wins). Values are forwarded LITERALLY: no
+// $VAR / ${VAR} expansion. This matches the docker and opensandbox runtimes,
+// which also pass env literally — callers that need shell expansion should
+// either resolve the value first or prepend `export X=...` to the command.
 func mergeEnv(persistentEnv, callEnv map[string]string) []string {
-	baseEnv := envMapFromList(os.Environ())
-	envMap := expandEnvMap(baseEnv, mergeEnvMaps(persistentEnv, callEnv))
-	if envMap == nil {
-		envMap = baseEnv
-	}
-	for k, v := range baseEnv {
-		if _, ok := envMap[k]; !ok {
-			envMap[k] = v
-		}
-	}
+	envMap := envMapFromList(os.Environ())
+	maps.Copy(envMap, persistentEnv)
+	maps.Copy(envMap, callEnv)
 
 	env := make([]string, 0, len(envMap))
 	for k, v := range envMap {
 		env = append(env, k+"="+v)
 	}
 	return env
-}
-
-func expandEnvMap(baseEnv, overlay map[string]string) map[string]string {
-	if len(overlay) == 0 {
-		return nil
-	}
-	expanded := make(map[string]string, len(overlay))
-	for key, value := range overlay {
-		expanded[key] = os.Expand(value, func(name string) string {
-			if name == key {
-				return baseEnv[name]
-			}
-			if overlayValue, ok := overlay[name]; ok {
-				return overlayValue
-			}
-			return baseEnv[name]
-		})
-	}
-	return expanded
 }
 
 func envMapFromList(env []string) map[string]string {
