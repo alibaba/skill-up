@@ -1,8 +1,12 @@
 ignoreGeneratedHeader = false
 severity = "warning"
 confidence = 0.8
-errorCode = 0
-warningCode = 0
+# Non-zero exit codes make CI's `revive` step actually fail on violations.
+# With both at 0 (revive's defaults), warnings become GitHub inline
+# annotations but the Lint job stays green — issues silently pass review,
+# as happened on PR #62 with flag-parameter and context-as-argument hits.
+errorCode = 1
+warningCode = 1
 
 [rule.context-keys-type]
 [rule.time-equal]
