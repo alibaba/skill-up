@@ -107,16 +107,20 @@ func (j *AgentJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 
 	// Get criterion results via agent.Agent. Snapshot parentCtx.Err() the
 	// instant Run returns, before parent's timer has any chance to fire on
-	// its own; this is what annotateTimeoutError uses to distinguish a
-	// judge-level deadline from a parent (case-level) one. Reading
+	// its own; this is how we distinguish a judge-level deadline from a
+	// parent (case-level) one and decide whether to annotate. Reading
 	// parentCtx.Err() later would race against the parent timer in the
 	// caseTimeout ≈ judgeTimeout boundary.
 	sessionResult, err := j.Agent.Run(ctx, j.Runtime, agent.ExecOptions{ArtifactDir: in.ArtifactDir}, messages)
 	parentExpired := parentCtx.Err() != nil
 	if err != nil {
+		annotated := err
+		if !parentExpired {
+			annotated = j.annotateTimeoutError(ctx, err)
+		}
 		if !canRecoverAgentJudgeResult(err, sessionResult) {
 			return nil, &SessionResultError{
-				Err:     fmt.Errorf("agent_judge agent call failed: %w", j.annotateTimeoutError(err, ctx, parentExpired)),
+				Err:     fmt.Errorf("agent_judge agent call failed: %w", annotated),
 				Session: sessionResult,
 			}
 		}
@@ -355,12 +359,13 @@ func findJSONObjectEnd(output string, start int) (int, bool) {
 }
 
 // annotateTimeoutError tags a context.DeadlineExceeded chain with the
-// judge-level timeout knob and seconds, but only when *we* are responsible
-// for that deadline — meaning judgeCtx really fired AND the parent context
-// had not already expired at the moment Run returned. The latter is passed
-// in as parentExpired (snapshotted at Run-return) instead of read here, to
-// avoid a race against the parent timer when caseTimeout ≈ judgeTimeout.
-func (j *AgentJudge) annotateTimeoutError(err error, judgeCtx context.Context, parentExpired bool) error {
+// judge-level timeout knob and seconds. The caller (Evaluate) decides whether
+// to invoke this — specifically, only when the parent context had not already
+// expired at the moment Run returned — so this function does not re-check the
+// parent. It only verifies that *our* judge ctx really fired before labeling
+// (an upstream HTTP layer can also return DeadlineExceeded with its own
+// shorter deadline, which is not ours to label).
+func (j *AgentJudge) annotateTimeoutError(judgeCtx context.Context, err error) error {
 	if err == nil || j.TimeoutSeconds <= 0 {
 		return err
 	}
@@ -368,14 +373,6 @@ func (j *AgentJudge) annotateTimeoutError(err error, judgeCtx context.Context, p
 		return err
 	}
 	if judgeCtx.Err() == nil {
-		// Inner ctx didn't fire; the DeadlineExceeded came from somewhere
-		// else (e.g. an HTTP layer with its own short deadline). Not ours
-		// to label.
-		return err
-	}
-	if parentExpired {
-		// Parent was already done at Run-return — the case-level layer will
-		// annotate that.
 		return err
 	}
 	return fmt.Errorf("%w (judge timeout %ds via judge.timeout_seconds)", err, j.TimeoutSeconds)

@@ -265,17 +265,19 @@ func (e *defaultEvaluator) executeCase(ctx context.Context, caseCfg *config.Case
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		attemptCtx, cancel, timeoutSource, timeoutSec := withCaseTimeout(ctx, e.evalCfg.Cases.Defaults.TimeoutSeconds, caseCfg.Constraints.TimeoutSeconds)
 		result = e.executeCaseOnce(attemptCtx, caseCfg, configName, overrideRT, overrideAgent)
-		// Snapshot both the case ctx and the parent ctx *before* cancel() so
-		// (a) cancel doesn't overwrite Err with Canceled and erase the signal,
-		// and (b) a parent-supplied deadline (e.g. a caller wrapping
-		// EvaluateAll in context.WithTimeout) firing through attemptCtx isn't
-		// relabelled as a case timeout — that would point users at the wrong
-		// YAML knob. A tighter child deadline (e.g. judge.timeout_seconds)
-		// gets the same protection because attemptCtx.Err() stays nil when
-		// the case-level deadline never fires.
-		caseDeadlineFired := errors.Is(attemptCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
+		// Decide whether to annotate *before* cancel() so (a) cancel doesn't
+		// overwrite Err with Canceled and erase the signal, and (b) a
+		// parent-supplied deadline (e.g. a caller wrapping EvaluateAll in
+		// context.WithTimeout) firing through attemptCtx isn't relabelled as a
+		// case timeout — that would point users at the wrong YAML knob. A
+		// tighter child deadline (e.g. judge.timeout_seconds) gets the same
+		// protection because attemptCtx.Err() stays nil when the case-level
+		// deadline never fires. The decision lives at the caller so the
+		// annotate helper stays free of a control-flag parameter.
+		if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+			annotateCaseTimeoutError(&result, timeoutSource, timeoutSec)
+		}
 		cancel()
-		annotateCaseTimeoutError(&result, timeoutSource, timeoutSec, caseDeadlineFired)
 
 		retryReason, ok := retryReasonForResult(result)
 		if !ok || !retryAllowed(e.evalCfg.Cases.RetryPolicy, retryReason) || attempt == maxAttempts {
@@ -663,18 +665,12 @@ func resolveJudgeScriptPath(skillDir string, judgeCfg config.JudgeConfig) config
 
 // annotateCaseTimeoutError attaches the configured case timeout and its
 // source config key to a result whose error chain contains
-// context.DeadlineExceeded — but only when the case-level context itself
-// expired. A tighter child deadline (e.g. judge.timeout_seconds firing while
-// the case ctx still has budget) would otherwise be mislabeled as a case
-// timeout and point users at the wrong YAML knob. The caller passes
-// caseDeadlineFired as a pre-cancel snapshot to avoid that race. The original
-// DeadlineExceeded is preserved via %w so callers (and isTimeoutError) still
-// match it.
-func annotateCaseTimeoutError(result *EvalResult, source string, seconds int, caseDeadlineFired bool) {
+// context.DeadlineExceeded. The caller is responsible for ensuring this is
+// only invoked when the case-level deadline actually fired (see executeCase);
+// here we just wrap. The original DeadlineExceeded is preserved via %w so
+// callers (and isTimeoutError) still match it.
+func annotateCaseTimeoutError(result *EvalResult, source string, seconds int) {
 	if result == nil || result.Error == nil || source == "" || seconds <= 0 {
-		return
-	}
-	if !caseDeadlineFired {
 		return
 	}
 	if !errors.Is(result.Error, context.DeadlineExceeded) {
