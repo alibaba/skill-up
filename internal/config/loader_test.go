@@ -43,6 +43,21 @@ cases:
 	}
 }
 
+func TestStripExt(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"case.yaml":        "case",
+		"case.with.dots":   "case.with",
+		"case-without-ext": "case-without-ext",
+	}
+	for input, want := range tests {
+		if got := stripExt(input); got != want {
+			t.Fatalf("stripExt(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestLoader_LoadEvalConfig(t *testing.T) {
 	t.Parallel()
 	content := `schema_version: v1alpha1

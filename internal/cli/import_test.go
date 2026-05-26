@@ -99,7 +99,7 @@ func TestGenerateEvalConfig(t *testing.T) {
 		t.Errorf("expected Skill Path '.', got '%s'", result.Skills[0].Path)
 	}
 
-	if result.Engine.Name != "claude_code" {
+	if result.Engine.Name != testEngineClaudeCode {
 		t.Errorf("expected Engine.Name 'claude_code', got '%s'", result.Engine.Name)
 	}
 

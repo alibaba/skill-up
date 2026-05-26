@@ -25,6 +25,25 @@ func TestNewIterationWorkspace_FirstIteration(t *testing.T) {
 	}
 }
 
+func TestNewIterationWorkspace_DefaultAndInvalidIteration(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	ws, err := NewIterationWorkspace("", "demo", 1)
+	if err != nil {
+		t.Fatalf("NewIterationWorkspace default returned error: %v", err)
+	}
+	if ws.RootDir != "demo-workspace" {
+		t.Fatalf("RootDir = %q, want demo-workspace", ws.RootDir)
+	}
+	if _, err := os.Stat("demo-workspace"); err != nil {
+		t.Fatalf("expected default workspace dir: %v", err)
+	}
+
+	if _, err := NewIterationWorkspace("bad", "demo", 0); err == nil {
+		t.Fatal("expected invalid iteration error")
+	}
+}
+
 func TestIterationWorkspace_Paths(t *testing.T) {
 	t.Parallel()
 	ws, err := NewIterationWorkspace("/tmp/test-workspace", "test-skill", 1)
@@ -214,5 +233,52 @@ func TestIterationWorkspace_WriteBenchmark(t *testing.T) {
 	path := filepath.Join(ws.IterationDir(), "benchmark.json")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		t.Error("expected benchmark.json to exist")
+	}
+}
+
+func TestIterationWorkspace_WriteFile(t *testing.T) {
+	t.Parallel()
+
+	ws, err := NewIterationWorkspace(t.TempDir(), "test-skill", 1)
+	if err != nil {
+		t.Fatalf("NewIterationWorkspace error: %v", err)
+	}
+
+	if err := ws.WriteFile("nested/artifact.txt", []byte("artifact")); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(ws.IterationDir(), "nested", "artifact.txt"))
+	if err != nil {
+		t.Fatalf("read artifact: %v", err)
+	}
+	if string(data) != "artifact" {
+		t.Fatalf("artifact data = %q, want artifact", data)
+	}
+
+	for _, rel := range []string{"../escape.txt", "/abs.txt"} {
+		if err := ws.WriteFile(rel, []byte("nope")); err == nil {
+			t.Fatalf("WriteFile(%q) returned nil error", rel)
+		}
+	}
+}
+
+func TestIterationWorkspaceRejectsUnsafeCaseIDs(t *testing.T) {
+	t.Parallel()
+
+	ws, err := NewIterationWorkspace(t.TempDir(), "test-skill", 1)
+	if err != nil {
+		t.Fatalf("NewIterationWorkspace error: %v", err)
+	}
+
+	for _, caseID := range []string{"../escape", "nested/case", `nested\case`, "/abs"} {
+		if err := ws.EnsureDirs([]string{caseID}); err == nil {
+			t.Fatalf("EnsureDirs(%q) returned nil error", caseID)
+		}
+		if err := ws.WriteResponse(caseID, "with_skill", "content"); err == nil {
+			t.Fatalf("WriteResponse(%q) returned nil error", caseID)
+		}
+	}
+	if err := validateCaseID("case-ok"); err != nil {
+		t.Fatalf("validateCaseID(case-ok) returned error: %v", err)
 	}
 }

@@ -32,6 +32,21 @@ func TestUsageOnError_PrintsUsageForParseErrors(t *testing.T) {
 	}
 }
 
+func TestExecuteArgsVersionInitializesRoot(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	output, err := captureStdout(t, func() error {
+		return ExecuteArgs("test-version", []string{"--version"})
+	})
+	if err != nil {
+		t.Fatalf("ExecuteArgs --version returned error: %v", err)
+	}
+	if !strings.Contains(output, "test-version") {
+		t.Fatalf("version output = %q, want test-version", output)
+	}
+}
+
 func TestIsInitInvocation(t *testing.T) {
 	cases := []struct {
 		name string

@@ -58,6 +58,20 @@ func TestNoneRuntime_StartStop(t *testing.T) {
 	if err := rt.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop should be no-op: %v", err)
 	}
+	if !rt.RequiresProcessSandbox() {
+		t.Fatal("NoneRuntime should require process sandboxing")
+	}
+}
+
+func TestNewRuntimeErrors(t *testing.T) {
+	t.Parallel()
+
+	if _, err := NewRuntime(Config{Type: "unknown"}); err == nil || !strings.Contains(err.Error(), "unknown runtime type") {
+		t.Fatalf("NewRuntime unknown error = %v", err)
+	}
+	if _, err := NewRuntime(Config{Type: "docker"}); err == nil || !strings.Contains(err.Error(), "requires environment.image") {
+		t.Fatalf("NewRuntime docker validation error = %v", err)
+	}
 }
 
 func TestNoneRuntime_UploadDownloadFile(t *testing.T) {
