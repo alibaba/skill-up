@@ -115,7 +115,12 @@ func planWindowsScript(scriptPath string, shell platform.HostShell) (scriptPlan,
 		return scriptPlan{
 			uploadName: "script.ps1",
 			command: func(remoteScript string) string {
-				return strings.Join(append(psArgs, quote(remoteScript)), " ")
+				// Defensive copy: appending to the captured psArgs
+				// directly would mutate its backing array if cap
+				// exceeds len. The .sh branch below does the same.
+				args := append([]string{}, psArgs...)
+				args = append(args, quote(remoteScript))
+				return strings.Join(args, " ")
 			},
 			cleanupCommand: winCleanup,
 			envPath:        identityEnvPath,
