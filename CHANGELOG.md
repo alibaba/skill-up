@@ -5,6 +5,73 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-05-26
+
+### Added
+- `docker` runtime: a third `environment.type` alongside `none` and
+  `opensandbox`. Each eval runs inside a local Docker container —
+  container-level filesystem/process/network isolation, reproducible via
+  pinned images, no external sandbox service dependency. Implemented in
+  `internal/runtime/docker.go` against the existing Runtime interface;
+  `Create` rolls half-created containers back with `docker rm -f` on any
+  failure, Upload/Download use `docker cp`. Closes #32.
+- `judge.timeout_seconds` now also bounds `agent_judge`, not just the
+  script judge. `0` keeps the previous "no judge-level deadline" semantics
+  (parent ctx still applies); positive values cap a single LLM-based
+  judge call short of the case timeout.
+
+### Changed
+- Case timeout is now a strict budget for **agent + judge as one unit**.
+  The salvage detour that re-ran the judge with `context.WithoutCancel`
+  when the agent run hit `context.DeadlineExceeded` (gated on
+  `>=16` chars of recoverable text) has been removed — it quietly broke
+  the contract that the case timeout bounds a case. `handleExecutionResult`
+  now ERRORs on any execution error; if the agent's context expired, the
+  judge does not run. (`AgentJudge.canRecoverAgentJudgeResult`, a
+  separate salvage that reparses JSON from a non-cancelled agent's
+  `FinalMessage`, is unaffected.)
+- Timeout errors now name the knob and value: `withCaseTimeout` returns a
+  `(source, seconds)` pair that `annotateCaseTimeoutError` formats into
+  `"… (case timeout 60s via cases.defaults.timeout_seconds)"`, so users
+  know which YAML field to tune. Symmetric annotation in
+  `agent_judge.annotateTimeoutError` for `judge.timeout_seconds` hits.
+
+### Fixed
+- `codex` engine: empty `ModelProvider` plus a non-empty `BaseURL` now
+  synthesises the same `model_providers.skill-up-openai` override that
+  `ModelProvider="openai"` already produced, with `wire_api="chat"`.
+  Previously the empty-provider path emitted only `-c openai_base_url=...`,
+  which codex silently ignores — it kept talking to `api.openai.com` under
+  the bundled provider with `wire_api="responses"`, so any
+  `/chat/completions`-only upstream (idealab, dashscope OpenAI-compat, …)
+  returned 400 from `codex_api::endpoint::responses`. The
+  `--model <provider>/<name>` path was unaffected; this aligns the
+  empty-provider path with it.
+- `eval.yaml` defaults: `LoadEvalConfig` now fills the documented defaults
+  (`timeout_seconds=300`, `max_turns=10`, `parallelism=1`,
+  `report.formats=[json]`) after unmarshal, sourced from
+  `DefaultEvalConfig()` so `defaults.yaml` stays the single source of
+  truth. Previously these only kicked in via the "no eval.yaml" code path
+  — with an eval.yaml present, an omitted `timeout_seconds` resolved to 0
+  and `withCaseTimeout` treated it as "no deadline", the opposite of what
+  the docs promised. `timeout_seconds=0` is now "not configured, use
+  default"; pass `-1` to opt out of the case-level deadline.
+- Runtime non-zero exit: surface stdout alongside stderr in the warn /
+  error log. `logNonZeroStderr` alone left users staring at an exit code
+  with no context when the failing tool (build, test runner, package
+  manager) wrote diagnostics to stdout. Wired into `NoneRuntime.Exec`,
+  `DockerRuntime.classifyExecResult`, and `OpenSandboxRuntime.Exec`
+  (non-zero, context-killed, and SDK-failure branches).
+- Case-timeout label no longer mislabels child or parent deadlines.
+  `annotateCaseTimeoutError` previously stamped
+  `"(case timeout … via cases.defaults.timeout_seconds)"` on any error
+  whose chain contained `context.DeadlineExceeded`, so a tighter
+  `judge.timeout_seconds` firing — or a parent caller's
+  `context.WithTimeout` propagating through — pointed users at the
+  wrong YAML knob. The annotation now requires both the case-level
+  attempt context to have hit `DeadlineExceeded` *and* the parent
+  context to still be alive at return time.
+
 ## [0.2.1] - 2026-05-22
 
 ### Fixed
