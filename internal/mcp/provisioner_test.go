@@ -279,3 +279,130 @@ func TestProvisioner_MockedServerFromConfigRefUsesToolResponses(t *testing.T) {
 		t.Fatalf("mock script missing fixture tool: %#v", server.Args)
 	}
 }
+
+func TestProvisionerValidationAndTransportErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		server  config.MCPServer
+		wantErr string
+	}{
+		{
+			name:    "missing mode",
+			server:  config.MCPServer{Name: "missing"},
+			wantErr: "mode is required",
+		},
+		{
+			name:    "unknown mode",
+			server:  config.MCPServer{Name: "bad", Mode: "proxy"},
+			wantErr: "mode must be one of",
+		},
+		{
+			name:    "http missing endpoint",
+			server:  config.MCPServer{Name: "http", Mode: "real", Transport: "http"},
+			wantErr: "requires endpoint",
+		},
+		{
+			name:    "stdio missing command",
+			server:  config.MCPServer{Name: "stdio", Mode: "real", Transport: "stdio"},
+			wantErr: "requires command",
+		},
+		{
+			name:    "unknown transport",
+			server:  config.MCPServer{Name: "bad-transport", Mode: "real", Transport: "sse", Endpoint: "https://example.test"},
+			wantErr: "transport must be one of",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, _, err := (Provisioner{}).Provision(config.MCPConfig{Servers: []config.MCPServer{tt.server}})
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Provision error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestProvisionerServerOverridesConfigRefFields(t *testing.T) {
+	t.Parallel()
+
+	skillDir := t.TempDir()
+	configPath := filepath.Join(skillDir, "mcp.yaml")
+	if err := os.WriteFile(configPath, []byte("transport: stdio\ncommand: node\nargs: [from-file]\nendpoint: https://file.example.test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved, _, err := (Provisioner{SkillDir: skillDir}).Provision(config.MCPConfig{
+		Servers: []config.MCPServer{{
+			Name:      "override",
+			Mode:      "real",
+			ConfigRef: "mcp.yaml",
+			Transport: "streamable-http",
+			Endpoint:  "https://server.example.test",
+			Command:   "ignored-because-http",
+			Args:      []string{"from-server"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Provision returned error: %v", err)
+	}
+	server := resolved.Servers[0]
+	if server.Transport != transportHTTP {
+		t.Fatalf("Transport = %q, want http", server.Transport)
+	}
+	if server.Endpoint != "https://server.example.test" {
+		t.Fatalf("Endpoint = %q, want server override", server.Endpoint)
+	}
+	if server.Command != "ignored-because-http" {
+		t.Fatalf("Command = %q, want explicit command preserved", server.Command)
+	}
+	if len(server.Args) != 1 || server.Args[0] != "from-server" {
+		t.Fatalf("Args = %#v, want server override", server.Args)
+	}
+}
+
+func TestResolveEnvReferences(t *testing.T) {
+	t.Parallel()
+
+	lookup := func(name string) (string, bool) {
+		values := map[string]string{
+			"TOKEN": "secret",
+			"HOST":  "example.test",
+		}
+		value, ok := values[name]
+		return value, ok
+	}
+
+	value, err := resolveEnvValue("https://${HOST}/mcp?token=${TOKEN}", lookup)
+	if err != nil {
+		t.Fatalf("resolveEnvValue returned error: %v", err)
+	}
+	if value != "https://example.test/mcp?token=secret" {
+		t.Fatalf("resolved value = %q", value)
+	}
+
+	refs, err := resolveReferencedEnv("Bearer ${TOKEN}", lookup)
+	if err != nil {
+		t.Fatalf("resolveReferencedEnv returned error: %v", err)
+	}
+	if refs["TOKEN"] != "secret" {
+		t.Fatalf("refs = %#v, want TOKEN", refs)
+	}
+
+	if _, err := resolveEnvValue("$TOKEN-suffix", lookup); err == nil || !strings.Contains(err.Error(), "invalid environment variable reference") {
+		t.Fatalf("resolveEnvValue invalid ref error = %v", err)
+	}
+	if _, err := resolveReferencedEnv("${MISSING}", lookup); err == nil || !strings.Contains(err.Error(), "MISSING") {
+		t.Fatalf("resolveReferencedEnv missing error = %v", err)
+	}
+	if name, ok := wholeEnvRef("$TOKEN"); !ok || name != "TOKEN" {
+		t.Fatalf("wholeEnvRef($TOKEN) = %q/%v, want TOKEN true", name, ok)
+	}
+	if _, ok := wholeEnvRef("$TOKEN-suffix"); ok {
+		t.Fatal("wholeEnvRef should reject invalid bare refs")
+	}
+}

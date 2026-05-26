@@ -196,3 +196,48 @@ func TestLoadEffective_ValidateErrorIncludesSources(t *testing.T) {
 		t.Errorf("validate error should mention source path; got %v", err)
 	}
 }
+
+func TestLoadFile(t *testing.T) {
+	tmp := t.TempDir()
+	valid := filepath.Join(tmp, "config.yaml")
+	writeFile(t, valid, "telemetry:\n  service_name: cli\n")
+
+	cfg, err := LoadFile(valid)
+	if err != nil {
+		t.Fatalf("LoadFile valid returned error: %v", err)
+	}
+	if cfg.Telemetry.ServiceName != "cli" {
+		t.Fatalf("service name = %q, want cli", cfg.Telemetry.ServiceName)
+	}
+
+	if _, err := LoadFile(filepath.Join(tmp, "missing.yaml")); err == nil || !strings.Contains(err.Error(), "config file not found") {
+		t.Fatalf("LoadFile missing error = %v", err)
+	}
+
+	invalid := filepath.Join(tmp, "invalid.yaml")
+	writeFile(t, invalid, "telemetry:\n  traces:\n    protocol: tcp\n")
+	if _, err := LoadFile(invalid); err == nil || !strings.Contains(err.Error(), "validate") {
+		t.Fatalf("LoadFile invalid error = %v", err)
+	}
+}
+
+func TestResolveConfigPaths(t *testing.T) {
+	t.Parallel()
+
+	xdg := t.TempDir()
+	env := func(key string) string {
+		if key == "XDG_CONFIG_HOME" {
+			return xdg
+		}
+		return ""
+	}
+	if got := resolveUserConfigPath(LoadOptions{HomeDir: "/home/test"}, env); got != filepath.Join(xdg, UserConfigDir, UserConfigFile) {
+		t.Fatalf("resolveUserConfigPath XDG = %q", got)
+	}
+	if got := resolveUserConfigPath(LoadOptions{HomeDir: "/home/test"}, emptyEnv); got != filepath.Join("/home/test", ".config", UserConfigDir, UserConfigFile) {
+		t.Fatalf("resolveUserConfigPath home = %q", got)
+	}
+	if got := resolveProjectConfigPath(LoadOptions{WorkingDir: "/repo"}); got != filepath.Join("/repo", ProjectConfigFile) {
+		t.Fatalf("resolveProjectConfigPath = %q", got)
+	}
+}

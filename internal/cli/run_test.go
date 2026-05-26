@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,12 +17,16 @@ import (
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/evaluator"
 	"github.com/alibaba/skill-up/internal/judge"
+	"github.com/alibaba/skill-up/internal/ui"
 	"github.com/alibaba/skill-up/internal/userconfig"
 )
 
-const agentJudgeType = "agent_judge"
-
-const testRuntimeOpenSandbox = "opensandbox"
+const (
+	agentJudgeType         = "agent_judge"
+	testEngineClaudeCode   = "claude_code"
+	testRuntimeOpenSandbox = "opensandbox"
+	testFlagBoolTrue       = "true"
+)
 
 // Test fixtures for the provider/model split disambiguation suite.
 const (
@@ -35,6 +40,168 @@ func TestRunCommand_UsesUsageAwareArgs(t *testing.T) {
 
 	if runCmd.Args == nil {
 		t.Fatal("expected run command args validator to be configured")
+	}
+}
+
+func newRunPhaseTestCommand(t *testing.T) *cobra.Command {
+	t.Helper()
+	cmd := &cobra.Command{Use: "run"}
+	cmd.SetContext(userconfig.WithContext(context.Background(), userconfig.Config{}, nil))
+	cmd.Flags().StringArray("include-case-name", nil, "")
+	cmd.Flags().StringArray("exclude-case-name", nil, "")
+	cmd.Flags().Bool("auto", false, "")
+	cmd.Flags().StringArray("format", nil, "")
+	cmd.Flags().String("output-dir", "", "")
+	cmd.Flags().String("engine", "", "")
+	cmd.Flags().String(runtimeFlagName, "", "")
+	cmd.Flags().String("model", "", "")
+	cmd.Flags().String("api-key", "", "")
+	cmd.Flags().Int("parallelism", 0, "")
+	cmd.Flags().SetNormalizeFunc(normalizeRunFlagName)
+	cmd.Flags().StringArray(runtimeKwargFlagName, nil, "")
+	var verbose verbosityValue
+	cmd.Flags().VarP(&verbose, "verbose", "v", "")
+	cmd.Flags().Lookup("verbose").NoOptDefVal = testFlagBoolTrue
+	cmd.Flags().Int("iteration", 0, "")
+	cmd.Flags().Bool("no-delete", false, "")
+	cmd.Flags().Bool("dry-run", false, "")
+	return cmd
+}
+
+func TestRunEvalDryRunLoadsFiltersAndSkipsAgentSetup(t *testing.T) {
+	cmd := newRunPhaseTestCommand(t)
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	if err := cmd.Flags().Set("dry-run", testFlagBoolTrue); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("include-case-name", "analyze-*"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("engine", "codex"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("model", "openai/gpt-5"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("parallelism", "1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set(runtimeFlagName, "none"); err != nil {
+		t.Fatal(err)
+	}
+
+	var uiOut bytes.Buffer
+	origUIOutput := ui.Output
+	ui.Output = &uiOut
+	t.Cleanup(func() { ui.Output = origUIOutput })
+
+	stdout, err := captureStdout(t, func() error {
+		return runEval(cmd, []string{testEvalPath})
+	})
+	if err != nil {
+		t.Fatalf("runEval dry-run returned error: %v", err)
+	}
+	if !strings.Contains(uiOut.String(), "Loaded 1 case(s) | engine: codex | model: openai/gpt-5") {
+		t.Fatalf("UI output = %q, want loaded dry-run summary", uiOut.String())
+	}
+	if !strings.Contains(stdout, "Would run 1 case(s) with agent codex") ||
+		!strings.Contains(stdout, "  - analyze-directory") {
+		t.Fatalf("stdout = %q, want dry-run case list", stdout)
+	}
+}
+
+func TestRunPhaseHelpers(t *testing.T) {
+	var out bytes.Buffer
+	observer := &uiProgressObserver{}
+	origUIOutput := ui.Output
+	ui.Output = &out
+	t.Cleanup(func() { ui.Output = origUIOutput })
+
+	observer.OnCaseStart(1, 2, "case-a", "Case A")
+	observer.OnCaseComplete(1, 2, "case-a", judge.StatusPass, 1)
+	if got := out.String(); !strings.Contains(got, "case-a: Case A") || !strings.Contains(got, "PASS (100.0%)") {
+		t.Fatalf("observer output = %q", got)
+	}
+
+	results := []evaluator.EvalResult{
+		{Status: judge.StatusPass},
+		{Status: judge.StatusFail},
+		{Status: judge.StatusError},
+		{Status: judge.StatusSkip},
+	}
+	passed, failed, errored := countResultStatus(results)
+	if passed != 1 || failed != 1 || errored != 1 {
+		t.Fatalf("countResultStatus = %d/%d/%d, want 1/1/1", passed, failed, errored)
+	}
+
+	if got := formatModelRef("openai", "gpt-5"); got != "openai/gpt-5" {
+		t.Fatalf("formatModelRef provider/name = %q", got)
+	}
+	if got := formatModelRef("", "gpt-5"); got != "gpt-5" {
+		t.Fatalf("formatModelRef name = %q", got)
+	}
+	if got := formatModelRef("openai", ""); got != "openai" {
+		t.Fatalf("formatModelRef provider = %q", got)
+	}
+	if got := formatModelRef("", ""); got != "<unset>" {
+		t.Fatalf("formatModelRef empty = %q", got)
+	}
+
+	var verbose verbosityValue
+	if verbose.Type() != "verbosity" {
+		t.Fatalf("verbosity Type() = %q, want verbosity", verbose.Type())
+	}
+}
+
+func TestLoadCredentialsAndAgentAppliesCLIModelAndAPIKey(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	cmd := newRunPhaseTestCommand(t)
+	if err := cmd.Flags().Set("model", "openai/gpt-5"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("api-key", "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+	evalCfg := &config.EvalConfig{Engine: config.EngineConfig{Name: "codex"}}
+	ag, resolver, params, err := loadCredentialsAndAgent(cmd, evalCfg)
+	if err != nil {
+		t.Fatalf("loadCredentialsAndAgent returned error: %v", err)
+	}
+	if ag == nil || resolver == nil {
+		t.Fatalf("agent/resolver = %v/%v, want non-nil", ag, resolver)
+	}
+	if params.Model != "gpt-5" || params.Provider != "" || params.APIKey != "sk-test" {
+		t.Fatalf("runner params = %+v, want literal gpt-5 with cli API key", params)
+	}
+}
+
+func TestLoadUserConfigHonorsInitAndExplicitFailures(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	badPath := filepath.Join(t.TempDir(), "bad.yaml")
+	if err := os.WriteFile(badPath, []byte("telemetry: : :\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := loadUserConfig([]string{"--config", badPath, "run"})
+	if err == nil {
+		t.Fatal("loadUserConfig for run with corrupt explicit config returned nil error")
+	}
+
+	cfg, sources, err := loadUserConfig([]string{"--config", badPath, "init"})
+	if err != nil {
+		t.Fatalf("loadUserConfig for init should ignore explicit load path, got %v", err)
+	}
+	if cfg.Kind != "" {
+		t.Fatalf("config = %+v, want empty", cfg)
+	}
+	for _, source := range sources {
+		if source.Kind == "explicit" {
+			t.Fatalf("init load should not include explicit source: %+v", sources)
+		}
 	}
 }
 
@@ -61,7 +228,7 @@ func TestGetVerbosity(t *testing.T) {
 			cmd := &cobra.Command{Use: "test"}
 			var verbose verbosityValue
 			cmd.Flags().VarP(&verbose, "verbose", "v", "")
-			cmd.Flags().Lookup("verbose").NoOptDefVal = "true"
+			cmd.Flags().Lookup("verbose").NoOptDefVal = testFlagBoolTrue
 
 			if err := cmd.Flags().Parse(tt.args); err != nil {
 				t.Fatalf("parse flags: %v", err)
@@ -355,6 +522,57 @@ func TestLoadAutoModeEvaluation_FallsBackToEvalsJSON(t *testing.T) {
 	}
 }
 
+func TestLoadManualModeEvaluationAcceptsSkillRootOrEvalFile(t *testing.T) {
+	root := t.TempDir()
+	writeAutoModeSkill(t, root)
+	writeAutoModeEvalYAML(t, root, "manual-case")
+	evalPath := filepath.Join(root, "evals", "eval.yaml")
+
+	gotPath, cases, evalCfg, loader, err := loadManualModeEvaluation(t.Context(), root)
+	if err != nil {
+		t.Fatalf("loadManualModeEvaluation(root) returned error: %v", err)
+	}
+	if gotPath != evalPath || len(cases) != 1 || cases[0].ID != "manual-case" {
+		t.Fatalf("root load path/cases = %q/%#v, want manual-case", gotPath, cases)
+	}
+	if evalCfg.Engine.Name != testEngineClaudeCode || loader.SkillDir() != root {
+		t.Fatalf("root eval/loader = %+v/%s", evalCfg.Engine, loader.SkillDir())
+	}
+
+	gotPath, cases, _, _, err = loadManualModeEvaluation(t.Context(), evalPath)
+	if err != nil {
+		t.Fatalf("loadManualModeEvaluation(file) returned error: %v", err)
+	}
+	if gotPath != evalPath || len(cases) != 1 {
+		t.Fatalf("file load path/cases = %q/%d", gotPath, len(cases))
+	}
+
+	if _, _, _, _, err := loadManualModeEvaluation(t.Context(), filepath.Join(root, "missing")); err == nil {
+		t.Fatal("expected error for missing eval.yaml")
+	}
+}
+
+func TestLoadRunInputsManualMode(t *testing.T) {
+	root := t.TempDir()
+	writeAutoModeSkill(t, root)
+	writeAutoModeEvalYAML(t, root, "manual-input")
+
+	cmd := newRunPhaseTestCommand(t)
+	cases, evalCfg, loader, err := loadRunInputs(t.Context(), cmd, []string{root})
+	if err != nil {
+		t.Fatalf("loadRunInputs manual returned error: %v", err)
+	}
+	if len(cases) != 1 || cases[0].ID != "manual-input" {
+		t.Fatalf("cases = %#v, want manual-input", cases)
+	}
+	if evalCfg.Engine.Name != testEngineClaudeCode {
+		t.Fatalf("engine = %q, want claude_code", evalCfg.Engine.Name)
+	}
+	if loader.SkillDir() != root {
+		t.Fatalf("loader.SkillDir() = %q, want %q", loader.SkillDir(), root)
+	}
+}
+
 func writeAutoModeSkill(t *testing.T, root string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(root, "SKILL.md"), []byte("# test skill\n"), 0o600); err != nil {
@@ -547,6 +765,54 @@ func TestNormalizeAutoEvalRoot(t *testing.T) {
 	_, err = normalizeAutoEvalRoot(looseFile)
 	if err == nil {
 		t.Fatal("expected error for file outside evals directory")
+	}
+}
+
+func TestResolveAutoEvalRootUsesExplicitPath(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	got, err := resolveAutoEvalRoot(t.Context(), []string{root})
+	if err != nil {
+		t.Fatalf("resolveAutoEvalRoot returned error: %v", err)
+	}
+	if got != root {
+		t.Fatalf("resolveAutoEvalRoot = %q, want %q", got, root)
+	}
+
+	if _, err := resolveAutoEvalRoot(t.Context(), []string{filepath.Join(root, "missing")}); err == nil {
+		t.Fatal("expected error for missing explicit auto root")
+	}
+}
+
+func TestResolveAutoEvalRootDiscoversFromWorkingTree(t *testing.T) {
+	root := t.TempDir()
+	writeAutoModeSkill(t, root)
+	writeAutoModeEvalsJSON(t, root)
+	deep := filepath.Join(root, "nested", "deep")
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(deep)
+
+	got, err := resolveAutoEvalRoot(t.Context(), nil)
+	if err != nil {
+		t.Fatalf("resolveAutoEvalRoot discovery returned error: %v", err)
+	}
+	if got != root {
+		t.Fatalf("resolveAutoEvalRoot discovery = %q, want %q", got, root)
+	}
+}
+
+func TestResolveEvalPathUsesExplicitArg(t *testing.T) {
+	t.Parallel()
+
+	got, err := resolveEvalPath(t.Context(), []string{testEvalPath})
+	if err != nil {
+		t.Fatalf("resolveEvalPath returned error: %v", err)
+	}
+	if got != testEvalPath {
+		t.Fatalf("resolveEvalPath = %q, want %q", got, testEvalPath)
 	}
 }
 
@@ -827,7 +1093,7 @@ func TestEvaluateOptionsFromFlags(t *testing.T) {
 	cmd.Flags().Int("iteration", 1, "")
 	cmd.Flags().StringArray("format", nil, "")
 
-	if err := cmd.Flags().Set("no-delete", "true"); err != nil {
+	if err := cmd.Flags().Set("no-delete", testFlagBoolTrue); err != nil {
 		t.Fatalf("set no-delete: %v", err)
 	}
 	if err := cmd.Flags().Set("output-dir", "/tmp/custom-output"); err != nil {
@@ -904,7 +1170,7 @@ func TestResolveEvalConfig_AllowsRawModelOverrideForAnyEngine(t *testing.T) {
 
 func TestResolveEvalConfig_ParsesProviderQualifiedModel(t *testing.T) {
 	t.Parallel()
-	runResolveEvalConfigCase(t, "anthropic/auto", "claude_code", "anthropic", "auto")
+	runResolveEvalConfigCase(t, "anthropic/auto", testEngineClaudeCode, "anthropic", "auto")
 }
 
 func TestApplyRunConfigOverrides_Parallelism(t *testing.T) {

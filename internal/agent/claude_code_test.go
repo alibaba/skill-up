@@ -297,6 +297,120 @@ func TestParseStreamOutput_JSONEventArray(t *testing.T) {
 	}
 }
 
+func TestParseStreamOutput_NDJSONWithTurnsAndTools(t *testing.T) {
+	t.Parallel()
+
+	output := strings.Join([]string{
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Prompt"}]}}`,
+		`{"type":"tool_call","tool_call":{"id":"tool-1","name":"read_file","input":{"path":"README.md"}}}`,
+		`{"type":"tool_result","tool_result":{"call_id":"tool-1","status":"success","content":"contents"}}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Answer"}],"usage":{"input_tokens":3,"cache_read_input_tokens":2,"output_tokens":5}}}`,
+		`{"type":"result","result":"Final answer","usage":{"input_tokens":4,"cache_creation_input_tokens":1,"output_tokens":6}}`,
+		`not-json`,
+		`{}`,
+	}, "\n")
+
+	trans, finalMsg, inputTokens, outputTokens := parseStreamOutput(output)
+	assertClaudeStreamParseResult(t, trans, finalMsg, inputTokens, outputTokens)
+}
+
+func assertClaudeStreamParseResult(t *testing.T, trans transcript.Transcript, finalMsg string, inputTokens, outputTokens int) {
+	t.Helper()
+	if finalMsg != "Final answer" {
+		t.Fatalf("finalMsg = %q, want Final answer", finalMsg)
+	}
+	if inputTokens != 5 || outputTokens != 6 {
+		t.Fatalf("tokens = %d/%d, want 5/6", inputTokens, outputTokens)
+	}
+	if len(trans) != 4 {
+		t.Fatalf("transcript length = %d, want 4: %#v", len(trans), trans)
+	}
+	assertClaudeStreamUserMessage(t, trans[0])
+	assertClaudeStreamToolCall(t, trans[1])
+	assertClaudeStreamToolResult(t, trans[2])
+	assertClaudeStreamAssistantMessage(t, trans[3])
+}
+
+func assertClaudeStreamUserMessage(t *testing.T, msg transcript.Message) {
+	t.Helper()
+	if msg.Role != transcript.RoleUser || msg.Content != "Prompt" || msg.Turn != 1 {
+		t.Fatalf("user message = %#v", msg)
+	}
+}
+
+func assertClaudeStreamToolCall(t *testing.T, msg transcript.Message) {
+	t.Helper()
+	if msg.ToolCall == nil || msg.ToolCall.Name != "read_file" || msg.Turn != 1 {
+		t.Fatalf("tool call = %#v", msg)
+	}
+}
+
+func assertClaudeStreamToolResult(t *testing.T, msg transcript.Message) {
+	t.Helper()
+	if msg.ToolResult == nil || msg.ToolResult.CallID != "tool-1" || msg.Turn != 1 {
+		t.Fatalf("tool result = %#v", msg)
+	}
+}
+
+func assertClaudeStreamAssistantMessage(t *testing.T, msg transcript.Message) {
+	t.Helper()
+	if msg.Role != transcript.RoleAssistant || msg.Content != "Answer" {
+		t.Fatalf("assistant message = %#v", msg)
+	}
+}
+
+func TestStreamEventNilPayloadsStillMaintainTurnState(t *testing.T) {
+	t.Parallel()
+
+	var state streamParseState
+	applyStreamUserEvent(&state, &streamEvent{})
+	if state.currentTurn != 1 || len(state.messages) != 0 {
+		t.Fatalf("nil user event state = %+v, want turn advanced without message", state)
+	}
+	applyStreamToolCallEvent(&state, &streamEvent{})
+	applyStreamToolResultEvent(&state, &streamEvent{})
+	applyStreamAssistantEvent(&state, &streamEvent{})
+	applyStreamResultEvent(&state, &streamEvent{Usage: &streamUsage{OutputTokens: 2}})
+	if len(state.messages) != 0 {
+		t.Fatalf("nil payload events appended messages: %#v", state.messages)
+	}
+	if state.totalOutputTokens != 2 {
+		t.Fatalf("result usage output tokens = %d, want 2", state.totalOutputTokens)
+	}
+}
+
+func TestClaudeInputContentJSONAndContentBlockToString(t *testing.T) {
+	t.Parallel()
+
+	data, err := claudeInputContentJSON("hello")
+	if err != nil {
+		t.Fatalf("claudeInputContentJSON string error: %v", err)
+	}
+	if !strings.Contains(string(data), `"text":"hello"`) {
+		t.Fatalf("string content JSON = %s", data)
+	}
+	data, err = claudeInputContentJSON([]map[string]string{{"type": "text", "text": "custom"}})
+	if err != nil {
+		t.Fatalf("claudeInputContentJSON custom error: %v", err)
+	}
+	if !strings.Contains(string(data), `"custom"`) {
+		t.Fatalf("custom content JSON = %s", data)
+	}
+
+	if got := contentBlockToString(nil); got != "" {
+		t.Fatalf("contentBlockToString(nil) = %q, want empty", got)
+	}
+	if got := contentBlockToString("plain"); got != "plain" {
+		t.Fatalf("contentBlockToString(string) = %q, want plain", got)
+	}
+	if got := contentBlockToString(map[string]string{"b": "2", "a": "1"}); got != `{"a":"1","b":"2"}` {
+		t.Fatalf("contentBlockToString(map) = %q", got)
+	}
+	if got := contentBlockToString(func() {}); got == "" {
+		t.Fatalf("contentBlockToString(unmarshalable) = %q, want fmt fallback", got)
+	}
+}
+
 func TestProviderAuthFailureSignal(t *testing.T) {
 	t.Parallel()
 

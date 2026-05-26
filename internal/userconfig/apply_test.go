@@ -1,6 +1,7 @@
 package userconfig
 
 import (
+	"context"
 	"os"
 	"slices"
 	"testing"
@@ -95,6 +96,28 @@ func TestMergeKwargs_NilEval(t *testing.T) {
 	merged := MergeKwargs(c, "opensandbox", nil)
 	if merged["base_url"] != "u" {
 		t.Errorf("user kwarg should fill: %+v", merged)
+	}
+}
+
+func TestConfigContextRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	cfg := Config{Env: map[string]string{"A": "B"}}
+	sources := []Source{{Kind: "project", Path: ".skill-up.yaml"}}
+	ctx := WithContext(context.Background(), cfg, sources)
+
+	gotCfg, gotSources, ok := FromContext(ctx)
+	if !ok {
+		t.Fatal("FromContext ok = false, want true")
+	}
+	if gotCfg.Env["A"] != "B" {
+		t.Fatalf("config from context = %#v", gotCfg)
+	}
+	if len(gotSources) != 1 || gotSources[0].Kind != "project" {
+		t.Fatalf("sources from context = %#v", gotSources)
+	}
+	if _, _, ok := FromContext(context.Background()); ok {
+		t.Fatal("FromContext on empty context = true, want false")
 	}
 }
 

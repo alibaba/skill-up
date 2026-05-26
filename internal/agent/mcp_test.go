@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -173,5 +175,74 @@ func TestBuildCodexMCPInstallCmd_RejectsInvalidHeaderEnvName(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "BAD-NAME") {
 		t.Fatalf("expected invalid env name in error, got %v", err)
+	}
+}
+
+func TestInstallMCPServersExecutesInstallCommandsWithServerEnv(t *testing.T) {
+	t.Parallel()
+
+	rt := &qoderTestRuntime{}
+	err := installMCPServers(context.Background(), rt, runtime.MCPConfig{
+		Servers: []runtime.MCPServerConfig{{
+			Name: "marker",
+			Env:  map[string]string{"MCP_TOKEN": "secret"},
+		}},
+	}, func(server runtime.MCPServerConfig) (string, error) {
+		if server.Name != "marker" {
+			t.Fatalf("server = %+v", server)
+		}
+		return "qodercli -p mcp-add-marker", nil
+	})
+	if err != nil {
+		t.Fatalf("installMCPServers returned error: %v", err)
+	}
+	if rt.lastCommand != "qodercli -p mcp-add-marker" {
+		t.Fatalf("last command = %q", rt.lastCommand)
+	}
+	if rt.lastExecEnv["MCP_TOKEN"] != "secret" {
+		t.Fatalf("exec env = %#v, want MCP_TOKEN", rt.lastExecEnv)
+	}
+}
+
+func TestInstallMCPServersReportsBuilderAndExitErrors(t *testing.T) {
+	t.Parallel()
+
+	err := installMCPServers(context.Background(), &qoderTestRuntime{}, runtime.MCPConfig{
+		Servers: []runtime.MCPServerConfig{{Name: "bad"}},
+	}, func(runtime.MCPServerConfig) (string, error) {
+		return "", errors.New("boom")
+	})
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("builder error = %v, want boom", err)
+	}
+
+	rt := &qoderTestRuntime{execResult: runtime.ExecResult{ExitCode: 2, Stderr: "install failed"}}
+	err = installMCPServers(context.Background(), rt, runtime.MCPConfig{
+		Servers: []runtime.MCPServerConfig{{Name: "bad"}},
+	}, func(runtime.MCPServerConfig) (string, error) {
+		return "qodercli mcp add bad", nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "install failed") {
+		t.Fatalf("exit error = %v, want stderr", err)
+	}
+}
+
+func TestMCPCommandValidationHelpers(t *testing.T) {
+	t.Parallel()
+
+	if _, err := shellEnvAssignment("BAD-NAME"); err == nil {
+		t.Fatal("shellEnvAssignment accepted invalid name")
+	}
+	if got, err := shellExpandedValue("https://${HOST}/mcp/${TOKEN}"); err != nil || !strings.Contains(got, `"${HOST}"`) || !strings.Contains(got, `"${TOKEN}"`) {
+		t.Fatalf("shellExpandedValue interpolation = %q, %v", got, err)
+	}
+	if got, err := shellExpandedValue("$TOKEN"); err != nil || got != `"${TOKEN}"` {
+		t.Fatalf("shellExpandedValue whole ref = %q, %v", got, err)
+	}
+	if _, err := shellExpandedValue("$TOKEN-suffix"); err == nil {
+		t.Fatal("shellExpandedValue accepted invalid bare ref")
+	}
+	if name, ok := wholeShellEnvRef("${TOKEN}"); !ok || name != "TOKEN" {
+		t.Fatalf("wholeShellEnvRef = %q/%v, want TOKEN true", name, ok)
 	}
 }

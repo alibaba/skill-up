@@ -18,11 +18,13 @@ import (
 	opensandbox "github.com/alibaba/OpenSandbox/sdks/sandbox/go"
 )
 
+const testWorkspaceMount = "/work"
+
 func TestNewRuntimeAcceptsOpenSandbox(t *testing.T) {
 	rt, err := NewRuntime(Config{
 		Type:           "opensandbox",
 		Image:          "ubuntu:24.04",
-		WorkspaceMount: "/work",
+		WorkspaceMount: testWorkspaceMount,
 		SandboxTimeout: 2 * time.Minute,
 		ReadyTimeout:   time.Second,
 		UseServerProxy: true,
@@ -41,7 +43,7 @@ func TestNewRuntimeAcceptsOpenSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRuntime returned error: %v", err)
 	}
-	if rt.Workspace() != "/work" {
+	if rt.Workspace() != testWorkspaceMount {
 		t.Fatalf("Workspace() = %q, want /work", rt.Workspace())
 	}
 }
@@ -66,7 +68,7 @@ func TestOpenSandboxCreateUsesSDKOptions(t *testing.T) {
 	}
 
 	rt, err := NewOpenSandboxRuntime(Config{
-		WorkspaceMount: "/work",
+		WorkspaceMount: testWorkspaceMount,
 		Image:          "ubuntu:24.04",
 		UseServerProxy: true,
 		ReadyTimeout:   3 * time.Second,
@@ -103,7 +105,7 @@ func TestOpenSandboxCreateUsesSDKOptions(t *testing.T) {
 	if gotOpts.Extensions["template"] != "basic" {
 		t.Fatalf("Extensions = %#v, want kwargs extensions", gotOpts.Extensions)
 	}
-	if fake.createdDirs[0] != "/work" {
+	if fake.createdDirs[0] != testWorkspaceMount {
 		t.Fatalf("created workspace = %q, want /work", fake.createdDirs[0])
 	}
 }
@@ -237,6 +239,241 @@ func TestOpenSandboxCreateSnapshotsKwargs(t *testing.T) {
 	}
 	if rt.fileParallelism != 3 {
 		t.Fatalf("fileParallelism = %d, want snapshot value 3", rt.fileParallelism)
+	}
+}
+
+func TestOpenSandboxLocalHelpersRejectUnsafePathsAndPreserveRemoteScope(t *testing.T) {
+	t.Parallel()
+
+	rel, err := remoteRelativePath("/workspace/src", "/workspace/src/a/b.txt")
+	if err != nil {
+		t.Fatalf("remoteRelativePath returned error: %v", err)
+	}
+	if rel != "a/b.txt" {
+		t.Fatalf("remoteRelativePath = %q, want a/b.txt", rel)
+	}
+	if rel, err := remoteRelativePath("/workspace/src", "/workspace/src"); err != nil || rel != "." {
+		t.Fatalf("remoteRelativePath root = %q, %v; want . nil", rel, err)
+	}
+	if _, err := remoteRelativePath("/workspace/src", "/workspace/other.txt"); err == nil {
+		t.Fatal("remoteRelativePath outside root returned nil error")
+	}
+
+	root := t.TempDir()
+	target, err := safeLocalTarget(root, "nested/file.txt")
+	if err != nil {
+		t.Fatalf("safeLocalTarget returned error: %v", err)
+	}
+	if target != filepath.Join(root, "nested", "file.txt") {
+		t.Fatalf("safeLocalTarget = %q, want nested target", target)
+	}
+	if target, err := safeLocalTarget(root, "."); err != nil || target != root {
+		t.Fatalf("safeLocalTarget dot = %q, %v; want root nil", target, err)
+	}
+	for _, rel := range []string{"../escape", "/absolute", "nested/../../escape"} {
+		if _, err := safeLocalTarget(root, rel); err == nil {
+			t.Fatalf("safeLocalTarget(%q) returned nil error", rel)
+		}
+	}
+}
+
+func TestOpenSandboxCommandHelpers(t *testing.T) {
+	t.Parallel()
+
+	env := map[string]string{
+		"PATH":  "$PATH:/custom/bin",
+		"PLAIN": "value",
+	}
+	literal := literalRemoteEnv(env)
+	if _, ok := literal["PATH"]; ok {
+		t.Fatalf("literalRemoteEnv kept expandable PATH: %v", literal)
+	}
+	if literal["PLAIN"] != "value" {
+		t.Fatalf("literalRemoteEnv dropped PLAIN: %v", literal)
+	}
+
+	command := withRemoteEnvExpansion("echo ok", env)
+	if !strings.HasPrefix(command, `export PATH="$PATH:/custom/bin"`+"\n") {
+		t.Fatalf("withRemoteEnvExpansion = %q", command)
+	}
+	if got := withRemoteEnvExpansion("echo ok", map[string]string{"PATH": "/usr/bin"}); got != "echo ok" {
+		t.Fatalf("withRemoteEnvExpansion without expansion = %q, want original command", got)
+	}
+	if got := shellDoubleQuote(`a"b\c` + "`d"); got != `"a\"b\\c\`+"`"+`d"` {
+		t.Fatalf("shellDoubleQuote returned %q", got)
+	}
+}
+
+func TestOpenSandboxExecutionToResult(t *testing.T) {
+	t.Parallel()
+
+	exitCode := 7
+	result := executionToResult(&opensandbox.Execution{
+		Stdout:   []opensandbox.OutputMessage{{Text: "out"}, {Text: "put"}},
+		Stderr:   []opensandbox.OutputMessage{{Text: "err"}},
+		ExitCode: &exitCode,
+	})
+	if result.Stdout != "output" || result.Stderr != "err" || result.ExitCode != 7 {
+		t.Fatalf("executionToResult = %+v, want combined stdout/stderr and exit 7", result)
+	}
+
+	result = executionToResult(&opensandbox.Execution{
+		Error: &opensandbox.ExecutionError{Traceback: []string{"line1", "line2"}, Value: "fallback"},
+	})
+	if result.Stderr != "line1\nline2" || result.ExitCode != 0 {
+		t.Fatalf("executionToResult traceback = %+v", result)
+	}
+
+	result = executionToResult(&opensandbox.Execution{
+		Error: &opensandbox.ExecutionError{Value: "fallback"},
+	})
+	if result.Stderr != "fallback" {
+		t.Fatalf("executionToResult fallback stderr = %q, want fallback", result.Stderr)
+	}
+
+	if result := executionToResult(nil); result.ExitCode != -1 {
+		t.Fatalf("executionToResult(nil).ExitCode = %d, want -1", result.ExitCode)
+	}
+}
+
+func TestOpenSandboxRuntimeStateAndPathHelpers(t *testing.T) {
+	t.Parallel()
+
+	rt, err := NewOpenSandboxRuntime(Config{WorkspaceMount: testWorkspaceMount})
+	if err != nil {
+		t.Fatalf("NewOpenSandboxRuntime returned error: %v", err)
+	}
+	if rt.RequiresProcessSandbox() {
+		t.Fatal("OpenSandbox runtime should report no additional process sandbox required")
+	}
+	if err := rt.ensureCreated(); err == nil {
+		t.Fatal("ensureCreated before Create returned nil error")
+	}
+	if got := rt.Workspace(); got != testWorkspaceMount {
+		t.Fatalf("Workspace() = %q, want /work", got)
+	}
+	if got := rt.execCwd(""); got != testWorkspaceMount {
+		t.Fatalf("execCwd empty = %q, want /work", got)
+	}
+	if got := rt.execCwd("nested"); got != "/work/nested" {
+		t.Fatalf("execCwd nested = %q, want /work/nested", got)
+	}
+	if got := rt.remotePath("/abs/path"); got != "/abs/path" {
+		t.Fatalf("remotePath absolute = %q, want /abs/path", got)
+	}
+	if got := rt.remotePath("../escape"); got != "/escape" {
+		t.Fatalf("remotePath cleans traversal relative to workspace, got %q", got)
+	}
+	if got := cleanRemotePath("./nested/../file.txt"); got != "file.txt" {
+		t.Fatalf("cleanRemotePath = %q, want file.txt", got)
+	}
+}
+
+func TestOpenSandboxRuntimeLifecycleMethods(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeOpenSandbox{}
+	rt := &OpenSandboxRuntime{sandbox: fake, cfg: Config{Delete: true}}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	if err := rt.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop returned error: %v", err)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+	if !fake.killed {
+		t.Fatal("Close with Delete=true did not kill sandbox")
+	}
+
+	keep := &fakeOpenSandbox{}
+	rt = &OpenSandboxRuntime{sandbox: keep, cfg: Config{Delete: false}}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("Close keep-alive returned error: %v", err)
+	}
+	if keep.killed {
+		t.Fatal("Close with Delete=false should not kill sandbox")
+	}
+}
+
+func TestOpenSandboxConfigParsingHelpers(t *testing.T) {
+	t.Parallel()
+
+	rt := &OpenSandboxRuntime{cfg: Config{Kwargs: map[string]string{
+		openSandboxKwargReqTimeout:  "5",
+		openSandboxKwargParallelism: "128",
+	}}}
+	if got := rt.resolveRequestTimeout(); got != 5*time.Second {
+		t.Fatalf("resolveRequestTimeout = %s, want 5s", got)
+	}
+	if got := rt.resolveFileTransferParallelism(); got != 64 {
+		t.Fatalf("resolveFileTransferParallelism clamps to %d, want 64", got)
+	}
+
+	rt.cfg.Kwargs[openSandboxKwargReqTimeout] = "-1"
+	rt.cfg.Kwargs[openSandboxKwargParallelism] = "0"
+	if got := rt.resolveRequestTimeout(); got != 0 {
+		t.Fatalf("invalid request timeout = %s, want 0", got)
+	}
+	if got := rt.resolveFileTransferParallelism(); got != openSandboxDefaultFileTransferParallelism {
+		t.Fatalf("invalid parallelism = %d, want default", got)
+	}
+
+	if got := durationSecondsPtr(1500 * time.Millisecond); got == nil || *got != 1 {
+		t.Fatalf("durationSecondsPtr(1.5s) = %v, want 1", got)
+	}
+	if got := durationSecondsPtr(0); got != nil {
+		t.Fatalf("durationSecondsPtr(0) = %v, want nil", got)
+	}
+	if got := (&OpenSandboxRuntime{}).entrypoint(); len(got) != 1 || got[0] != "tail -F /dev/null" {
+		t.Fatalf("default entrypoint = %#v", got)
+	}
+	if got := (&OpenSandboxRuntime{cfg: Config{Entrypoint: []string{"sleep", "infinity"}}}).entrypoint(); len(got) != 2 || got[0] != "sleep" {
+		t.Fatalf("configured entrypoint = %#v", got)
+	}
+
+	parsed := parseExtensions(context.Background(), "test", `{"template":"basic"}`)
+	if parsed["template"] != "basic" {
+		t.Fatalf("parseExtensions valid = %#v", parsed)
+	}
+	if got := parseExtensions(context.Background(), "test", `{bad json`); got != nil {
+		t.Fatalf("parseExtensions invalid = %#v, want nil", got)
+	}
+	if got := parseExtensions(context.Background(), "test", `{}`); got != nil {
+		t.Fatalf("parseExtensions empty = %#v, want nil", got)
+	}
+}
+
+func TestOpenSandboxDirectoryFallbacks(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeOpenSandbox{createDirErr: errors.New("api unavailable")}
+	rt := &OpenSandboxRuntime{sandbox: fake}
+	if err := rt.ensureDirectory(context.Background(), "/work/a b", 0o755); err != nil {
+		t.Fatalf("ensureDirectory should accept shell-verified directory: %v", err)
+	}
+	if len(fake.execs) != 1 || !strings.Contains(fake.execs[0].Command, "mkdir -p '/work/a b'") {
+		t.Fatalf("fallback command = %#v", fake.execs)
+	}
+
+	exit := 2
+	fake = &fakeOpenSandbox{
+		createDirErr: errors.New("api unavailable"),
+		execResult:   &opensandbox.Execution{ExitCode: &exit, Stderr: []opensandbox.OutputMessage{{Text: "denied"}}},
+	}
+	rt = &OpenSandboxRuntime{sandbox: fake}
+	if err := rt.ensureDirectory(context.Background(), "/work/nope", 0o755); err == nil || !strings.Contains(err.Error(), "denied") {
+		t.Fatalf("ensureDirectory error = %v, want shell stderr", err)
+	}
+
+	fake = &fakeOpenSandbox{execResult: &opensandbox.Execution{ExitCode: &exit}}
+	rt = &OpenSandboxRuntime{sandbox: fake}
+	if err := rt.ensureDirectories(context.Background(), []string{"/work/a", "/work/b"}); err == nil || !strings.Contains(err.Error(), "exit code 2") {
+		t.Fatalf("ensureDirectories error = %v, want exit code", err)
+	}
+	if err := rt.ensureDirectories(context.Background(), nil); err != nil {
+		t.Fatalf("ensureDirectories(nil) = %v, want nil", err)
 	}
 }
 

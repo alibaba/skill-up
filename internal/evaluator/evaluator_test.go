@@ -39,8 +39,11 @@ type mockAgent struct {
 	runCall      atomic.Int32
 	credCall     atomic.Int32
 	installCall  atomic.Int32
+	mcpCall      atomic.Int32
+	skillCall    atomic.Int32
 	mu           sync.Mutex
 	lastMessages []transcript.Message
+	lastSkill    runtime.SkillConfig
 }
 
 func (m *mockAgent) Name() string { return m.name }
@@ -50,10 +53,15 @@ func (m *mockAgent) Install(_ context.Context, _ runtime.Runtime) error {
 }
 
 func (m *mockAgent) InstallMCP(_ context.Context, _ runtime.Runtime, _ runtime.MCPConfig) error {
+	m.mcpCall.Add(1)
 	return nil
 }
 
-func (m *mockAgent) InstallSkill(_ context.Context, _ runtime.Runtime, _ runtime.SkillConfig) error {
+func (m *mockAgent) InstallSkill(_ context.Context, _ runtime.Runtime, cfg runtime.SkillConfig) error {
+	m.skillCall.Add(1)
+	m.mu.Lock()
+	m.lastSkill = cfg
+	m.mu.Unlock()
 	return nil
 }
 func (m *mockAgent) Check(_ context.Context, _ runtime.Runtime) error { return nil }
@@ -233,6 +241,301 @@ func TestProvisionMCPConfigCachesResolvedConfig(t *testing.T) {
 	}
 	if got := secondEnv["MCP_TOKEN"]; got != "first-token" {
 		t.Fatalf("cached env = %q", got)
+	}
+}
+
+func TestEvaluatorInputHelpers(t *testing.T) {
+	t.Parallel()
+
+	promptCfg := &config.CaseConfig{Input: config.Input{Prompt: "single prompt"}}
+	prompt, turns := casePromptAndTurnsTotal(promptCfg)
+	if prompt != "single prompt" || turns != 1 {
+		t.Fatalf("prompt case = %q/%d, want single prompt/1", prompt, turns)
+	}
+	if messages := buildCaseMessages(promptCfg); len(messages) != 1 || messages[0].Role != transcript.RoleUser || messages[0].Turn != 1 {
+		t.Fatalf("prompt messages = %#v, want one user message", messages)
+	}
+
+	turnCfg := &config.CaseConfig{Input: config.Input{Turns: []config.Turn{
+		{Role: "user", Content: "first"},
+		{Role: "assistant", Content: "second"},
+		{Content: "third defaults to user"},
+	}}}
+	prompt, turns = casePromptAndTurnsTotal(turnCfg)
+	if prompt != "first" || turns != 3 {
+		t.Fatalf("turn case = %q/%d, want first/3", prompt, turns)
+	}
+	messages := buildCaseMessages(turnCfg)
+	if len(messages) != 3 || messages[1].Role != transcript.RoleAssistant || messages[2].Role != transcript.RoleUser || messages[2].Turn != 3 {
+		t.Fatalf("turn messages = %#v, want preserved roles and turn numbers", messages)
+	}
+}
+
+func TestEvaluatorRetryAndRecoveryHelpers(t *testing.T) {
+	t.Parallel()
+
+	policy := config.RetryPolicy{MaxRetries: 2, RetryOn: []string{"timeout"}}
+	if !retryAllowed(policy, "TIMEOUT") {
+		t.Fatal("retryAllowed should match retry reasons case-insensitively")
+	}
+	if retryAllowed(policy, "error") {
+		t.Fatal("retryAllowed unexpectedly allowed unconfigured error reason")
+	}
+	if retryBackoffDelay(0) != 2*time.Second || retryBackoffDelay(2) != 4*time.Second {
+		t.Fatalf("retryBackoffDelay produced unexpected values")
+	}
+
+	result := EvalResult{Status: judge.StatusError, Error: context.DeadlineExceeded}
+	if reason, ok := retryReasonForResult(result); !ok || reason != "timeout" {
+		t.Fatalf("retryReasonForResult(timeout) = %q/%v, want timeout true", reason, ok)
+	}
+	result.Error = errors.New("boom")
+	if reason, ok := retryReasonForResult(result); !ok || reason != "error" {
+		t.Fatalf("retryReasonForResult(error) = %q/%v, want error true", reason, ok)
+	}
+	result.Status = judge.StatusFail
+	if _, ok := retryReasonForResult(result); ok {
+		t.Fatal("retryReasonForResult should ignore non-error statuses")
+	}
+
+	timeoutResult := &EvalResult{Error: fmt.Errorf("agent failed: %w", context.DeadlineExceeded)}
+	annotateCaseTimeoutError(timeoutResult, "cases.defaults.timeout_seconds", 30)
+	if !strings.Contains(timeoutResult.Error.Error(), "case timeout 30s via cases.defaults.timeout_seconds") {
+		t.Fatalf("annotated timeout error = %v", timeoutResult.Error)
+	}
+	if !errors.Is(timeoutResult.Error, context.DeadlineExceeded) {
+		t.Fatalf("annotation lost DeadlineExceeded in error chain: %v", timeoutResult.Error)
+	}
+
+	nonTimeoutResult := &EvalResult{Error: errors.New("boom")}
+	annotateCaseTimeoutError(nonTimeoutResult, "cases.defaults.timeout_seconds", 30)
+	if nonTimeoutResult.Error.Error() != "boom" {
+		t.Fatalf("non-timeout error was annotated: %v", nonTimeoutResult.Error)
+	}
+}
+
+func TestEvaluatorSessionHelpers(t *testing.T) {
+	t.Parallel()
+
+	original := &agent.SessionResult{
+		FinalMessage: "stale",
+		Transcript: transcript.Transcript{
+			{Role: transcript.RoleAssistant, Content: "fresh"},
+			{Role: transcript.RoleToolCall, Content: "tool"},
+		},
+		Artifacts: &agent.SessionArtifacts{
+			WorkspaceDiff:  "diff",
+			GeneratedFiles: []string{"a.txt"},
+		},
+	}
+	normalized := normalizeSessionResult(original)
+	if normalized.FinalMessage != "fresh" {
+		t.Fatalf("normalized FinalMessage = %q, want fresh", normalized.FinalMessage)
+	}
+	if original.FinalMessage != "stale" {
+		t.Fatalf("normalizeSessionResult mutated original final message to %q", original.FinalMessage)
+	}
+	if sessionTranscript(original).FinalAssistantMessage() != "fresh" {
+		t.Fatal("sessionTranscript did not return transcript")
+	}
+	if sessionWorkspaceDiff(original) != "diff" {
+		t.Fatal("sessionWorkspaceDiff did not return diff")
+	}
+	if got := sessionGeneratedFiles(original); len(got) != 1 || got[0] != "a.txt" {
+		t.Fatalf("sessionGeneratedFiles = %#v, want a.txt", got)
+	}
+	if normalizeSessionResult(nil) == nil {
+		t.Fatal("normalizeSessionResult(nil) returned nil")
+	}
+	if sessionTranscript(nil) != nil || sessionWorkspaceDiff(nil) != "" || sessionGeneratedFiles(nil) != nil {
+		t.Fatal("nil session helpers should return empty values")
+	}
+}
+
+func TestEvaluatorConfigHelpers(t *testing.T) {
+	t.Parallel()
+
+	e := newTestEvaluator(EvalOptions{})
+	if e.judgeScriptBaseDir() != "" {
+		t.Fatalf("judgeScriptBaseDir without loader = %q, want empty", e.judgeScriptBaseDir())
+	}
+
+	skillDir := t.TempDir()
+	rel := resolveJudgeScriptPath(skillDir, config.JudgeConfig{Type: "script", ScriptPath: "checks/pass.sh"})
+	want := filepath.Join(skillDir, "checks", "pass.sh")
+	if rel.ScriptPath != want {
+		t.Fatalf("resolveJudgeScriptPath relative = %q, want %q", rel.ScriptPath, want)
+	}
+	abs := resolveJudgeScriptPath(skillDir, config.JudgeConfig{Type: "script", ScriptPath: want})
+	if abs.ScriptPath != want {
+		t.Fatalf("resolveJudgeScriptPath absolute = %q, want unchanged", abs.ScriptPath)
+	}
+	unchanged := resolveJudgeScriptPath(skillDir, config.JudgeConfig{Type: "rule_based", ScriptPath: "checks/pass.sh"})
+	if unchanged.ScriptPath != "checks/pass.sh" {
+		t.Fatalf("non-script path changed to %q", unchanged.ScriptPath)
+	}
+
+	if resolveExpectConfig(&config.Expect{}) != nil {
+		t.Fatal("empty expect config should resolve to nil")
+	}
+	exitCode := 0
+	if resolveExpectConfig(&config.Expect{ExitCode: &exitCode}) == nil {
+		t.Fatal("expect config with exit_code should be active")
+	}
+	if judgeLabel(config.JudgeConfig{}) != "no_judge" || judgeLabel(config.JudgeConfig{Type: "rule_based"}) != "rule_based" {
+		t.Fatal("judgeLabel returned unexpected values")
+	}
+}
+
+func TestSetupCaseEnvironmentRunsSetupAndInstallsAgentMCPAndSkill(t *testing.T) {
+	skillDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Skill\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	evalsDir := filepath.Join(skillDir, "evals")
+	if err := os.MkdirAll(evalsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	evalPath := filepath.Join(evalsDir, "eval.yaml")
+	if err := os.WriteFile(evalPath, []byte("schema_version: v1alpha1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := &mockRuntime{workspace: t.TempDir()}
+	ag := &mockAgent{name: "agent"}
+	e := newTestEvaluator(EvalOptions{
+		SkillDir: skillDir,
+		Loader:   config.NewLoader(evalPath),
+		EvalCfg: &config.EvalConfig{
+			Environment: config.Environment{
+				Type:       "opensandbox",
+				SetupSteps: []config.SetupStep{{Run: "printf setup > marker.txt"}},
+			},
+			Skills: []config.SkillRef{{Path: ".", Target: "custom-target"}},
+		},
+	})
+
+	err := e.setupCaseEnvironment(context.Background(), rt, &config.CaseConfig{ID: "case-a"}, "with_skill", ag, runtime.MCPConfig{})
+	if err != nil {
+		t.Fatalf("setupCaseEnvironment returned error: %v", err)
+	}
+	if rt.execCall.Load() != 1 {
+		t.Fatalf("setup exec calls = %d, want 1", rt.execCall.Load())
+	}
+	if ag.installCall.Load() != 1 || ag.mcpCall.Load() != 1 || ag.skillCall.Load() != 1 {
+		t.Fatalf("agent install calls install/mcp/skill = %d/%d/%d, want 1/1/1", ag.installCall.Load(), ag.mcpCall.Load(), ag.skillCall.Load())
+	}
+	ag.mu.Lock()
+	lastSkill := ag.lastSkill
+	ag.mu.Unlock()
+	if lastSkill.Source != skillDir || lastSkill.Target != "custom-target" {
+		t.Fatalf("last skill config = %+v, want source skill dir and custom target", lastSkill)
+	}
+
+	withoutSkillAgent := &mockAgent{name: "agent"}
+	if err := e.setupCaseEnvironment(context.Background(), rt, &config.CaseConfig{ID: "case-a"}, "without_skill", withoutSkillAgent, runtime.MCPConfig{}); err != nil {
+		t.Fatalf("setup without_skill returned error: %v", err)
+	}
+	if withoutSkillAgent.skillCall.Load() != 0 {
+		t.Fatalf("without_skill installed skill %d time(s), want 0", withoutSkillAgent.skillCall.Load())
+	}
+}
+
+func TestSetupCaseEnvironmentReportsSetupFailures(t *testing.T) {
+	t.Parallel()
+
+	e := newTestEvaluator(EvalOptions{EvalCfg: &config.EvalConfig{
+		Environment: config.Environment{SetupSteps: []config.SetupStep{{Run: "exit 2"}}},
+	}})
+	rt := &mockRuntime{
+		workspace: t.TempDir(),
+		execFunc: func(context.Context, string, runtime.ExecOptions) (runtime.ExecResult, error) {
+			return runtime.ExecResult{ExitCode: 2, Stderr: "bad setup"}, nil
+		},
+	}
+	err := e.setupCaseEnvironment(context.Background(), rt, &config.CaseConfig{ID: "case-a"}, "with_skill", &mockAgent{name: "agent"}, runtime.MCPConfig{})
+	if err == nil || !strings.Contains(err.Error(), "bad setup") {
+		t.Fatalf("setup error = %v, want stderr", err)
+	}
+
+	rt.execFunc = func(context.Context, string, runtime.ExecOptions) (runtime.ExecResult, error) {
+		return runtime.ExecResult{}, errors.New("boom")
+	}
+	err = e.setupCaseEnvironment(context.Background(), rt, &config.CaseConfig{ID: "case-a"}, "with_skill", &mockAgent{name: "agent"}, runtime.MCPConfig{})
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("setup exec error = %v, want boom", err)
+	}
+}
+
+func TestSerializeTranscriptWritesJSONAndCleanupRemovesFile(t *testing.T) {
+	t.Parallel()
+
+	path, cleanup, err := serializeTranscript(transcript.Transcript{
+		{Role: transcript.RoleUser, Content: "hello", Turn: 1},
+		{Role: transcript.RoleAssistant, Content: "hi", Turn: 1},
+	})
+	if err != nil {
+		t.Fatalf("serializeTranscript returned error: %v", err)
+	}
+	t.Cleanup(cleanup)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read transcript: %v", err)
+	}
+	if !strings.Contains(string(data), `"role":"assistant"`) || !strings.Contains(string(data), `"content":"hi"`) {
+		t.Fatalf("serialized transcript = %s", data)
+	}
+	cleanup()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("cleanup did not remove transcript file, stat err=%v", err)
+	}
+}
+
+func TestArtifactOutputHelpersDownloadOnlyMissingFiles(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	e := newTestEvaluator(EvalOptions{OutputDir: outputDir})
+	prepared := e.prepareOutputDir(context.Background(), "with_skill", "case-a", "agent/run")
+	if prepared == "" {
+		t.Fatal("prepareOutputDir returned empty path")
+	}
+	inside := filepath.Join(prepared, "already.txt")
+	if err := os.WriteFile(inside, []byte("already"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !artifactsInDir([]string{inside}, prepared) {
+		t.Fatal("artifactsInDir should accept files already in prepared directory")
+	}
+	if artifactInCleanDir("relative.txt", filepath.Clean(prepared)) {
+		t.Fatal("relative artifact should not be treated as already copied")
+	}
+
+	rt := &mockRuntime{
+		workspace: t.TempDir(),
+		downloadFileFunc: func(_ context.Context, sourcePath, targetPath string) error {
+			return os.WriteFile(targetPath, []byte(filepath.Base(sourcePath)), 0o600)
+		},
+	}
+	session := &agent.SessionResult{Artifacts: &agent.SessionArtifacts{GeneratedFiles: []string{inside, "/remote/new.txt"}}}
+	e.ensureArtifactsInOutputDir(context.Background(), rt, "with_skill", "case-a", "agent/run", prepared, session)
+	if rt.downloadFileCall.Load() != 1 {
+		t.Fatalf("download calls = %d, want only missing remote artifact", rt.downloadFileCall.Load())
+	}
+	data, err := os.ReadFile(filepath.Join(prepared, "new.txt"))
+	if err != nil {
+		t.Fatalf("downloaded artifact missing: %v", err)
+	}
+	if string(data) != "new.txt" {
+		t.Fatalf("downloaded artifact data = %q", data)
+	}
+
+	e.downloadArtifacts(context.Background(), rt, "with_skill", "case-b", "judge/run", &agent.SessionResult{
+		Artifacts: &agent.SessionArtifacts{GeneratedFiles: []string{"/remote/judge.txt"}},
+	})
+	if _, err := os.Stat(filepath.Join(outputDir, "case-b", "with_skill", "outputs", "judge", "run", "judge.txt")); err != nil {
+		t.Fatalf("downloadArtifacts did not write judge artifact: %v", err)
 	}
 }
 
