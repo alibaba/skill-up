@@ -489,10 +489,10 @@ func (r *OpenSandboxRuntime) Exec(ctx context.Context, command string, opts Exec
 	env := mergeEnvMaps(r.cfg.Env, opts.Env)
 
 	req := opensandbox.RunCommandRequest{
-		Command: withRemoteEnvExpansion(command, env),
+		Command: command,
 		Cwd:     r.execCwd(opts.Cwd),
 		Timeout: int64(opts.TimeoutSec) * 1000,
-		Envs:    literalRemoteEnv(env),
+		Envs:    env,
 	}
 	span.SetAttributes(
 		attribute.String("process.command", command),
@@ -540,33 +540,6 @@ func (r *OpenSandboxRuntime) Exec(ctx context.Context, command string, opts Exec
 		return result, fmt.Errorf("opensandbox exec failed: %w", err)
 	}
 	return result, nil
-}
-
-func literalRemoteEnv(env map[string]string) map[string]string {
-	if len(env) == 0 {
-		return nil
-	}
-	literal := make(map[string]string, len(env))
-	for k, v := range env {
-		if k == "PATH" && strings.Contains(v, "$") {
-			continue
-		}
-		literal[k] = v
-	}
-	return literal
-}
-
-func withRemoteEnvExpansion(command string, env map[string]string) string {
-	pathValue, ok := env["PATH"]
-	if !ok || !strings.Contains(pathValue, "$") {
-		return command
-	}
-	return "export PATH=" + shellDoubleQuote(pathValue) + "\n" + command
-}
-
-func shellDoubleQuote(s string) string {
-	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "`", "\\`")
-	return `"` + replacer.Replace(s) + `"`
 }
 
 // Workspace returns the sandbox workspace path.

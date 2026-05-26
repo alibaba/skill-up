@@ -725,11 +725,14 @@ func TestOpenSandboxExecMapsOptionsAndResult(t *testing.T) {
 	if req.Cwd != "/workspace/repo" || req.Timeout != 5000 || req.Envs["X"] != "Y" || req.Envs["CUSTOM_BIN"] != "/agent/bin" {
 		t.Fatalf("unexpected exec request: %+v", req)
 	}
-	if _, ok := req.Envs["PATH"]; ok {
-		t.Fatalf("PATH should be expanded remotely instead of passed literally: %+v", req.Envs)
+	// Env values forward literally — including $-bearing PATH. Callers
+	// that need shell expansion must resolve the value first (see
+	// internal/agent.probeAndMergePATH).
+	if got := req.Envs["PATH"]; got != "$CUSTOM_BIN:$PATH" {
+		t.Fatalf("PATH should forward literally; got %q in %+v", got, req.Envs)
 	}
-	if !strings.Contains(req.Command, `export PATH="$CUSTOM_BIN:$PATH"`) || !strings.Contains(req.Command, "echo hello") {
-		t.Fatalf("unexpected command with env expansion: %q", req.Command)
+	if req.Command != "echo hello" {
+		t.Fatalf("command should forward unchanged; got %q", req.Command)
 	}
 }
 
