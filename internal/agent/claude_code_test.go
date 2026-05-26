@@ -734,10 +734,12 @@ func (r *claudeCodeTestRuntime) DownloadDir(context.Context, string, string) err
 }
 
 func (r *claudeCodeTestRuntime) Exec(_ context.Context, command string, opts runtime.ExecOptions) (runtime.ExecResult, error) {
-	// Probe calls (printf '%s' "$HOME/...") are issued by agent.Install
-	// via probeAndMergePATH; respond with a canned literal PATH and do
-	// NOT record as the agent's own command.
-	if strings.HasPrefix(command, `printf '%s' "$HOME/`) {
+	// Probe calls (issued by agent.Install via probeAndMergePATH) get a
+	// canned literal PATH and are NOT recorded as the agent's own
+	// command. Match the exact probe constant rather than a prefix so a
+	// future test that legitimately runs `printf '%s' "$HOME/..."` for
+	// some other purpose isn't silently swallowed.
+	if command == claudeCodeExecPathProbeCmd {
 		stdout := r.probeResponseStdout
 		if stdout == "" {
 			stdout = "/fake/.local/bin:/fake/.nvm/current/bin:/usr/bin"

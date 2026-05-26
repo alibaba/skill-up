@@ -391,9 +391,11 @@ func (r *qoderTestRuntime) DownloadFile(context.Context, string, string) error {
 }
 func (r *qoderTestRuntime) DownloadDir(context.Context, string, string) error { return nil }
 func (r *qoderTestRuntime) Exec(_ context.Context, command string, opts runtime.ExecOptions) (runtime.ExecResult, error) {
-	// Probe calls (agent.Install via probeAndMergePATH) — respond with a
-	// canned literal PATH; do not record as a real command.
-	if strings.HasPrefix(command, `printf '%s' "$HOME/`) {
+	// Probe calls (agent.Install via probeAndMergePATH) get a canned
+	// literal PATH and are NOT recorded as a real command. Exact-match
+	// the probe constant so unrelated `printf '%s' "$HOME/..."` tests
+	// aren't silently intercepted.
+	if command == qoderExecPathProbeCmd {
 		stdout := r.probeResponseStdout
 		if stdout == "" {
 			stdout = "/fake/.local/bin:/usr/bin"

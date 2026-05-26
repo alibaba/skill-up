@@ -25,6 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   matching docker and opensandbox. If your `eval.yaml` relied on
   host-side expansion (e.g. `MY_VAR: "$HOME/foo"`), switch to a literal
   value or `export` it inside a `setup_steps` step.
+- `docker` / `opensandbox`: the same "values forward literally" rule
+  now applies — previously the docker runtime silently dropped
+  `environment.env.PATH` values containing `$` (the alternative was
+  passing them to `docker create --env` literally, which would have
+  broken container startup because the entrypoint's PATH lookup can't
+  resolve directories named `$HOME` / `$PATH`). After this PR no key
+  is special-cased, so passing such a value will now make the
+  container/sandbox fail to start; use a literal PATH or move the
+  manipulation into a `setup_steps` `export`.
 - `environment.type: none`: the framework no longer force-prepends
   `$HOME/.local/bin:$HOME/.nvm/current/bin:$PATH` to agent commands.
   Because `ag.Install` is skipped for type=none, the new probe doesn't
