@@ -37,7 +37,7 @@ var ErrAgentRequiresBash = errors.New("agent CLI execution on Windows requires b
 // runtimes whose target matches the host (NoneRuntime today); sandboxed
 // runtimes target a non-Windows guest and never go through platform.Host().
 func requireBashOnWindowsHost(rt Runtime) error {
-	if rt.TargetGOOS() != "windows" {
+	if rt.TargetGOOS() != platform.GOOSWindows {
 		return nil
 	}
 	if platform.Host().IsBash {
