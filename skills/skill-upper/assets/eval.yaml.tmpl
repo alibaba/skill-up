@@ -24,6 +24,8 @@ engine:
   #   provider: anthropic
   #   name: claude-sonnet-4-6
   #   base_url: ""
+  # kwargs:                         # agent-specific switches; see references/eval-yaml.md
+  #   bypass_sandbox: "true"        # codex: skip its own process sandbox (host kernel lacks Landlock)
 
 # mcp:
 #   servers:

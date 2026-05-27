@@ -125,6 +125,39 @@ report:
 	}
 }
 
+func TestLoader_LoadEvalConfig_EngineKwargs(t *testing.T) {
+	t.Parallel()
+
+	content := `schema_version: v1alpha1
+environment:
+  type: none
+engine:
+  name: codex
+  kwargs:
+    bypass_sandbox: "1"
+    future_key: ok
+cases:
+  files: []
+`
+
+	tmpDir := t.TempDir()
+	evalPath := filepath.Join(tmpDir, "eval.yaml")
+	if err := os.WriteFile(evalPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write temp eval.yaml: %v", err)
+	}
+
+	cfg, err := NewLoader(evalPath).LoadEvalConfig()
+	if err != nil {
+		t.Fatalf("LoadEvalConfig failed: %v", err)
+	}
+	if got := cfg.Engine.Kwargs["bypass_sandbox"]; got != "1" {
+		t.Errorf("engine.kwargs.bypass_sandbox = %q, want %q", got, "1")
+	}
+	if got := cfg.Engine.Kwargs["future_key"]; got != "ok" {
+		t.Errorf("engine.kwargs.future_key = %q, want %q", got, "ok")
+	}
+}
+
 // nolint:funlen // table-driven test cases drive the line count; splitting hurts readability.
 func TestLoader_LoadEvalConfig_PassThreshold(t *testing.T) {
 	t.Parallel()

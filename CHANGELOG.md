@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `engine.kwargs` (CLI: `--engine-kwarg key=value`, alias `--ek`): an
+  agent-specific switch map mirroring `environment.kwargs`/`--runtime-kwarg`.
+  Each agent reads only the keys it understands; unknown keys are silently
+  ignored. First key: `bypass_sandbox` — `codex` honours it by forcing
+  `--dangerously-bypass-approvals-and-sandbox` and skipping its Landlock-based
+  `linux-sandbox` wrapper, useful on CI runners whose kernel/seccomp profile
+  does not allow Landlock setup (typical Aone CI symptom:
+  `error running landlock: Sandbox(LandlockRestrict)`, exit 101 on every
+  shell call). `claude_code` and `qodercli` accept the key but no-op.
+
 ## [0.2.2] - 2026-05-26
 
 ### Added

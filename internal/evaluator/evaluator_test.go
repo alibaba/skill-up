@@ -660,7 +660,7 @@ func TestExecuteCase_AgentTimeoutDoesNotInvokeAgentJudge(t *testing.T) {
 	})
 
 	origDetect := agentDetectWithInitParams
-	agentDetectWithInitParams = func(_ string, _ credential.AgentInitParams) (agent.Agent, error) {
+	agentDetectWithInitParams = func(_ string, _ credential.AgentInitParams, _ map[string]string) (agent.Agent, error) {
 		return judgeAgent, nil
 	}
 	defer func() { agentDetectWithInitParams = origDetect }()

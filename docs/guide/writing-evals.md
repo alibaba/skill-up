@@ -85,6 +85,8 @@ engine:
     provider: anthropic
     name: claude-sonnet-4-6
     base_url: ""                  # Custom API endpoint (optional)
+  kwargs:                         # Agent-specific switches (optional)
+    bypass_sandbox: "true"        # codex: skip its own process sandbox (host kernel lacks Landlock)
 
 # ========== 6. Cases ==========
 cases:
@@ -110,6 +112,21 @@ report:
 ```
 
 `cases.parallelism` is the file-level default. To override it for a single run, use `skill-up run --parallelism N` without modifying `eval.yaml`. Allowed range: **1 to 256**.
+
+### Engine kwargs (agent-specific switches)
+
+`engine.kwargs` is a free-form string map. Each agent reads only the keys it recognises; unknown keys are silently ignored. CLI override: `--engine-kwarg key=value` (alias `--ek`), repeatable. Precedence: `--engine-kwarg` > `engine.kwargs` > default.
+
+| key | agent | `true` behaviour | unset / `false` |
+| :---: | :---: | :--- | :--- |
+| `bypass_sandbox` | `codex` | Forces `--dangerously-bypass-approvals-and-sandbox`; overrides the runtime-derived choice. Use when the host kernel lacks Landlock support (e.g. some CI containers) | Default: `none` runtime → `--sandbox workspace-write`; other runtimes already bypass |
+| `bypass_sandbox` | `claude_code` | No-op — claude already runs with `--permission-mode=bypassPermissions` | No-op |
+| `bypass_sandbox` | `qodercli` | No-op — no equivalent flag | No-op |
+
+```bash
+# One-off override at the call site
+skill-up run evals/eval.yaml --engine-kwarg bypass_sandbox=true
+```
 
 ### MCP configuration
 

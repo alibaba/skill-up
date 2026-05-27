@@ -97,6 +97,10 @@ type EngineConfig struct {
 	Version string      `yaml:"version,omitempty"`
 	Entry   string      `yaml:"entry,omitempty"`
 	Model   ModelConfig `yaml:"model"`
+	// Kwargs carries agent-specific key/value options. Each agent reads only
+	// the keys it understands; unknown keys are ignored. Recognised keys are
+	// documented per agent (e.g. codex honours "bypass_sandbox").
+	Kwargs map[string]string `yaml:"kwargs,omitempty"`
 }
 
 // ModelConfig describes the model to use.

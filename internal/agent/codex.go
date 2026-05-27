@@ -227,8 +227,11 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 	start := time.Now()
 
 	instruction := BuildInstructionFromMessages(messages)
+	// bypass_sandbox kwarg overrides the runtime-derived choice; useful when
+	// the host kernel does not support codex's Landlock-based linux-sandbox
+	// (e.g. CI containers that block Landlock syscalls).
 	sandboxFlag := codexBypassSandbox
-	if rt.RequiresProcessSandbox() {
+	if rt.RequiresProcessSandbox() && !EngineKwargBool(a.Cfg.Kwargs, KwargBypassSandbox) {
 		sandboxFlag = codexProcessSandbox
 	}
 	lastMessagePath := filepath.Join(rt.Workspace(), ".skill-up", "codex-last-message.txt")
