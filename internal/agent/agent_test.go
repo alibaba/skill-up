@@ -250,7 +250,7 @@ func TestDetectAgentWithInitParams_SetsTypedCredentialFields(t *testing.T) {
 		Model:    "gpt-5.4",
 		APIKey:   "openai-test-token",
 		BaseURL:  "https://openai.example.com/v1",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("DetectAgentWithInitParams failed: %v", err)
 	}
@@ -280,7 +280,7 @@ func TestDetectAgentWithInitParams_QoderMapsAPIKeyToRuntimeEnv(t *testing.T) {
 	ag, err := DetectAgentWithInitParams("qoder-cli", credential.AgentInitParams{
 		Provider: "qoder",
 		Model:    "auto",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("DetectAgentWithInitParams failed: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestDetectAgentWithInitParams_QoderIgnoresParamsAPIKey(t *testing.T) {
 		Provider: "anthropic",
 		Model:    "auto",
 		APIKey:   "sk-ant-should-not-appear",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("DetectAgentWithInitParams failed: %v", err)
 	}
@@ -343,7 +343,7 @@ func TestDetectAgentWithInitParams_StripsAutoForNonQoderEngines(t *testing.T) {
 
 	ag, err := DetectAgentWithInitParams("claude-code", credential.AgentInitParams{
 		Model: "auto",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("DetectAgentWithInitParams failed: %v", err)
 	}
@@ -362,7 +362,7 @@ func TestDetectAgentWithInitParams_PreservesAutoForQoderCLI(t *testing.T) {
 
 	ag, err := DetectAgentWithInitParams("qoder-cli", credential.AgentInitParams{
 		Model: "auto",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("DetectAgentWithInitParams failed: %v", err)
 	}
@@ -373,5 +373,29 @@ func TestDetectAgentWithInitParams_PreservesAutoForQoderCLI(t *testing.T) {
 	}
 	if got := qoderAgent.Cfg.ModelName; got != "auto" {
 		t.Fatalf("ModelName = %q, want auto (should be preserved for qoder-cli)", got)
+	}
+}
+
+func TestDetectAgentWithInitParams_ForwardsKwargs(t *testing.T) {
+	t.Parallel()
+
+	kwargs := map[string]string{KwargBypassSandbox: "true", "future_key": "x"}
+	ag, err := DetectAgentWithInitParams("codex", credential.AgentInitParams{
+		Provider: "openai",
+		Model:    "gpt-5.4",
+	}, kwargs)
+	if err != nil {
+		t.Fatalf("DetectAgentWithInitParams failed: %v", err)
+	}
+
+	codexAgent, ok := ag.(*CodexAgent)
+	if !ok {
+		t.Fatalf("expected *CodexAgent, got %T", ag)
+	}
+	if got := codexAgent.Cfg.Kwargs[KwargBypassSandbox]; got != "true" {
+		t.Fatalf("Cfg.Kwargs[%s] = %q, want true", KwargBypassSandbox, got)
+	}
+	if got := codexAgent.Cfg.Kwargs["future_key"]; got != "x" {
+		t.Fatalf("Cfg.Kwargs[future_key] = %q, want x", got)
 	}
 }

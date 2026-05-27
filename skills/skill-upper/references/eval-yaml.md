@@ -104,6 +104,23 @@ environment:
 - `provider` / `name` 组合在 CLI 中形如 `anthropic/claude-sonnet-4-6`、`openai/gpt-4` 等。
 - `qodercli` 通常无需配置 `model`。
 
+### `engine.kwargs` —— agent 私有开关
+
+`engine.kwargs` 是字符串键值对，每个 agent 只读取自己关心的 key，未知 key 静默忽略。CLI 等价开关：`--engine-kwarg key=value`（别名 `--ek`），可重复。优先级 `--engine-kwarg` > `engine.kwargs` > 缺省。
+
+```yaml
+engine:
+  name: codex
+  kwargs:
+    bypass_sandbox: "true"
+```
+
+| key | agent | true 时行为 | 缺省 / false |
+|---|---|---|---|
+| `bypass_sandbox` | `codex` | 命令行强制 `--dangerously-bypass-approvals-and-sandbox`，覆盖根据 runtime 自动决定的 sandbox flag。用于宿主内核不支持 Landlock 的场景（典型：部分 CI 容器） | 维持现状：`none` runtime 用 `--sandbox workspace-write`，其它 runtime 已是 bypass |
+| `bypass_sandbox` | `claude_code` | no-op（claude 现有命令已固定 `--permission-mode=bypassPermissions`） | no-op |
+| `bypass_sandbox` | `qodercli` | no-op（qoder CLI 无对应 flag） | no-op |
+
 ## 常见错误
 
 - `opensandbox` 但未配置鉴权或 `base_url` → 运行时失败

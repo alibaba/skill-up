@@ -34,7 +34,9 @@ func DetectAgent(engineName string, cfg Config) (Agent, error) {
 }
 
 // DetectAgentWithInitParams maps resolved init params into an engine-specific agent config.
-func DetectAgentWithInitParams(engineName string, params credential.AgentInitParams) (Agent, error) {
+// kwargs carries engine.kwargs from eval.yaml (or --engine-kwarg overrides) and
+// is forwarded as-is to the agent; each agent reads only the keys it understands.
+func DetectAgentWithInitParams(engineName string, params credential.AgentInitParams, kwargs map[string]string) (Agent, error) {
 	model := params.Model
 	// "auto" is a QoderCLI-specific model tier; strip it for other engines
 	// so downstream agents don't need to hard-code awareness of it.
@@ -49,6 +51,7 @@ func DetectAgentWithInitParams(engineName string, params credential.AgentInitPar
 		APIKey:        params.APIKey,
 		BaseURL:       params.BaseURL,
 		EnvVars:       make(map[string]string),
+		Kwargs:        kwargs,
 	}
 
 	switch engineName {

@@ -36,6 +36,8 @@ const (
 	runtimeKwargFlagName   = "runtime-kwarg"
 	runtimeKwargAlias      = "rk"
 	runtimeFlagName        = "runtime"
+	engineKwargFlagName    = "engine-kwarg"
+	engineKwargAlias       = "ek"
 )
 
 // validRuntimeTypes lists the environment.type values accepted by --runtime.
@@ -105,6 +107,7 @@ func init() {
 	runCmd.Flags().Int("parallelism", 0, "Override cases.parallelism. Must be between 1 and 256 when specified")
 	runCmd.Flags().SetNormalizeFunc(normalizeRunFlagName)
 	runCmd.Flags().StringArray(runtimeKwargFlagName, nil, "Environment kwarg in key=value format (can be used multiple times; --rk is accepted as an alias)")
+	runCmd.Flags().StringArray(engineKwargFlagName, nil, "Engine kwarg in key=value format (can be used multiple times; --ek is accepted as an alias). Recognised keys are per-agent (e.g. codex honours bypass_sandbox=true)")
 	runCmd.Flags().VarP(&verbose, "verbose", "v", "Increase log verbosity (-v or --verbose for debug, -vv or --verbose=2 for trace; --verbose=true/false is also supported)")
 	runCmd.Flags().Lookup("verbose").NoOptDefVal = "true"
 	runCmd.Flags().Int("iteration", 0, "Total number of evaluation runs. Each run writes artifacts to iteration-<N>. 0 = auto (appends after the last existing iteration). Default: auto")
@@ -242,7 +245,7 @@ func loadCredentialsAndAgent(cmd *cobra.Command, evalCfg *config.EvalConfig) (ag
 		cliAPIKey,
 	)
 
-	ag, err := agent.DetectAgentWithInitParams(evalCfg.Engine.Name, runnerParams)
+	ag, err := agent.DetectAgentWithInitParams(evalCfg.Engine.Name, runnerParams, evalCfg.Engine.Kwargs)
 	if err != nil {
 		return nil, nil, credential.AgentInitParams{}, fmt.Errorf("failed to create agent: %w", err)
 	}
@@ -495,6 +498,9 @@ func applyRunConfigOverrides(evalCfg *config.EvalConfig, cmd *cobra.Command) err
 	if err := applyRuntimeKwargOverrides(evalCfg, cmd); err != nil {
 		return err
 	}
+	if err := applyEngineKwargOverrides(evalCfg, cmd); err != nil {
+		return err
+	}
 	if err := applyRuntimeTypeOverride(evalCfg, cmd); err != nil {
 		return err
 	}
@@ -537,27 +543,39 @@ func applyUserConfigKwargs(ctx context.Context, evalCfg *config.EvalConfig) {
 }
 
 func applyRuntimeKwargOverrides(evalCfg *config.EvalConfig, cmd *cobra.Command) error {
-	runtimeKwargFlag := cmd.Flags().Lookup(runtimeKwargFlagName)
-	if runtimeKwargFlag == nil || !runtimeKwargFlag.Changed {
+	return applyMapKwargFlag(cmd, runtimeKwargFlagName, &evalCfg.Environment.Kwargs)
+}
+
+func applyEngineKwargOverrides(evalCfg *config.EvalConfig, cmd *cobra.Command) error {
+	return applyMapKwargFlag(cmd, engineKwargFlagName, &evalCfg.Engine.Kwargs)
+}
+
+// applyMapKwargFlag reads a repeatable key=value StringArray flag and merges
+// its values into the destination map (initialising it if nil). It is shared
+// by --runtime-kwarg and --engine-kwarg; both wrappers exist so callers and
+// error messages stay specific to their respective surfaces.
+func applyMapKwargFlag(cmd *cobra.Command, flagName string, dest *map[string]string) error {
+	flag := cmd.Flags().Lookup(flagName)
+	if flag == nil || !flag.Changed {
 		return nil
 	}
-	values, err := cmd.Flags().GetStringArray(runtimeKwargFlagName)
+	values, err := cmd.Flags().GetStringArray(flagName)
 	if err != nil {
-		return fmt.Errorf("read --runtime-kwarg: %w", err)
+		return fmt.Errorf("read --%s: %w", flagName, err)
 	}
 	if len(values) == 0 {
 		return nil
 	}
-	if evalCfg.Environment.Kwargs == nil {
-		evalCfg.Environment.Kwargs = map[string]string{}
+	if *dest == nil {
+		*dest = map[string]string{}
 	}
 	for _, value := range values {
 		key, val, ok := strings.Cut(value, "=")
 		key = strings.TrimSpace(key)
 		if !ok || key == "" {
-			return fmt.Errorf("invalid --runtime-kwarg %q: expected key=value", value)
+			return fmt.Errorf("invalid --%s %q: expected key=value", flagName, value)
 		}
-		evalCfg.Environment.Kwargs[key] = val
+		(*dest)[key] = val
 	}
 	return nil
 }
@@ -594,8 +612,11 @@ func applyRuntimeTypeOverride(evalCfg *config.EvalConfig, cmd *cobra.Command) er
 }
 
 func normalizeRunFlagName(_ *pflag.FlagSet, name string) pflag.NormalizedName {
-	if name == runtimeKwargAlias {
+	switch name {
+	case runtimeKwargAlias:
 		return pflag.NormalizedName(runtimeKwargFlagName)
+	case engineKwargAlias:
+		return pflag.NormalizedName(engineKwargFlagName)
 	}
 	return pflag.NormalizedName(name)
 }

@@ -65,6 +65,10 @@ type Config struct {
 	ModelProvider string
 	APIKey        string
 	BaseURL       string
+	// Kwargs carries agent-specific key/value options forwarded from
+	// EngineConfig.Kwargs. Each agent reads only the keys it understands;
+	// unknown keys are ignored. See agent kwargs helpers in kwargs.go.
+	Kwargs map[string]string
 }
 
 // Runtime is an alias for runtime.Runtime for agent package convenience.

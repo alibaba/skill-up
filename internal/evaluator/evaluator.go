@@ -627,7 +627,7 @@ func (e *defaultEvaluator) resolveJudgeAgent(ctx context.Context, judgeCfg confi
 	if e.evalCfg.Engine.Name != "" {
 		judgeParams := credential.ResolveJudgeInitParams(e.evalCfg.Engine.Name, judgeCfg, e.runnerParams, e.resolver)
 		var err error
-		judgeAgent, err = agentDetectWithInitParams(e.evalCfg.Engine.Name, judgeParams)
+		judgeAgent, err = agentDetectWithInitParams(e.evalCfg.Engine.Name, judgeParams, e.evalCfg.Engine.Kwargs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create judge agent: %w", err)
 		}

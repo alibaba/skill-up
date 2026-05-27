@@ -716,6 +716,76 @@ func TestCodexRun_MergesConfiguredEnvVars(t *testing.T) {
 	}
 }
 
+func TestCodexRun_SandboxFlagHonoursKwargAndRuntime(t *testing.T) {
+	t.Parallel()
+
+	stdout := `{"type":"thread.started","thread_id":"thread-123"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"done"}}
+{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":1}}`
+
+	cases := []struct {
+		name        string
+		workspace   string // codexTestRuntime returns RequiresProcessSandbox() == (workspace != "opensandbox")
+		kwargs      map[string]string
+		wantFlag    string
+		notWantFlag string
+	}{
+		{
+			name:        "none runtime, no kwarg -> auto workspace-write",
+			workspace:   t.TempDir(),
+			kwargs:      nil,
+			wantFlag:    "--sandbox workspace-write",
+			notWantFlag: "--dangerously-bypass-approvals-and-sandbox",
+		},
+		{
+			name:        "none runtime, bypass_sandbox=true -> forced bypass",
+			workspace:   t.TempDir(),
+			kwargs:      map[string]string{KwargBypassSandbox: "true"},
+			wantFlag:    "--dangerously-bypass-approvals-and-sandbox",
+			notWantFlag: "--sandbox workspace-write",
+		},
+		{
+			name:        "opensandbox runtime, no kwarg -> bypass (unchanged)",
+			workspace:   "opensandbox",
+			kwargs:      nil,
+			wantFlag:    "--dangerously-bypass-approvals-and-sandbox",
+			notWantFlag: "--sandbox workspace-write",
+		},
+		{
+			name:        "none runtime, bypass_sandbox=garbage -> auto workspace-write (ParseBool fails)",
+			workspace:   t.TempDir(),
+			kwargs:      map[string]string{KwargBypassSandbox: "garbage"},
+			wantFlag:    "--sandbox workspace-write",
+			notWantFlag: "--dangerously-bypass-approvals-and-sandbox",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rt := &codexTestRuntime{
+				workspace:  tc.workspace,
+				execResult: runtime.ExecResult{Stdout: stdout, ExitCode: 0},
+			}
+			ag := NewCodexAgent(Config{Kwargs: tc.kwargs})
+			if _, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{
+				Role:    transcript.RoleUser,
+				Content: "hi",
+				Turn:    1,
+			}}); err != nil {
+				t.Fatalf("Run failed: %v", err)
+			}
+			if !containsCommand(rt.commands, tc.wantFlag) {
+				t.Fatalf("no command contains %q; commands=%v", tc.wantFlag, rt.commands)
+			}
+			if containsCommand(rt.commands, tc.notWantFlag) {
+				t.Fatalf("commands unexpectedly contain %q; commands=%v", tc.notWantFlag, rt.commands)
+			}
+		})
+	}
+}
+
 func TestCodexRun_KeepsStreamFinalMessageWhenSessionHasNoFinalMessage(t *testing.T) {
 	t.Parallel()
 
