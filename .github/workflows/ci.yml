@@ -1,12 +1,9 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - '.github/workflows/docs.yml'
   pull_request:
     branches: [main]
     paths-ignore:
@@ -69,9 +66,9 @@ jobs:
           echo "color=$color" >> "$GITHUB_OUTPUT"
           echo "::notice::Total coverage: ${pct}% (${color})"
 
-      # Hand the badge to the push-only update-coverage-badge job below via
-      # an artifact. PRs (including forks) still run the compute step above
-      # for visibility, but skip the upload so they can never trigger a push.
+      # Hand the badge to the update-coverage-badge job below via an artifact.
+      # PRs (including forks) still run the compute step above for visibility,
+      # but skip the upload so they can never trigger a push.
       #
       # include-hidden-files: true is required — the badge lives under
       # .github/, and actions/upload-artifact defaults to excluding files
@@ -79,7 +76,7 @@ jobs:
       # upload would silently match nothing and, combined with
       # if-no-files-found: error, fail the build job on every push to main.
       - name: Upload coverage badge artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v5
         with:
           name: coverage-badge
@@ -91,9 +88,9 @@ jobs:
   update-coverage-badge:
     name: Commit coverage badge
     needs: build
-    # Gate the entire job — not just individual steps — on push-to-main so
+    # Gate the entire job — not just individual steps — on main-only events so
     # the contents: write token below is never issued for pull_request runs.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
