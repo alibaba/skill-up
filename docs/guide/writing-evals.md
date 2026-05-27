@@ -85,8 +85,7 @@ engine:
     provider: anthropic
     name: claude-sonnet-4-6
     base_url: ""                  # Custom API endpoint (optional)
-  kwargs:                         # Agent-specific switches (optional)
-    bypass_sandbox: "true"        # codex: skip its own process sandbox (host kernel lacks Landlock)
+  # kwargs: { ... }               # Agent-specific switches — see "Engine kwargs" below
 
 # ========== 6. Cases ==========
 cases:
