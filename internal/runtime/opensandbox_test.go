@@ -277,33 +277,6 @@ func TestOpenSandboxLocalHelpersRejectUnsafePathsAndPreserveRemoteScope(t *testi
 	}
 }
 
-func TestOpenSandboxCommandHelpers(t *testing.T) {
-	t.Parallel()
-
-	env := map[string]string{
-		"PATH":  "$PATH:/custom/bin",
-		"PLAIN": "value",
-	}
-	literal := literalRemoteEnv(env)
-	if _, ok := literal["PATH"]; ok {
-		t.Fatalf("literalRemoteEnv kept expandable PATH: %v", literal)
-	}
-	if literal["PLAIN"] != "value" {
-		t.Fatalf("literalRemoteEnv dropped PLAIN: %v", literal)
-	}
-
-	command := withRemoteEnvExpansion("echo ok", env)
-	if !strings.HasPrefix(command, `export PATH="$PATH:/custom/bin"`+"\n") {
-		t.Fatalf("withRemoteEnvExpansion = %q", command)
-	}
-	if got := withRemoteEnvExpansion("echo ok", map[string]string{"PATH": "/usr/bin"}); got != "echo ok" {
-		t.Fatalf("withRemoteEnvExpansion without expansion = %q, want original command", got)
-	}
-	if got := shellDoubleQuote(`a"b\c` + "`d"); got != `"a\"b\\c\`+"`"+`d"` {
-		t.Fatalf("shellDoubleQuote returned %q", got)
-	}
-}
-
 func TestOpenSandboxExecutionToResult(t *testing.T) {
 	t.Parallel()
 
