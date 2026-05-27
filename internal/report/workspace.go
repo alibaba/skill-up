@@ -32,6 +32,15 @@ const (
 	filePerm = 0o644
 )
 
+// isRootedPath reports whether p begins with either path separator. On
+// Windows filepath.IsAbs requires a volume name (e.g. `C:\…`), so a POSIX-
+// style "/abs.txt" passed in from user-supplied YAML would otherwise be
+// accepted as a relative path; treat any leading `/` or `\` as rooted to
+// keep the path-traversal guard OS-independent.
+func isRootedPath(p string) bool {
+	return strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\`)
+}
+
 // validateCaseID checks that caseID does not contain path traversal sequences.
 func validateCaseID(caseID string) error {
 	cleaned := filepath.Clean(caseID)
@@ -204,9 +213,12 @@ func (w *IterationWorkspace) WriteBenchmarkMD(bm *AnthropicBenchmark) error {
 
 // WriteFile writes arbitrary content to a file in the iteration directory.
 func (w *IterationWorkspace) WriteFile(relPath string, data []byte) error {
-	// Prevent path traversal attacks.
+	// Prevent path traversal attacks. On Windows filepath.IsAbs requires a
+	// volume name, so a POSIX-style "/abs.txt" passed in by an eval case
+	// would slip through; reject rooted paths (leading separator) as well
+	// to keep the security check OS-independent.
 	cleaned := filepath.Clean(relPath)
-	if filepath.IsAbs(cleaned) || strings.HasPrefix(cleaned, "..") {
+	if filepath.IsAbs(cleaned) || isRootedPath(cleaned) || strings.HasPrefix(cleaned, "..") {
 		return fmt.Errorf("invalid relative path: %s", relPath)
 	}
 

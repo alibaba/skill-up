@@ -801,7 +801,12 @@ func safeLocalTarget(root, rel string) (string, error) {
 	if clean == "." {
 		return root, nil
 	}
-	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+	// On Windows filepath.IsAbs requires a volume name, so a POSIX-style
+	// "/absolute" supplied via the SDK would otherwise slip through; also
+	// reject any rooted path (leading separator) so the guard behaves the
+	// same on both OSes.
+	rooted := strings.HasPrefix(clean, "/") || strings.HasPrefix(clean, `\`)
+	if filepath.IsAbs(clean) || rooted || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("unsafe sandbox file path: %s", rel)
 	}
 	return filepath.Join(root, clean), nil

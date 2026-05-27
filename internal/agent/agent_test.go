@@ -13,6 +13,7 @@ import (
 
 	"github.com/alibaba/skill-up/internal/agentkind"
 	"github.com/alibaba/skill-up/internal/credential"
+	"github.com/alibaba/skill-up/internal/platform"
 )
 
 // modelAuto is the QoderCLI "auto" model tier, shared across agent tests.
@@ -281,7 +282,7 @@ func (r *probeMergeTestRuntime) MergeEnv(env map[string]string) {
 	}
 	maps.Copy(r.merged, env)
 }
-func (r *probeMergeTestRuntime) TargetGOOS() string { return "linux" }
+func (r *probeMergeTestRuntime) TargetGOOS() string { return platform.GOOSLinux }
 
 func TestProbeAndMergePATH_HappyPath(t *testing.T) {
 	t.Parallel()

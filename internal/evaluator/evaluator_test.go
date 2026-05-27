@@ -25,6 +25,7 @@ import (
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/judge"
 	"github.com/alibaba/skill-up/internal/logging"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
@@ -93,13 +94,13 @@ type mockRuntime struct {
 	execFunc         func(ctx context.Context, command string, opts runtime.ExecOptions) (runtime.ExecResult, error)
 }
 
-func (m *mockRuntime) Create(_ context.Context) error                  { return nil }
-func (m *mockRuntime) Close() error                                    { return nil }
-func (m *mockRuntime) Workspace() string                               { return m.workspace }
-func (m *mockRuntime) RequiresProcessSandbox() bool                    { return true }
-func (m *mockRuntime) MergeEnv(_ map[string]string)                    {}
+func (m *mockRuntime) Create(_ context.Context) error { return nil }
+func (m *mockRuntime) Close() error                   { return nil }
+func (m *mockRuntime) Workspace() string              { return m.workspace }
+func (m *mockRuntime) RequiresProcessSandbox() bool   { return true }
+func (m *mockRuntime) MergeEnv(_ map[string]string)   {}
 
-func (m *mockRuntime) TargetGOOS() string                              { return "linux" }
+func (m *mockRuntime) TargetGOOS() string                              { return platform.GOOSLinux }
 func (m *mockRuntime) Start(_ context.Context) error                   { return nil }
 func (m *mockRuntime) Stop(_ context.Context) error                    { return nil }
 func (m *mockRuntime) UploadFile(_ context.Context, _, _ string) error { return nil }

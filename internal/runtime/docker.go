@@ -508,12 +508,6 @@ func (r *DockerRuntime) MergeEnv(env map[string]string) {
 	mergeIntoEnvBaseline(&r.cfg.Env, env)
 }
 
-// TargetGOOS reports "linux": Docker containers running skill-up evals are
-// always Linux images regardless of the host OS.
-func (r *DockerRuntime) TargetGOOS() string {
-	return "linux"
-}
-
 // snapshotContainerID returns the current container id under the mutex,
 // so callers can use the captured local value through the rest of their
 // method without racing a concurrent Close. The lock is released on
