@@ -759,6 +759,7 @@ func (r *claudeCodeTestRuntime) Workspace() string { return r.workspace }
 func (r *claudeCodeTestRuntime) RequiresProcessSandbox() bool {
 	return true
 }
+
 func (r *claudeCodeTestRuntime) MergeEnv(env map[string]string) {
 	if r.mergedEnv == nil {
 		r.mergedEnv = make(map[string]string, len(env))

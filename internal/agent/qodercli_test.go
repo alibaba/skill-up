@@ -414,6 +414,7 @@ func (r *qoderTestRuntime) Workspace() string { return r.workspace }
 func (r *qoderTestRuntime) RequiresProcessSandbox() bool {
 	return true
 }
+
 func (r *qoderTestRuntime) MergeEnv(env map[string]string) {
 	if r.mergedEnv == nil {
 		r.mergedEnv = make(map[string]string, len(env))

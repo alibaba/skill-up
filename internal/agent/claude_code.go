@@ -46,6 +46,8 @@ func NewClaudeCodeAgent(cfg Config) *ClaudeCodeAgent {
 }
 
 // Install installs Claude Code when it is not already available in the runtime.
+//
+//nolint:dupl // each agent Install shares the same probe→merge→exec lifecycle; the deltas (probe const, default install cmd) are pulled out, leaving the orchestration intentionally similar.
 func (a *ClaudeCodeAgent) Install(ctx context.Context, rt Runtime) error {
 	a.probeAndMergePATH(ctx, rt, claudeCodeExecPathProbeCmd)
 

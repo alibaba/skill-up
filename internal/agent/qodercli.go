@@ -190,6 +190,8 @@ func findQoderSessionFile(ctx context.Context, rt Runtime) string {
 }
 
 // Install installs qoder CLI via official install script.
+//
+//nolint:dupl // each agent Install shares the same probe→merge→exec lifecycle; the deltas (probe const, default install cmd) are pulled out, leaving the orchestration intentionally similar.
 func (a *QoderCLIAgent) Install(ctx context.Context, rt Runtime) error {
 	a.probeAndMergePATH(ctx, rt, qoderExecPathProbeCmd)
 
