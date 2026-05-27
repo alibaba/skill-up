@@ -106,7 +106,7 @@ environment:
 
 ### `engine.kwargs` —— agent 私有开关
 
-`engine.kwargs` 是字符串键值对，每个 agent 只读取自己关心的 key，未知 key 静默忽略。CLI 等价开关：`--engine-kwarg key=value`（别名 `--ek`），可重复。优先级 `--engine-kwarg` > `engine.kwargs` > 缺省。
+`engine.kwargs` 是字符串键值对，每个 agent 只读取自己关心的 key，未知 key 被忽略。无人认识的 key（拼写错误，如 `bypas_sandbox`）会在 verbose 日志里打 DEBUG，`-v` 可见。CLI 等价开关：`--engine-kwarg key=value`（别名 `--ek`），可重复。优先级 `--engine-kwarg` > `engine.kwargs` > 缺省。
 
 ```yaml
 engine:

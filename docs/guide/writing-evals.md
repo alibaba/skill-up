@@ -115,7 +115,7 @@ report:
 
 ### Engine kwargs (agent-specific switches)
 
-`engine.kwargs` is a free-form string map. Each agent reads only the keys it recognises; unknown keys are silently ignored. CLI override: `--engine-kwarg key=value` (alias `--ek`), repeatable. Precedence: `--engine-kwarg` > `engine.kwargs` > default.
+`engine.kwargs` is a free-form string map. Each agent reads only the keys it recognises; unknown keys are ignored. Unrecognised keys (typos like `bypas_sandbox`) emit a DEBUG log line — run with `-v` to surface them. CLI override: `--engine-kwarg key=value` (alias `--ek`), repeatable. Precedence: `--engine-kwarg` > `engine.kwargs` > default.
 
 | key | agent | `true` behaviour | unset / `false` |
 | :---: | :---: | :--- | :--- |

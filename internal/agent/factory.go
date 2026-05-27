@@ -53,6 +53,7 @@ func DetectAgentWithInitParams(engineName string, params credential.AgentInitPar
 		EnvVars:       make(map[string]string),
 		Kwargs:        kwargs,
 	}
+	logUnknownEngineKwargs(engineName, kwargs)
 
 	switch engineName {
 	case qoderCLIEngineAlias, qoderEngineAlias, qoderCLIEngineName:
