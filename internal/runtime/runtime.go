@@ -55,6 +55,20 @@ func mergeEnvMaps(persistentEnv, callEnv map[string]string) map[string]string {
 	return env
 }
 
+// mergeIntoEnvBaseline overlays src onto *target. Single shared
+// implementation for Runtime.MergeEnv across the three concrete runtimes;
+// they each retain a 1-line method so they continue to satisfy the
+// interface, but the behaviour itself lives here.
+func mergeIntoEnvBaseline(target *map[string]string, src map[string]string) {
+	if len(src) == 0 {
+		return
+	}
+	if *target == nil {
+		*target = make(map[string]string, len(src))
+	}
+	maps.Copy(*target, src)
+}
+
 // ExecResult holds the output and exit code of a command execution.
 type ExecResult struct {
 	Stdout   string

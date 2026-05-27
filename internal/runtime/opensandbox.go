@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -555,13 +554,7 @@ func (r *OpenSandboxRuntime) RequiresProcessSandbox() bool {
 // MergeEnv layers entries into the runtime's persistent env baseline. See
 // Runtime.MergeEnv for the contract.
 func (r *OpenSandboxRuntime) MergeEnv(env map[string]string) {
-	if len(env) == 0 {
-		return
-	}
-	if r.cfg.Env == nil {
-		r.cfg.Env = make(map[string]string, len(env))
-	}
-	maps.Copy(r.cfg.Env, env)
+	mergeIntoEnvBaseline(&r.cfg.Env, env)
 }
 
 func (r *OpenSandboxRuntime) connectionConfig() opensandbox.ConnectionConfig {

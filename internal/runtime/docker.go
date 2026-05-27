@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"os/exec"
 	"path"
@@ -500,13 +499,7 @@ func (r *DockerRuntime) RequiresProcessSandbox() bool {
 // post-Create MergeEnv calls only affect subsequent `docker exec`
 // invocations, not the long-running entrypoint process.
 func (r *DockerRuntime) MergeEnv(env map[string]string) {
-	if len(env) == 0 {
-		return
-	}
-	if r.cfg.Env == nil {
-		r.cfg.Env = make(map[string]string, len(env))
-	}
-	maps.Copy(r.cfg.Env, env)
+	mergeIntoEnvBaseline(&r.cfg.Env, env)
 }
 
 // snapshotContainerID returns the current container id under the mutex,

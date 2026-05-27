@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,13 +41,7 @@ type NoneRuntime struct {
 // Runtime.MergeEnv for the contract (callers MUST sequence MergeEnv before
 // any concurrent Exec; the intended use is a one-time setup step).
 func (r *NoneRuntime) MergeEnv(env map[string]string) {
-	if len(env) == 0 {
-		return
-	}
-	if r.cfg.Env == nil {
-		r.cfg.Env = make(map[string]string, len(env))
-	}
-	maps.Copy(r.cfg.Env, env)
+	mergeIntoEnvBaseline(&r.cfg.Env, env)
 }
 
 // Create allocates the temporary workspace used by the runtime.
