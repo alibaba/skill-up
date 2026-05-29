@@ -14,12 +14,12 @@ import (
 
 // mockEngineHome creates a fake HOME whose $HOME/.local/bin contains symlinks
 // named "qodercli", "claude", "codex" (all pointing at mock-engine/engine.sh).
-// We cannot merely prepend a directory to PATH, because the agent layer forces
-// PATH="$HOME/.local/bin:$HOME/.nvm/current/bin:$PATH" before running the
-// engine (see internal/agent.agentExecutablePath). That means any mock we put
-// on PATH would be shadowed by the real qodercli in the developer's real
-// ~/.local/bin. By taking over HOME we make the agent layer look inside our
-// fake tree first, which guarantees the mock wins.
+// The e2e pipeline uses environment.type: none and supplies PATH explicitly
+// via mockEngineEnv, so the framework's normal probe-PATH-at-Install flow
+// (see internal/agent.probeAndMergePATH, only invoked for envType != "none")
+// doesn't run here. We still override HOME so that the symlinks under our
+// fake $HOME/.local/bin win over any real claude/codex/qodercli on the
+// developer's machine.
 func mockEngineHome(t *testing.T) (home, binDir string) {
 	t.Helper()
 

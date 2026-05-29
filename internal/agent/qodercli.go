@@ -22,6 +22,11 @@ type QoderCLIAgent struct {
 
 var supportedQoderModels = []string{"lite", "efficient", "auto", "performance", "ultimate"}
 
+// qoderExecPathProbeCmd resolves $HOME/.local/bin only — qodercli is a
+// self-contained binary placed there by the official installer, not a node
+// script, so the nvm path is unneeded.
+const qoderExecPathProbeCmd = `printf '%s' "$HOME/.local/bin:$PATH"`
+
 // NewQoderCLIAgent creates a new QoderCLIAgent.
 func NewQoderCLIAgent(cfg Config) *QoderCLIAgent {
 	if cfg.Name == "" {
@@ -185,7 +190,11 @@ func findQoderSessionFile(ctx context.Context, rt Runtime) string {
 }
 
 // Install installs qoder CLI via official install script.
+//
+//nolint:dupl // each agent Install shares the same probe→merge→exec lifecycle; the deltas (probe const, default install cmd) are pulled out, leaving the orchestration intentionally similar.
 func (a *QoderCLIAgent) Install(ctx context.Context, rt Runtime) error {
+	a.probeAndMergePATH(ctx, rt, qoderExecPathProbeCmd)
+
 	opts := ExecOptions{Cwd: "/"}
 	opts = a.mergeExecOptionsEnv(ctx, opts, nil, nil)
 

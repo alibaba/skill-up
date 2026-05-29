@@ -37,6 +37,13 @@ type NoneRuntime struct {
 	workspace string
 }
 
+// MergeEnv layers entries into the runtime's persistent env baseline. See
+// Runtime.MergeEnv for the contract (callers MUST sequence MergeEnv before
+// any concurrent Exec; the intended use is a one-time setup step).
+func (r *NoneRuntime) MergeEnv(env map[string]string) {
+	mergeIntoEnvBaseline(&r.cfg.Env, env)
+}
+
 // Create allocates the temporary workspace used by the runtime.
 func (r *NoneRuntime) Create(ctx context.Context) error {
 	dir, err := os.MkdirTemp("", "skill-up-*")

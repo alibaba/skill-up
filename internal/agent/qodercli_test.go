@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -135,8 +136,11 @@ func TestQoderCLIInstall_UsesDefaultCommand(t *testing.T) {
 	if !strings.Contains(rt.lastCommand, "curl -fsSL https://qoder.com/install | bash") {
 		t.Fatalf("install command does not run qoder installer:\n%s", rt.lastCommand)
 	}
-	if got := rt.lastExecEnv["PATH"]; got != agentExecutablePath {
-		t.Fatalf("install PATH = %q, want agent executable path", got)
+	if _, ok := rt.lastExecEnv["PATH"]; ok {
+		t.Fatalf("install env should not carry PATH from agent; PATH flows via runtime baseline. got %q", rt.lastExecEnv["PATH"])
+	}
+	if got := rt.mergedEnv["PATH"]; got == "" {
+		t.Fatalf("expected probeAndMergePATH to populate runtime baseline with PATH; mergedEnv=%+v", rt.mergedEnv)
 	}
 }
 
@@ -366,10 +370,12 @@ func TestFindQoderSessionFileSymlink(t *testing.T) {
 }
 
 type qoderTestRuntime struct {
-	workspace   string
-	execResult  runtime.ExecResult
-	lastCommand string
-	lastExecEnv map[string]string
+	workspace           string
+	execResult          runtime.ExecResult
+	lastCommand         string
+	lastExecEnv         map[string]string
+	probeResponseStdout string
+	mergedEnv           map[string]string
 }
 
 func (r *qoderTestRuntime) Create(context.Context) error { return nil }
@@ -385,6 +391,17 @@ func (r *qoderTestRuntime) DownloadFile(context.Context, string, string) error {
 }
 func (r *qoderTestRuntime) DownloadDir(context.Context, string, string) error { return nil }
 func (r *qoderTestRuntime) Exec(_ context.Context, command string, opts runtime.ExecOptions) (runtime.ExecResult, error) {
+	// Probe calls (agent.Install via probeAndMergePATH) get a canned
+	// literal PATH and are NOT recorded as a real command. Exact-match
+	// the probe constant so unrelated `printf '%s' "$HOME/..."` tests
+	// aren't silently intercepted.
+	if command == qoderExecPathProbeCmd {
+		stdout := r.probeResponseStdout
+		if stdout == "" {
+			stdout = "/fake/.local/bin:/usr/bin"
+		}
+		return runtime.ExecResult{Stdout: stdout}, nil
+	}
 	r.lastCommand = command
 	if strings.Contains(command, "qodercli --permission-mode=bypass_permissions") ||
 		strings.Contains(command, "qodercli -p ") ||
@@ -396,4 +413,11 @@ func (r *qoderTestRuntime) Exec(_ context.Context, command string, opts runtime.
 func (r *qoderTestRuntime) Workspace() string { return r.workspace }
 func (r *qoderTestRuntime) RequiresProcessSandbox() bool {
 	return true
+}
+
+func (r *qoderTestRuntime) MergeEnv(env map[string]string) {
+	if r.mergedEnv == nil {
+		r.mergedEnv = make(map[string]string, len(env))
+	}
+	maps.Copy(r.mergedEnv, env)
 }

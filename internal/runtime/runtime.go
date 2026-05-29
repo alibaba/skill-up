@@ -17,42 +17,21 @@ const (
 	ClaudeFileMode = 0o600
 )
 
+// mergeEnv returns the host env (os.Environ) with persistentEnv and callEnv
+// overlaid, in that order (callEnv wins). Values are forwarded LITERALLY: no
+// $VAR / ${VAR} expansion. This matches the docker and opensandbox runtimes,
+// which also pass env literally — callers that need shell expansion should
+// either resolve the value first or prepend `export X=...` to the command.
 func mergeEnv(persistentEnv, callEnv map[string]string) []string {
-	baseEnv := envMapFromList(os.Environ())
-	envMap := expandEnvMap(baseEnv, mergeEnvMaps(persistentEnv, callEnv))
-	if envMap == nil {
-		envMap = baseEnv
-	}
-	for k, v := range baseEnv {
-		if _, ok := envMap[k]; !ok {
-			envMap[k] = v
-		}
-	}
+	envMap := envMapFromList(os.Environ())
+	maps.Copy(envMap, persistentEnv)
+	maps.Copy(envMap, callEnv)
 
 	env := make([]string, 0, len(envMap))
 	for k, v := range envMap {
 		env = append(env, k+"="+v)
 	}
 	return env
-}
-
-func expandEnvMap(baseEnv, overlay map[string]string) map[string]string {
-	if len(overlay) == 0 {
-		return nil
-	}
-	expanded := make(map[string]string, len(overlay))
-	for key, value := range overlay {
-		expanded[key] = os.Expand(value, func(name string) string {
-			if name == key {
-				return baseEnv[name]
-			}
-			if overlayValue, ok := overlay[name]; ok {
-				return overlayValue
-			}
-			return baseEnv[name]
-		})
-	}
-	return expanded
 }
 
 func envMapFromList(env []string) map[string]string {
@@ -74,6 +53,20 @@ func mergeEnvMaps(persistentEnv, callEnv map[string]string) map[string]string {
 	maps.Copy(env, persistentEnv)
 	maps.Copy(env, callEnv)
 	return env
+}
+
+// mergeIntoEnvBaseline overlays src onto *target. Single shared
+// implementation for Runtime.MergeEnv across the three concrete runtimes;
+// they each retain a 1-line method so they continue to satisfy the
+// interface, but the behaviour itself lives here.
+func mergeIntoEnvBaseline(target *map[string]string, src map[string]string) {
+	if len(src) == 0 {
+		return
+	}
+	if *target == nil {
+		*target = make(map[string]string, len(src))
+	}
+	maps.Copy(*target, src)
 }
 
 // ExecResult holds the output and exit code of a command execution.
@@ -109,6 +102,13 @@ type Runtime interface {
 	DownloadDir(ctx context.Context, sourceDir, targetDir string) error
 
 	Exec(ctx context.Context, command string, opts ExecOptions) (ExecResult, error)
+	// MergeEnv layers entries onto the runtime's persistent env baseline
+	// (Config.Env). Subsequent Exec calls see these vars unless overridden
+	// by opts.Env. Used by orchestrators (e.g. the evaluator) to seed
+	// runtime-resolved values — for example the agent's PATH expanded
+	// against the target shell — without each Exec caller needing to
+	// know about them. Idempotent; later calls overwrite same-key values.
+	MergeEnv(env map[string]string)
 	Workspace() string
 	// RequiresProcessSandbox reports whether agents should enable their own process sandbox.
 	RequiresProcessSandbox() bool

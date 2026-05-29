@@ -49,6 +49,11 @@ const (
 	codexStatusError            = "error"
 )
 
+// codexExecPathProbeCmd resolves $HOME/.local/bin (the codex binary, installed
+// via `npm install -g` under the bootstrap's npm_config_prefix) and
+// $HOME/.nvm/current/bin (node, needed by codex's #!/usr/bin/env node shebang).
+const codexExecPathProbeCmd = `printf '%s' "$HOME/.local/bin:$HOME/.nvm/current/bin:$PATH"`
+
 // NewCodexAgent creates a new CodexAgent.
 func NewCodexAgent(cfg Config) *CodexAgent {
 	if cfg.Name == "" {
@@ -67,7 +72,11 @@ func NewCodexAgent(cfg Config) *CodexAgent {
 }
 
 // Install installs Codex CLI when it is not already available in the runtime.
+//
+//nolint:dupl // each agent Install shares the same probe→merge→exec lifecycle; the deltas (probe const, default install cmd) are pulled out, leaving the orchestration intentionally similar.
 func (a *CodexAgent) Install(ctx context.Context, rt Runtime) error {
+	a.probeAndMergePATH(ctx, rt, codexExecPathProbeCmd)
+
 	opts := ExecOptions{Cwd: "/"}
 	opts = a.mergeExecOptionsEnv(ctx, opts, nil, nil)
 

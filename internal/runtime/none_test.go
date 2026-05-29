@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -403,18 +402,21 @@ func TestNoneRuntime_ExecWithEnv(t *testing.T) {
 	}
 }
 
-func TestNoneRuntime_ExecExpandsPathFromRuntimeEnv(t *testing.T) {
-	bashPath, err := exec.LookPath("bash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	basePath := filepath.Dir(bashPath)
-	t.Setenv("PATH", basePath)
-
+// TestNoneRuntime_ForwardsEnvLiterally verifies that NoneRuntime forwards
+// $-bearing env values literally — matching the docker and opensandbox
+// runtimes. Callers that want shell expansion must resolve the value first
+// (see internal/agent.probeAndMergePATH) or prepend `export X=...` to the
+// command themselves. The runtime never expands.
+//
+// printf '%s' "$VAR" prints whatever string the runtime handed to the
+// shell. If the runtime pre-expanded $CUSTOM_BIN / $PATH the child would
+// see "/agent/bin:..." instead of the literal "$CUSTOM_BIN:$PATH".
+func TestNoneRuntime_ForwardsEnvLiterally(t *testing.T) {
 	rt := &NoneRuntime{cfg: Config{
 		Env: map[string]string{
-			"CUSTOM_BIN": "/agent/bin",
-			"PATH":       "$CUSTOM_BIN:$PATH",
+			"CUSTOM_BIN":      "/agent/bin",
+			"LITERAL_PATH":    "$CUSTOM_BIN:$PATH",
+			"ALSO_UNEXPANDED": "${HOME}/foo",
 		},
 	}}
 	if err := rt.Create(context.Background()); err != nil {
@@ -422,12 +424,13 @@ func TestNoneRuntime_ExecExpandsPathFromRuntimeEnv(t *testing.T) {
 	}
 	defer func() { _ = rt.Close() }()
 
-	result, err := rt.Exec(context.Background(), "printf %s \"$PATH\"", ExecOptions{})
+	result, err := rt.Exec(context.Background(), `printf '%s\n%s\n' "$LITERAL_PATH" "$ALSO_UNEXPANDED"`, ExecOptions{})
 	if err != nil {
 		t.Fatalf("Exec returned error: %v", err)
 	}
-	if got, want := result.Stdout, "/agent/bin:"+basePath; got != want {
-		t.Fatalf("PATH = %q, want %q", got, want)
+	want := "$CUSTOM_BIN:$PATH\n${HOME}/foo\n"
+	if result.Stdout != want {
+		t.Fatalf("env values should be passed literally; got %q want %q", result.Stdout, want)
 	}
 }
 
@@ -577,5 +580,53 @@ func TestMaskCommand(t *testing.T) {
 				t.Errorf("maskCommand() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNoneRuntime_MergeEnv(t *testing.T) {
+	t.Parallel()
+	rt := &NoneRuntime{}
+	rt.MergeEnv(map[string]string{"FOO": "1", "BAR": "2"})
+	if got := rt.cfg.Env["FOO"]; got != "1" {
+		t.Fatalf("FOO = %q, want 1", got)
+	}
+	if got := rt.cfg.Env["BAR"]; got != "2" {
+		t.Fatalf("BAR = %q, want 2", got)
+	}
+	// Second call overlays; later keys win.
+	rt.MergeEnv(map[string]string{"BAR": "overridden", "BAZ": "3"})
+	if got := rt.cfg.Env["BAR"]; got != "overridden" {
+		t.Fatalf("BAR after overlay = %q, want overridden", got)
+	}
+	if got := rt.cfg.Env["BAZ"]; got != "3" {
+		t.Fatalf("BAZ = %q, want 3", got)
+	}
+	if got := rt.cfg.Env["FOO"]; got != "1" {
+		t.Fatalf("FOO after overlay = %q, want 1 preserved", got)
+	}
+	// Empty map is a no-op.
+	rt.MergeEnv(nil)
+	rt.MergeEnv(map[string]string{})
+	if len(rt.cfg.Env) != 3 {
+		t.Fatalf("env length = %d, want 3 after no-op calls", len(rt.cfg.Env))
+	}
+}
+
+func TestNoneRuntime_MergeEnv_VisibleToSubsequentExec(t *testing.T) {
+	t.Parallel()
+	rt := &NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	rt.MergeEnv(map[string]string{"SKILL_UP_MERGE_TEST": "visible"})
+
+	res, err := rt.Exec(context.Background(), `printf '%s' "$SKILL_UP_MERGE_TEST"`, ExecOptions{})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if res.Stdout != "visible" {
+		t.Fatalf("Exec saw SKILL_UP_MERGE_TEST=%q, want visible", res.Stdout)
 	}
 }
