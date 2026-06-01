@@ -1,6 +1,15 @@
 package agent
 
-import "strings"
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+)
+
+// errEnsureNodeRuntimeNoCLI is returned when ensureNodeRuntime is called
+// without a CLI binary name to guard against — a programming error.
+var errEnsureNodeRuntimeNoCLI = errors.New("ensureNodeRuntime: cliBin must not be empty")
 
 const (
 	agentNodeDefaultVersion = "22"
@@ -61,26 +70,29 @@ func nodeBootstrapLines(nodeVersion string) []string {
 	}
 }
 
-func nodeRuntimeCommand(command string) string {
-	return nodeRuntimeCommandWithGuard("", command)
-}
-
-// nodeRuntimeCommandWithGuard wraps command with the Node/nvm bootstrap,
-// but skips the bootstrap entirely when cliBin is already on PATH. This lets
-// host-style runtimes (environment.type: none) reuse a locally-installed
-// claude / codex without forcing an nvm switch.
-func nodeRuntimeCommandWithGuard(cliBin, command string) string {
-	lines := []string{"set -e"}
-	bootstrap := nodeBootstrapLines(agentNodeDefaultVersion)
+// ensureNodeRuntime runs the nvm/Node bootstrap as a standalone Exec call,
+// separate from the agent invocation that follows. When cliBin is already on
+// PATH the script short-circuits with `exit 0` and produces no output, so the
+// happy-path cost is one extra `command -v` check. Errors are wrapped with a
+// `node bootstrap failed` prefix so they're distinguishable from agent run
+// failures in result handling and signal detectors.
+func ensureNodeRuntime(ctx context.Context, rt Runtime, cliBin string, opts ExecOptions) error {
 	if cliBin == "" {
-		lines = append(lines, bootstrap...)
-	} else {
-		lines = append(lines, "if ! command -v "+shellQuote(cliBin)+" >/dev/null 2>&1; then")
-		for _, l := range bootstrap {
-			lines = append(lines, "  "+l)
-		}
-		lines = append(lines, "fi")
+		return errEnsureNodeRuntimeNoCLI
 	}
-	lines = append(lines, command)
-	return strings.Join(lines, "\n")
+	lines := []string{
+		"set -e",
+		"if command -v " + shellQuote(cliBin) + " >/dev/null 2>&1; then exit 0; fi",
+	}
+	lines = append(lines, nodeBootstrapLines(agentNodeDefaultVersion)...)
+	script := strings.Join(lines, "\n")
+
+	result, err := rt.Exec(ctx, script, opts)
+	if err != nil {
+		return fmt.Errorf("node bootstrap failed: %w", err)
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("node bootstrap failed (exit %d): %s", result.ExitCode, result.Stderr)
+	}
+	return nil
 }

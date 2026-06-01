@@ -746,6 +746,12 @@ func (r *claudeCodeTestRuntime) Exec(_ context.Context, command string, opts run
 		}
 		return runtime.ExecResult{Stdout: stdout}, nil
 	}
+	// ensureNodeRuntime emits a script whose first conditional short-circuits
+	// when claude is already on PATH. Treat it as a no-op success so the
+	// subsequent agent-command Exec is what tests observe via lastCommand.
+	if strings.Contains(command, "if command -v 'claude' >/dev/null 2>&1; then exit 0; fi") {
+		return runtime.ExecResult{ExitCode: 0}, nil
+	}
 	r.lastCommand = command
 	r.execCount++
 	if r.execCount == 1 {

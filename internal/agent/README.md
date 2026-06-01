@@ -79,6 +79,8 @@ export NVM_NODEJS_ORG_MIRROR=https://mirrors.aliyun.com/nodejs-release
 export NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
 ```
 
+The bootstrap is invoked from `ensureNodeRuntime`, which runs as its **own** `rt.Exec` call before the agent invocation (or MCP install). The script's first line short-circuits with `exit 0` when the CLI binary (`claude`, `codex`) is already on `PATH`, so the happy-path cost is one `command -v` check. Splitting the bootstrap into a separate Exec keeps the agent run's stdout/stderr clean of nvm/curl noise and makes bootstrap failures distinguishable in errors (`node bootstrap failed: ...`) and traces.
+
 ## Agent Interface
 
 ```go

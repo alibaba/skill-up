@@ -71,15 +71,17 @@ func (a *ClaudeCodeAgent) Install(ctx context.Context, rt Runtime) error {
 
 // InstallMCP installs MCP servers with the Claude Code CLI.
 func (a *ClaudeCodeAgent) InstallMCP(ctx context.Context, rt Runtime, mcpCfg runtime.MCPConfig) error {
+	if len(mcpCfg.Servers) == 0 {
+		return nil
+	}
+	if err := ensureNodeRuntime(ctx, rt, "claude", ExecOptions{}); err != nil {
+		return err
+	}
 	return installMCPServers(ctx, rt, mcpCfg, buildClaudeMCPInstallCmd)
 }
 
 func buildClaudeMCPInstallCmd(server runtime.MCPServerConfig) (string, error) {
-	cmd, err := buildClaudeCompatibleMCPInstallCmd("claude", "claude-code", server)
-	if err != nil {
-		return "", err
-	}
-	return nodeRuntimeCommandWithGuard("claude", cmd), nil
+	return buildClaudeCompatibleMCPInstallCmd("claude", "claude-code", server)
 }
 
 func defaultClaudeCodeInstallCmd() string {
@@ -134,7 +136,10 @@ func (a *ClaudeCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions,
 	ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, opts.Env)
 
 	instruction := BuildInstructionFromMessages(messages)
-	cmd := nodeRuntimeCommandWithGuard("claude", buildClaudePrintCmd(sessionID, a.effectiveModelName(ctx), instruction))
+	if err := ensureNodeRuntime(ctx, rt, "claude", opts); err != nil {
+		return nil, err
+	}
+	cmd := buildClaudePrintCmd(sessionID, a.effectiveModelName(ctx), instruction)
 
 	result, err := rt.Exec(ctx, cmd, opts)
 	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result)

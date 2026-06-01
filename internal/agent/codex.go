@@ -97,6 +97,12 @@ func (a *CodexAgent) Install(ctx context.Context, rt Runtime) error {
 
 // InstallMCP installs MCP servers with the Codex CLI.
 func (a *CodexAgent) InstallMCP(ctx context.Context, rt Runtime, mcpCfg runtime.MCPConfig) error {
+	if len(mcpCfg.Servers) == 0 {
+		return nil
+	}
+	if err := ensureNodeRuntime(ctx, rt, codexEngineName, ExecOptions{}); err != nil {
+		return err
+	}
 	return installMCPServers(ctx, rt, mcpCfg, buildCodexMCPInstallCmd)
 }
 
@@ -142,7 +148,7 @@ func buildCodexMCPInstallCmd(server runtime.MCPServerConfig) (string, error) {
 	default:
 		return "", fmt.Errorf("mcp server %q transport %q is not supported by codex", server.Name, server.Transport)
 	}
-	return nodeRuntimeCommandWithGuard("codex", cmd.String()), nil
+	return cmd.String(), nil
 }
 
 func buildCodexMCPRemoteInstallCmd(server runtime.MCPServerConfig) (string, error) {
@@ -177,7 +183,7 @@ func buildCodexMCPRemoteInstallCmd(server runtime.MCPServerConfig) (string, erro
 		return "", fmt.Errorf("mcp server %q endpoint is invalid: %w", server.Name, err)
 	}
 	cmd.WriteString(endpoint)
-	return nodeRuntimeCommandWithGuard("codex", cmd.String()), nil
+	return cmd.String(), nil
 }
 
 func buildCodexMCPRemoteBridgeScript(server runtime.MCPServerConfig) (string, error) {
@@ -244,12 +250,16 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 		sandboxFlag = codexProcessSandbox
 	}
 	lastMessagePath := filepath.Join(rt.Workspace(), ".skill-up", "codex-last-message.txt")
-	cmd := "mkdir -p " + shellQuote(filepath.Dir(lastMessagePath)) + "\n" +
-		nodeRuntimeCommandWithGuard("codex", buildCodexRunCmdWithLastMessage(instruction, a.effectiveModelName(ctx), a.runProviderConfig(ctx), sandboxFlag, lastMessagePath))
 
 	envVars := a.credentialEnvVars(credential.EnvOpenAIAPIKey, credential.EnvOpenAIBaseURL)
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))
 	ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, opts.Env)
+
+	if err := ensureNodeRuntime(ctx, rt, codexEngineName, opts); err != nil {
+		return nil, err
+	}
+	cmd := "mkdir -p " + shellQuote(filepath.Dir(lastMessagePath)) + "\n" +
+		buildCodexRunCmdWithLastMessage(instruction, a.effectiveModelName(ctx), a.runProviderConfig(ctx), sandboxFlag, lastMessagePath)
 
 	result, err := rt.Exec(ctx, cmd, opts)
 	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result, lastMessagePath)
