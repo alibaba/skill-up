@@ -137,7 +137,12 @@ func (a *ClaudeCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions,
 
 	instruction := BuildInstructionFromMessages(messages)
 	if err := ensureNodeRuntime(ctx, rt, "claude", opts); err != nil {
-		return nil, err
+		return &SessionResult{
+			Engine:     a.Name(),
+			ExitCode:   1,
+			DurationMs: time.Since(start).Milliseconds(),
+			Artifacts:  &SessionArtifacts{},
+		}, err
 	}
 	cmd := buildClaudePrintCmd(sessionID, a.effectiveModelName(ctx), instruction)
 

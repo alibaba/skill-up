@@ -256,7 +256,12 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 	ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, opts.Env)
 
 	if err := ensureNodeRuntime(ctx, rt, codexEngineName, opts); err != nil {
-		return nil, err
+		return &SessionResult{
+			Engine:     a.Name(),
+			ExitCode:   1,
+			DurationMs: time.Since(start).Milliseconds(),
+			Artifacts:  &SessionArtifacts{},
+		}, err
 	}
 	cmd := "mkdir -p " + shellQuote(filepath.Dir(lastMessagePath)) + "\n" +
 		buildCodexRunCmdWithLastMessage(instruction, a.effectiveModelName(ctx), a.runProviderConfig(ctx), sandboxFlag, lastMessagePath)
