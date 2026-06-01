@@ -93,10 +93,10 @@ type SkillRef struct {
 
 // EngineConfig defines the Agent Engine configuration.
 type EngineConfig struct {
-	Name    string              `yaml:"name"` // claude_code, codex, custom
-	Version string              `yaml:"version,omitempty"`
-	Entry   string              `yaml:"entry,omitempty"`
-	Model   ModelConfig         `yaml:"model"`
+	Name    string      `yaml:"name"` // claude_code, codex, custom
+	Version string      `yaml:"version,omitempty"`
+	Entry   string      `yaml:"entry,omitempty"`
+	Model   ModelConfig `yaml:"model"`
 	// Kwargs carries agent-specific key/value options. Each agent reads only
 	// the keys it understands; unknown keys are ignored. Recognised keys are
 	// documented per agent (e.g. codex honours "bypass_sandbox").
