@@ -141,6 +141,18 @@ engine:
       output_file: outputs/session-result.json
 ```
 
+关键字段说明（完整契约见 [docs/design/custom-engine.md](../../design/custom-engine.md)）：
+
+- **`transport`**（必填）—— skill-up 调用 agent 的方式。
+  - `local`：通过 `runtime.Exec` 在当前 runtime 内执行 `local.command`，agent 进程可访问 runtime workspace、已安装的 skill、fixture、MCP 配置以及进程环境变量。
+  - `http`：调用远程（或本地）HTTP agent 服务。Phase 2 已完成设计，本版本 validate 阶段直接拒绝并提示 "not yet implemented"。
+- **`response_format`**（可选，默认 `session_result`）—— skill-up 如何解析 agent 输出。
+  - `session_result`：从 `local.output_file`（若配置）或 stdout 读出完整的 `SessionResult` JSON，包含 `exit_code` / `final_message` / `transcript` / `turns` / `input_tokens` / `output_tokens` / `artifacts`。**推荐保留默认**，可以让 judge 和报告拿到完整上下文。
+  - `text`：把 stdout 整体当作 `final_message`，skill-up 自动按输入消息 + 助手回复合成 minimal transcript，使 judge 仍能拿到一段对话。仅适合不输出结构化结果的简易脚本。
+- **`timeout_seconds`**（可选）—— 单次调用的超时时间。未设时回退到 case 级 timeout；两者都设置时 skill-up 取较小值，保证传给 agent 的预算与真实墙钟一致。
+- **`env`**（可选）—— 凭据 / 敏感参数通道。值会以进程环境变量形式注入到 agent。**这是唯一允许携带凭据的字段**：`command` / `args` / `cwd` / `input_file` / `output_file` 在配置加载阶段会拒绝凭据形态的值。
+- **`kwargs`**（可选）—— 非敏感开关，模板里以 `${kwargs.<key>}` 暴露。与 `env` 不同，kwargs 也走严格凭据检查，不允许携带凭据值或凭据形态的 key（如 `token` / `api_key` / `bearerToken` 等）。
+
 `command` / `args` / `cwd` / `env` / `input_file` / `output_file` 中可用的模板变量：
 `${workspace}`、`${input_file}`、`${output_file}`、`${model}`、`${model_provider}`、`${model_name}`、`${case_id}`、`${variant}`、`${max_turns}`、`${timeout_seconds}`、`${kwargs.<key>}`，以及环境变量形式 `${VAR}` / `${VAR:-default}` / `${VAR?error message}`。
 

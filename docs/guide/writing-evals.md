@@ -157,6 +157,18 @@ engine:
       output_file: outputs/session-result.json   # optional override
 ```
 
+Key fields (full contract in [docs/design/custom-engine.md](../design/custom-engine.md)):
+
+- **`transport`** (required) — how skill-up invokes your agent.
+  - `local`: run `local.command` inside the current runtime via `runtime.Exec`. The agent process can read the runtime workspace, installed skills, fixtures, MCP config, and process environment variables.
+  - `http`: call a remote (or local) HTTP agent service. Designed in Phase 2 and rejected by validation today with an explicit "not yet implemented".
+- **`response_format`** (optional, default `session_result`) — how skill-up parses the agent's output.
+  - `session_result`: read a full `SessionResult` JSON from `local.output_file` (when configured) or stdout. Carries `exit_code` / `final_message` / `transcript` / `turns` / `input_tokens` / `output_tokens` / `artifacts`. **Recommended**: keeps the full context for judges and reports.
+  - `text`: take stdout verbatim as `final_message`. skill-up synthesises a minimal transcript (input messages + the assistant reply) so judges still receive a conversation. Use only for simple scripts that do not produce structured output.
+- **`timeout_seconds`** (optional) — per-call deadline. Falls back to the case-level timeout when unset; when both are set, skill-up takes the smaller of the two so the value handed to the agent matches the real wall-clock budget.
+- **`env`** (optional) — credentials and secret parameters. Values are injected into the agent process as environment variables. **This is the only channel allowed to carry credentials**: `command` / `args` / `cwd` / `input_file` / `output_file` reject secret-shaped values at config load.
+- **`kwargs`** (optional) — non-secret knobs exposed to templates as `${kwargs.<key>}`. Unlike `env`, kwargs are subject to the same strict secret-rejection as command-line fields, so they must not carry credentials or credential-shaped keys.
+
 Template variables available in `command` / `args` / `cwd` / `env` / `input_file` / `output_file`:
 `${workspace}`, `${input_file}`, `${output_file}`, `${model}`, `${model_provider}`, `${model_name}`, `${case_id}`, `${variant}`, `${max_turns}`, `${timeout_seconds}`, `${kwargs.<key>}`, plus environment variables via `${VAR}` / `${VAR:-default}` / `${VAR?error message}`.
 
