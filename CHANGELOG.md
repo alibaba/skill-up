@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-06-03
+
 ### Added
 - `collect_artifacts`: glob patterns (doublestar syntax — `*` within a
   path segment, `**` across directories) that select workspace files to
@@ -17,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the agent succeeded, failed, or timed out**. Collection is read-only and
   orthogonal to `report.artifacts` (artifact types) and the `agent_judge`
   workspace diff.
+- Custom Engine with `local` transport (`engine.custom` in `eval.yaml`):
+  plug in any agent executor as a user-provided command without modifying
+  `skill-up`. The framework runs the command inside the current runtime via
+  `runtime.Exec`, passes a standard `SessionInput` (JSON), and parses a
+  standard `SessionResult`. Supports `session_result` and `text` response
+  formats, structured file artifacts, `env` / `kwargs` forwarding, and
+  `${VAR}` / `${VAR:-default}` / `${VAR?msg}` env references resolved at
+  load time. API keys and custom env values are masked in reports.
+  `http` transport config is parsed and validated but returns an explicit
+  "not yet implemented" error — HTTP lands in a follow-up.
 - `runtime.Runtime.MergeEnv(env)`: new interface method that lets
   setup-time callers (notably each agent's `Install`) seed the runtime's
   persistent env baseline. Subsequent `Exec` calls inherit these vars
@@ -48,6 +60,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Because `ag.Install` is skipped for type=none, the new probe doesn't
   run either; the host shell's PATH is used as-is. Add the dirs to
   your shell rc if `claude` / `codex` / `qodercli` isn't already on it.
+- Non-built-in `engine.name` values with an `engine.custom` block now
+  dispatch to `CustomAgent`; without the block the error is
+  `unsupported agent "x": missing engine.custom`.
+
+### Fixed
+- Skill name in reports (`result.json`, benchmark, JUnit, HTML) now
+  reads the `name:` field from SKILL.md frontmatter instead of using
+  the directory basename. Falls back to basename when SKILL.md is
+  missing, has no frontmatter, or declares no name.
 
 ## [0.2.3] - 2026-05-27
 
@@ -231,6 +252,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project and delivers the end-to-end capability to declare eval environments,
   run cases and emit structured reports as described in [README.md](README.md).
 
+[0.2.4]: https://github.com/alibaba/skill-up/releases/tag/v0.2.4
+[0.2.3]: https://github.com/alibaba/skill-up/releases/tag/v0.2.3
+[0.2.2]: https://github.com/alibaba/skill-up/releases/tag/v0.2.2
 [0.2.1]: https://github.com/alibaba/skill-up/releases/tag/v0.2.1
 [0.2.0]: https://github.com/alibaba/skill-up/releases/tag/v0.2.0
 [0.1.2]: https://github.com/alibaba/skill-up/releases/tag/v0.1.2
