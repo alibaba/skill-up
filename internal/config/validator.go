@@ -5,6 +5,8 @@ import (
 	"path"
 	"strings"
 
+	"github.com/bmatcuk/doublestar/v4"
+
 	"github.com/alibaba/skill-up/internal/agentkind"
 )
 
@@ -91,6 +93,8 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 		errs = append(errs, fmt.Sprintf("cases.retry_policy.max_retries must be <= %d", maxRetryPolicyRetries))
 	}
 
+	errs = append(errs, validateCollectArtifacts("cases.defaults.collect_artifacts", cfg.Cases.Defaults.CollectArtifacts)...)
+
 	if len(errs) > 0 {
 		return fmt.Errorf("validation errors:\n  - %s", strings.Join(errs, "\n  - "))
 	}
@@ -124,6 +128,8 @@ func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 	if cfg.Judge.Type != "" {
 		errs = append(errs, validateJudgeTypeAndFields(cfg.Judge)...)
 	}
+
+	errs = append(errs, validateCollectArtifacts("collect_artifacts", cfg.CollectArtifacts)...)
 
 	if len(errs) > 0 {
 		return fmt.Errorf("validation errors:\n  - %s", strings.Join(errs, "\n  - "))
@@ -160,6 +166,23 @@ func validateJudgeTypeAndFields(judge JudgeConfig) []string {
 		errs = append(errs, "judge.timeout_seconds must be non-negative")
 	}
 
+	return errs
+}
+
+// validateCollectArtifacts checks that every collect_artifacts entry is a
+// non-empty, valid doublestar glob. field is the YAML path used in error
+// messages (e.g. "cases.defaults.collect_artifacts").
+func validateCollectArtifacts(field string, patterns []string) []string {
+	var errs []string
+	for i, p := range patterns {
+		if strings.TrimSpace(p) == "" {
+			errs = append(errs, fmt.Sprintf("%s[%d] must not be empty", field, i))
+			continue
+		}
+		if !doublestar.ValidatePattern(p) {
+			errs = append(errs, fmt.Sprintf("%s[%d] is not a valid glob pattern: %q", field, i, p))
+		}
+	}
 	return errs
 }
 

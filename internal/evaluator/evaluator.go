@@ -413,6 +413,10 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	if sessionResult != nil && sessionResult.Artifacts != nil && len(sessionResult.Artifacts.GeneratedFiles) > 0 {
 		e.ensureArtifactsInOutputDir(ctx, rt, configName, caseCfg.ID, "agent/run", agentArtifactDir, sessionResult)
 	}
+	// Download glob-selected workspace artifacts unconditionally — before the
+	// timeout/error early-return below and before the deferred rt.Close() — so
+	// they are captured even when the agent failed or timed out.
+	e.collectGlobArtifacts(ctx, rt, configName, caseCfg)
 	if shouldReturn := e.handleExecutionResult(ctx, caseCfg, configName, startTime, &result, execErr); shouldReturn {
 		return result
 	}

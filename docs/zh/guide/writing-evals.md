@@ -94,6 +94,9 @@ cases:
   defaults:                       # 用例默认值
     timeout_seconds: 300          # 超时时间（秒），默认 300
     max_turns: 12                 # 最大交互轮数，默认 12
+    collect_artifacts:            # 用 glob 指定要下载的 workspace 产物文件（见下文）
+      - "**/*.json"
+      - "report/**"
   parallelism: 2                  # 用例并行数，默认 1
   retry_policy:                   # 重试策略
     max_retries: 1
@@ -110,6 +113,30 @@ report:
 ```
 
 `cases.parallelism` 是配置文件中的默认用例并行数；临时运行时可以用 `skill-up run --parallelism N` 覆盖它，不需要修改 `eval.yaml`。命令行覆盖值必须在 1 到 256 之间。
+
+### 采集 workspace 产物（`collect_artifacts`）
+
+`collect_artifacts` 用 glob 声明要从用例 workspace 采集的文件。每次 Agent 运行后——**无论成功、失败还是超时**——命中的文件都会被下载到：
+
+```
+<output-dir>/<case-id>/<configuration>/outputs/workspace/<相对路径>
+```
+
+文件相对 workspace 根目录的**路径结构会被保留**，例如 `report/run-1/summary.json` 会落到 `outputs/workspace/report/run-1/summary.json`。
+
+- **Glob 语法** 采用 [doublestar](https://github.com/bmatcuk/doublestar)：`*` 仅匹配单层路径段，`**` 跨目录递归匹配。示例：`*.md`、`src/**/*.go`、`report/**`、`**/*.json`。
+- **两层配置，按并集合并。** `cases.defaults.collect_artifacts` 对所有用例生效；单个用例可在 `case.yaml` 中追加：
+
+  ```yaml
+  collect_artifacts:
+    - "out/**"
+  ```
+
+  per-case 列表会追加到默认值之后并去重（默认值在前）。
+- **始终采集**，与 judge 类型、workspace 是否为 git 仓库无关；采集过程只读，不会修改 workspace。
+- workspace 下的 `.git/` 目录会被**排除**（`agent_judge` 会在其中提交一份 baseline），因此 `**` 这类宽模式不会把 VCS 内部文件扫进产物。
+
+> **请勿与 `report.artifacts` 混淆**（后者选择产物*类型*，如 `transcript`/`logs`），也不同于 `agent_judge` 使用的 git workspace diff（那是喂给 judge 的 diff *字符串*，不落盘成文件）。`collect_artifacts` 下载的是文件实体，与二者正交。
 
 ### 自定义 Engine（Custom Engine）
 

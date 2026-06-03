@@ -163,6 +163,13 @@ type CasesConfig struct {
 type CaseDefaults struct {
 	TimeoutSeconds int `yaml:"timeout_seconds,omitempty"`
 	MaxTurns       int `yaml:"max_turns,omitempty"`
+	// CollectArtifacts lists glob patterns (doublestar syntax, e.g. "*.md",
+	// "a/**/b", "**/*.json") selecting workspace files to download as run
+	// artifacts for every case. Matches are copied into
+	// <output-dir>/<case>/<config>/outputs/workspace/ preserving their relative
+	// path, regardless of whether the agent succeeded, failed, or timed out.
+	// Per-case CaseConfig.CollectArtifacts is merged (union) on top of this.
+	CollectArtifacts []string `yaml:"collect_artifacts,omitempty"`
 }
 
 // RetryPolicy describes retry behavior.
@@ -235,6 +242,11 @@ type CaseConfig struct {
 	Constraints Constraints `yaml:"constraints"`
 	Expect      Expect      `yaml:"expect"`
 	Judge       JudgeConfig `yaml:"judge,omitempty"`
+	// CollectArtifacts lists glob patterns (doublestar syntax) selecting
+	// workspace files to download as artifacts for this case. It is merged
+	// (union, de-duplicated) with cases.defaults.collect_artifacts. See
+	// CaseDefaults.CollectArtifacts for the download layout and semantics.
+	CollectArtifacts []string `yaml:"collect_artifacts,omitempty"`
 }
 
 // Input describes the agent input (prompt or turns).

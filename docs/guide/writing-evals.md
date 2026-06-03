@@ -95,6 +95,9 @@ cases:
   defaults:
     timeout_seconds: 300          # Per-case timeout, default 300s
     max_turns: 12                 # Max conversation turns, default 12
+    collect_artifacts:            # Glob patterns selecting workspace files to download (see below)
+      - "**/*.json"
+      - "report/**"
   parallelism: 2                  # Case parallelism, default 1
   retry_policy:
     max_retries: 1
@@ -126,6 +129,31 @@ report:
 # One-off override at the call site
 skill-up run evals/eval.yaml --engine-kwarg bypass_sandbox=true
 ```
+
+### Collecting workspace artifacts (`collect_artifacts`)
+
+`collect_artifacts` declares glob patterns that select files from the case workspace to download as run artifacts. After every agent run — **whether it succeeded, failed, or timed out** — matching files are copied to:
+
+```
+<output-dir>/<case-id>/<configuration>/outputs/workspace/<relative-path>
+```
+
+The matched file's path **relative to the workspace root is preserved**, so `report/run-1/summary.json` lands at `outputs/workspace/report/run-1/summary.json`.
+
+- **Glob syntax** uses [doublestar](https://github.com/bmatcuk/doublestar): `*` matches within a single path segment, `**` matches across directories. Examples: `*.md`, `src/**/*.go`, `report/**`, `**/*.json`.
+- **Two layers, merged as a union.** `cases.defaults.collect_artifacts` applies to every case; a case may add its own:
+
+  ```yaml
+  # in a case.yaml
+  collect_artifacts:
+    - "out/**"
+  ```
+
+  The per-case list is appended to the defaults and de-duplicated (defaults first).
+- **Always collected**, independent of the judge type and of whether the workspace is a git repo. Collection is read-only — it never modifies the workspace.
+- The workspace `.git/` directory is **excluded** (an `agent_judge` run commits a baseline there), so a broad pattern like `**` won't sweep VCS internals into the artifacts.
+
+> **Not to be confused with `report.artifacts`** (which selects artifact *types* like `transcript`/`logs`), or with the git workspace diff used by `agent_judge` (a diff *string* fed to the judge, not downloaded files). `collect_artifacts` downloads actual file contents and is orthogonal to both.
 
 ### Custom Engine
 
@@ -178,7 +206,6 @@ Secret-handling rules (enforced at config load):
 - `${SOMEVAR:-...}` defaults that contain recognizable credential shapes (`sk-...`, `sk-ant-...`, `ghp_...`, `AIza...`, `AKIA...`, JWTs) are likewise rejected in command-line contexts.
 
 See `docs/design/custom-engine.md` for the full SessionInput / SessionResult schema your agent must conform to.
-
 
 ### MCP configuration
 
