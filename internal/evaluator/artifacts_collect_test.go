@@ -105,6 +105,31 @@ func TestCollectGlobArtifacts_DownloadsEvenWhenContextCancelled(t *testing.T) {
 	assertFileContent(t, filepath.Join(outputDir, "case-t", "with_skill", "outputs", "workspace", "out", "result.json"), "{}")
 }
 
+func TestCollectGlobArtifacts_ClearsStaleArtifacts(t *testing.T) {
+	outputDir := t.TempDir()
+	e := newTestEvaluator(EvalOptions{
+		OutputDir: outputDir,
+		EvalCfg: &config.EvalConfig{
+			Cases: config.CasesConfig{
+				Defaults: config.CaseDefaults{CollectArtifacts: []string{"**/*.json"}},
+			},
+		},
+	})
+	caseCfg := &config.CaseConfig{ID: "case-r"}
+	base := filepath.Join(outputDir, "case-r", "with_skill", "outputs", "workspace")
+
+	// First attempt produces old.json.
+	rt1 := newNoneRuntimeWithFiles(t, map[string]string{"old.json": "1"})
+	e.collectGlobArtifacts(context.Background(), rt1, "with_skill", caseCfg)
+	assertFileContent(t, filepath.Join(base, "old.json"), "1")
+
+	// Second attempt (e.g. retry) produces only new.json; old.json must not linger.
+	rt2 := newNoneRuntimeWithFiles(t, map[string]string{"new.json": "2"})
+	e.collectGlobArtifacts(context.Background(), rt2, "with_skill", caseCfg)
+	assertFileContent(t, filepath.Join(base, "new.json"), "2")
+	assertFileAbsent(t, filepath.Join(base, "old.json"))
+}
+
 func TestCollectGlobArtifacts_NoPatternsIsNoop(t *testing.T) {
 	rt := newNoneRuntimeWithFiles(t, map[string]string{"a.json": "{}"})
 	outputDir := t.TempDir()

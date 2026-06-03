@@ -2,6 +2,7 @@ package evaluator
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -80,6 +81,14 @@ func (e *defaultEvaluator) collectGlobArtifacts(ctx context.Context, rt runtime.
 	}
 
 	targetRoot := filepath.Join(e.outputDir, caseCfg.ID, configName, "outputs", collectArtifactsSubdir)
+	// Clear the subtree before downloading so a reused --output-dir or a retry
+	// attempt cannot leave stale artifacts from an earlier run that the current
+	// workspace no longer produces or matches (mirrors prepareOutputDir for
+	// agent/run). Only done after listing succeeds, so a transient list failure
+	// preserves whatever was collected previously.
+	if err := os.RemoveAll(targetRoot); err != nil {
+		logging.WarnContextf(ctx, "Evaluator: collect_artifacts: failed to clear %s for case %s: %v", targetRoot, caseCfg.ID, err)
+	}
 	downloaded := 0
 	for _, rel := range files {
 		if !matchesAnyGlob(patterns, rel) {
