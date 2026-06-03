@@ -130,6 +130,30 @@ func TestCollectGlobArtifacts_ClearsStaleArtifacts(t *testing.T) {
 	assertFileAbsent(t, filepath.Join(base, "old.json"))
 }
 
+func TestCollectGlobArtifacts_ExcludesGitDir(t *testing.T) {
+	rt := newNoneRuntimeWithFiles(t, map[string]string{
+		".git/objects/ab/cd": "obj",
+		".git/config":        "[core]",
+		"report/result.json": "{}",
+	})
+	outputDir := t.TempDir()
+	e := newTestEvaluator(EvalOptions{
+		OutputDir: outputDir,
+		EvalCfg: &config.EvalConfig{
+			Cases: config.CasesConfig{
+				Defaults: config.CaseDefaults{CollectArtifacts: []string{"**"}}, // broadest glob
+			},
+		},
+	})
+
+	e.collectGlobArtifacts(context.Background(), rt, "with_skill", &config.CaseConfig{ID: "case-g"})
+
+	base := filepath.Join(outputDir, "case-g", "with_skill", "outputs", "workspace")
+	assertFileContent(t, filepath.Join(base, "report", "result.json"), "{}")
+	assertFileAbsent(t, filepath.Join(base, ".git", "config"))
+	assertFileAbsent(t, filepath.Join(base, ".git", "objects", "ab", "cd"))
+}
+
 func TestCollectGlobArtifacts_NoPatternsIsNoop(t *testing.T) {
 	rt := newNoneRuntimeWithFiles(t, map[string]string{"a.json": "{}"})
 	outputDir := t.TempDir()

@@ -151,6 +151,7 @@ The matched file's path **relative to the workspace root is preserved**, so `rep
 
   The per-case list is appended to the defaults and de-duplicated (defaults first).
 - **Always collected**, independent of the judge type and of whether the workspace is a git repo. Collection is read-only — it never modifies the workspace.
+- The workspace `.git/` directory is **excluded** (an `agent_judge` run commits a baseline there), so a broad pattern like `**` won't sweep VCS internals into the artifacts.
 
 > **Not to be confused with `report.artifacts`** (which selects artifact *types* like `transcript`/`logs`), or with the git workspace diff used by `agent_judge` (a diff *string* fed to the judge, not downloaded files). `collect_artifacts` downloads actual file contents and is orthogonal to both.
 

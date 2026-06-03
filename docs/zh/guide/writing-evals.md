@@ -134,6 +134,7 @@ report:
 
   per-case 列表会追加到默认值之后并去重（默认值在前）。
 - **始终采集**，与 judge 类型、workspace 是否为 git 仓库无关；采集过程只读，不会修改 workspace。
+- workspace 下的 `.git/` 目录会被**排除**（`agent_judge` 会在其中提交一份 baseline），因此 `**` 这类宽模式不会把 VCS 内部文件扫进产物。
 
 > **请勿与 `report.artifacts` 混淆**（后者选择产物*类型*，如 `transcript`/`logs`），也不同于 `agent_judge` 使用的 git workspace diff（那是喂给 judge 的 diff *字符串*，不落盘成文件）。`collect_artifacts` 下载的是文件实体，与二者正交。
 

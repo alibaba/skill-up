@@ -108,8 +108,13 @@ func (e *defaultEvaluator) collectGlobArtifacts(ctx context.Context, rt runtime.
 // leading "./") of every regular file in the runtime workspace. It uses a
 // portable `find . -type f` so it works uniformly across the none, docker, and
 // opensandbox runtimes.
+//
+// The `.git` directory is excluded: agent_judge runs commit a baseline into the
+// workspace (see prepareWorkspaceDiffState), and doublestar's `**`/`*` match
+// dotfile paths, so a broad glob like "**" would otherwise sweep the entire VCS
+// object store into the artifacts — framework noise, not agent output.
 func listWorkspaceFiles(ctx context.Context, rt runtime.Runtime) ([]string, error) {
-	result, err := rt.Exec(ctx, "find . -type f", runtime.ExecOptions{Cwd: rt.Workspace()})
+	result, err := rt.Exec(ctx, "find . -type f -not -path './.git/*'", runtime.ExecOptions{Cwd: rt.Workspace()})
 	if err != nil {
 		return nil, err
 	}
