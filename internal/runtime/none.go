@@ -277,11 +277,18 @@ func classifyExecError(ctx context.Context, runErr error) (int, error) {
 	if runErr == nil {
 		return 0, nil
 	}
-	ctxErr := ctx.Err()
-
+	// When the context terminated the process, force -1 regardless of the
+	// OS-reported exit code. On POSIX a killed `sleep` propagates as -1
+	// (signal), but on Windows bash's `sleep 1` killed by ctx-cancel
+	// surfaces as exit 1 — which would otherwise be indistinguishable from
+	// a normal failure. -1 + ctxErr is the canonical "killed by context"
+	// signal callers (and the surrounding switch in Exec) look for.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return -1, ctxErr
+	}
 	var exitErr *exec.ExitError
 	if errors.As(runErr, &exitErr) {
-		return exitErr.ExitCode(), ctxErr
+		return exitErr.ExitCode(), nil
 	}
 	// exec.ErrWaitDelay (no ExitError wrapped) means the process itself
 	// exited successfully but Wait closed lingering stdio pipes held by a
@@ -290,10 +297,7 @@ func classifyExecError(ctx context.Context, runErr error) (int, error) {
 	// hard exec failure, so an otherwise-successful built-in agent run is
 	// not reported as failed just because a child held the pipe.
 	if errors.Is(runErr, exec.ErrWaitDelay) {
-		return 0, ctxErr
-	}
-	if ctxErr != nil {
-		return -1, ctxErr
+		return 0, nil
 	}
 	return -1, runErr
 }

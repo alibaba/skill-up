@@ -1121,13 +1121,16 @@ func TestCustomAgent_CollectArtifacts_MixedSafeAndEscaping(t *testing.T) {
 	}
 	ag.collectArtifacts(context.Background(), rt, ExecOptions{}, artifacts)
 
-	// Safe entries must survive; escaping entries must be dropped.
+	// Safe entries must survive; escaping entries must be dropped. Use
+	// filepath.Base for the safe-suffix check so the assertion is OS-neutral
+	// — on Windows the path separator is `\`, which would otherwise miss a
+	// `/safe.txt` suffix match.
 	hasSafe := false
 	for _, p := range artifacts.GeneratedFiles {
 		if strings.HasPrefix(p, "/etc") {
 			t.Fatalf("escaping path leaked through: %q", p)
 		}
-		if strings.HasSuffix(p, "/safe.txt") {
+		if filepath.Base(p) == "safe.txt" {
 			hasSafe = true
 		}
 	}

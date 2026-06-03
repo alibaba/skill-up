@@ -288,6 +288,14 @@ func TestNoneRuntime_ExecOmitsDeadlineDelta_OnManualCancel(t *testing.T) {
 }
 
 func TestNoneRuntime_ExecKillsDescendantsOnTimeout(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		// Windows has no POSIX process-group equivalent: a backgrounded
+		// grandchild spawned by `&` keeps running after its parent shell is
+		// killed by ctx-cancel. configureProcessGroup is a no-op on Windows,
+		// so we cannot guarantee descendant termination here. The cleanup
+		// contract for native Windows agent runs is documented as best-effort.
+		t.Skip("POSIX process-group kill semantics; no Windows equivalent")
+	}
 	t.Parallel()
 
 	rt := &NoneRuntime{}
