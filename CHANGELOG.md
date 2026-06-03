@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `collect_artifacts`: glob patterns (doublestar syntax — `*` within a
+  path segment, `**` across directories) that select workspace files to
+  download as run artifacts. Configurable at `cases.defaults.collect_artifacts`
+  (all cases) and per-case `collect_artifacts` (merged as a de-duplicated
+  union). Matches are downloaded — preserving their workspace-relative path —
+  to `<output-dir>/<case>/<config>/outputs/workspace/`, **regardless of whether
+  the agent succeeded, failed, or timed out**. Collection is read-only and
+  orthogonal to `report.artifacts` (artifact types) and the `agent_judge`
+  workspace diff.
 - `runtime.Runtime.MergeEnv(env)`: new interface method that lets
   setup-time callers (notably each agent's `Install`) seed the runtime's
   persistent env baseline. Subsequent `Exec` calls inherit these vars
