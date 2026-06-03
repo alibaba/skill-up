@@ -46,6 +46,10 @@ type AgentInitParams struct {
 	APIKey   string
 	BaseURL  string
 
+	// Custom carries the custom engine config when the engine name does not
+	// match a built-in agent. It is nil for built-in agents.
+	Custom *config.CustomEngineConfig
+
 	ProviderSource ValueSource
 	ModelSource    ValueSource
 	APIKeySource   ValueSource
@@ -63,10 +67,11 @@ type agentResolveInput struct {
 	resolver    *Resolver
 	cliModel    string
 	cliAPIKey   string
+	custom      *config.CustomEngineConfig
 }
 
 // ResolveRunnerInitParams resolves the final init params for the runner agent.
-func ResolveRunnerInitParams(engine string, modelCfg config.ModelConfig, resolver *Resolver, cliModel string, cliAPIKey string) AgentInitParams {
+func ResolveRunnerInitParams(engine string, modelCfg config.ModelConfig, custom *config.CustomEngineConfig, resolver *Resolver, cliModel string, cliAPIKey string) AgentInitParams {
 	return resolveAgentInitParams(agentResolveInput{
 		kind:        AgentKindRunner,
 		engine:      engine,
@@ -77,6 +82,7 @@ func ResolveRunnerInitParams(engine string, modelCfg config.ModelConfig, resolve
 		resolver:    resolver,
 		cliModel:    cliModel,
 		cliAPIKey:   cliAPIKey,
+		custom:      custom,
 	})
 }
 
@@ -96,6 +102,7 @@ func ResolveJudgeInitParams(engine string, judgeCfg config.JudgeConfig, runner A
 		valueSource: ValueSourceJudge,
 		fallback:    fallback,
 		resolver:    resolver,
+		custom:      runner.Custom,
 	})
 }
 
@@ -109,12 +116,20 @@ func parseJudgeModel(value string) (provider, model string) {
 }
 
 func resolveAgentInitParams(in agentResolveInput) AgentInitParams {
+	// A built-in engine ignores any engine.custom block, so it is not carried
+	// into the init params — otherwise downstream logic (e.g. the model "auto"
+	// strip) would mistake a built-in engine for a custom one.
+	custom := in.custom
+	if config.IsBuiltinEngineName(in.engine) {
+		custom = nil
+	}
 	params := AgentInitParams{
 		Kind:     in.kind,
 		Engine:   in.engine,
 		Provider: in.provider,
 		Model:    in.model,
 		BaseURL:  in.baseURL,
+		Custom:   custom,
 	}
 	if params.Provider != "" {
 		params.ProviderSource = in.valueSource
@@ -178,6 +193,8 @@ func applyCLIOverrides(params *AgentInitParams, cliModel string, cliAPIKey strin
 	// upstream correctly regardless of Provider. Dropping it here broke the
 	// `--api-key K --model literal_opaque/id` flow, where ResolveModelRef
 	// rightly returns Provider="" because the prefix isn't a configured namespace.
+	// This also subsumes the custom-engine case: a custom engine references the
+	// CLI key explicitly via ${api_key} and never had a provider to begin with.
 	params.APIKey = cliAPIKey
 	params.APIKeySource = ValueSourceCLI
 }

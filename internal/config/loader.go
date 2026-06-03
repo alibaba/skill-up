@@ -76,6 +76,9 @@ func (l *Loader) LoadEvalConfig() (*EvalConfig, error) {
 	}
 
 	applyDocumentedDefaults(&cfg)
+	// Custom engine env resolution and validation are intentionally deferred:
+	// the final engine name is only known after CLI overrides (--engine), so
+	// the caller invokes ResolveCustomEngineConfig once that is settled.
 	return &cfg, nil
 }
 

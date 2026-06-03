@@ -11,8 +11,12 @@ import (
 
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/alibaba/skill-up/internal/agentkind"
 	"github.com/alibaba/skill-up/internal/credential"
 )
+
+// modelAuto is the QoderCLI "auto" model tier, shared across agent tests.
+const modelAuto = "auto"
 
 func TestListSkillFiles_ExcludesEvals(t *testing.T) {
 	t.Parallel()
@@ -94,26 +98,26 @@ func TestListSkillFiles_EmptyDir(t *testing.T) {
 func TestDetectAgent_QoderCLI(t *testing.T) {
 	t.Parallel()
 
-	cfg := Config{Name: qoderCLIEngineAlias}
-	agent, err := DetectAgent(qoderCLIEngineAlias, cfg)
+	cfg := Config{Name: agentkind.QoderCLIAlias}
+	agent, err := DetectAgent(agentkind.QoderCLIAlias, cfg)
 	if err != nil {
 		t.Fatalf("DetectAgent failed: %v", err)
 	}
-	if agent.Name() != qoderCLIEngineAlias {
-		t.Errorf("expected %s, got %s", qoderCLIEngineAlias, agent.Name())
+	if agent.Name() != agentkind.QoderCLIAlias {
+		t.Errorf("expected %s, got %s", agentkind.QoderCLIAlias, agent.Name())
 	}
 }
 
 func TestDetectAgent_QoderCLILegacyAlias(t *testing.T) {
 	t.Parallel()
 
-	cfg := Config{Name: qoderCLIEngineName}
-	agent, err := DetectAgent(qoderCLIEngineName, cfg)
+	cfg := Config{Name: agentkind.QoderCLI}
+	agent, err := DetectAgent(agentkind.QoderCLI, cfg)
 	if err != nil {
 		t.Fatalf("DetectAgent failed: %v", err)
 	}
-	if agent.Name() != qoderCLIEngineName {
-		t.Errorf("expected legacy alias %s, got %s", qoderCLIEngineName, agent.Name())
+	if agent.Name() != agentkind.QoderCLI {
+		t.Errorf("expected legacy alias %s, got %s", agentkind.QoderCLI, agent.Name())
 	}
 }
 
@@ -408,7 +412,7 @@ func TestUnsupportedAgentError(t *testing.T) {
 	t.Parallel()
 
 	err := &UnsupportedAgentError{Name: "test-agent"}
-	if err.Error() != "unsupported agent: test-agent" {
+	if err.Error() != `unsupported agent "test-agent": missing engine.custom` {
 		t.Errorf("unexpected error message: %s", err.Error())
 	}
 }

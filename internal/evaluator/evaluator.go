@@ -238,6 +238,24 @@ func casePromptAndTurnsTotal(caseCfg *config.CaseConfig) (string, int) {
 	return prompt, turnsTotal
 }
 
+// caseMaxTurns returns the case max-turns constraint, falling back to the
+// global cases.defaults value.
+func caseMaxTurns(evalCfg *config.EvalConfig, caseCfg *config.CaseConfig) int {
+	if caseCfg.Constraints.MaxTurns > 0 {
+		return caseCfg.Constraints.MaxTurns
+	}
+	return evalCfg.Cases.Defaults.MaxTurns
+}
+
+// caseTimeoutSeconds returns the case timeout constraint, falling back to the
+// global cases.defaults value.
+func caseTimeoutSeconds(evalCfg *config.EvalConfig, caseCfg *config.CaseConfig) int {
+	if caseCfg.Constraints.TimeoutSeconds > 0 {
+		return caseCfg.Constraints.TimeoutSeconds
+	}
+	return evalCfg.Cases.Defaults.TimeoutSeconds
+}
+
 // buildCaseMessages builds transcript messages from case input (single prompt or multi-turn).
 func buildCaseMessages(caseCfg *config.CaseConfig) []transcript.Message {
 	if caseCfg.Input.Prompt != "" {
@@ -381,7 +399,14 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	if observability.LinkedTraceTopologyEnabled() {
 		logging.DebugContextf(agentCtx, "Evaluator: linked agent trace started for case %s (%s)", caseCfg.ID, configName)
 	}
-	sessionResult, execErr := runAgent.Run(agentCtx, rt, agent.ExecOptions{ArtifactDir: agentArtifactDir}, messages)
+	agentExecOpts := agent.ExecOptions{
+		ArtifactDir: agentArtifactDir,
+		CaseID:      caseCfg.ID,
+		Variant:     configName,
+		MaxTurns:    caseMaxTurns(e.evalCfg, caseCfg),
+		TimeoutSec:  caseTimeoutSeconds(e.evalCfg, caseCfg),
+	}
+	sessionResult, execErr := runAgent.Run(agentCtx, rt, agentExecOpts, messages)
 	agentSpan.End()
 	finalizeArtifacts(sessionResult)
 	result.SessionResult = normalizeSessionResult(sessionResult)

@@ -1,0 +1,7 @@
+id: hello
+title: Custom engine emits expected final_message
+input:
+  prompt: ping the custom engine
+expect:
+  must_contain:
+    - "custom-engine-handled"

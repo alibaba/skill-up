@@ -50,7 +50,7 @@
 ## Features
 
 - **Declarative Eval Config**: Define evaluation environment, engine, model, and cases through YAML (`eval.yaml` + `cases/*.yaml`).
-- **Multi-Engine Support**: Works with Qoder CLI, Claude Code, and Codex as Agent Engines.
+- **Multi-Engine Support**: Works with Qoder CLI, Claude Code, and Codex as built-in Agent Engines, plus user-defined agents via `engine.custom` (local transport — see [docs/design/custom-engine.md](docs/design/custom-engine.md)).
 - **Flexible Judging**: Supports `rule_based`, `script`, and `agent_judge` evaluation strategies.
 - **Structured Reports**: Outputs Anthropic-compatible `grading.json`, `benchmark.json`, `benchmark.md`, plus `result.json`, JUnit XML, and HTML reports.
 - **Anthropic Compatible**: Import `evals.json` via `skill-up import`, or auto-detect with `--auto`.

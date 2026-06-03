@@ -225,7 +225,7 @@ func TestResolveRunnerInitParams_PrefersProviderEnvOverResolver(t *testing.T) {
 	params := ResolveRunnerInitParams("codex", config.ModelConfig{
 		Provider: "openai",
 		Name:     "gpt-5.4",
-	}, r, "", "")
+	}, nil, r, "", "")
 
 	if params.Kind != AgentKindRunner {
 		t.Fatalf("Kind = %q, want %q", params.Kind, AgentKindRunner)
@@ -249,7 +249,7 @@ func TestResolveRunnerInitParams_DoesNotScanProviderEnvWhenProviderMissing(t *te
 	t.Setenv("OPENAI_API_KEY", "sk-env-openai")
 	t.Setenv("OPENAI_BASE_URL", "https://env.example.com/v1")
 
-	params := ResolveRunnerInitParams("codex", config.ModelConfig{Name: "gpt-5.4"}, nil, "", "")
+	params := ResolveRunnerInitParams("codex", config.ModelConfig{Name: "gpt-5.4"}, nil, nil, "", "")
 
 	if params.Provider != "" {
 		t.Fatalf("Provider = %q, want empty", params.Provider)
@@ -275,7 +275,7 @@ func TestResolveRunnerInitParams_PrefersCLIOverrides(t *testing.T) {
 	params := ResolveRunnerInitParams("codex", config.ModelConfig{
 		Provider: "openai",
 		Name:     "gpt-5.4",
-	}, nil, "gpt-5.6-cli", "sk-cli-openai")
+	}, nil, nil, "gpt-5.6-cli", "sk-cli-openai")
 
 	if params.Model != "gpt-5.6-cli" || params.ModelSource != ValueSourceCLI {
 		t.Fatalf("unexpected CLI model resolution: %#v", params)
@@ -293,7 +293,7 @@ func TestResolveRunnerInitParams_LogsCLIAPIKeySource(t *testing.T) {
 		ResolveRunnerInitParams("codex", config.ModelConfig{
 			Provider: "openai",
 			Name:     "gpt-5.4",
-		}, nil, "", "sk-cli-openai")
+		}, nil, nil, "", "sk-cli-openai")
 	})
 
 	if !strings.Contains(output, "source.api_key=cli") {
@@ -316,13 +316,30 @@ func TestResolveRunnerInitParams_CLIAPIKeyAppliesWithoutProvider(t *testing.T) {
 	// literal-opaque-id flows.
 	params := ResolveRunnerInitParams("codex", config.ModelConfig{
 		Name: "gpt-5.4",
-	}, nil, "", "sk-cli-openai")
+	}, nil, nil, "", "sk-cli-openai")
 
 	if params.APIKey != "sk-cli-openai" {
 		t.Fatalf("APIKey = %q, want sk-cli-openai (CLI key must apply even with empty Provider)", params.APIKey)
 	}
 	if params.APIKeySource != ValueSourceCLI {
 		t.Fatalf("APIKeySource = %v, want ValueSourceCLI", params.APIKeySource)
+	}
+}
+
+func TestResolveRunnerInitParams_CustomEngineCLIAPIKeyApplies(t *testing.T) {
+	// A custom engine references the CLI key explicitly via ${api_key} and
+	// has no model provider. The key must still be applied (it reaches the
+	// agent through engine.custom.env / ${api_key}).
+	params := ResolveRunnerInitParams("my-agent", config.ModelConfig{}, &config.CustomEngineConfig{
+		Transport: "local",
+		Local:     &config.CustomLocalConfig{Command: "/opt/agent"},
+	}, nil, "", "sk-cli-custom")
+
+	if params.APIKey != "sk-cli-custom" {
+		t.Fatalf("APIKey = %q, want sk-cli-custom for a custom engine", params.APIKey)
+	}
+	if params.Custom == nil {
+		t.Fatal("Custom config was not threaded into AgentInitParams")
 	}
 }
 
@@ -458,7 +475,7 @@ func TestResolveRunnerInitParams_UsesGenericProviderScopedEnv(t *testing.T) {
 	params := ResolveRunnerInitParams("custom", config.ModelConfig{
 		Provider: "dashscope",
 		Name:     "qwen-max",
-	}, nil, "", "")
+	}, nil, nil, "", "")
 
 	if params.Model != "qwen-max-env" || params.ModelSource != ValueSourceEnv {
 		t.Fatalf("unexpected model resolution: %#v", params)
@@ -468,6 +485,31 @@ func TestResolveRunnerInitParams_UsesGenericProviderScopedEnv(t *testing.T) {
 	}
 	if params.BaseURL != "https://dashscope.example.com" || params.BaseURLSource != ValueSourceEnv {
 		t.Fatalf("unexpected base-url resolution: %#v", params)
+	}
+}
+
+func TestResolveRunnerInitParams_DropsCustomForBuiltinEngine(t *testing.T) {
+	custom := &config.CustomEngineConfig{
+		Transport: "local",
+		Local:     &config.CustomLocalConfig{Command: "/opt/agent"},
+	}
+	params := ResolveRunnerInitParams("codex", config.ModelConfig{Name: "auto"}, custom, nil, "", "")
+
+	// A built-in engine ignores engine.custom; it must not leak into params.
+	if params.Custom != nil {
+		t.Fatalf("Custom = %#v, want nil for a built-in engine", params.Custom)
+	}
+}
+
+func TestResolveRunnerInitParams_KeepsCustomForCustomEngine(t *testing.T) {
+	custom := &config.CustomEngineConfig{
+		Transport: "local",
+		Local:     &config.CustomLocalConfig{Command: "/opt/agent"},
+	}
+	params := ResolveRunnerInitParams("my-agent", config.ModelConfig{}, custom, nil, "", "")
+
+	if params.Custom == nil {
+		t.Fatal("Custom = nil, want it preserved for a custom engine")
 	}
 }
 
