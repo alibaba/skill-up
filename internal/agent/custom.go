@@ -193,7 +193,26 @@ func (a *CustomAgent) runLocal(ctx context.Context, rt Runtime, opts ExecOptions
 	}
 
 	result, execErr := rt.Exec(execCtx, cmd, execOpts)
-	return a.finishLocal(ctx, rt, opts, custom, result, execErr, inputFile, outputFile, clearedStaleOutput, start, messages)
+	return a.finishLocal(ctx, rt, opts, custom, result, execErr, localRunContext{
+		InputFile:          inputFile,
+		OutputFile:         outputFile,
+		ClearedStaleOutput: clearedStaleOutput,
+		Start:              start,
+		Messages:           messages,
+	})
+}
+
+// localRunContext bundles the local-run bookkeeping that finishLocal needs:
+// the resolved input/output paths, whether the pre-run cleanup actually
+// removed a stale output file, the run start time (for duration), and the
+// caller's transcript messages. Carrying these as one struct keeps
+// finishLocal's signature manageable as more bookkeeping accrues.
+type localRunContext struct {
+	InputFile          string
+	OutputFile         string
+	ClearedStaleOutput bool
+	Start              time.Time
+	Messages           []transcript.Message
 }
 
 // clearStaleOutputFile removes a pre-existing output file before the run and
@@ -273,8 +292,8 @@ func (a *CustomAgent) buildLocalExec(ctx context.Context, rt Runtime, opts ExecO
 }
 
 // finishLocal turns a runtime exec result into a SessionResult.
-func (a *CustomAgent) finishLocal(ctx context.Context, rt Runtime, opts ExecOptions, custom *config.CustomEngineConfig, result ExecResult, execErr error, inputFile, outputFile string, clearedStaleOutput bool, start time.Time, messages []transcript.Message) (*SessionResult, error) {
-	durationMs := time.Since(start).Milliseconds()
+func (a *CustomAgent) finishLocal(ctx context.Context, rt Runtime, opts ExecOptions, custom *config.CustomEngineConfig, result ExecResult, execErr error, rc localRunContext) (*SessionResult, error) {
+	durationMs := time.Since(rc.Start).Milliseconds()
 
 	// The command may already have emitted a valid result even when execErr
 	// is non-nil — a timeout, exec.ErrWaitDelay (a backgrounded child kept
@@ -295,9 +314,11 @@ func (a *CustomAgent) finishLocal(ctx context.Context, rt Runtime, opts ExecOpti
 		readCtx, cancel = context.WithTimeout(context.WithoutCancel(ctx), customArtifactReadTimeout)
 		defer cancel()
 	}
-	raw, outputFileProduced = a.readRawResult(readCtx, rt, custom, result, outputFile)
+	raw, outputFileProduced = a.readRawResult(readCtx, rt, custom, result, rc.OutputFile)
 
-	res, parseErr := a.buildResult(ctx, rt, opts, custom, raw, result, durationMs, messages)
+	res, parseErr := a.buildResult(ctx, rt, opts, custom, raw, result, durationMs, rc.Messages)
+
+	usedOutputFile := outputFileProduced || rc.ClearedStaleOutput
 
 	if execErr != nil {
 		switch {
@@ -305,7 +326,7 @@ func (a *CustomAgent) finishLocal(ctx context.Context, rt Runtime, opts ExecOpti
 			// Nothing usable was produced before the failure.
 			res = a.errorResult(result.ExitCode)
 			res.DurationMs = durationMs
-			res.Transcript = minimalCustomTranscript(messages, "")
+			res.Transcript = minimalCustomTranscript(rc.Messages, "")
 		case res.ExitCode == 0:
 			// The run was interrupted; a parsed exit_code 0 must not let the
 			// evaluator treat an interrupted run as a success.
@@ -319,11 +340,11 @@ func (a *CustomAgent) finishLocal(ctx context.Context, rt Runtime, opts ExecOpti
 		} else {
 			res.Stderr = a.maskAPIKey(res.Stderr)
 		}
-		a.registerFrameworkIO(res, inputFile, outputFile, outputFileProduced || clearedStaleOutput)
+		a.registerFrameworkIO(res, rc.InputFile, rc.OutputFile, usedOutputFile)
 		return res, fmt.Errorf("custom engine run failed: %w", execErr)
 	}
 
-	a.registerFrameworkIO(res, inputFile, outputFile, outputFileProduced || clearedStaleOutput)
+	a.registerFrameworkIO(res, rc.InputFile, rc.OutputFile, usedOutputFile)
 	// A non-zero process exit is a failed run even when the engine's JSON
 	// reports exit_code 0 (e.g. a wrapper that crashed after printing output)
 	// or never emitted parseable JSON at all. Reflect the real process
