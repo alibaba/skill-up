@@ -168,12 +168,3 @@ func (a *CLIAgent) Check(ctx context.Context, rt Runtime) error {
 
 	return nil
 }
-
-func (a *CLIAgent) installSkillDefault(ctx context.Context, rt Runtime, skillCfg runtime.SkillConfig) error {
-	target := skillCfg.Target
-	if target == "" && a.Cfg.SkillPath != "" {
-		target = filepath.Join(a.Cfg.SkillPath, filepath.Base(skillCfg.Source))
-	}
-
-	return installSkill(ctx, rt, skillCfg.Source, target)
-}

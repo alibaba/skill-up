@@ -752,3 +752,70 @@ func TestLoader_SkillDirSearchDepthLimit(t *testing.T) {
 		t.Errorf("expected depth-limited fallback SkillDir '%s', got '%s'", want, loader.SkillDir())
 	}
 }
+
+func TestLoader_SkillName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		skillMD   *string // nil => no SKILL.md file written
+		wantName  string
+		wantFound bool
+	}{
+		{
+			name:      "frontmatter name differs from dir basename",
+			skillMD:   strPtr("---\nname: code-stats\ndescription: stuff\n---\n\n# Body\n"),
+			wantName:  "code-stats",
+			wantFound: true,
+		},
+		{
+			name:      "frontmatter without name field",
+			skillMD:   strPtr("---\ndescription: stuff\n---\n\n# Body\n"),
+			wantName:  "",
+			wantFound: false,
+		},
+		{
+			name:      "empty name value",
+			skillMD:   strPtr("---\nname: \"\"\n---\n"),
+			wantName:  "",
+			wantFound: false,
+		},
+		{
+			name:      "no frontmatter fence",
+			skillMD:   strPtr("# Just a heading\n"),
+			wantName:  "",
+			wantFound: false,
+		},
+		{
+			name:      "missing SKILL.md",
+			skillMD:   nil,
+			wantName:  "",
+			wantFound: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// Use a directory basename that never matches a frontmatter name,
+			// so a non-fallback result must come from SKILL.md.
+			skillDir := filepath.Join(t.TempDir(), "dir-basename")
+			if err := os.MkdirAll(skillDir, 0o755); err != nil {
+				t.Fatalf("failed to create skill dir: %v", err)
+			}
+			if tt.skillMD != nil {
+				if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(*tt.skillMD), 0o600); err != nil {
+					t.Fatalf("failed to write SKILL.md: %v", err)
+				}
+			}
+
+			loader := &Loader{skillDir: skillDir}
+			gotName, gotFound := loader.SkillName()
+			if gotName != tt.wantName || gotFound != tt.wantFound {
+				t.Errorf("SkillName() = (%q, %t), want (%q, %t)", gotName, gotFound, tt.wantName, tt.wantFound)
+			}
+		})
+	}
+}
+
+func strPtr(s string) *string { return &s }

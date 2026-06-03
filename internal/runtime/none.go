@@ -19,6 +19,9 @@ import (
 const (
 	noneDirMode  = 0o755
 	noneFileMode = 0o600
+	// noneExecWaitDelay is the grace period Wait allows for I/O to drain after
+	// a command's context is cancelled before it forcibly closes the pipes.
+	noneExecWaitDelay = 2 * time.Second
 )
 
 // pathInWorkspaceOrAbs returns p if it is an absolute host path, otherwise filepath.Join(r.workspace, p).
@@ -176,6 +179,14 @@ func (r *NoneRuntime) Exec(ctx context.Context, command string, opts ExecOptions
 	startTime := time.Now()
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", command)
+	// Run in a dedicated process group and kill the whole group on
+	// cancellation, so a timed-out command's descendants do not outlive it.
+	configureProcessGroup(cmd)
+	// WaitDelay bounds how long Wait blocks after the context is cancelled:
+	// without it, a killed command whose grandchildren still hold the stdout
+	// pipe (e.g. a backgrounded `sleep`) makes Exec hang until those children
+	// exit, so a context deadline would not actually be enforced.
+	cmd.WaitDelay = noneExecWaitDelay
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	} else {
@@ -248,6 +259,7 @@ func (r *NoneRuntime) Exec(ctx context.Context, command string, opts ExecOptions
 //	nil err                            → (0, nil)
 //	*exec.ExitError + ctx.Err() == nil → (exitCode, nil)
 //	*exec.ExitError + ctx.Err() != nil → (exitCode, ctxErr)   // process was killed by ctx
+//	exec.ErrWaitDelay (no ExitError)   → (0, nil)             // process exited 0, only pipes outlived it
 //	non-ExitError                      → (-1, ctxErr or err)
 func classifyExecError(ctx context.Context, runErr error) (int, error) {
 	if runErr == nil {
@@ -258,6 +270,15 @@ func classifyExecError(ctx context.Context, runErr error) (int, error) {
 	var exitErr *exec.ExitError
 	if errors.As(runErr, &exitErr) {
 		return exitErr.ExitCode(), ctxErr
+	}
+	// exec.ErrWaitDelay (no ExitError wrapped) means the process itself
+	// exited successfully but Wait closed lingering stdio pipes held by a
+	// background descendant. The captured stdout/stderr up to that point are
+	// still valid output — surface this as a normal exit 0 rather than a
+	// hard exec failure, so an otherwise-successful built-in agent run is
+	// not reported as failed just because a child held the pipe.
+	if errors.Is(runErr, exec.ErrWaitDelay) {
+		return 0, ctxErr
 	}
 	if ctxErr != nil {
 		return -1, ctxErr

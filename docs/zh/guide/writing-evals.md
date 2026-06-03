@@ -137,6 +137,58 @@ report:
 
 > **请勿与 `report.artifacts` 混淆**（后者选择产物*类型*，如 `transcript`/`logs`），也不同于 `agent_judge` 使用的 git workspace diff（那是喂给 judge 的 diff *字符串*，不落盘成文件）。`collect_artifacts` 下载的是文件实体，与二者正交。
 
+### 自定义 Engine（Custom Engine）
+
+当 `engine.name` 不是内置引擎（`claude_code` / `codex` / `qodercli`）时，必须再写一个 `engine.custom` 段来告诉 skill-up 怎么调用你的 Agent。当前只实现了 `transport: local`；`transport: http` 已设计但尚未实现，validation 会直接报 "not yet implemented"。
+
+```yaml
+engine:
+  name: my-agent
+  model:
+    provider: anthropic
+    name: claude-sonnet-4-6
+  custom:
+    transport: local              # local（已实现）| http（规划中）
+    response_format: session_result  # session_result（默认）| text
+    timeout_seconds: 300
+    env:                          # 凭据 / 敏感参数 —— 不要在 command/args 里引用这些
+      MY_AGENT_TOKEN: ${MY_AGENT_TOKEN}
+    kwargs:                       # 非敏感开关，模板里以 ${kwargs.<key>} 暴露
+      profile: production
+    local:
+      command: /opt/my-agent/bin/run
+      args:
+        - --input
+        - ${input_file}           # skill-up 写入的 SessionInput JSON 路径
+        - --output
+        - ${output_file}          # 你的 Agent 应写入 SessionResult JSON 的路径
+      cwd: ${workspace}           # 可选；被限制在 runtime workspace 内
+      input_file: inputs/messages.json     # 可选覆盖（相对 workspace）
+      output_file: outputs/session-result.json
+```
+
+关键字段说明（完整契约见 [docs/design/custom-engine.md](../../design/custom-engine.md)）：
+
+- **`transport`**（必填）—— skill-up 调用 agent 的方式。
+  - `local`：通过 `runtime.Exec` 在当前 runtime 内执行 `local.command`，agent 进程可访问 runtime workspace、已安装的 skill、fixture、MCP 配置以及进程环境变量。
+  - `http`：调用远程（或本地）HTTP agent 服务。Phase 2 已完成设计，本版本 validate 阶段直接拒绝并提示 "not yet implemented"。
+- **`response_format`**（可选，默认 `session_result`）—— skill-up 如何解析 agent 输出。
+  - `session_result`：从 `local.output_file`（若配置）或 stdout 读出完整的 `SessionResult` JSON，包含 `exit_code` / `final_message` / `transcript` / `turns` / `input_tokens` / `output_tokens` / `artifacts`。**推荐保留默认**，可以让 judge 和报告拿到完整上下文。
+  - `text`：把 stdout 整体当作 `final_message`，skill-up 自动按输入消息 + 助手回复合成 minimal transcript，使 judge 仍能拿到一段对话。仅适合不输出结构化结果的简易脚本。
+- **`timeout_seconds`**（可选）—— 单次调用的超时时间。未设时回退到 case 级 timeout；两者都设置时 skill-up 取较小值，保证传给 agent 的预算与真实墙钟一致。
+- **`env`**（可选）—— 凭据 / 敏感参数通道。值会以进程环境变量形式注入到 agent。**这是唯一允许携带凭据的字段**：`command` / `args` / `cwd` / `input_file` / `output_file` 在配置加载阶段会拒绝凭据形态的值。
+- **`kwargs`**（可选）—— 非敏感开关，模板里以 `${kwargs.<key>}` 暴露。与 `env` 不同，kwargs 也走严格凭据检查，不允许携带凭据值或凭据形态的 key（如 `token` / `api_key` / `bearerToken` 等）。
+
+`command` / `args` / `cwd` / `env` / `input_file` / `output_file` 中可用的模板变量：
+`${workspace}`、`${input_file}`、`${output_file}`、`${model}`、`${model_provider}`、`${model_name}`、`${case_id}`、`${variant}`、`${max_turns}`、`${timeout_seconds}`、`${kwargs.<key>}`，以及环境变量形式 `${VAR}` / `${VAR:-default}` / `${VAR?error message}`。
+
+凭据收敛规则（配置加载期强校验）：
+
+- `${api_key}` 以及任何看起来像凭据的 kwarg key（`token` / `secret` / `api_key` / `apiKey` / `bearerToken` 等）都不允许出现在 `command` / `args` / `cwd` / `input_file` / `output_file` 中，必须经由 `engine.custom.env` 注入到子进程环境变量里。
+- `${SOMEVAR:-...}` 默认值如果匹配常见凭据特征（`sk-...`、`sk-ant-...`、`ghp_...`、`AIza...`、`AKIA...`、JWT 等），同样会在命令行场景被拒。
+
+SessionInput / SessionResult 的完整 JSON 契约见 `docs/design/custom-engine.md`。
+
 ### MCP 配置说明
 
 MCP 支持 `mode: real` 和 `mode: mocked`。`real` 用于把真实 MCP Server 安装到 `claude_code`、`qodercli` 或 `codex` 等 Agent；`mocked` 会由 `internal/mcp` 生成本地 stdio Mock Server，并按普通 MCP 配置安装到 Agent。

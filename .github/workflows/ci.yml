@@ -80,7 +80,7 @@ jobs:
       # if-no-files-found: error, fail the build job on every push to main.
       - name: Upload coverage badge artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-badge
           path: .github/badges/coverage.json
@@ -457,7 +457,7 @@ jobs:
           fi
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.11.4
 

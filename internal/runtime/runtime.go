@@ -82,6 +82,12 @@ type ExecOptions struct {
 	Env         map[string]string
 	TimeoutSec  int
 	ArtifactDir string
+
+	// Case metadata passed through to agents that build a structured session
+	// input (e.g. Custom Engine). Built-in agents ignore these fields.
+	CaseID   string
+	Variant  string
+	MaxTurns int
 }
 
 // Runtime defines the interface for sandbox runtimes.

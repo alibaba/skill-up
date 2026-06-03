@@ -2,9 +2,11 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -74,6 +76,9 @@ func (l *Loader) LoadEvalConfig() (*EvalConfig, error) {
 	}
 
 	applyDocumentedDefaults(&cfg)
+	// Custom engine env resolution and validation are intentionally deferred:
+	// the final engine name is only known after CLI overrides (--engine), so
+	// the caller invokes ResolveCustomEngineConfig once that is settled.
 	return &cfg, nil
 }
 
@@ -171,6 +176,14 @@ func (l *Loader) SkillDir() string {
 	return l.skillDir
 }
 
+// SkillName returns the skill's declared name from the `name:` field of
+// SKILL.md's YAML frontmatter in the resolved skill directory. It returns
+// ("", false) when SKILL.md is absent, lacks YAML frontmatter, or declares no
+// name — callers should fall back to the directory basename in that case.
+func (l *Loader) SkillName() (string, bool) {
+	return parseSkillName(l.skillDir)
+}
+
 // CasesDir returns the path to the cases directory.
 func (l *Loader) CasesDir() string {
 	return filepath.Join(l.skillDir, evalsSubdir, casesSubdir)
@@ -209,4 +222,66 @@ func FindSkillDir(startDir string) (string, bool) {
 	}
 
 	return filepath.Dir(startDir), true
+}
+
+// skillFrontmatter holds the fields skill-up reads from a SKILL.md YAML
+// frontmatter block. Only the name is needed today.
+type skillFrontmatter struct {
+	Name string `yaml:"name"`
+}
+
+// parseSkillName reads SKILL.md from skillDir and extracts the `name` field of
+// its YAML frontmatter. It returns ("", false) when the file is missing, has no
+// frontmatter fence, fails to parse, or declares an empty name.
+func parseSkillName(skillDir string) (string, bool) {
+	data, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		return "", false
+	}
+
+	fm, ok := extractFrontmatter(data)
+	if !ok {
+		return "", false
+	}
+
+	var meta skillFrontmatter
+	if err := yaml.Unmarshal(fm, &meta); err != nil {
+		return "", false
+	}
+
+	name := strings.TrimSpace(meta.Name)
+	if name == "" {
+		return "", false
+	}
+
+	return name, true
+}
+
+// extractFrontmatter returns the bytes of the leading YAML frontmatter block
+// delimited by a `---` fence at the very start of the document and the next
+// `---` line. It returns (nil, false) when the content does not open with a
+// frontmatter fence or the closing fence is missing, so the markdown body is
+// never fed to the YAML parser.
+func extractFrontmatter(data []byte) ([]byte, bool) {
+	lines := bytes.Split(data, []byte("\n"))
+
+	// Require the very first line to be a `---` fence (trailing whitespace/CR
+	// tolerated), then return everything up to the next fence.
+	if len(lines) == 0 || !isFence(lines[0]) {
+		return nil, false
+	}
+
+	for i := 1; i < len(lines); i++ {
+		if isFence(lines[i]) {
+			return bytes.Join(lines[1:i], []byte("\n")), true
+		}
+	}
+
+	return nil, false
+}
+
+// isFence reports whether a line is a `---` frontmatter fence, tolerating a
+// trailing carriage return and surrounding whitespace.
+func isFence(line []byte) bool {
+	return string(bytes.TrimRight(line, " \t\r")) == "---"
 }

@@ -1,0 +1,28 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+
+mcp:
+  servers: []
+
+engine:
+  name: e2e-custom-agent
+  custom:
+    transport: local
+    response_format: session_result
+    local:
+      command: ${CUSTOM_AGENT_BIN}
+      args:
+        - ${input_file}
+
+cases:
+  files:
+    - evals/cases/hello.yaml
+  defaults:
+    timeout_seconds: 60
+    max_turns: 3
+  parallelism: 1
+
+report:
+  formats: [json]
