@@ -30,7 +30,9 @@ func installMCPServers(ctx context.Context, rt Runtime, mcpCfg runtime.MCPConfig
 		}
 		// ExecOptions.Env exposes auth values to the one-shot install process.
 		// Agent CLI --env flags persist selected variables into the registered
-		// MCP server config so future tool calls can read them.
+		// MCP server config so future tool calls can read them. PATH flows
+		// from the runtime baseline (populated by Install's probeAndMergePATH)
+		// rather than being injected here.
 		result, err := rt.Exec(ctx, cmd, ExecOptions{Env: server.Env})
 		if err != nil {
 			return fmt.Errorf("failed to install MCP server %s: %w", server.Name, err)

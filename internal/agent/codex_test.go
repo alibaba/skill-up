@@ -999,6 +999,14 @@ func (r *codexTestRuntime) Exec(_ context.Context, command string, opts runtime.
 		}
 		return runtime.ExecResult{Stdout: stdout}, nil
 	}
+	// ensureNodeRuntime emits a script whose first conditional short-circuits
+	// when codex is already on PATH. Treat it as a no-op success so the
+	// subsequent agent-command Exec is what tests observe via lastCommand /
+	// execResult — otherwise the bootstrap call would consume the configured
+	// non-zero exit codes meant for the codex invocation.
+	if strings.Contains(command, "if command -v 'codex' >/dev/null 2>&1; then exit 0; fi") {
+		return runtime.ExecResult{ExitCode: 0}, nil
+	}
 	r.commands = append(r.commands, command)
 	r.lastCommand = command
 	if strings.Contains(command, "SKILL_UP_CODEX_THREAD_ID") {
