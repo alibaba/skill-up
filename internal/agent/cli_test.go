@@ -4,13 +4,28 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"testing"
 
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
 
+// skipIfNoPOSIXShell skips tests that rely on a POSIX shell at the host
+// (RunCmd/InstallSkillCmd/InstallMCPCmd templates baked with bash builtins,
+// `&&` pipelines, `$VAR` expansion, etc.). On Windows skill-up's none runtime
+// uses cmd.exe, which can't interpret those constructs — agent execution on
+// native Windows is intentionally out of scope; users go through WSL2.
+func skipIfNoPOSIXShell(t *testing.T) {
+	t.Helper()
+	if goruntime.GOOS == platform.GOOSWindows {
+		t.Skip("POSIX-shell agent template; native Windows agent execution is unsupported (use WSL2)")
+	}
+}
+
 func TestCLIAgent_Run(t *testing.T) {
+	skipIfNoPOSIXShell(t)
 	t.Parallel()
 
 	// Use NoneRuntime as the test runtime
@@ -41,6 +56,7 @@ func TestCLIAgent_Run(t *testing.T) {
 }
 
 func TestCLIAgent_RunExitError(t *testing.T) {
+	skipIfNoPOSIXShell(t)
 	t.Parallel()
 
 	rt := &runtime.NoneRuntime{}
@@ -172,6 +188,7 @@ func TestCLIAgent_InstallSkillDefault(t *testing.T) {
 }
 
 func TestCLIAgent_InstallSkillWithCmd(t *testing.T) {
+	skipIfNoPOSIXShell(t)
 	t.Parallel()
 
 	rt := &runtime.NoneRuntime{}
@@ -259,6 +276,7 @@ func TestCLIAgent_InstallMCPConfiguredServersRequireInstallCommand(t *testing.T)
 }
 
 func TestCLIAgent_InstallMCPUsesResolvedEndpointConfigRefAndEnv(t *testing.T) {
+	skipIfNoPOSIXShell(t)
 	t.Parallel()
 
 	rt := &runtime.NoneRuntime{}
@@ -296,5 +314,25 @@ func TestCLIAgent_InstallMCPUsesResolvedEndpointConfigRefAndEnv(t *testing.T) {
 	want := "github|https://mcp.example.test/github|/tmp/github-mcp.yaml|secret-token"
 	if string(data) != want {
 		t.Fatalf("marker content: got %q, want %q", string(data), want)
+	}
+}
+
+func TestCheckCommandForOS(t *testing.T) {
+	tests := []struct {
+		name, in, goos, want string
+	}{
+		{"posix unchanged", "command -v codex", "linux", "command -v codex"},
+		{"darwin unchanged", "command -v claude", "darwin", "command -v claude"},
+		{"windows translates", "command -v codex", platform.GOOSWindows, "where codex"},
+		{"windows redirects /dev/null", "command -v codex >/dev/null 2>&1", platform.GOOSWindows, "where codex >nul 2>&1"},
+		{"windows stderr /dev/null", "command -v claude 2>/dev/null", platform.GOOSWindows, "where claude 2>nul"},
+		{"windows non-command form unchanged", "codex --version", platform.GOOSWindows, "codex --version"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := checkCommandForOS(tt.in, tt.goos); got != tt.want {
+				t.Fatalf("checkCommandForOS(%q, %q) = %q, want %q", tt.in, tt.goos, got, tt.want)
+			}
+		})
 	}
 }

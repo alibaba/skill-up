@@ -15,12 +15,36 @@ import (
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/observability"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
+	"github.com/alibaba/skill-up/internal/shellquote"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
 
 // ErrAgentNotFound is returned when the agent executable is not found.
 var ErrAgentNotFound = errors.New("agent not found in PATH")
+
+// ErrAgentRequiresBash is returned when an agent CLI is invoked on a Windows
+// host where Git Bash (or another bash discoverable by platform.DiscoverBash)
+// is not available. Agent commands are POSIX-quoted and assume a bash
+// interpreter; running them through the cmd.exe fallback would let metachars
+// (`& | " %VAR%`) in the instruction reach the shell unprotected. See
+// docs/guide/windows.md for the documented limitation.
+var ErrAgentRequiresBash = errors.New("agent CLI execution on Windows requires bash; install Git for Windows or set SKILL_UP_BASH")
+
+// requireBashOnWindowsHost rejects agent execution when the runtime's target
+// is Windows but the host shell would be cmd.exe. We only enforce this for
+// runtimes whose target matches the host (NoneRuntime today); sandboxed
+// runtimes target a non-Windows guest and never go through platform.Host().
+func requireBashOnWindowsHost(rt Runtime) error {
+	if rt.TargetGOOS() != platform.GOOSWindows {
+		return nil
+	}
+	if platform.Host().IsBash {
+		return nil
+	}
+	return ErrAgentRequiresBash
+}
 
 // ErrAgentInstallFailed is returned when agent installation fails.
 var ErrAgentInstallFailed = errors.New("agent installation failed")
@@ -184,8 +208,7 @@ func (a *BaseAgent) logCredentialStatus(ctx context.Context, apiKeyEnv, baseURLE
 	// This does not scan unrelated providers.
 	if apiKey := os.Getenv(apiKeyEnv); apiKey != "" {
 		logging.DebugContextf(ctx, "%s detected for %s (source=process_env)", apiKeyEnv, a.Name())
-		if baseURL := os.Getenv(baseURLEnv); baseURLEnv != "" && baseURL != "" {
-			_ = baseURL
+		if baseURLEnv != "" && os.Getenv(baseURLEnv) != "" {
 			logging.DebugContextf(ctx, "%s detected for %s (source=process_env)", baseURLEnv, a.Name())
 		}
 		return
@@ -339,22 +362,13 @@ func formatAgentModel(provider, model string) string {
 	return provider + "/" + model
 }
 
-// shellQuote quotes a string for safe shell usage.
+// shellQuote quotes a string for safe POSIX shell usage. Agent commands are
+// always composed for and executed by bash (via the Node/nvm bootstrap), so
+// POSIX quoting is correct even when skill-up itself runs on a Windows host.
+// It delegates to internal/shellquote so the project keeps a single quoting
+// implementation.
 func shellQuote(s string) string {
-	if s == "" {
-		return "''"
-	}
-	var result strings.Builder
-	result.WriteByte('\'')
-	for _, c := range s {
-		if c == '\'' {
-			result.WriteString(`'\''`)
-		} else {
-			result.WriteRune(c)
-		}
-	}
-	result.WriteByte('\'')
-	return result.String()
+	return shellquote.QuotePOSIX(s)
 }
 
 // BuildInstructionFromMessages converts messages to a single instruction string.

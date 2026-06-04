@@ -129,7 +129,7 @@ func (g *gitInitUploader) Upload(ctx context.Context, rt runtime.Runtime, caseCf
 			return err
 		}
 		fmt.Fprintf(&script, "git remote add %s %s\n",
-			shellquote.Quote(remote.Name), shellquote.Quote(remote.URL))
+			shellquote.QuotePOSIX(remote.Name), shellquote.QuotePOSIX(remote.URL))
 	}
 
 	result, err := rt.Exec(ctx, script.String(), runtime.ExecOptions{
@@ -170,7 +170,10 @@ func (g *gitCheckoutUploader) Upload(ctx context.Context, rt runtime.Runtime, ca
 	// invocations and is never interpolated into the error message (a
 	// double-quoted echo would re-evaluate command substitutions); the Go
 	// error below already reports the branch name safely via %q.
-	quoted := shellquote.Quote(branch)
+	// The script runs in a POSIX shell inside the runtime (either the
+	// `none` runtime on a POSIX host, or the Linux OpenSandbox), so quote
+	// with POSIX rules explicitly rather than the host-aware Quote.
+	quoted := shellquote.QuotePOSIX(branch)
 	script := fmt.Sprintf("set -eu\n"+
 		"if git switch %[1]s 2>/dev/null; then :\n"+
 		"elif ! git rev-parse --verify --quiet HEAD >/dev/null 2>&1; then git switch -c %[1]s\n"+
@@ -222,7 +225,7 @@ func (a *applyDiffUploader) Upload(ctx context.Context, rt runtime.Runtime, case
 	}
 
 	// Quote the tmp path and use `--` to stop git from treating the path as an option.
-	result, err := rt.Exec(ctx, "git apply -- "+shellquote.Quote(tmpPath), runtime.ExecOptions{
+	result, err := rt.Exec(ctx, "git apply -- "+shellquote.QuotePOSIX(tmpPath), runtime.ExecOptions{
 		Cwd: rt.Workspace(),
 	})
 	if err != nil {

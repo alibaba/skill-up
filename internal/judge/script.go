@@ -4,13 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"path"
 	"strconv"
 	"strings"
 	"time"
 
 	evalruntime "github.com/alibaba/skill-up/internal/runtime"
-	"github.com/alibaba/skill-up/internal/shellquote"
 )
 
 // DefaultScriptTimeout is the default timeout for script execution (30s).
@@ -76,33 +74,48 @@ func (j *ScriptJudge) runtime(ctx context.Context) (evalruntime.Runtime, func(),
 }
 
 func (j *ScriptJudge) evaluateInRuntime(ctx context.Context, rt evalruntime.Runtime, in Input, timeout time.Duration) (*Result, error) {
-	remoteDir := path.Join("/tmp", fmt.Sprintf("skill-up-judge-%d", time.Now().UnixNano()))
-	remoteScript := path.Join(remoteDir, "script")
+	targetGOOS := rt.TargetGOOS()
+	plan, err := planScript(j.ScriptPath, targetGOOS)
+	if err != nil {
+		return nil, fmt.Errorf("script execution failed: %w", err)
+	}
+
+	remoteDir := judgeTempDir(targetGOOS)
+	remoteScript := joinForGOOS(targetGOOS, remoteDir, plan.uploadName)
 	if err := rt.UploadFile(ctx, j.ScriptPath, remoteScript); err != nil {
 		return nil, fmt.Errorf("script execution failed: upload script judge: %w", err)
 	}
 	defer func() {
-		_, _ = rt.Exec(context.WithoutCancel(ctx), "rm -rf "+shellquote.Quote(remoteDir), evalruntime.ExecOptions{})
+		_, _ = rt.Exec(context.WithoutCancel(ctx), plan.cleanupCommand(remoteDir), evalruntime.ExecOptions{})
 	}()
 
 	remoteTranscript := ""
 	if j.TranscriptPath != "" {
-		remoteTranscript = path.Join(remoteDir, "transcript.json")
+		remoteTranscript = joinForGOOS(targetGOOS, remoteDir, "transcript.json")
 		if err := rt.UploadFile(ctx, j.TranscriptPath, remoteTranscript); err != nil {
 			return nil, fmt.Errorf("script execution failed: upload script judge transcript: %w", err)
 		}
 	}
 
-	command := "chmod 700 " + shellquote.Quote(remoteScript) + " && " + shellquote.Quote(remoteScript)
+	command := plan.command(remoteScript)
 	cwd := in.WorkspacePath
 	if cwd == "" {
 		cwd = rt.Workspace()
+	}
+	// Translate the transcript path into the script interpreter's preferred
+	// form (e.g. forward slashes for `.sh` running under Git Bash so POSIX
+	// tools can `cat "$EVAL_TRANSCRIPT_PATH"`). Every plan returned by
+	// planScript sets envPath (identity on POSIX, ToSlash on Windows .sh),
+	// so the function is always safe to invoke.
+	transcriptEnv := remoteTranscript
+	if remoteTranscript != "" {
+		transcriptEnv = plan.envPath(remoteTranscript)
 	}
 	result, err := rt.Exec(ctx, command, evalruntime.ExecOptions{
 		Cwd:        cwd,
 		TimeoutSec: int(timeout.Seconds()),
 		Env: map[string]string{
-			"EVAL_TRANSCRIPT_PATH": remoteTranscript,
+			"EVAL_TRANSCRIPT_PATH": transcriptEnv,
 			"EVAL_FINAL_MESSAGE":   in.FinalMessage,
 			"EVAL_EXIT_CODE":       strconv.Itoa(in.ExitCode),
 		},

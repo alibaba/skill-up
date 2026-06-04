@@ -24,9 +24,13 @@ permissions:
 jobs:
   build:
     name: Build & Test
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      # Surface failures on every OS independently instead of cancelling the
+      # whole matrix when one runner fails.
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         go-version: ["1.25.x"]
 
     steps:
@@ -43,14 +47,22 @@ jobs:
       - name: Build
         run: go build ./...
 
+      # Force bash on Windows runners too: pwsh's legacy native-argument
+      # passing splits `-coverprofile=coverage.out` and feeds `.out` to go
+      # as a package import path, producing `FAIL .out [setup failed]`.
+      # Git Bash is preinstalled on windows-latest and parses args verbatim.
       - name: Test (with race detector and coverage)
+        shell: bash
         run: go test -race -timeout 120s -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
 
       # Self-hosted coverage badge: parse the total from `go tool cover -func`
       # and rewrite .github/badges/coverage.json. The shields.io endpoint badge
       # in README.md reads this JSON via raw.githubusercontent.com.
+      # Ubuntu-only: the Windows leg of the matrix uses a different shell
+      # toolchain and we only need one canonical coverage number.
       - name: Compute coverage and update badge
         id: coverage
+        if: matrix.os == 'ubuntu-latest'
         run: |
           pct=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%","",$3); print $3}')
           if [ -z "$pct" ]; then
@@ -79,7 +91,7 @@ jobs:
       # upload would silently match nothing and, combined with
       # if-no-files-found: error, fail the build job on every push to main.
       - name: Upload coverage badge artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: matrix.os == 'ubuntu-latest' && github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v7
         with:
           name: coverage-badge
@@ -120,6 +132,43 @@ jobs:
           git add .github/badges/coverage.json
           git commit -m "chore(ci): update coverage badge to ${pct} [skip ci]"
           git push origin badges
+
+  e2e-windows:
+    # Windows e2e is intentionally narrower than the Linux e2e: it does not
+    # set SKILL_UP_FULL_E2E, so the LLM-dependent tests in e2e/cli_test.go,
+    # e2e/agent_test.go and e2e/mcp_test.go self-skip. The mock-engine and
+    # script-judge contract tests still exercise the Windows-specific code
+    # paths added by issue #31 — shell selection, MSYS argv handling,
+    # QuoteWindows, NewShellCmd's WaitDelay, the script-judge interpreter
+    # dispatch — through the full CLI pipeline. Real-LLM coverage stays on
+    # the Linux e2e job below.
+    name: E2E (none runtime, Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      # Match the Build & Test step's shell choice so pwsh's legacy argv
+      # passing does not split `-coverprofile`-style flags.
+      - name: Run e2e tests (none runtime, quick mode)
+        shell: bash
+        run: go test -tags e2e -timeout 1200s -count=1 -v ./e2e
+        env:
+          SKILL_UP_E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-artifacts
+
+      - name: Upload e2e workspace artifacts
+        if: always() && hashFiles('e2e-artifacts/**') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-windows-workspaces
+          path: e2e-artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
 
   e2e:
     name: E2E (none runtime)

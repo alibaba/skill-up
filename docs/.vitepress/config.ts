@@ -51,6 +51,7 @@ export default defineConfig({
               text: 'Introduction',
               items: [
                 { text: 'Getting Started', link: '/guide/getting-started' },
+                { text: 'Windows Support', link: '/guide/windows' },
               ],
             },
             {
@@ -106,6 +107,7 @@ export default defineConfig({
               text: '入门',
               items: [
                 { text: '快速上手', link: '/zh/guide/getting-started' },
+                { text: 'Windows 支持', link: '/zh/guide/windows' },
               ],
             },
             {

@@ -5,8 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
 ## [0.2.4] - 2026-06-03
 
 ### Added
@@ -34,6 +32,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   persistent env baseline. Subsequent `Exec` calls inherit these vars
   unless overridden by `opts.Env`. Implementations are intended for
   one-time setup; concurrent `MergeEnv`/`Exec` is not safe.
+- **First-class Windows support** for the CLI, the `none` runtime, and the
+  script judge. Native Windows builds run all unit tests, the script judge
+  routes `.ps1`/`.cmd`/`.bat` directly and `.sh` through Git Bash when
+  available, and CI gains a `windows-latest` build/test matrix plus a
+  dedicated `E2E (none runtime, Windows)` contract job.
+  See [Windows Support](docs/guide/windows.md) for the full guide.
+- `SKILL_UP_BASH` environment variable: explicit path to a `bash`
+  executable for skill-up's `none` runtime to use. Honored on every
+  platform (read once at startup, takes precedence over `PATH`).
+- PowerShell tooling under `scripts/windows/`: `hooks.ps1`,
+  `lint-tools.ps1`, and `verify.ps1` mirror the Makefile targets for
+  contributors on Windows; `examples/judge-debug-eval.ps1` provides a
+  runnable PowerShell script-judge example.
+- `.gitattributes` pins line endings (LF for `*.sh`, CRLF for `*.ps1` /
+  `*.cmd` / `*.bat`) so Git checkout on Windows does not break scripts.
 
 ### Changed
 - Agent layer no longer injects PATH into the env map. Each agent's
@@ -63,6 +76,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Non-built-in `engine.name` values with an `engine.custom` block now
   dispatch to `CustomAgent`; without the block the error is
   `unsupported agent "x": missing engine.custom`.
+- Agent CLIs (Claude Code, Codex, Qoder CLI) now hard-fail on Windows
+  hosts without a discoverable bash, with a clear error pointing at
+  Git Bash or `SKILL_UP_BASH`. Previously the cmd.exe fallback would
+  accept agent commands but leak shell metacharacters from instructions
+  into the host shell.
+- `internal/platform` centralizes host shell, quoter, and bash discovery
+  behind a single `platform.Host()` (cached for the process lifetime).
+  Replaces the previous ad-hoc platform branching in `NoneRuntime.Exec`
+  and the script-judge planner.
+- `Runtime.TargetGOOS() string` is now a required interface method so
+  future runtimes get a compile-time error rather than silently
+  defaulting to `"linux"`.
 
 ### Fixed
 - Skill name in reports (`result.json`, benchmark, JUnit, HTML) now

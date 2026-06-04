@@ -24,7 +24,14 @@ func mustCompile() (string, func()) {
 		panic("creating temp dir: " + err.Error())
 	}
 
-	binPath := filepath.Join(dir, "skill-up")
+	binName := "skill-up"
+	if runtime.GOOS == "windows" {
+		// Windows refuses to execute a file without a recognized extension,
+		// so go build's -o output must end in .exe or every later
+		// exec.Command(binaryPath) fails with "executable file not found".
+		binName += ".exe"
+	}
+	binPath := filepath.Join(dir, binName)
 
 	_, testFile, _, _ := runtime.Caller(0)
 	projectRoot := filepath.Dir(filepath.Dir(testFile))

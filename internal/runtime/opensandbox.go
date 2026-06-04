@@ -557,6 +557,12 @@ func (r *OpenSandboxRuntime) MergeEnv(env map[string]string) {
 	mergeIntoEnvBaseline(&r.cfg.Env, env)
 }
 
+// TargetGOOS reports "linux": OpenSandbox always executes commands inside a
+// Linux sandbox regardless of the host OS.
+func (r *OpenSandboxRuntime) TargetGOOS() string {
+	return "linux"
+}
+
 func (r *OpenSandboxRuntime) connectionConfig() opensandbox.ConnectionConfig {
 	return opensandbox.ConnectionConfig{
 		Domain:         r.baseURL,
@@ -667,7 +673,7 @@ func (r *OpenSandboxRuntime) ensureDirectory(ctx context.Context, dir string, mo
 	if err == nil {
 		return nil
 	}
-	quoted := shellquote.Quote(dir)
+	quoted := shellquote.QuotePOSIX(dir)
 	result, execErr := r.runCommand(ctx, "/", "mkdir -p "+quoted+" && test -d "+quoted+" && test -w "+quoted, 30)
 	if execErr != nil {
 		return err
@@ -690,7 +696,7 @@ func (r *OpenSandboxRuntime) ensureDirectories(ctx context.Context, dirs []strin
 	command.WriteString("mkdir -p")
 	for _, dir := range dirs {
 		command.WriteByte(' ')
-		command.WriteString(shellquote.Quote(dir))
+		command.WriteString(shellquote.QuotePOSIX(dir))
 	}
 	result, err := r.runCommand(ctx, "/", command.String(), 30)
 	if err != nil {
@@ -795,7 +801,12 @@ func safeLocalTarget(root, rel string) (string, error) {
 	if clean == "." {
 		return root, nil
 	}
-	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+	// On Windows filepath.IsAbs requires a volume name, so a POSIX-style
+	// "/absolute" supplied via the SDK would otherwise slip through; also
+	// reject any rooted path (leading separator) so the guard behaves the
+	// same on both OSes.
+	rooted := strings.HasPrefix(clean, "/") || strings.HasPrefix(clean, `\`)
+	if filepath.IsAbs(clean) || rooted || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("unsafe sandbox file path: %s", rel)
 	}
 	return filepath.Join(root, clean), nil

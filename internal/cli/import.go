@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -156,7 +157,9 @@ func generateEvalConfig(caseIDs []string, outputDir string) *config.EvalConfig {
 
 	caseFiles := make([]string, len(caseIDs))
 	for i, caseID := range caseIDs {
-		caseFiles[i] = filepath.Join(relPrefix, "cases", caseID+".yaml")
+		// eval.yaml is a portable config consumed by the loader on any OS;
+		// always use forward slashes for case paths regardless of the host.
+		caseFiles[i] = path.Join(filepath.ToSlash(relPrefix), "cases", caseID+".yaml")
 	}
 
 	cfg.Cases.Files = caseFiles

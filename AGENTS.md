@@ -34,6 +34,11 @@ make lint-tools
 If you are in mainland China and `go install` is slow, set
 `GOPROXY=https://goproxy.cn,direct` before running the commands above.
 
+On Windows, `make` is unavailable by default; use the PowerShell equivalents
+in `scripts/windows/` (`hooks.ps1`, `lint-tools.ps1`, `verify.ps1`). See the
+[Windows support guide](docs/guide/windows.md) for supported features and
+known limitations.
+
 ## Build & run
 
 ```bash

@@ -141,6 +141,11 @@ make build
 go build -o bin/skill-up ./cmd/skill-up
 ```
 
+**Windows 用户**：skill-up 原生支持 Windows。请参阅
+[Windows 支持指南](docs/zh/guide/windows.md) 了解推荐工作流、已知限制
+（特别是：原生运行 agent CLI 需要 Git Bash）以及 `scripts/windows/`
+下的 PowerShell 工具脚本。
+
 ## 快速上手
 
 ### 第一步：创建评测配置

@@ -5,12 +5,14 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/logging"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
@@ -297,6 +299,13 @@ func TestFindQoderSessionFile(t *testing.T) {
 }
 
 func TestFindQoderSessionFile_SelectsNewestByModTime(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		// The workspace-key path layout embeds a Linux-style workspace path,
+		// which contains a colon on Windows (e.g. `C:`) and cannot be a
+		// directory component. Qoder native Windows agent execution is out of
+		// scope; this test is exercised on Linux/darwin only.
+		t.Skip("qoder workspace-key path layout is POSIX-only")
+	}
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
@@ -421,3 +430,5 @@ func (r *qoderTestRuntime) MergeEnv(env map[string]string) {
 	}
 	maps.Copy(r.mergedEnv, env)
 }
+
+func (r *qoderTestRuntime) TargetGOOS() string { return platform.GOOSLinux }

@@ -118,6 +118,15 @@ type Runtime interface {
 	Workspace() string
 	// RequiresProcessSandbox reports whether agents should enable their own process sandbox.
 	RequiresProcessSandbox() bool
+	// TargetGOOS reports the GOOS value of the environment where Exec
+	// runs commands. NoneRuntime executes on the host so it returns
+	// runtime.GOOS; OpenSandboxRuntime always returns "linux" because
+	// it executes inside a Linux sandbox. Implementations must return a
+	// non-empty value -- callers (most importantly the script-judge
+	// planner) use it to choose between POSIX and Windows command shapes,
+	// and silently defaulting to "linux" would mask configuration
+	// mistakes in any future Windows-targeting runtime.
+	TargetGOOS() string
 }
 
 // FileReadSeeker combines io.ReadSeeker for file access.

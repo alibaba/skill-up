@@ -14,6 +14,7 @@ import (
 
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/logging"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
@@ -772,3 +773,5 @@ func (r *claudeCodeTestRuntime) MergeEnv(env map[string]string) {
 	}
 	maps.Copy(r.mergedEnv, env)
 }
+
+func (r *claudeCodeTestRuntime) TargetGOOS() string { return platform.GOOSLinux }
