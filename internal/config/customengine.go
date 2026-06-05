@@ -472,49 +472,39 @@ func resolveEnvRefsWith(s string, rejectSecrets bool) (string, error) {
 //
 //revive:disable-next-line:flag-parameter
 func resolveEnvToken(inner string, rejectSecrets bool) (value string, leaveIntact bool, err error) {
-	name := inner
-	var defaultVal, errMsg string
-	hasDefault, hasErrForm := false, false
-	if before, after, found := strings.Cut(inner, ":-"); found {
-		name, defaultVal, hasDefault = before, after, true
-	} else if before, after, found := strings.Cut(inner, "?"); found {
-		name, errMsg, hasErrForm = before, after, true
-	}
+	tok := ParseTemplateToken(inner)
 
-	if IsBuiltinTemplateVar(name) {
-		if rejectSecrets && isSensitiveTemplateVar(name) {
+	if IsBuiltinTemplateVar(tok.Name) {
+		if rejectSecrets && isSensitiveTemplateVar(tok.Name) {
 			return "", false, fmt.Errorf(
 				"secret-like template variable ${%s} must not be referenced in a command line; pass credentials via engine.custom.env instead",
-				name,
+				tok.Name,
 			)
 		}
 		return "", true, nil
 	}
 
-	if rejectSecrets && isSensitiveEnvName(name) {
+	if rejectSecrets && isSensitiveEnvName(tok.Name) {
 		return "", false, fmt.Errorf(
 			"secret-like environment variable %q must not be referenced in a command line; pass credentials via engine.custom.env instead",
-			name,
+			tok.Name,
 		)
 	}
 
-	if v := os.Getenv(name); v != "" {
-		if err := rejectIfSecretLiteral(name, v, rejectSecrets, false); err != nil {
+	if v := os.Getenv(tok.Name); v != "" {
+		if err := rejectIfSecretLiteral(tok.Name, v, rejectSecrets, false); err != nil {
 			return "", false, err
 		}
 		return v, false, nil
 	}
-	if hasDefault {
-		if err := rejectIfSecretLiteral(name, defaultVal, rejectSecrets, true); err != nil {
+	if tok.HasDefault {
+		if err := rejectIfSecretLiteral(tok.Name, tok.Default, rejectSecrets, true); err != nil {
 			return "", false, err
 		}
-		return defaultVal, false, nil
+		return tok.Default, false, nil
 	}
-	if hasErrForm {
-		if strings.TrimSpace(errMsg) == "" {
-			errMsg = name + " is required"
-		}
-		return "", false, errors.New(errMsg)
+	if tok.HasErrForm {
+		return "", false, tok.RequiredErr()
 	}
-	return "", false, fmt.Errorf("environment variable %s is required but not set", name)
+	return "", false, fmt.Errorf("environment variable %s is required but not set", tok.Name)
 }
