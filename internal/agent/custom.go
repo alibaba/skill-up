@@ -1136,37 +1136,29 @@ func renderTemplate(s string, vars map[string]string) (string, error) {
 }
 
 func resolveTemplateToken(inner string, vars map[string]string) (string, error) {
-	name := inner
-	var defaultVal, errMsg string
-	hasDefault, hasErrForm := false, false
-	if before, after, found := strings.Cut(inner, ":-"); found {
-		name, defaultVal, hasDefault = before, after, true
-	} else if before, after, found := strings.Cut(inner, "?"); found {
-		name, errMsg, hasErrForm = before, after, true
-	}
+	// Share the ${X} / ${X:-default} / ${X?msg} grammar with the config-load-time
+	// resolver (config.resolveEnvToken) so the two cannot drift apart.
+	tok := config.ParseTemplateToken(inner)
 
-	if v, ok := vars[name]; ok {
+	if v, ok := vars[tok.Name]; ok {
 		// A present-but-empty built-in value (e.g. an unconfigured api_key)
 		// is treated as unset so ${X:-default} and ${X?msg} still apply.
-		if v != "" || (!hasDefault && !hasErrForm) {
+		if v != "" || (!tok.HasDefault && !tok.HasErrForm) {
 			return v, nil
 		}
 	}
-	if v := os.Getenv(name); v != "" {
+	if v := os.Getenv(tok.Name); v != "" {
 		return v, nil
 	}
-	if hasDefault {
-		return defaultVal, nil
+	if tok.HasDefault {
+		return tok.Default, nil
 	}
-	if hasErrForm {
-		if strings.TrimSpace(errMsg) == "" {
-			errMsg = name + " is required"
-		}
-		return "", errors.New(errMsg)
+	if tok.HasErrForm {
+		return "", tok.RequiredErr()
 	}
 	// kwargs.<key> references that were not provided resolve to empty.
-	if strings.HasPrefix(name, "kwargs.") {
+	if strings.HasPrefix(tok.Name, "kwargs.") {
 		return "", nil
 	}
-	return "", fmt.Errorf("unresolved template variable %q", name)
+	return "", fmt.Errorf("unresolved template variable %q", tok.Name)
 }
