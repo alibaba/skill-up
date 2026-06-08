@@ -215,12 +215,18 @@ jobs:
           npm install -g --include=optional '@openai/codex@0.80.0'
           codex --version
 
-      - name: Install qodercli
+      - name: Install qodercli (pinned v1.0.14)
         if: steps.secrets.outputs.available == 'true'
+        env:
+          QODER_VERSION: "1.0.14"
+          QODER_SHA256: "4d83ec3d3a0948b73012cfdd6e2757be0a5da5c89a288425a5607fd42be1de7b"
         run: |
-          curl -fsSL https://qoder.com/install | bash
-          # qoder.com installer drops the binary under ~/.qoder/bin by default;
-          # surface it on PATH for the rest of the job.
+          TARBALL=$(mktemp)
+          curl -fsSL "https://qoder-ide.oss-accelerate.aliyuncs.com/qodercli/releases/${QODER_VERSION}/qodercli-linux-x64.tar.gz" -o "$TARBALL"
+          echo "$QODER_SHA256  $TARBALL" | sha256sum -c -
+          mkdir -p "$HOME/.qoder/bin"
+          tar -xzf "$TARBALL" -C "$HOME/.qoder/bin"
+          rm -f "$TARBALL"
           echo "$HOME/.qoder/bin" >> "$GITHUB_PATH"
 
       - name: Verify qodercli on PATH
