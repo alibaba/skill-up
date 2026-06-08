@@ -32,7 +32,8 @@ this order:
    `C:\Program Files (x86)\Git\bin\bash.exe`.
 
 If none is found the script judge fails with a clear error. Install
-[Git for Windows](https://git-scm.com/download/win) or set `SKILL_UP_BASH`.
+[Git for Windows](https://git-scm.com/download/win) or set `SKILL_UP_BASH`
+(see [Environment Variables](./user-config.md#skill_up_bash) for full details).
 
 The WSL shim at `C:\Windows\System32\bash.exe` is intentionally rejected at
 all three steps (override, PATH, well-known) because it expects Linux-format

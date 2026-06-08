@@ -120,6 +120,50 @@ skill-up init --config ./team-config.yaml --print
 
 ---
 
+## Environment Variables
+
+Beyond the YAML config file, skill-up respects certain environment variables
+that influence runtime behavior. These are separate from the `env` map in
+`config.yaml` (which injects variables into the child process environment).
+
+### `SKILL_UP_BASH`
+
+Override the bash interpreter used by skill-up for `.sh` script judges and
+shell commands.
+
+| Aspect       | Detail                                                                 |
+| :----------- | :--------------------------------------------------------------------- |
+| **Purpose**  | Point skill-up at a specific `bash` binary                             |
+| **Applies**  | All platforms — Linux, macOS, and Windows                              |
+| **Default**  | Unset; skill-up falls back to `bash` on `PATH` (and on Windows, well-known Git Bash locations) |
+
+**Precedence:** When `SKILL_UP_BASH` is set and points to a valid file,
+skill-up uses it unconditionally — it is checked **before** any `PATH` lookup
+or well-known-path probing.
+
+**Full-trust requirement:** The path you supply is used as-is without further
+sandboxing. You are responsible for ensuring it points to a trustworthy bash
+binary.
+
+Example (macOS / Linux):
+
+```bash
+export SKILL_UP_BASH=/opt/homebrew/bin/bash
+skill-up run ./evals/eval.yaml
+```
+
+Example (Windows — Git Bash in a non-standard location):
+
+```powershell
+$env:SKILL_UP_BASH = "D:\tools\git\bin\bash.exe"
+skill-up run .\evals\eval.yaml
+```
+
+On Windows, the WSL shim at `C:\Windows\System32\bash.exe` is rejected even
+when specified via `SKILL_UP_BASH`; see [Windows Support](./windows.md#running-sh-script-judges-on-windows) for details.
+
+---
+
 ## Examples
 
 ### Always export traces to a local collector

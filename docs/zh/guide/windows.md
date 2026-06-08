@@ -28,7 +28,8 @@ skill-up 原生支持 Windows。本页说明哪些功能可用、当前的限制
    `C:\Program Files (x86)\Git\bin\bash.exe`。
 
 若都找不到，script judge 会以明确的错误失败。请安装
-[Git for Windows](https://git-scm.com/download/win) 或设置 `SKILL_UP_BASH`。
+[Git for Windows](https://git-scm.com/download/win) 或设置 `SKILL_UP_BASH`
+（完整说明见[环境变量](./user-config.md#skill_up_bash)）。
 
 `C:\Windows\System32\bash.exe`（WSL shim）会在三个步骤里都被主动忽略 ——
 即使通过 `SKILL_UP_BASH` 显式指向或它在 PATH 上排在前面，因为它期望 Linux
