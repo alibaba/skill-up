@@ -34,9 +34,9 @@ jobs:
         go-version: ["1.25.x"]
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: ${{ matrix.go-version }}
           cache: true
@@ -92,7 +92,7 @@ jobs:
       # if-no-files-found: error, fail the build job on every push to main.
       - name: Upload coverage badge artifact
         if: matrix.os == 'ubuntu-latest' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: coverage-badge
           path: .github/badges/coverage.json
@@ -110,12 +110,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           ref: badges
 
       - name: Download coverage badge artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: coverage-badge
           path: .github/badges/
@@ -146,9 +146,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: "1.25.x"
           cache: true
@@ -163,7 +163,7 @@ jobs:
 
       - name: Upload e2e workspace artifacts
         if: always() && hashFiles('e2e-artifacts/**') != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: e2e-windows-workspaces
           path: e2e-artifacts/
@@ -174,7 +174,7 @@ jobs:
     name: E2E (none runtime)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       # Fork PRs run without access to repository secrets. Detect that early
       # and skip the rest of the job so we don't burn CI minutes installing
@@ -191,13 +191,13 @@ jobs:
             echo "available=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         if: steps.secrets.outputs.available == 'true'
         with:
           go-version: "1.25.x"
           cache: true
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         if: steps.secrets.outputs.available == 'true'
         with:
           node-version: "22"
@@ -268,7 +268,7 @@ jobs:
 
       - name: Upload e2e workspace artifacts
         if: always() && steps.secrets.outputs.available == 'true' && hashFiles('e2e-artifacts/**') != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: e2e-workspaces
           path: e2e-artifacts/
@@ -282,7 +282,7 @@ jobs:
     # sandbox is slower than the none-runtime job; give it generous headroom.
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       # The opensandbox runtime is self-hosted on the runner (see below), so no
       # OPENSANDBOX_* secret is needed — but the agent under test still calls a
@@ -299,7 +299,7 @@ jobs:
             echo "available=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         if: steps.secrets.outputs.available == 'true'
         with:
           go-version: "1.25.x"
@@ -307,7 +307,7 @@ jobs:
 
       - name: Install uv
         if: steps.secrets.outputs.available == 'true'
-        uses: astral-sh/setup-uv@v8.1.0
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
 
       - name: Install OpenSandbox server
         if: steps.secrets.outputs.available == 'true'
@@ -391,7 +391,7 @@ jobs:
 
       - name: Upload OpenSandbox server log
         if: always() && steps.secrets.outputs.available == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: opensandbox-server-log
           path: ${{ runner.temp }}/opensandbox-server.log
@@ -400,7 +400,7 @@ jobs:
 
       - name: Upload opensandbox e2e workspace artifacts
         if: always() && steps.secrets.outputs.available == 'true' && hashFiles('e2e-opensandbox-artifacts/**') != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: e2e-opensandbox-workspaces
           path: e2e-opensandbox-artifacts/
@@ -417,9 +417,9 @@ jobs:
     # runtime against a real daemon directly, no agent or model in the loop.
     # That also means they run on fork PRs, unlike the other two e2e jobs.
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: "1.25.x"
           cache: true
@@ -449,7 +449,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Check secret availability
         id: secrets
@@ -463,7 +463,7 @@ jobs:
             echo "available=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         if: steps.secrets.outputs.available == 'true'
         with:
           go-version: "1.25.x"
@@ -485,7 +485,7 @@ jobs:
 
       - name: Upload docker full e2e artifacts
         if: always() && steps.secrets.outputs.available == 'true' && hashFiles('e2e-docker-full-artifacts/**') != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: e2e-docker-full-workspaces
           path: e2e-docker-full-artifacts/
@@ -496,9 +496,9 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: "1.25.x"
           cache: true
@@ -512,7 +512,7 @@ jobs:
           fi
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9
         with:
           version: v2.11.4
 
@@ -526,24 +526,24 @@ jobs:
     name: GoReleaser Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: "1.25.x"
           cache: true
 
       - name: GoReleaser check
-        uses: goreleaser/goreleaser-action@v7
+        uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7
         with:
           distribution: goreleaser
           version: "~> v2"
           args: check
 
       - name: GoReleaser snapshot build
-        uses: goreleaser/goreleaser-action@v7
+        uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7
         with:
           distribution: goreleaser
           version: "~> v2"
