@@ -894,14 +894,15 @@ func (a *CustomAgent) buildSessionInput(rt Runtime, opts ExecOptions, messages [
 	for _, m := range messages {
 		msgs = append(msgs, SessionMessage{Role: string(m.Role), Content: m.Content})
 	}
+	meta := opts.AgentMeta()
 	return SessionInput{
-		CaseID:         opts.CaseID,
-		Variant:        opts.Variant,
+		CaseID:         meta.CaseID,
+		Variant:        meta.Variant,
 		Workspace:      rt.Workspace(),
 		Model:          formatAgentModel(a.Cfg.ModelProvider, a.Cfg.ModelName),
 		Kwargs:         kwargs,
 		Messages:       msgs,
-		MaxTurns:       opts.MaxTurns,
+		MaxTurns:       meta.MaxTurns,
 		TimeoutSeconds: timeoutSec,
 	}
 }
@@ -912,6 +913,7 @@ func (a *CustomAgent) buildSessionInput(rt Runtime, opts ExecOptions, messages [
 // once resolveCustomIOFiles has run.
 func (a *CustomAgent) buildBaseVars(rt Runtime, opts ExecOptions, messages []transcript.Message, timeoutSec int) map[string]string {
 	workspace := rt.Workspace()
+	meta := opts.AgentMeta()
 	return map[string]string{
 		"workspace":       workspace,
 		"prompt":          singleTurnPrompt(messages),
@@ -921,9 +923,9 @@ func (a *CustomAgent) buildBaseVars(rt Runtime, opts ExecOptions, messages []tra
 		"model_provider":  a.Cfg.ModelProvider,
 		"model_name":      a.Cfg.ModelName,
 		"api_key":         a.Cfg.APIKey,
-		"case_id":         opts.CaseID,
-		"variant":         opts.Variant,
-		"max_turns":       strconv.Itoa(opts.MaxTurns),
+		"case_id":         meta.CaseID,
+		"variant":         meta.Variant,
+		"max_turns":       strconv.Itoa(meta.MaxTurns),
 		"timeout_seconds": strconv.Itoa(timeoutSec),
 	}
 }

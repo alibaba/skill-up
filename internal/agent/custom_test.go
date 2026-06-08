@@ -43,7 +43,7 @@ func TestCustomAgent_RunLocal_StdoutSessionResult(t *testing.T) {
 		},
 	})
 
-	res, err := ag.Run(context.Background(), rt, ExecOptions{CaseID: "c1", Variant: "with_skill"}, userMessages())
+	res, err := ag.Run(context.Background(), rt, ExecOptions{AgentMetadata: &runtime.AgentMetadata{CaseID: "c1", Variant: "with_skill"}}, userMessages())
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -579,7 +579,7 @@ func TestCustomAgent_RunLocal_RendersTemplatedKwargs(t *testing.T) {
 		},
 	})
 
-	res, err := ag.Run(context.Background(), rt, ExecOptions{CaseID: "case-42"}, userMessages())
+	res, err := ag.Run(context.Background(), rt, ExecOptions{AgentMetadata: &runtime.AgentMetadata{CaseID: "case-42"}}, userMessages())
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

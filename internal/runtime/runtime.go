@@ -76,6 +76,16 @@ type ExecResult struct {
 	ExitCode int
 }
 
+// AgentMetadata carries case-level metadata that only agents building a
+// structured session input (e.g. the Custom Engine) consume. It is threaded
+// per-Run via ExecOptions.AgentMetadata rather than baked into the agent at
+// construction, because a single agent instance is reused across cases.
+type AgentMetadata struct {
+	CaseID   string
+	Variant  string
+	MaxTurns int
+}
+
 // ExecOptions configures how a command is executed.
 type ExecOptions struct {
 	Cwd         string
@@ -83,11 +93,20 @@ type ExecOptions struct {
 	TimeoutSec  int
 	ArtifactDir string
 
-	// Case metadata passed through to agents that build a structured session
-	// input (e.g. Custom Engine). Built-in agents ignore these fields.
-	CaseID   string
-	Variant  string
-	MaxTurns int
+	// AgentMetadata carries case-level metadata for agents that build a
+	// structured session input (e.g. Custom Engine). It is nil for runs that
+	// do not need it; built-in agents ignore it. Read it via AgentMeta, which
+	// is nil-safe.
+	AgentMetadata *AgentMetadata
+}
+
+// AgentMeta returns the case-level agent metadata, or a zero value when unset,
+// so callers can read its fields without a nil check.
+func (o ExecOptions) AgentMeta() AgentMetadata {
+	if o.AgentMetadata == nil {
+		return AgentMetadata{}
+	}
+	return *o.AgentMetadata
 }
 
 // Runtime defines the interface for sandbox runtimes.

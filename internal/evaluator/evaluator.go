@@ -401,10 +401,12 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	}
 	agentExecOpts := agent.ExecOptions{
 		ArtifactDir: agentArtifactDir,
-		CaseID:      caseCfg.ID,
-		Variant:     configName,
-		MaxTurns:    caseMaxTurns(e.evalCfg, caseCfg),
 		TimeoutSec:  caseTimeoutSeconds(e.evalCfg, caseCfg),
+		AgentMetadata: &runtime.AgentMetadata{
+			CaseID:   caseCfg.ID,
+			Variant:  configName,
+			MaxTurns: caseMaxTurns(e.evalCfg, caseCfg),
+		},
 	}
 	sessionResult, execErr := runAgent.Run(agentCtx, rt, agentExecOpts, messages)
 	agentSpan.End()
