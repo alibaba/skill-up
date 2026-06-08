@@ -3,12 +3,16 @@
 package e2e
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alibaba/skill-up/internal/judge"
+	"github.com/alibaba/skill-up/internal/report"
 )
 
 // getCustomEngineTestdataDir returns the path to e2e/testdata/custom-engine.
@@ -46,6 +50,8 @@ func customEngineEnv(agentBin string) []string {
 //  2. The framework writes the SessionInput JSON to ${input_file}.
 //  3. The agent's stdout is parsed back into a SessionResult.
 //  4. final_message reaches the report and an expect.must_contain rule passes.
+//  5. report.json contains the expected case content: final_message, judge
+//     outcome, and input prompt.
 func TestPipeline_CustomEngine_LocalTransport(t *testing.T) {
 	skipIfNoPOSIXShell(t)
 	t.Parallel()
@@ -73,6 +79,43 @@ func TestPipeline_CustomEngine_LocalTransport(t *testing.T) {
 	}
 	if !strings.Contains(result.Stdout, "1 passed") {
 		t.Errorf("expected the summary line to report 1 passed, got:\n%s", result.Stdout)
+	}
+
+	// --- Assert generated report.json content ---
+	reportPath := filepath.Join(outputDir, "iteration-1", "report.json")
+	reportData, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatalf("failed to read report.json at %s: %v", reportPath, err)
+	}
+
+	var rpt report.Input
+	if err := json.Unmarshal(reportData, &rpt); err != nil {
+		t.Fatalf("failed to parse report.json: %v", err)
+	}
+
+	if len(rpt.CaseResults) != 1 {
+		t.Fatalf("expected exactly 1 case result, got %d", len(rpt.CaseResults))
+	}
+
+	cr := rpt.CaseResults[0]
+
+	// The fixture agent.sh always emits final_message "custom-engine-handled".
+	if cr.Response != "custom-engine-handled" {
+		t.Errorf("expected response (final_message) = %q, got %q", "custom-engine-handled", cr.Response)
+	}
+
+	// The case's expect.must_contain rule should yield a PASS grading.
+	if cr.Grading == nil {
+		t.Fatalf("expected grading to be non-nil")
+	}
+	if cr.Grading.Status != judge.StatusPass {
+		t.Errorf("expected grading status = %q, got %q", judge.StatusPass, cr.Grading.Status)
+	}
+
+	// The prompt in the report must match the user message from the case YAML.
+	const expectedPrompt = "ping the custom engine"
+	if !strings.Contains(cr.Prompt, expectedPrompt) {
+		t.Errorf("expected prompt to contain %q, got %q", expectedPrompt, cr.Prompt)
 	}
 }
 
