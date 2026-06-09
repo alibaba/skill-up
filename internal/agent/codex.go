@@ -45,8 +45,6 @@ const (
 	codexFnCall                 = "function_call"
 	codexFnCallOut              = "function_call_output"
 	codexTokenCount             = "token_count"
-	codexStatusSuccess          = "success"
-	codexStatusError            = "error"
 )
 
 // codexExecPathProbeCmd resolves $HOME/.local/bin (the codex binary, installed
