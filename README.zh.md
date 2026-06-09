@@ -221,6 +221,34 @@ skill-up import ./evals/evals.json --output ./evals
 | `skill-up debug judge <input.json>`  | 使用 JSON 输入调试 judge 模块              |
 | `skill-up debug report <input.json>` | 使用 JSON 输入调试 report 模块             |
 
+## GitHub Action
+
+在 CI 上对你的 Agent Skill 跑评测,每个 PR 自动触发——并在一步内**跨引擎**
+(`claude_code` / `codex` / `qodercli`)校验同一个 skill。本仓库根目录提供了
+action([`action.yml`](action.yml)):
+
+```yaml
+# .github/workflows/skill-eval.yml
+name: Skill Eval
+on:
+  pull_request:
+    paths: ['skills/**', 'evals/**', '**/SKILL.md']
+jobs:
+  eval:
+    runs-on: ubuntu-latest          # Docker 容器 action —— 仅 Linux
+    steps:
+      - uses: actions/checkout@v4
+      - uses: alibaba/skill-up@v0.1.0
+        with:
+          engine: claude_code        # 或 codex / qodercli;留空则由 eval.yaml 自行声明
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          skill-target: evals/eval.yaml
+```
+
+主要入参:`engine`、`model`、`provider`、`api-key`、`base-url`、`skill-target`、
+`parallelism`。action 预先把 skill-up 和三个引擎 CLI 烤进 runner 镜像,跑一次
+就是「拉镜像、评测」。完整入参/产出见 [`action.yml`](action.yml)。
+
 ## 许可证
 
 Apache License 2.0 — 详见 [LICENSE](LICENSE)。

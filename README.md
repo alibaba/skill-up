@@ -297,6 +297,35 @@ skill-up import ./evals/evals.json --output ./evals
 | `skill-up debug judge <input.json>`  | Debug judge module with a JSON input        |
 | `skill-up debug report <input.json>` | Debug report module with a JSON input       |
 
+## GitHub Action
+
+Run your Agent Skill evals in CI on every pull request — and check the same skill
+**across engines** (`claude_code` / `codex` / `qodercli`) in one step. This repo
+ships an action at its root ([`action.yml`](action.yml)):
+
+```yaml
+# .github/workflows/skill-eval.yml
+name: Skill Eval
+on:
+  pull_request:
+    paths: ['skills/**', 'evals/**', '**/SKILL.md']
+jobs:
+  eval:
+    runs-on: ubuntu-latest          # Docker container action — Linux only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: alibaba/skill-up@v0.1.0
+        with:
+          engine: claude_code        # or codex / qodercli; empty = let eval.yaml decide
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          skill-target: evals/eval.yaml
+```
+
+Key inputs: `engine`, `model`, `provider`, `api-key`, `base-url`, `skill-target`,
+`parallelism`. The action prebuilds skill-up + the three engine CLIs into its
+runner image, so a run is just "pull image, eval". See [`action.yml`](action.yml)
+for the full input/output reference.
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).
