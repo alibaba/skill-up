@@ -120,13 +120,19 @@ func (t *httpTransport) doRequest(client *http.Client, req *http.Request) *trans
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxHTTPResponseBytes))
+	// Read one byte past the cap so an over-limit body surfaces a clear error
+	// instead of silently truncating into an inscrutable JSON parse failure.
+	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxHTTPResponseBytes+1))
 	if readErr != nil {
 		return &transportOutcome{
 			exitCode: 1,
 			stderr:   a.maskAPIKey(readErr.Error()),
 			execErr:  errors.New(a.maskAPIKey("read custom engine http response: " + readErr.Error())),
 		}
+	}
+	if int64(len(respBody)) > maxHTTPResponseBytes {
+		msg := fmt.Sprintf("custom engine http response exceeded %d bytes", maxHTTPResponseBytes)
+		return &transportOutcome{exitCode: 1, stderr: msg, execErr: errors.New(msg)}
 	}
 	raw := string(respBody)
 
