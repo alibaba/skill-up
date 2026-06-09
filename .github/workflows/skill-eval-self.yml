@@ -1,0 +1,62 @@
+name: Self-eval (dogfood the action)
+
+# Dogfoods the Agent Skill Eval action (action.yml) against this repo's own
+# skill-upper skill: it runs the action exactly as a downstream user would, so a
+# green check here is the action's end-to-end integration test.
+#
+# Uses `uses: ./` (the action from this checkout) so it validates the PR's own
+# version before any release tag exists. Model traffic is pinned to dashscope's
+# qwen3.6-plus (Anthropic-compat endpoint) — same as the repo's e2e jobs — so it
+# never calls real Claude.
+
+on:
+  pull_request:
+    paths:
+      - 'action.yml'
+      - 'action/**'
+      - 'skills/skill-upper/**'
+      - '.github/workflows/skill-eval-self.yml'
+  workflow_dispatch:
+
+jobs:
+  dogfood:
+    name: Eval skill-upper via the action
+    runs-on: ubuntu-latest      # Docker container action — Linux only
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # Fork PRs run without repository secrets; skip cleanly instead of 401ing.
+      - name: Check secret availability
+        id: secrets
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+        run: |
+          if [ -z "$DASHSCOPE_API_KEY" ]; then
+            echo "::notice::Skipping self-eval: DASHSCOPE_API_KEY not provisioned (likely a fork PR)."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run skill-upper eval via the action
+        if: steps.secrets.outputs.available == 'true'
+        id: eval
+        uses: ./
+        with:
+          engine: claude_code
+          # claude_code + dashscope -> Anthropic-compat endpoint; model pinned to
+          # qwen3.6-plus so no path accidentally calls real Claude.
+          provider: dashscope
+          model: qwen3.6-plus
+          api-key: ${{ secrets.DASHSCOPE_API_KEY }}
+          # Point at the skill dir; skill-up finds evals/eval.yaml inside and
+          # resolves cases (evals/cases/*.yaml) relative to the skill root.
+          skill-target: skills/skill-upper
+
+      - name: Upload eval report
+        if: always() && steps.secrets.outputs.available == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: skill-upper-self-eval
+          path: skill-up-workspace/**
+          if-no-files-found: warn
