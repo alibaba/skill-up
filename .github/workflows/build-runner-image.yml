@@ -2,15 +2,29 @@ name: Build & push skill-eval runner image
 
 # Builds the runner image used by the Agent Skill Eval action (action.yml):
 # bakes skill-up + claude + codex + qodercli from public registries and pushes
-# to ghcr.io via the built-in GITHUB_TOKEN (no PAT, no write:packages on a
-# personal token). Run manually, or on a tag, to (re)publish the image; then
-# point action.yml's `runs.image` at the new tag.
+# to ghcr.io/<this-org>/skill-up-runner via the built-in GITHUB_TOKEN (no PAT).
 #
-# NOTE: pushing under this repo's org namespace (ghcr.io/<org>/skill-up-runner)
-# requires the org to allow Actions to create packages. Until that is sorted,
-# action.yml may reference an image hosted elsewhere (see its header).
+# Triggers:
+#   - pull_request touching the action/image -> rebuild & push (same-repo only;
+#     fork PRs build without pushing, since they lack package-write).
+#   - push to main touching the action/image -> republish.
+#   - workflow_dispatch -> manual (re)publish at an explicit tag.
+#
+# NOTE: pushing under the org namespace requires the org to allow Actions to
+# create packages. If that is not yet enabled, the push step fails and
+# action.yml keeps referencing a staging image until an org owner enables it.
 
 on:
+  pull_request:
+    paths:
+      - 'action/**'
+      - 'action.yml'
+      - '.github/workflows/build-runner-image.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'action/**'
+      - '.github/workflows/build-runner-image.yml'
   workflow_dispatch:
     inputs:
       tag:
@@ -30,10 +44,24 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
+      - name: Resolve tag & push policy
+        id: meta
+        env:
+          # Fork PRs can't push packages; build-only for them.
+          SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v0.1.0" >> "$GITHUB_OUTPUT"
+          fi
+          echo "push=${SAME_REPO}" >> "$GITHUB_OUTPUT"
+
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to ghcr.io
+        if: steps.meta.outputs.push == 'true'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
@@ -46,9 +74,9 @@ jobs:
           context: ./action
           file: ./action/Dockerfile
           platforms: linux/amd64,linux/arm64
-          push: true
+          push: ${{ steps.meta.outputs.push == 'true' }}
           tags: |
-            ${{ env.IMAGE }}:${{ inputs.tag }}
+            ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
             ${{ env.IMAGE }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
