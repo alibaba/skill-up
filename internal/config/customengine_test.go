@@ -5,7 +5,22 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
+
+func TestCustomHTTPConfig_UnmarshalsScalarRequestBody(t *testing.T) {
+	// Regression: request_body was declared map[string]any, so the documented
+	// top-level scalar form `request_body: ${session_input}` failed at YAML
+	// load. It must now accept a scalar value.
+	var h CustomHTTPConfig
+	if err := yaml.Unmarshal([]byte("url: https://x\nrequest_body: ${session_input}\n"), &h); err != nil {
+		t.Fatalf("unmarshal scalar request_body: %v", err)
+	}
+	if h.RequestBody != "${session_input}" {
+		t.Fatalf("RequestBody = %#v, want the scalar string \"${session_input}\"", h.RequestBody)
+	}
+}
 
 func TestResolveCustomEngineEnv_AllForms(t *testing.T) {
 	t.Setenv("CUSTOM_BIN", "/opt/agent")

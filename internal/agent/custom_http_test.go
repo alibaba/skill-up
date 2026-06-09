@@ -131,6 +131,33 @@ func TestCustomAgent_RunHTTP_RequestBodyInjectsSessionInputStructure(t *testing.
 	}
 }
 
+func TestCustomAgent_RunHTTP_ScalarRequestBodyIsSessionInput(t *testing.T) {
+	t.Parallel()
+	// The documented top-level form `request_body: ${session_input}` (a scalar,
+	// not a map) must POST the SessionInput JSON object, not a quoted string.
+	var probe struct {
+		Messages []struct {
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &probe)
+		_, _ = io.WriteString(w, `{"exit_code":0,"final_message":"ok"}`)
+	}))
+	defer srv.Close()
+
+	custom := httpEngine(srv.URL)
+	custom.HTTP.RequestBody = "${session_input}"
+	rt := newCustomTestRuntime(t)
+	if _, err := httpAgent(custom, "").Run(context.Background(), rt, ExecOptions{}, userMessages()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(probe.Messages) != 1 || probe.Messages[0].Content != "review the diff" {
+		t.Fatalf("scalar ${session_input} body did not carry the SessionInput: %#v", probe.Messages)
+	}
+}
+
 func TestCustomAgent_RunHTTP_RequestBodyRendersKwargs(t *testing.T) {
 	t.Parallel()
 	var got map[string]string
