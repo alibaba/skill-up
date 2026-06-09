@@ -237,20 +237,21 @@ func validateEngine(engine EngineConfig) []string {
 func validateCustomEngine(custom *CustomEngineConfig) []string {
 	var errs []string
 
-	// Only the local transport is implemented. The http transport is designed
-	// (see docs/design/custom-engine.md) but rejected here so `skill-up
-	// validate` does not approve a config that every run would fail.
+	// Both the local and http transports are implemented. The http transport
+	// currently supports JSON request/response only; multipart file upload
+	// (engine.custom.http.files) and URL artifact download are follow-ups, so
+	// they are rejected here rather than silently ignored.
 	switch custom.Transport {
 	case "":
-		errs = append(errs, "engine.custom.transport is required (local)")
+		errs = append(errs, "engine.custom.transport is required (local or http)")
 	case customTransportLocal:
 		if custom.Local == nil || custom.Local.Command == "" {
 			errs = append(errs, "engine.custom.local.command is required when transport is local")
 		}
 	case customTransportHTTP:
-		errs = append(errs, "engine.custom.transport: http is not yet implemented; use transport: local")
+		errs = append(errs, validateCustomHTTP(custom.HTTP)...)
 	default:
-		errs = append(errs, fmt.Sprintf("engine.custom.transport must be \"local\" (got %q)", custom.Transport))
+		errs = append(errs, fmt.Sprintf("engine.custom.transport must be \"local\" or \"http\" (got %q)", custom.Transport))
 	}
 
 	if custom.ResponseFormat != "" &&
@@ -272,6 +273,26 @@ func validateCustomEngine(custom *CustomEngineConfig) []string {
 		}
 	}
 
+	return errs
+}
+
+// validateCustomHTTP validates the engine.custom.http block. The http transport
+// supports JSON request/response today; file upload and URL artifact download
+// are follow-ups, so a non-empty files list is rejected as not-yet-implemented.
+func validateCustomHTTP(h *CustomHTTPConfig) []string {
+	if h == nil {
+		return []string{"engine.custom.http.url is required when transport is http"}
+	}
+	var errs []string
+	if h.URL == "" {
+		errs = append(errs, "engine.custom.http.url is required when transport is http")
+	}
+	if h.Method != "" && !strings.EqualFold(h.Method, "POST") {
+		errs = append(errs, fmt.Sprintf("engine.custom.http.method must be POST (got %q)", h.Method))
+	}
+	if len(h.Files) > 0 {
+		errs = append(errs, "engine.custom.http.files (file upload) is not yet implemented")
+	}
 	return errs
 }
 

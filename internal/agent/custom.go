@@ -41,11 +41,16 @@ const (
 	// maxInlineArtifactTotal caps the sum of inline artifact sizes across a
 	// single SessionResult.
 	maxInlineArtifactTotal = 200 * 1024 * 1024
+	// maxHTTPResponseBytes caps how much of an http transport response body is
+	// read, so a misbehaving or malicious agent service cannot exhaust memory
+	// with an unbounded SessionResult payload.
+	maxHTTPResponseBytes = 64 * 1024 * 1024
 )
 
 // CustomAgent implements Agent for user-defined engines configured via
-// engine.custom. Phase 1 supports the local transport; the http transport is
-// designed but not yet implemented. See docs/design/custom-engine.md.
+// engine.custom. The local transport is fully supported; the http transport
+// supports JSON request/response, with multipart file upload and URL artifact
+// download still pending. See docs/design/custom-engine.md.
 //
 // CustomAgent embeds BaseAgent directly (not CLIAgent) so it inherits only
 // shared agent infrastructure — Name, credential helpers, exec-options merge,
@@ -160,16 +165,16 @@ func (a *CustomAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mes
 	return a.assembleResult(ctx, rt, opts, prep, outcome)
 }
 
-// selectTransport maps engine.custom.transport to its implementation. The http
-// transport is designed but not yet implemented; selecting it returns the
-// explicit error rather than a transport. When http lands, this case returns an
-// &httpTransport{} and CustomAgent.Run is otherwise unchanged.
+// selectTransport maps engine.custom.transport to its implementation: the
+// local transport runs a command in the runtime, the http transport calls a
+// remote agent service. Both produce a transportOutcome that CustomAgent.Run
+// hands to the shared assembleResult.
 func (a *CustomAgent) selectTransport(custom *config.CustomEngineConfig) (customTransport, error) {
 	switch custom.Transport {
 	case customTransportLocal:
 		return &localTransport{a: a}, nil
 	case customTransportHTTP:
-		return nil, errors.New("custom engine http transport is not yet implemented")
+		return &httpTransport{a: a}, nil
 	default:
 		return nil, fmt.Errorf("custom engine transport %q is not supported", custom.Transport)
 	}
