@@ -64,14 +64,13 @@ outputs:
     description: 'Directory containing the JSON / JUnit / HTML reports.'
 
 # Docker container action: the prebuilt image ships the three engines + skill-up
-# + the action code, so the caller just `uses:` it.
-# IMAGE SOURCE: currently a public staging image; once .github/workflows/
-# build-runner-image.yml has published ghcr.io/<this-org>/skill-up-runner, point
-# this at that tag. The image tag should be bumped together with releases.
+# + the action code, so the caller just `uses:` it. The image is published to
+# this repo's own org namespace by .github/workflows/build-runner-image.yml;
+# bump the tag together with releases (pin by @sha256 digest for reproducibility).
 # NOTE: Docker container actions run on Linux runners only.
 runs:
   using: docker
-  image: docker://ghcr.io/zpzjzj/skill-up-runner:v0.1.0
+  image: docker://ghcr.io/alibaba/skill-up-runner:v0.1.0
   args:
     - --engine
     - ${{ inputs.engine }}
