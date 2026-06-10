@@ -367,39 +367,37 @@ func TestCustomAgent_RunHTTP_OptionalMissingSkipped(t *testing.T) {
 	}
 }
 
-func TestCustomAgent_RunHTTP_MultipartNewlineFilenameStaysOneEntry(t *testing.T) {
-	t.Parallel()
-	// Regression: with newline-separated `find` output a filename containing a
-	// newline would split into a bogus (possibly absolute) entry. -print0 keeps
-	// it a single in-workspace entry; assert it uploads intact with no escape.
-	var files map[string]string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, files = captureMultipart(t, r)
-		_, _ = io.WriteString(w, `{"exit_code":0,"final_message":"ok"}`)
-	}))
-	defer srv.Close()
+// fakeFindRuntime is a minimal Runtime whose Exec returns canned `find` output,
+// used to test that listWorkspaceFiles/expandHTTPFiles filter unsafe entries
+// without needing real (and non-portable) exotic filenames. Only Exec and
+// Workspace are exercised; other methods would panic via the nil embedded
+// interface if called.
+type fakeFindRuntime struct {
+	Runtime
 
-	rt := newCustomTestRuntime(t)
-	weird := "weird\n/etc/passwd"
-	writeWorkspaceFile(t, rt, weird, "IN-WORKSPACE")
-	custom := httpEngine(srv.URL)
-	custom.HTTP.Files = []config.CustomHTTPFile{{Path: "**/*"}}
-	if _, err := httpAgent(custom, "").Run(context.Background(), rt, ExecOptions{}, userMessages()); err != nil {
-		t.Fatalf("Run: %v", err)
+	workspace string
+	findOut   string
+}
+
+func (f fakeFindRuntime) Workspace() string { return f.workspace }
+func (f fakeFindRuntime) Exec(_ context.Context, _ string, _ ExecOptions) (ExecResult, error) {
+	return ExecResult{Stdout: f.findOut}, nil
+}
+
+func TestExpandHTTPFiles_FiltersUnsafeListingEntries(t *testing.T) {
+	t.Parallel()
+	// Simulated `find -print0` output: a safe relative file, an absolute entry
+	// (what a newline split would have produced without -print0), and a name
+	// containing a newline (cannot be a safe multipart filename). Only the safe
+	// relative path must survive — the others are filtered before any download.
+	out := "./src/a.go\x00/etc/passwd\x00./bad\nname.txt\x00"
+	rt := fakeFindRuntime{workspace: "/ws", findOut: out}
+	got, err := expandHTTPFiles(context.Background(), rt, []config.CustomHTTPFile{{Path: "**/*"}})
+	if err != nil {
+		t.Fatalf("expandHTTPFiles: %v", err)
 	}
-	// Exactly one part (no newline split), carrying the in-workspace content,
-	// and no separate off-workspace entry. The header encodes the newline, so
-	// match on content rather than the exact (encoded) filename.
-	if len(files) != 1 {
-		t.Fatalf("newline filename should be a single upload entry, got: %#v", files)
-	}
-	for name, content := range files {
-		if content != "IN-WORKSPACE" {
-			t.Fatalf("uploaded content = %q, want IN-WORKSPACE", content)
-		}
-		if name == "/etc/passwd" {
-			t.Fatalf("newline split produced an off-workspace entry: %q", name)
-		}
+	if len(got) != 1 || got[0] != "src/a.go" {
+		t.Fatalf("expandHTTPFiles = %v, want [src/a.go] (absolute and CR/LF entries filtered)", got)
 	}
 }
 

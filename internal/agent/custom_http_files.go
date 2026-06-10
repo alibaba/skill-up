@@ -176,8 +176,10 @@ func listWorkspaceFiles(ctx context.Context, rt Runtime) ([]string, error) {
 		}
 		rel := strings.TrimPrefix(entry, "./")
 		// Defence in depth: never surface an absolute or ..-bearing entry so it
-		// can never reach DownloadFile, regardless of how find behaves.
-		if rel != "" && config.WorkspaceRelPathSafe(rel) {
+		// can never reach DownloadFile, regardless of how find behaves. Also drop
+		// names with a CR/LF — they cannot be safely written into a multipart
+		// Content-Disposition filename (header corruption / injection).
+		if rel != "" && config.WorkspaceRelPathSafe(rel) && !strings.ContainsAny(rel, "\r\n") {
 			files = append(files, rel)
 		}
 	}
