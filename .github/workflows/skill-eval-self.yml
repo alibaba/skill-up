@@ -1,13 +1,14 @@
 name: Self-eval (dogfood the action)
 
 # Dogfoods the Agent Skill Eval action (action.yml) against this repo's own
-# skill-upper skill: it runs the action exactly as a downstream user would, so a
-# green check here is the action's end-to-end integration test.
+# skill-upper skill — once per engine (claude_code / codex / qodercli) — so a
+# green check here is the action's end-to-end integration test for every engine
+# it claims to support.
 #
 # Uses `uses: ./` (the action from this checkout) so it validates the PR's own
-# version before any release tag exists. Model traffic is pinned to dashscope's
-# qwen3.6-plus (Anthropic-compat endpoint) — same as the repo's e2e jobs — so it
-# never calls real Claude.
+# version before any release tag exists. All model traffic is pinned to
+# dashscope's qwen3.6-plus — same as the repo's e2e jobs — so no path ever
+# calls real Claude / real GPT, regardless of engine.
 
 on:
   pull_request:
@@ -20,19 +21,41 @@ on:
 
 jobs:
   dogfood:
-    name: Eval skill-upper via the action
+    name: Eval skill-upper (${{ matrix.engine }})
     runs-on: ubuntu-latest      # Docker container action — Linux only
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # claude_code / codex share the dashscope key; the action routes it to
+          # ANTHROPIC_* / OPENAI_* per engine and prefixes codex's model ref.
+          - engine: claude_code
+            provider: dashscope
+            model: qwen3.6-plus
+            api-key-secret: DASHSCOPE_API_KEY
+          - engine: codex
+            provider: dashscope
+            model: qwen3.6-plus
+            api-key-secret: DASHSCOPE_API_KEY
+          # qodercli authenticates with a Qoder PAT; no base-url/model routing.
+          - engine: qodercli
+            provider: ''
+            model: ''
+            api-key-secret: QODER_ACCESS_TOKEN
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       # Fork PRs run without repository secrets; skip cleanly instead of 401ing.
+      # The judge hop always needs the dashscope key, so require it for every
+      # engine; qodercli additionally needs its own PAT.
       - name: Check secret availability
         id: secrets
         env:
+          ENGINE_KEY: ${{ secrets[matrix.api-key-secret] }}
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
         run: |
-          if [ -z "$DASHSCOPE_API_KEY" ]; then
-            echo "::notice::Skipping self-eval: DASHSCOPE_API_KEY not provisioned (likely a fork PR)."
+          if [ -z "$ENGINE_KEY" ] || [ -z "$DASHSCOPE_API_KEY" ]; then
+            echo "::notice::Skipping self-eval (${{ matrix.engine }}): required secret not provisioned (likely a fork PR)."
             echo "available=false" >> "$GITHUB_OUTPUT"
           else
             echo "available=true" >> "$GITHUB_OUTPUT"
@@ -42,18 +65,22 @@ jobs:
         if: steps.secrets.outputs.available == 'true'
         id: eval
         env:
-          # Pin EVERY claude_code hop — the case agent AND the agent_judge — to
-          # qwen3.6-plus on dashscope's Anthropic-compat endpoint (same as the
-          # repo's e2e jobs). --model only pins the case agent; the judge reads
-          # ANTHROPIC_MODEL, so without this it falls back to a real-Claude model
-          # the dashscope endpoint rejects with 400.
+          # skill-upper's cases score with agent_judge — a separate claude_code
+          # invocation regardless of the case engine — so every matrix entry
+          # needs the anthropic-protocol creds + model pin for the judge hop
+          # (the action only injects env for the *selected* engine). Mirrors the
+          # repo's e2e full-LLM job: pin every hop to qwen3.6-plus on dashscope.
+          ANTHROPIC_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.DASHSCOPE_API_KEY }}
+          ANTHROPIC_BASE_URL: https://dashscope.aliyuncs.com/apps/anthropic
           ANTHROPIC_MODEL: qwen3.6-plus
+          OPENAI_MODEL: qwen3.6-plus
         uses: ./
         with:
-          engine: claude_code
-          provider: dashscope
-          model: qwen3.6-plus
-          api-key: ${{ secrets.DASHSCOPE_API_KEY }}
+          engine: ${{ matrix.engine }}
+          provider: ${{ matrix.provider }}
+          model: ${{ matrix.model }}
+          api-key: ${{ secrets[matrix.api-key-secret] }}
           # Point at the skill dir; skill-up finds evals/eval.yaml inside and
           # resolves cases (evals/cases/*.yaml) relative to the skill root.
           skill-target: skills/skill-upper
@@ -68,6 +95,6 @@ jobs:
         if: always() && steps.secrets.outputs.available == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: skill-upper-self-eval
+          name: skill-upper-self-eval-${{ matrix.engine }}
           path: skill-up-workspace/**
           if-no-files-found: warn
