@@ -93,6 +93,25 @@ jobs:
             echo "available=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # qodercli 1.x exits 0 even on auth failure, so skill-up can't tell a bad
+      # token from a good one — surfacing as empty agent output. This probe makes
+      # the real auth state visible (token length only, never the value; GitHub
+      # also masks the secret). Read its log to know if the token is the problem.
+      - name: qoder auth diagnostic
+        if: matrix.engine == 'qodercli' && steps.secrets.outputs.available == 'true'
+        continue-on-error: true
+        env:
+          QODER_PERSONAL_ACCESS_TOKEN: ${{ secrets.QODER_ACCESS_TOKEN }}
+        run: |
+          docker run --rm -e QODER_PERSONAL_ACCESS_TOKEN \
+            --entrypoint bash "ghcr.io/${{ github.repository_owner }}/skill-up-runner:v0.1.0" -c '
+              echo "version: $(qodercli --version 2>&1 | tail -1)"
+              echo "token present: $([ -n "$QODER_PERSONAL_ACCESS_TOKEN" ] && echo yes || echo NO) (len=${#QODER_PERSONAL_ACCESS_TOKEN})"
+              echo "--- qodercli -p probe ---"
+              qodercli --permission-mode=bypass_permissions -p "Reply with exactly: PONG" 2>&1 | head -20
+              echo "(probe exit=$?)"
+            '
+
       - name: Run skill-upper eval via the action
         if: steps.secrets.outputs.available == 'true'
         id: eval
