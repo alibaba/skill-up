@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Custom Engine `http` transport (`engine.custom.transport: http`): calls a
+  remote (or local) HTTP agent service, POSTing the `SessionInput` and parsing
+  the `SessionResult` from the response. Renders `${...}` references in
+  `http.url` / `http.headers` / `http.request_body`; a `request_body` field
+  whose value is exactly `${session_input}`, `${messages}`, or `${kwargs}` is
+  injected as a JSON structure rather than a string. A non-2xx status is treated
+  as an engine execution error, and the API key is rejected in the URL (use a
+  header or the request body instead) and masked in responses. This is the JSON
+  request/response core; multipart file upload (`http.files`) and URL artifact
+  download are follow-ups and are currently rejected as not-yet-implemented.
+
 ## [0.2.4] - 2026-06-03
 
 ### Added

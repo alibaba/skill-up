@@ -5,7 +5,22 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
+
+func TestCustomHTTPConfig_UnmarshalsScalarRequestBody(t *testing.T) {
+	// Regression: request_body was declared map[string]any, so the documented
+	// top-level scalar form `request_body: ${session_input}` failed at YAML
+	// load. It must now accept a scalar value.
+	var h CustomHTTPConfig
+	if err := yaml.Unmarshal([]byte("url: https://x\nrequest_body: ${session_input}\n"), &h); err != nil {
+		t.Fatalf("unmarshal scalar request_body: %v", err)
+	}
+	if h.RequestBody != "${session_input}" {
+		t.Fatalf("RequestBody = %#v, want the scalar string \"${session_input}\"", h.RequestBody)
+	}
+}
 
 func TestResolveCustomEngineEnv_AllForms(t *testing.T) {
 	t.Setenv("CUSTOM_BIN", "/opt/agent")
@@ -114,16 +129,16 @@ func TestResolveCustomEngineEnv_BuiltinEngineSkipsResolution(t *testing.T) {
 
 func TestResolveCustomEngineConfig_ValidatesOverriddenEngine(t *testing.T) {
 	// Simulates a --engine override turning a built-in engine (whose custom
-	// block was skipped at load) into a custom one with an unrunnable transport.
+	// block was skipped at load) into a custom one with an invalid config.
 	cfg := &EvalConfig{
 		Engine: EngineConfig{
 			Name:   "my-agent",
-			Custom: &CustomEngineConfig{Transport: "http", HTTP: &CustomHTTPConfig{URL: "https://x"}},
+			Custom: &CustomEngineConfig{Transport: "http", HTTP: &CustomHTTPConfig{}},
 		},
 	}
 	err := ResolveCustomEngineConfig(cfg)
-	if err == nil || !strings.Contains(err.Error(), "http is not yet implemented") {
-		t.Fatalf("error = %v, want the http transport to be rejected", err)
+	if err == nil || !strings.Contains(err.Error(), "http.url is required") {
+		t.Fatalf("error = %v, want the missing http.url to be rejected", err)
 	}
 }
 
@@ -465,9 +480,19 @@ func TestResolveCustomEngineConfig_CustomTransport(t *testing.T) {
 			wantError: "engine.custom.response_format must be one of",
 		},
 		{
-			name:      "http not yet implemented",
-			custom:    &CustomEngineConfig{Transport: "http", HTTP: &CustomHTTPConfig{URL: "https://x"}},
-			wantError: "http is not yet implemented",
+			name:      "http missing url",
+			custom:    &CustomEngineConfig{Transport: "http", HTTP: &CustomHTTPConfig{}},
+			wantError: "engine.custom.http.url is required",
+		},
+		{
+			name:      "http non-POST method",
+			custom:    &CustomEngineConfig{Transport: "http", HTTP: &CustomHTTPConfig{URL: "https://x", Method: "GET"}},
+			wantError: "engine.custom.http.method must be POST",
+		},
+		{
+			name:      "http file upload not yet implemented",
+			custom:    &CustomEngineConfig{Transport: "http", HTTP: &CustomHTTPConfig{URL: "https://x", Files: []CustomHTTPFile{{Path: "diff.patch"}}}},
+			wantError: "engine.custom.http.files (file upload) is not yet implemented",
 		},
 	}
 	for _, tc := range tests {
@@ -479,6 +504,16 @@ func TestResolveCustomEngineConfig_CustomTransport(t *testing.T) {
 				t.Fatalf("error = %v, want %q", err, tc.wantError)
 			}
 		})
+	}
+}
+
+func TestResolveCustomEngineConfig_ValidCustomHTTP(t *testing.T) {
+	cfg := customEngineEvalConfig("my-agent", &CustomEngineConfig{
+		Transport: "http",
+		HTTP:      &CustomHTTPConfig{URL: "https://example.com/run"},
+	})
+	if err := ResolveCustomEngineConfig(cfg); err != nil {
+		t.Fatalf("valid http config rejected: %v", err)
 	}
 }
 

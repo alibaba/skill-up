@@ -128,13 +128,19 @@ type CustomLocalConfig struct {
 }
 
 // CustomHTTPConfig configures the http transport: a remote or local HTTP agent
-// service. The implementation lands in a follow-up phase.
+// service. JSON request/response is implemented; multipart file upload (Files)
+// is not yet wired and is rejected at validation.
 type CustomHTTPConfig struct {
-	URL         string            `yaml:"url"`
-	Method      string            `yaml:"method,omitempty"` // POST
-	Headers     map[string]string `yaml:"headers,omitempty"`
-	Files       []CustomHTTPFile  `yaml:"files,omitempty"`
-	RequestBody map[string]any    `yaml:"request_body,omitempty"`
+	URL     string            `yaml:"url"`
+	Method  string            `yaml:"method,omitempty"` // POST
+	Headers map[string]string `yaml:"headers,omitempty"`
+	Files   []CustomHTTPFile  `yaml:"files,omitempty"`
+	// RequestBody is an arbitrary YAML value: a map, a sequence, or a scalar
+	// such as `request_body: ${session_input}`. It is rendered by the http
+	// transport (see renderBodyValue), which injects ${session_input} /
+	// ${messages} / ${kwargs} as JSON structures. Declared as `any` so yaml.v3
+	// can unmarshal a top-level scalar, not only a map.
+	RequestBody any `yaml:"request_body,omitempty"`
 }
 
 // CustomHTTPFile declares a workspace file (or glob) uploaded with an HTTP request.

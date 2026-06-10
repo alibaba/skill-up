@@ -302,8 +302,11 @@ func resolveHTTPEnv(h *CustomHTTPConfig) []string {
 	}
 	if rb, err := resolveEnvRefsInAny(h.RequestBody); err != nil {
 		errs = append(errs, fmt.Sprintf("engine.custom.http.request_body: %s", err))
-	} else if m, ok := rb.(map[string]any); ok {
-		h.RequestBody = m
+	} else {
+		// RequestBody is any (map, sequence, or scalar), so write the resolved
+		// value back unconditionally — a scalar like ${session_input} would be
+		// dropped by a map-only type assertion.
+		h.RequestBody = rb
 	}
 	return errs
 }

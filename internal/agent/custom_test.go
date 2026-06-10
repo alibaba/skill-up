@@ -768,20 +768,6 @@ echo '{"exit_code":0,"final_message":"same-path-ok"}' > '${output_file}'`},
 	}
 }
 
-func TestCustomAgent_RunHTTP_NotImplemented(t *testing.T) {
-	t.Parallel()
-	rt := newCustomTestRuntime(t)
-	ag := customLocalAgent(&config.CustomEngineConfig{
-		Transport: "http",
-		HTTP:      &config.CustomHTTPConfig{URL: "https://example.com"},
-	})
-
-	_, err := ag.Run(context.Background(), rt, ExecOptions{}, userMessages())
-	if err == nil || !strings.Contains(err.Error(), "not yet implemented") {
-		t.Fatalf("error = %v, want not-implemented error", err)
-	}
-}
-
 func TestRenderTemplate(t *testing.T) {
 	t.Setenv("RT_TEST_ENV", "env-value")
 
