@@ -133,6 +133,9 @@ jobs:
           provider: ${{ matrix.provider }}
           model: ${{ matrix.model }}
           api-key: ${{ secrets[matrix.api-key-secret] }}
+          # Run cases concurrently so the larger per-case timeout (600s, needed
+          # by the slower codex coder model) doesn't blow up wall-clock.
+          parallelism: '3'
           # Point at the skill dir; skill-up finds evals/eval.yaml inside and
           # resolves cases (evals/cases/*.yaml) relative to the skill root.
           skill-target: skills/skill-upper
