@@ -490,9 +490,14 @@ func TestResolveCustomEngineConfig_CustomTransport(t *testing.T) {
 			wantError: "engine.custom.http.method must be POST",
 		},
 		{
-			name:      "http file upload not yet implemented",
-			custom:    &CustomEngineConfig{Transport: "http", HTTP: &CustomHTTPConfig{URL: "https://x", Files: []CustomHTTPFile{{Path: "diff.patch"}}}},
-			wantError: "engine.custom.http.files (file upload) is not yet implemented",
+			name:      "http file path escapes workspace",
+			custom:    &CustomEngineConfig{Transport: "http", HTTP: &CustomHTTPConfig{URL: "https://x", Files: []CustomHTTPFile{{Path: "../escape"}}}},
+			wantError: "must be a non-empty relative path inside the workspace",
+		},
+		{
+			name:      "http file path absolute",
+			custom:    &CustomEngineConfig{Transport: "http", HTTP: &CustomHTTPConfig{URL: "https://x", Files: []CustomHTTPFile{{Path: "/etc/passwd"}}}},
+			wantError: "must be a non-empty relative path inside the workspace",
 		},
 	}
 	for _, tc := range tests {
@@ -510,10 +515,13 @@ func TestResolveCustomEngineConfig_CustomTransport(t *testing.T) {
 func TestResolveCustomEngineConfig_ValidCustomHTTP(t *testing.T) {
 	cfg := customEngineEvalConfig("my-agent", &CustomEngineConfig{
 		Transport: "http",
-		HTTP:      &CustomHTTPConfig{URL: "https://example.com/run"},
+		HTTP: &CustomHTTPConfig{
+			URL:   "https://example.com/run",
+			Files: []CustomHTTPFile{{Path: "diff.patch"}, {Path: "src/**/*.go"}},
+		},
 	})
 	if err := ResolveCustomEngineConfig(cfg); err != nil {
-		t.Fatalf("valid http config rejected: %v", err)
+		t.Fatalf("valid http config (with files) rejected: %v", err)
 	}
 }
 

@@ -15,9 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose value is exactly `${session_input}`, `${messages}`, or `${kwargs}` is
   injected as a JSON structure rather than a string. A non-2xx status is treated
   as an engine execution error, and the API key is rejected in the URL (use a
-  header or the request body instead) and masked in responses. This is the JSON
-  request/response core; multipart file upload (`http.files`) and URL artifact
-  download are follow-ups and are currently rejected as not-yet-implemented.
+  header or the request body instead) and masked in responses.
+- Custom Engine `http` transport multipart file upload (`engine.custom.http.files`):
+  when files are declared the request becomes `multipart/form-data` — the JSON
+  body is sent as the `payload` field and each matched workspace file as a
+  `files` part (the part filename is the workspace-relative path). Paths may be
+  exact or doublestar globs (`*`, `**`), are confined to the workspace, and only
+  regular files are uploaded; `required: true` (the default) errors when an
+  entry matches nothing, `required: false` skips it. URL artifact download in
+  the result remains a follow-up.
 
 ## [0.2.4] - 2026-06-03
 

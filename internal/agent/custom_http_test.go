@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"mime"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -228,14 +231,186 @@ func TestCustomAgent_RunHTTP_RejectsNonPostMethod(t *testing.T) {
 	}
 }
 
-func TestCustomAgent_RunHTTP_FilesNotImplemented(t *testing.T) {
+func writeWorkspaceFile(t *testing.T, rt Runtime, rel, content string) {
+	t.Helper()
+	p := filepath.Join(rt.Workspace(), filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// captureMultipart parses a multipart request into the payload field and a
+// filename -> content map for the `files` parts.
+func captureMultipart(t *testing.T, r *http.Request) (payload string, files map[string]string) {
+	t.Helper()
+	mr, err := r.MultipartReader()
+	if err != nil {
+		t.Fatalf("not a multipart request: %v", err)
+	}
+	files = map[string]string{}
+	for {
+		part, perr := mr.NextPart()
+		if perr == io.EOF {
+			break
+		}
+		if perr != nil {
+			t.Fatalf("read multipart part: %v", perr)
+		}
+		data, _ := io.ReadAll(part)
+		// part.FileName() returns filepath.Base for receiver-side safety; read
+		// the raw disposition filename to verify the full workspace-relative
+		// path is on the wire.
+		_, params, _ := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
+		switch part.FormName() {
+		case "payload":
+			payload = string(data)
+		case "files":
+			files[params["filename"]] = string(data)
+		}
+	}
+	return payload, files
+}
+
+func TestCustomAgent_RunHTTP_MultipartExactFile(t *testing.T) {
 	t.Parallel()
-	custom := httpEngine("http://127.0.0.1:0")
-	custom.HTTP.Files = []config.CustomHTTPFile{{Path: "diff.patch"}}
+	var (
+		contentType string
+		payload     string
+		files       map[string]string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		contentType = r.Header.Get("Content-Type")
+		payload, files = captureMultipart(t, r)
+		_, _ = io.WriteString(w, `{"exit_code":0,"final_message":"ok"}`)
+	}))
+	defer srv.Close()
+
 	rt := newCustomTestRuntime(t)
+	writeWorkspaceFile(t, rt, "diff.patch", "DIFF-CONTENT")
+	custom := httpEngine(srv.URL)
+	custom.HTTP.Files = []config.CustomHTTPFile{{Path: "diff.patch"}}
+	if _, err := httpAgent(custom, "").Run(context.Background(), rt, ExecOptions{}, userMessages()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.HasPrefix(contentType, "multipart/form-data") {
+		t.Fatalf("Content-Type = %q, want multipart/form-data", contentType)
+	}
+	if files["diff.patch"] != "DIFF-CONTENT" {
+		t.Fatalf("file part = %#v, want diff.patch -> DIFF-CONTENT", files)
+	}
+	if !strings.Contains(payload, "review the diff") {
+		t.Fatalf("payload field did not carry the SessionInput: %q", payload)
+	}
+}
+
+func TestCustomAgent_RunHTTP_MultipartGlobExcludesDirsAndNonMatches(t *testing.T) {
+	t.Parallel()
+	var files map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, files = captureMultipart(t, r)
+		_, _ = io.WriteString(w, `{"exit_code":0,"final_message":"ok"}`)
+	}))
+	defer srv.Close()
+
+	rt := newCustomTestRuntime(t)
+	writeWorkspaceFile(t, rt, "src/a.go", "A")
+	writeWorkspaceFile(t, rt, "src/b.go", "B")
+	writeWorkspaceFile(t, rt, "README.md", "readme")
+	custom := httpEngine(srv.URL)
+	custom.HTTP.Files = []config.CustomHTTPFile{{Path: "src/*.go"}}
+	if _, err := httpAgent(custom, "").Run(context.Background(), rt, ExecOptions{}, userMessages()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(files) != 2 || files["src/a.go"] != "A" || files["src/b.go"] != "B" {
+		t.Fatalf("glob upload = %#v, want exactly src/a.go and src/b.go", files)
+	}
+	if _, ok := files["README.md"]; ok {
+		t.Fatalf("non-matching README.md should not be uploaded: %#v", files)
+	}
+	if _, ok := files["src"]; ok {
+		t.Fatalf("directory src should never be uploaded as a part: %#v", files)
+	}
+}
+
+func TestCustomAgent_RunHTTP_RequiredFileMissingErrors(t *testing.T) {
+	t.Parallel()
+	rt := newCustomTestRuntime(t)
+	custom := httpEngine("http://127.0.0.1:0")
+	custom.HTTP.Files = []config.CustomHTTPFile{{Path: "nope.txt"}} // required defaults to true
 	_, err := httpAgent(custom, "").Run(context.Background(), rt, ExecOptions{}, userMessages())
-	if err == nil || !strings.Contains(err.Error(), "not yet implemented") {
-		t.Fatalf("expected files-not-implemented error, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "matched no files") {
+		t.Fatalf("expected required-missing error, got: %v", err)
+	}
+}
+
+func TestCustomAgent_RunHTTP_OptionalMissingSkipped(t *testing.T) {
+	t.Parallel()
+	var files map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, files = captureMultipart(t, r)
+		_, _ = io.WriteString(w, `{"exit_code":0,"final_message":"ok"}`)
+	}))
+	defer srv.Close()
+
+	rt := newCustomTestRuntime(t)
+	optional := false
+	custom := httpEngine(srv.URL)
+	custom.HTTP.Files = []config.CustomHTTPFile{{Path: "nope.txt", Required: &optional}}
+	if _, err := httpAgent(custom, "").Run(context.Background(), rt, ExecOptions{}, userMessages()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("optional missing file should be skipped, got parts: %#v", files)
+	}
+}
+
+func TestCustomAgent_RunHTTP_MultipartNewlineFilenameStaysOneEntry(t *testing.T) {
+	t.Parallel()
+	// Regression: with newline-separated `find` output a filename containing a
+	// newline would split into a bogus (possibly absolute) entry. -print0 keeps
+	// it a single in-workspace entry; assert it uploads intact with no escape.
+	var files map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, files = captureMultipart(t, r)
+		_, _ = io.WriteString(w, `{"exit_code":0,"final_message":"ok"}`)
+	}))
+	defer srv.Close()
+
+	rt := newCustomTestRuntime(t)
+	weird := "weird\n/etc/passwd"
+	writeWorkspaceFile(t, rt, weird, "IN-WORKSPACE")
+	custom := httpEngine(srv.URL)
+	custom.HTTP.Files = []config.CustomHTTPFile{{Path: "**/*"}}
+	if _, err := httpAgent(custom, "").Run(context.Background(), rt, ExecOptions{}, userMessages()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// Exactly one part (no newline split), carrying the in-workspace content,
+	// and no separate off-workspace entry. The header encodes the newline, so
+	// match on content rather than the exact (encoded) filename.
+	if len(files) != 1 {
+		t.Fatalf("newline filename should be a single upload entry, got: %#v", files)
+	}
+	for name, content := range files {
+		if content != "IN-WORKSPACE" {
+			t.Fatalf("uploaded content = %q, want IN-WORKSPACE", content)
+		}
+		if name == "/etc/passwd" {
+			t.Fatalf("newline split produced an off-workspace entry: %q", name)
+		}
+	}
+}
+
+func TestCustomAgent_RunHTTP_RejectsUnsafeFilePath(t *testing.T) {
+	t.Parallel()
+	rt := newCustomTestRuntime(t)
+	custom := httpEngine("http://127.0.0.1:0")
+	custom.HTTP.Files = []config.CustomHTTPFile{{Path: "../escape.txt"}}
+	_, err := httpAgent(custom, "").Run(context.Background(), rt, ExecOptions{}, userMessages())
+	if err == nil || !strings.Contains(err.Error(), "relative path inside the workspace") {
+		t.Fatalf("expected unsafe-path rejection, got: %v", err)
 	}
 }
 

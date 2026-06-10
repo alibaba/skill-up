@@ -19,9 +19,9 @@ import (
 // session preparation and result assembly live on CustomAgent, reused via the
 // back-reference.
 //
-// This transport currently supports JSON request/response only. Multipart file
-// upload (engine.custom.http.files) and URL artifact download are follow-ups; a
-// non-empty files list is rejected as not-yet-implemented.
+// It supports JSON request/response and multipart file upload
+// (engine.custom.http.files). URL artifact download in the result is a
+// follow-up.
 type httpTransport struct {
 	a *CustomAgent
 }
@@ -31,7 +31,7 @@ type httpTransport struct {
 // URL, secret in URL, unrenderable template, files configured) is returned as
 // run's error so the run is abandoned; a transport/status failure is carried in
 // transportOutcome.execErr so a partial SessionResult can still be assembled.
-func (t *httpTransport) run(ctx context.Context, _ Runtime, _ ExecOptions, prep *customRunPrep) (*transportOutcome, error) {
+func (t *httpTransport) run(ctx context.Context, rt Runtime, _ ExecOptions, prep *customRunPrep) (*transportOutcome, error) {
 	a := t.a
 	custom := prep.custom
 	// Guard against a nil/unsupported http block: a `--engine` override can
@@ -39,9 +39,6 @@ func (t *httpTransport) run(ctx context.Context, _ Runtime, _ ExecOptions, prep 
 	// built-in engine names).
 	if custom.HTTP == nil || custom.HTTP.URL == "" {
 		return nil, errors.New("engine.custom.http.url is required when transport is http")
-	}
-	if len(custom.HTTP.Files) > 0 {
-		return nil, errors.New("engine.custom.http.files (file upload) is not yet implemented")
 	}
 
 	url, err := renderTemplate(custom.HTTP.URL, prep.vars)
@@ -67,11 +64,6 @@ func (t *httpTransport) run(ctx context.Context, _ Runtime, _ ExecOptions, prep 
 		return nil, err
 	}
 
-	headers, err := renderTemplateMap(custom.HTTP.Headers, prep.vars)
-	if err != nil {
-		return nil, fmt.Errorf("render http.headers: %w", err)
-	}
-
 	// Enforce the custom timeout via a context deadline (mirrors the local
 	// transport); the http.Client.Timeout is a backstop for the case where the
 	// transport ignores ctx.
@@ -84,18 +76,50 @@ func (t *httpTransport) run(ctx context.Context, _ Runtime, _ ExecOptions, prep 
 		defer cancel()
 	}
 
-	req, err := http.NewRequestWithContext(reqCtx, method, url, bytes.NewReader(body))
+	req, err := t.buildRequest(ctx, reqCtx, rt, prep, method, url, body)
+	if err != nil {
+		return nil, err
+	}
+	return t.doRequest(&http.Client{Timeout: timeout}, req), nil
+}
+
+// buildRequest constructs the HTTP request. With files configured the request
+// is multipart/form-data — the JSON body becomes the `payload` field and each
+// matched workspace file a `files` part; otherwise it is a plain JSON body.
+// reqCtx carries the per-request deadline; ctx is used for reading workspace
+// files. headers are rendered and applied, and the multipart Content-Type (with
+// boundary) wins over any user-supplied one.
+func (t *httpTransport) buildRequest(ctx, reqCtx context.Context, rt Runtime, prep *customRunPrep, method, url string, jsonBody []byte) (*http.Request, error) {
+	custom := prep.custom
+	reqBody := io.Reader(bytes.NewReader(jsonBody))
+	contentType := ""
+	if len(custom.HTTP.Files) > 0 {
+		mpBody, ct, mErr := t.buildMultipartBody(ctx, rt, custom.HTTP, jsonBody)
+		if mErr != nil {
+			return nil, mErr
+		}
+		reqBody, contentType = bytes.NewReader(mpBody), ct
+	}
+
+	req, err := http.NewRequestWithContext(reqCtx, method, url, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("build http request: %w", err)
+	}
+
+	headers, err := renderTemplateMap(custom.HTTP.Headers, prep.vars)
+	if err != nil {
+		return nil, fmt.Errorf("render http.headers: %w", err)
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	if req.Header.Get("Content-Type") == "" {
+	switch {
+	case contentType != "":
+		req.Header.Set("Content-Type", contentType)
+	case req.Header.Get("Content-Type") == "":
 		req.Header.Set("Content-Type", "application/json")
 	}
-
-	return t.doRequest(&http.Client{Timeout: timeout}, req), nil
+	return req, nil
 }
 
 // doRequest performs the request and maps the response onto a transportOutcome.
