@@ -20,8 +20,9 @@ import (
 // back-reference.
 //
 // This transport currently supports JSON request/response only. Multipart file
-// upload (engine.custom.http.files) and URL artifact download are follow-ups; a
-// non-empty files list is rejected as not-yet-implemented.
+// upload (engine.custom.http.files) is a follow-up; a non-empty files list is
+// rejected as not-yet-implemented. Downloading result artifacts declared via a
+// `url` is handled transport-agnostically in CustomAgent.collectArtifacts.
 type httpTransport struct {
 	a *CustomAgent
 }
