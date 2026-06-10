@@ -41,17 +41,28 @@ jobs:
       - name: Run skill-upper eval via the action
         if: steps.secrets.outputs.available == 'true'
         id: eval
+        env:
+          # Pin EVERY claude_code hop — the case agent AND the agent_judge — to
+          # qwen3.6-plus on dashscope's Anthropic-compat endpoint (same as the
+          # repo's e2e jobs). --model only pins the case agent; the judge reads
+          # ANTHROPIC_MODEL, so without this it falls back to a real-Claude model
+          # the dashscope endpoint rejects with 400.
+          ANTHROPIC_MODEL: qwen3.6-plus
         uses: ./
         with:
           engine: claude_code
-          # claude_code + dashscope -> Anthropic-compat endpoint; model pinned to
-          # qwen3.6-plus so no path accidentally calls real Claude.
           provider: dashscope
           model: qwen3.6-plus
           api-key: ${{ secrets.DASHSCOPE_API_KEY }}
           # Point at the skill dir; skill-up finds evals/eval.yaml inside and
           # resolves cases (evals/cases/*.yaml) relative to the skill root.
           skill-target: skills/skill-upper
+
+      - name: Make reports readable
+        # The Docker container action runs as root, so report files land
+        # root-owned; relax perms before the runner-user upload step reads them.
+        if: always() && steps.secrets.outputs.available == 'true'
+        run: sudo chmod -R a+rX "$GITHUB_WORKSPACE/skill-up-workspace" || true
 
       - name: Upload eval report
         if: always() && steps.secrets.outputs.available == 'true'

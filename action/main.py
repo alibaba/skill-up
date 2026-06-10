@@ -115,6 +115,27 @@ def engine_env(engine, api_key, base_url):
     return env
 
 
+def engine_model_env(engine, model):
+    """Pin the engine-scoped MODEL env when an explicit ``model`` override is set.
+
+    ``skill-up run --model`` sets the model for the primary case engine, but an
+    ``agent_judge`` is a *separate* claude_code / codex invocation that reads the
+    engine-scoped ``ANTHROPIC_MODEL`` / ``OPENAI_MODEL`` env instead. Without
+    pinning that too, judges fall back to the engine's built-in default model
+    (e.g. claude-sonnet-*), which a custom endpoint (dashscope, a gateway, ...)
+    may not support — surfacing as a 400 "model not found" on the judge call
+    while the case agent itself ran fine. Returns {} when model is empty or the
+    engine has no model-env convention (qodercli).
+    """
+    if not model:
+        return {}
+    if engine == "claude_code":
+        return {"ANTHROPIC_MODEL": model}
+    if engine == "codex":
+        return {"OPENAI_MODEL": model}
+    return {}
+
+
 def unified_base_url_env(provider, base_url):
     """engine="" : fill only protocol-scoped OPENAI_BASE_URL / ANTHROPIC_BASE_URL.
 
@@ -403,6 +424,7 @@ def main():
         run_env["OPENSANDBOX_API_KEY"] = inputs.open_sandbox_api_key
     if inputs.engine:
         run_env.update(engine_env(inputs.engine, inputs.api_key, base_url))
+        run_env.update(engine_model_env(inputs.engine, inputs.model))
         run_env.update(provider_env(inputs.provider, inputs.api_key, base_url))
     else:
         run_env.update(unified_base_url_env(inputs.provider, inputs.base_url))
