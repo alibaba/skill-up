@@ -57,7 +57,6 @@ jobs:
           echo "tag=${{ inputs.tag || 'v0.1.0' }}" >> "$GITHUB_OUTPUT"
           echo "push=${SAME_REPO}" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to ghcr.io
@@ -73,7 +72,11 @@ jobs:
         with:
           context: ./action
           file: ./action/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          # amd64 only: GitHub cloud runners are x86_64, and qodercli's
+          # bun-compiled binary crashes under qemu arm64 emulation (its
+          # --version self-check exits 1). Revisit with native arm64 runners
+          # if self-hosted arm consumers show up.
+          platforms: linux/amd64
           push: ${{ steps.meta.outputs.push == 'true' }}
           tags: |
             ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
