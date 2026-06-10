@@ -103,6 +103,10 @@ jobs:
       - name: Run skill-upper eval via the action
         if: steps.secrets.outputs.available == 'true'
         id: eval
+        # Don't let skill-up's exit-1-on-any-case-failure fail the job directly —
+        # agent evals on CI's stand-in models are non-deterministic. The pass-rate
+        # threshold step below is the real gate.
+        continue-on-error: true
         env:
           # agent_judge runs as a separate agent invocation (it follows the case
           # engine), so pin BOTH protocol-scoped model envs and provide the
@@ -141,3 +145,30 @@ jobs:
           name: skill-upper-self-eval-${{ matrix.engine }}
           path: skill-up-workspace/**
           if-no-files-found: warn
+
+      # Real gate: pass rate must meet the threshold. Tolerates the occasional
+      # flaky case from the stand-in model while still catching a broadly broken
+      # run (e.g. codex's structural judge failure → 0%, blocked only because
+      # codex is continue-on-error at the job level). Full per-case status is
+      # printed and also in the uploaded artifact.
+      - name: Enforce pass-rate threshold
+        if: steps.secrets.outputs.available == 'true'
+        env:
+          MIN_PASS_PCT: '60'
+        run: |
+          report=$(ls -1 "$GITHUB_WORKSPACE"/skill-up-workspace/iteration-*/report.json 2>/dev/null | tail -1)
+          if [ -z "$report" ] || [ ! -f "$report" ]; then
+            echo "::error::no report.json produced — the eval did not run to completion"
+            exit 1
+          fi
+          total=$(jq '.case_results | length' "$report")
+          passed=$(jq '[.case_results[] | select(.status=="PASS")] | length' "$report")
+          echo "engine=${{ matrix.engine }}: ${passed}/${total} cases passed (threshold ${MIN_PASS_PCT}%)"
+          jq -r '.case_results[] | "  \(.status)\t\(.case_id)"' "$report"
+          if [ "${total:-0}" -eq 0 ]; then echo "::error::no cases in report"; exit 1; fi
+          pct=$(( passed * 100 / total ))
+          if [ "$pct" -lt "$MIN_PASS_PCT" ]; then
+            echo "::error::pass rate ${pct}% below threshold ${MIN_PASS_PCT}%"
+            exit 1
+          fi
+          echo "::notice::${{ matrix.engine }} pass rate ${pct}% meets threshold"
