@@ -14,25 +14,32 @@ FROM node:20-bookworm-slim
 # the image. Keep codex aligned with the codexDefaultVersion skill-up expects.
 ARG CLAUDE_VERSION=latest
 ARG CODEX_VERSION=0.80.0
-ARG QODER_VERSION=latest
 ARG SKILL_UP_VERSION=latest
 
-# python3 (for main.py) + curl/bash/git/ca-certificates (for skill-up install.sh).
+# python3 (for main.py) + curl/bash/git/ca-certificates/unzip (installers).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        python3 curl bash git ca-certificates \
+        python3 curl bash git ca-certificates unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# Agent engines — all public npm packages.
-#   claude_code -> @anthropic-ai/claude-code  (CLI binary: claude)
-#   codex       -> @openai/codex              (CLI binary: codex)
-#   qodercli    -> @qoder-ai/qodercli         (CLI binary: qodercli)
+# Agent engines.
+#   claude_code -> @anthropic-ai/claude-code (npm, CLI binary: claude)
+#   codex       -> @openai/codex             (npm, CLI binary: codex)
 RUN npm install -g \
         "@anthropic-ai/claude-code@${CLAUDE_VERSION}" \
         "@openai/codex@${CODEX_VERSION}" \
-        "@qoder-ai/qodercli@${QODER_VERSION}" \
     && claude --version \
-    && codex --version \
+    && codex --version
+
+#   qodercli -> official installer (qoder.com/install), NOT npm: the npm
+#   @qoder-ai/qodercli package is a different release line (1.x) whose flags
+#   don't match skill-up's adapter (`--permission-mode=bypass_permissions -p`,
+#   built against the installer's 0.x line) — it no-ops silently. The installer
+#   drops the binary under $HOME/.qoder and symlinks $HOME/.local/bin; symlink
+#   it into /usr/local/bin because $HOME differs at Actions runtime
+#   (/github/home, not /root).
+RUN curl -fsSL https://qoder.com/install | bash \
+    && ln -sf /root/.local/bin/qodercli /usr/local/bin/qodercli \
     && qodercli --version
 
 # skill-up — public GitHub Releases via the official installer.
