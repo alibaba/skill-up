@@ -5,21 +5,24 @@ name: Build & push skill-eval runner image
 # to ghcr.io/<this-org>/skill-up-runner via the built-in GITHUB_TOKEN (no PAT).
 #
 # Triggers:
-#   - pull_request touching the action/image -> rebuild & push (same-repo only;
-#     fork PRs build without pushing, since they lack package-write).
+#   - workflow_call: invoked by skill-eval-self.yml so the dogfood eval always
+#     runs against an image built from the same commit (no pull/push race).
 #   - push to main touching the action/image -> republish.
 #   - workflow_dispatch -> manual (re)publish at an explicit tag.
 #
+# Fork PRs lack package-write on GITHUB_TOKEN: they build without pushing.
+#
 # NOTE: pushing under the org namespace requires the org to allow Actions to
-# create packages. If that is not yet enabled, the push step fails and
-# action.yml keeps referencing a staging image until an org owner enables it.
+# create packages (verified working for this repo).
 
 on:
-  pull_request:
-    paths:
-      - 'action/**'
-      - 'action.yml'
-      - '.github/workflows/build-runner-image.yml'
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Image tag to publish'
+        required: false
+        type: string
+        default: 'v0.1.0'
   push:
     branches: [main]
     paths:
@@ -30,6 +33,7 @@ on:
       tag:
         description: 'Image tag to publish (e.g. v0.1.0)'
         required: true
+        type: string
         default: 'v0.1.0'
 
 env:
@@ -50,11 +54,7 @@ jobs:
           # Fork PRs can't push packages; build-only for them.
           SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=v0.1.0" >> "$GITHUB_OUTPUT"
-          fi
+          echo "tag=${{ inputs.tag || 'v0.1.0' }}" >> "$GITHUB_OUTPUT"
           echo "push=${SAME_REPO}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3

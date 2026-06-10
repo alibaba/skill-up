@@ -20,8 +20,18 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Rebuild & republish the runner image from THIS commit first, so the dogfood
+  # jobs below always eval with the action code + engines baked at the same ref
+  # (otherwise they'd race the parallel image build and pull a stale :v0.1.0).
+  image:
+    uses: ./.github/workflows/build-runner-image.yml
+    permissions:
+      contents: read
+      packages: write
+
   dogfood:
     name: Eval skill-upper (${{ matrix.engine }})
+    needs: image
     runs-on: ubuntu-latest      # Docker container action — Linux only
     strategy:
       fail-fast: false
@@ -33,9 +43,12 @@ jobs:
             provider: dashscope
             model: qwen3.6-plus
             api-key-secret: DASHSCOPE_API_KEY
+          # codex must use dashscope's *coder* model: qwen3.6-plus rejects
+          # codex's tool-call format ("function.arguments must be JSON"); the
+          # qwen3-coder line is the combination validated in the internal CI.
           - engine: codex
             provider: dashscope
-            model: qwen3.6-plus
+            model: qwen3-coder-plus
             api-key-secret: DASHSCOPE_API_KEY
           # qodercli authenticates with a Qoder PAT; no base-url/model routing.
           - engine: qodercli
@@ -65,16 +78,17 @@ jobs:
         if: steps.secrets.outputs.available == 'true'
         id: eval
         env:
-          # skill-upper's cases score with agent_judge — a separate claude_code
-          # invocation regardless of the case engine — so every matrix entry
-          # needs the anthropic-protocol creds + model pin for the judge hop
-          # (the action only injects env for the *selected* engine). Mirrors the
-          # repo's e2e full-LLM job: pin every hop to qwen3.6-plus on dashscope.
+          # agent_judge runs as a separate agent invocation (it follows the case
+          # engine), so pin BOTH protocol-scoped model envs and provide the
+          # anthropic-protocol creds for claude judge hops — the action only
+          # injects env for the *selected* engine. Mirrors the repo's e2e
+          # full-LLM job: every hop lands on dashscope, never real Claude/GPT.
           ANTHROPIC_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.DASHSCOPE_API_KEY }}
           ANTHROPIC_BASE_URL: https://dashscope.aliyuncs.com/apps/anthropic
           ANTHROPIC_MODEL: qwen3.6-plus
-          OPENAI_MODEL: qwen3.6-plus
+          # Only codex hops read OPENAI_MODEL; keep it on the coder line.
+          OPENAI_MODEL: qwen3-coder-plus
         uses: ./
         with:
           engine: ${{ matrix.engine }}
