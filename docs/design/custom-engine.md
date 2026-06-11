@@ -345,8 +345,10 @@ Every file that needs to enter the report directory must be explicitly declared 
   over-cap body is logged and skipped without failing the run. A URL embedding
   the configured API key is refused up front, and logged error strings are
   scrubbed of the configured `api_key` and `engine.custom.env` secrets. Only the
-  declared URL is fetched — SSRF is the engine/operator's responsibility, the
-  same trust posture as the HTTP transport.
+  declared URL is fetched and **redirects are not followed** (a 3xx is skipped),
+  so the artifact host cannot redirect the fetch to a different endpoint — SSRF
+  is otherwise the engine/operator's responsibility, the same trust posture as
+  the HTTP transport.
 - Any agent may declare `content` or `content_base64` for small files.
 
 Undeclared files are not detected, downloaded, or written into the report directory by
@@ -811,10 +813,11 @@ The hardening below is enforced in code; treat each item as part of the contract
   `len(content_base64) * 3 / 4`; an exact post-decode check enforces the cap if the
   estimate was off.
 - `artifacts.files[].url` downloads are read through an `io.LimitReader` capped at
-  **256 MB** and a per-download timeout; an over-cap body, a non-2xx status, a
-  non-http(s) scheme, or a transport error is logged and skipped without failing
-  the run. The download writes to the report's artifact directory, not the
-  workspace, so it bypasses the `f.Path` workspace confinement by construction.
+  **256 MB** and a per-download timeout; an over-cap body, a non-2xx status (3xx
+  redirects are not followed), a non-http(s) scheme, or a transport error is
+  logged and skipped without failing the run. The download writes to the report's
+  artifact directory, not the workspace, so it bypasses the `f.Path` workspace
+  confinement by construction.
 
 ### Process and time bounds
 

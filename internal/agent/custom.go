@@ -858,8 +858,18 @@ func (a *CustomAgent) downloadURLArtifact(ctx context.Context, opts ExecOptions,
 
 	// url is engine-declared (SessionResult.artifacts.files[].url); fetching the
 	// exact declared endpoint is the documented contract and the engine/operator
-	// is the trust boundary, the same posture as the http transport.
-	client := &http.Client{Timeout: customArtifactDownloadTimeout}
+	// is the trust boundary, the same posture as the http transport. Redirects
+	// are NOT followed: a 3xx would let the artifact host (or the engine) swap
+	// the archived bytes for a Location pointing at a different — possibly
+	// internal — endpoint, breaking the "exact declared URL" boundary and the
+	// up-front api-key/scheme checks. ErrUseLastResponse returns the 3xx as-is so
+	// it falls through to the non-2xx skip path below.
+	client := &http.Client{
+		Timeout: customArtifactDownloadTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := client.Do(req) //nolint:gosec // intentional engine-declared dynamic URL
 	if err != nil {
 		// The net/http error embeds the request URL; mask it so a credential a

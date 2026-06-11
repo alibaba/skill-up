@@ -110,6 +110,46 @@ func TestCustomAgent_CollectArtifacts_URLUnreachableSkipped(t *testing.T) {
 	}
 }
 
+// TestCustomAgent_CollectArtifacts_URLRedirectNotFollowed ensures a 3xx from the
+// declared url is not followed: the redirect target's bytes must not be
+// archived, so the artifact host cannot swap the content for a different
+// (possibly internal) endpoint. The 3xx falls through to the non-2xx skip path.
+func TestCustomAgent_CollectArtifacts_URLRedirectNotFollowed(t *testing.T) {
+	t.Parallel()
+	var targetHit bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		targetHit = true
+		_, _ = io.WriteString(w, "internal-secret-body")
+	}))
+	defer target.Close()
+
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer redirector.Close()
+
+	rt := newCustomTestRuntime(t)
+	artifactDir := t.TempDir()
+	ag := customLocalAgent(&config.CustomEngineConfig{Transport: "http"})
+	artifacts := &SessionArtifacts{Files: []ArtifactFile{{Name: "r.txt", URL: redirector.URL}}}
+
+	out := captureStdout(t, func() {
+		ag.collectArtifacts(context.Background(), rt, ExecOptions{ArtifactDir: artifactDir}, artifacts)
+	})
+	if targetHit {
+		t.Fatal("redirect target was fetched; redirects must not be followed")
+	}
+	if containsBasename(artifacts.GeneratedFiles, "r.txt") {
+		t.Fatalf("generated_files = %v, want the redirect skipped", artifacts.GeneratedFiles)
+	}
+	if _, err := os.Stat(filepath.Join(artifactDir, "r.txt")); !os.IsNotExist(err) {
+		t.Fatalf("r.txt should not have been written (stat err = %v)", err)
+	}
+	if !strings.Contains(out, "returned status 302") {
+		t.Fatalf("logs = %q, want a 3xx skip warning", out)
+	}
+}
+
 // TestCustomAgent_CollectArtifacts_URLNonHTTPSchemeSkipped rejects a non-http(s)
 // scheme (e.g. file://) before any request is made.
 func TestCustomAgent_CollectArtifacts_URLNonHTTPSchemeSkipped(t *testing.T) {
