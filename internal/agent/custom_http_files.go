@@ -118,10 +118,14 @@ func expandHTTPFiles(ctx context.Context, rt Runtime, files []config.CustomHTTPF
 			return nil, fmt.Errorf(
 				"engine.custom.http.files[%d].path %q must be a non-empty relative path inside the workspace", i, f.Path)
 		}
+		// listWorkspaceFiles strips a leading ./ from every entry, so normalize
+		// the configured pattern the same way — otherwise "./diff.patch" or
+		// "./src/*.go" would never match the stripped listing.
+		pat := strings.TrimPrefix(f.Path, "./")
 		var matched []string
-		if isGlobPattern(f.Path) {
+		if isGlobPattern(pat) {
 			for _, rel := range listing {
-				ok, mErr := doublestar.Match(f.Path, rel)
+				ok, mErr := doublestar.Match(pat, rel)
 				if mErr != nil {
 					return nil, fmt.Errorf("engine.custom.http.files[%d].path %q: invalid glob: %w", i, f.Path, mErr)
 				}
@@ -129,8 +133,8 @@ func expandHTTPFiles(ctx context.Context, rt Runtime, files []config.CustomHTTPF
 					matched = append(matched, rel)
 				}
 			}
-		} else if present[f.Path] {
-			matched = []string{f.Path}
+		} else if present[pat] {
+			matched = []string{pat}
 		}
 		if len(matched) == 0 {
 			if f.Required == nil || *f.Required {

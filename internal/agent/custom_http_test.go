@@ -401,6 +401,23 @@ func TestExpandHTTPFiles_FiltersUnsafeListingEntries(t *testing.T) {
 	}
 }
 
+func TestExpandHTTPFiles_NormalizesDotSlashPrefix(t *testing.T) {
+	t.Parallel()
+	// A ./-prefixed exact path and glob must match the listing, which has the
+	// ./ stripped from every entry.
+	rt := fakeFindRuntime{workspace: "/ws", findOut: "./diff.patch\x00./src/a.go\x00"}
+	got, err := expandHTTPFiles(context.Background(), rt, []config.CustomHTTPFile{
+		{Path: "./diff.patch"},
+		{Path: "./src/*.go"},
+	})
+	if err != nil {
+		t.Fatalf("expandHTTPFiles: %v", err)
+	}
+	if len(got) != 2 || got[0] != "diff.patch" || got[1] != "src/a.go" {
+		t.Fatalf("expandHTTPFiles = %v, want [diff.patch src/a.go] (./ prefix normalized)", got)
+	}
+}
+
 func TestCustomAgent_RunHTTP_RejectsUnsafeFilePath(t *testing.T) {
 	t.Parallel()
 	rt := newCustomTestRuntime(t)
