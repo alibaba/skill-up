@@ -38,6 +38,11 @@ concurrency:
   group: self-eval-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# Least-privilege default for every job (the image job overrides with
+# packages: write for the ghcr push).
+permissions:
+  contents: read
+
 jobs:
   # Rebuild & republish the runner image from THIS commit first, so the dogfood
   # jobs below always eval with the action code + engines baked at the same ref
@@ -67,7 +72,6 @@ jobs:
           - engine: claude_code
             provider: dashscope
             model: qwen3.6-plus
-            api-key-secret: DASHSCOPE_API_KEY
           # codex uses dashscope's *coder* model: qwen3.6-plus rejects codex's
           # tool-call format ("function.arguments must be JSON"); qwen3-coder is
           # the combination validated in the internal CI. (Currently blocked by
@@ -75,12 +79,10 @@ jobs:
           - engine: codex
             provider: dashscope
             model: qwen3-coder-plus
-            api-key-secret: DASHSCOPE_API_KEY
           # qodercli authenticates with a Qoder PAT; no base-url/model routing.
           - engine: qodercli
             provider: ''
             model: ''
-            api-key-secret: QODER_ACCESS_TOKEN
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -90,7 +92,9 @@ jobs:
       - name: Check secret availability
         id: secrets
         env:
-          ENGINE_KEY: ${{ secrets[matrix.api-key-secret] }}
+          # Reference each secret by literal name (no dynamic secrets[...]
+          # indexing, which CodeQL flags as exposing the whole secrets context).
+          ENGINE_KEY: ${{ matrix.engine == 'qodercli' && secrets.QODER_ACCESS_TOKEN || secrets.DASHSCOPE_API_KEY }}
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
         run: |
           if [ -z "$ENGINE_KEY" ] || [ -z "$DASHSCOPE_API_KEY" ]; then
@@ -124,7 +128,7 @@ jobs:
           engine: ${{ matrix.engine }}
           provider: ${{ matrix.provider }}
           model: ${{ matrix.model }}
-          api-key: ${{ secrets[matrix.api-key-secret] }}
+          api-key: ${{ matrix.engine == 'qodercli' && secrets.QODER_ACCESS_TOKEN || secrets.DASHSCOPE_API_KEY }}
           # Run cases concurrently so the larger per-case timeout (600s, needed
           # by the slower codex coder model) doesn't blow up wall-clock.
           parallelism: '3'
