@@ -57,14 +57,6 @@ jobs:
     name: Eval skill-upper (${{ matrix.engine }})
     needs: image
     runs-on: ubuntu-latest      # Docker container action — Linux only
-    # codex is non-blocking: skill-upper's cases pin an anthropic judge model,
-    # and skill-up runs agent_judge on the case engine, so codex (OpenAI
-    # protocol) can't drive the judge. This is an upstream skill-up limitation,
-    # not an action defect — see https://github.com/alibaba/skill-up/issues/104.
-    # The codex agent itself works (verified end-to-end with an OpenAI-protocol
-    # judge); flip this back to blocking once #104 lands. claude_code + qodercli
-    # remain hard gates.
-    continue-on-error: ${{ matrix.engine == 'codex' }}
     strategy:
       fail-fast: false
       matrix:
@@ -150,13 +142,24 @@ jobs:
           path: skill-up-workspace/**
           if-no-files-found: warn
 
-      # Real gate: pass rate must meet the threshold. Tolerates the occasional
-      # flaky case from the stand-in model while still catching a broadly broken
-      # run (e.g. codex's structural judge failure → 0%, blocked only because
-      # codex is continue-on-error at the job level). Full per-case status is
-      # printed and also in the uploaded artifact.
+      # codex's gate is waived (not enforced) pending the upstream agent_judge
+      # fix: skill-upper's cases pin an anthropic judge model and skill-up runs
+      # agent_judge on the case engine, so codex (OpenAI protocol) can't drive
+      # the judge — an upstream limitation, not an action defect. See
+      # https://github.com/alibaba/skill-up/issues/104. The codex agent itself
+      # works (verified end-to-end with an OpenAI-protocol judge); codex still
+      # runs here for visibility (report uploaded above). Remove this skip to
+      # re-enable the gate once #104 lands.
+      - name: codex gate waived (see skill-up#104)
+        if: matrix.engine == 'codex' && steps.secrets.outputs.available == 'true'
+        run: echo "::notice::codex pass-rate gate waived pending alibaba/skill-up#104"
+
+      # Real gate (claude_code / qodercli): pass rate must meet the threshold.
+      # Tolerates the occasional flaky case from the stand-in model while still
+      # catching a broadly broken run. Full per-case status is printed and also
+      # in the uploaded artifact.
       - name: Enforce pass-rate threshold
-        if: steps.secrets.outputs.available == 'true'
+        if: matrix.engine != 'codex' && steps.secrets.outputs.available == 'true'
         env:
           MIN_PASS_PCT: '60'
         run: |
