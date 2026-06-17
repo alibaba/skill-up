@@ -16,8 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   injected as a JSON structure rather than a string. A non-2xx status is treated
   as an engine execution error, and the API key is rejected in the URL (use a
   header or the request body instead) and masked in responses. This is the JSON
-  request/response core; multipart file upload (`http.files`) and URL artifact
-  download are follow-ups and are currently rejected as not-yet-implemented.
+  request/response core; multipart file upload (`http.files`) is a follow-up and
+  is currently rejected as not-yet-implemented.
+- Custom Engine: download `artifacts.files[].url` artifacts into the report. A
+  result that declares a downloadable `url` is fetched (http/https only) and
+  written into the case artifact directory under `name`. The download is
+  best-effort and bounded (256 MB cap, request timeout): a non-2xx status,
+  transport error, non-http(s) scheme, or over-cap body is logged and skipped
+  without failing the run. A URL embedding the configured API key is refused, and
+  logged errors are scrubbed of the configured `api_key` / `engine.custom.env`
+  secrets.
 
 ## [0.2.4] - 2026-06-03
 

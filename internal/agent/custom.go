@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -45,12 +48,25 @@ const (
 	// read, so a misbehaving or malicious agent service cannot exhaust memory
 	// with an unbounded SessionResult payload.
 	maxHTTPResponseBytes = 64 * 1024 * 1024
+	// customArtifactDownloadTimeout bounds a single best-effort url artifact
+	// download so a slow or hung remote cannot stall report assembly.
+	customArtifactDownloadTimeout = 60 * time.Second
 )
+
+// maxArtifactDownloadBytes caps how many bytes are read from a declared
+// artifacts.files[].url before the download is abandoned. Sized larger than
+// maxHTTPResponseBytes (a single JSON SessionResult) because a downloadable
+// artifact may be a whole report or archive, while still bounding what a
+// misbehaving engine can pull into the report directory. It is a var, not a
+// const, only so the size-cap test can lower it without transferring hundreds
+// of megabytes.
+var maxArtifactDownloadBytes int64 = 256 * 1024 * 1024
 
 // CustomAgent implements Agent for user-defined engines configured via
 // engine.custom. The local transport is fully supported; the http transport
-// supports JSON request/response, with multipart file upload and URL artifact
-// download still pending. See docs/design/custom-engine.md.
+// supports JSON request/response, with multipart file upload still pending.
+// Result artifacts declared via a `url` are downloaded for any transport. See
+// docs/design/custom-engine.md.
 //
 // CustomAgent embeds BaseAgent directly (not CLIAgent) so it inherits only
 // shared agent infrastructure — Name, credential helpers, exec-options merge,
@@ -684,8 +700,8 @@ func validateArtifactSize(i int, f ArtifactFile, runningTotal int64) (int64, err
 // pipeline: path entries register the original workspace path (so the
 // workspace-diff collector excludes it) and, when the declared name differs
 // from the basename, additionally archive a copy under that name; inline
-// content is written to the case artifact directory. url-based artifacts are
-// deferred to the http phase.
+// content is written to the case artifact directory; url-based artifacts are
+// downloaded into the case artifact directory (best-effort).
 func (a *CustomAgent) collectArtifacts(ctx context.Context, rt Runtime, opts ExecOptions, artifacts *SessionArtifacts) {
 	// Drop any engine-supplied generated_files paths that escape the
 	// workspace. On the none runtime an absolute path is the host path, so an
@@ -714,7 +730,9 @@ func (a *CustomAgent) collectArtifacts(ctx context.Context, rt Runtime, opts Exe
 				artifacts.GeneratedFiles = append(artifacts.GeneratedFiles, path)
 			}
 		case f.URL != "":
-			logging.DebugContextf(ctx, "CustomAgent: artifact %q url is not downloaded in the local transport", f.Name)
+			if path := a.downloadURLArtifact(ctx, opts, f); path != "" {
+				artifacts.GeneratedFiles = append(artifacts.GeneratedFiles, path)
+			}
 		}
 	}
 }
@@ -789,6 +807,97 @@ func (a *CustomAgent) writeInlineArtifact(ctx context.Context, opts ExecOptions,
 	path, err := writeLocalArtifact(opts.ArtifactDir, f.Name, content)
 	if err != nil {
 		logging.WarnContextf(ctx, "CustomAgent: cannot write inline artifact %q: %v", f.Name, err)
+		return ""
+	}
+	return path
+}
+
+// downloadURLArtifact fetches a declared artifacts.files[].url and writes the
+// body into the case artifact directory under f.Name, returning the local path.
+//
+// It is best-effort, mirroring the rest of artifact handling: a non-http(s)
+// scheme, a transport error, a non-2xx status, or an over-cap body is logged as
+// a warning and yields an empty string so the run still succeeds. Only the exact
+// URL the engine declared is fetched — SSRF is out of scope by the same posture
+// as the http transport, where the engine/operator is the trust boundary. A URL
+// that embeds the configured API key is refused up front (it would otherwise be
+// transmitted to the engine-declared endpoint and its proxies), and every error
+// string — which net/http builds with the request URL — is passed through
+// maskAPIKey so the configured api_key and engine.custom.env secrets cannot
+// survive into the log. The download writes to the artifact output dir, never
+// the workspace, so it bypasses the workspacePath confinement used for f.Path.
+func (a *CustomAgent) downloadURLArtifact(ctx context.Context, opts ExecOptions, f ArtifactFile) string {
+	if opts.ArtifactDir == "" || f.Name == "" {
+		return ""
+	}
+	parsed, err := url.Parse(f.URL)
+	if err != nil {
+		logging.WarnContextf(ctx, "CustomAgent: artifact %q has an invalid url: %v", f.Name, a.maskAPIKey(err.Error()))
+		return ""
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		logging.WarnContextf(ctx, "CustomAgent: artifact %q url scheme %q is not http(s); skipping", f.Name, parsed.Scheme)
+		return ""
+	}
+	// A URL embedding the configured API key would transmit it to the
+	// engine-declared endpoint (and into its request logs and proxies), the
+	// same leak errSecretInURL guards against for the http transport. The engine
+	// is untrusted, so refuse rather than fetch.
+	if a.containsAPIKey(f.URL) {
+		logging.WarnContextf(ctx, "CustomAgent: artifact %q url embeds the API key; skipping download", f.Name)
+		return ""
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, customArtifactDownloadTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, f.URL, nil)
+	if err != nil {
+		logging.WarnContextf(ctx, "CustomAgent: cannot build request for artifact %q: %v", f.Name, a.maskAPIKey(err.Error()))
+		return ""
+	}
+
+	// url is engine-declared (SessionResult.artifacts.files[].url); fetching the
+	// exact declared endpoint is the documented contract and the engine/operator
+	// is the trust boundary, the same posture as the http transport. Redirects
+	// are NOT followed: a 3xx would let the artifact host (or the engine) swap
+	// the archived bytes for a Location pointing at a different — possibly
+	// internal — endpoint, breaking the "exact declared URL" boundary and the
+	// up-front api-key/scheme checks. ErrUseLastResponse returns the 3xx as-is so
+	// it falls through to the non-2xx skip path below.
+	client := &http.Client{
+		Timeout: customArtifactDownloadTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req) //nolint:gosec // intentional engine-declared dynamic URL
+	if err != nil {
+		// The net/http error embeds the request URL; mask it so a credential a
+		// user mistakenly put in the URL cannot leak into the warning log.
+		logging.WarnContextf(ctx, "CustomAgent: cannot download artifact %q: %v", f.Name, a.maskAPIKey(err.Error()))
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logging.WarnContextf(ctx, "CustomAgent: artifact %q url returned status %d; skipping", f.Name, resp.StatusCode)
+		return ""
+	}
+
+	// Read one byte past the cap so an over-limit body is rejected rather than
+	// silently truncated into the report.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxArtifactDownloadBytes+1))
+	if err != nil {
+		logging.WarnContextf(ctx, "CustomAgent: cannot read artifact %q body: %v", f.Name, a.maskAPIKey(err.Error()))
+		return ""
+	}
+	if int64(len(body)) > maxArtifactDownloadBytes {
+		logging.WarnContextf(ctx, "CustomAgent: artifact %q exceeds download size limit %d bytes; dropping", f.Name, maxArtifactDownloadBytes)
+		return ""
+	}
+
+	path, err := writeLocalArtifact(opts.ArtifactDir, f.Name, string(body))
+	if err != nil {
+		logging.WarnContextf(ctx, "CustomAgent: cannot write downloaded artifact %q: %v", f.Name, err)
 		return ""
 	}
 	return path
