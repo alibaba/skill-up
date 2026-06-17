@@ -20,8 +20,8 @@ import (
 // back-reference.
 //
 // It supports JSON request/response and multipart file upload
-// (engine.custom.http.files). URL artifact download in the result is a
-// follow-up.
+// (engine.custom.http.files). Result artifacts declared via a `url` are
+// downloaded transport-agnostically in CustomAgent.collectArtifacts.
 type httpTransport struct {
 	a *CustomAgent
 }

@@ -22,8 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `files` part (the part filename is the workspace-relative path). Paths may be
   exact or doublestar globs (`*`, `**`), are confined to the workspace, and only
   regular files are uploaded; `required: true` (the default) errors when an
-  entry matches nothing, `required: false` skips it. URL artifact download in
-  the result remains a follow-up.
+  entry matches nothing, `required: false` skips it.
+- Custom Engine: download `artifacts.files[].url` artifacts into the report. A
+  result that declares a downloadable `url` is fetched (http/https only) and
+  written into the case artifact directory under `name`. The download is
+  best-effort and bounded (256 MB cap, request timeout): a non-2xx status,
+  transport error, non-http(s) scheme, or over-cap body is logged and skipped
+  without failing the run. A URL embedding the configured API key is refused, and
+  logged errors are scrubbed of the configured `api_key` / `engine.custom.env`
+  secrets.
 
 ## [0.2.4] - 2026-06-03
 
