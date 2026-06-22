@@ -314,17 +314,29 @@ jobs:
     runs-on: ubuntu-latest          # Docker container action — Linux only
     steps:
       - uses: actions/checkout@v4
-      - uses: alibaba/skill-up@v0.1.0
+      - uses: alibaba/skill-up@main  # see "Versioning" below
         with:
           engine: claude_code        # or codex / qodercli; empty = let eval.yaml decide
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          base-url: https://api.anthropic.com   # your model endpoint
           skill-target: evals/eval.yaml
 ```
+
+Requirements for the caller: a **Linux** runner (it's a Docker container action),
+and your model credential stored as a repo secret. The runner image is public, so
+no extra registry auth is needed.
 
 Key inputs: `engine`, `model`, `provider`, `api-key`, `base-url`, `skill-target`,
 `parallelism`. The action prebuilds skill-up + the three engine CLIs into its
 runner image, so a run is just "pull image, eval". See [`action.yml`](action.yml)
 for the full input/output reference.
+
+### Versioning
+
+`uses:` points at any git ref that contains `action.yml`. Pin a **release tag**
+(the first release that includes the action onward) or a commit SHA for stability;
+`@main` always tracks the latest. Release tags published **before** the action was
+added do not contain `action.yml` and cannot be used as the ref.
 
 ## License
 

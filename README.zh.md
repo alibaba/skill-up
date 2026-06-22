@@ -238,16 +238,26 @@ jobs:
     runs-on: ubuntu-latest          # Docker 容器 action —— 仅 Linux
     steps:
       - uses: actions/checkout@v4
-      - uses: alibaba/skill-up@v0.1.0
+      - uses: alibaba/skill-up@main  # 见下方「版本引用」
         with:
           engine: claude_code        # 或 codex / qodercli;留空则由 eval.yaml 自行声明
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          base-url: https://api.anthropic.com   # 你的模型端点
           skill-target: evals/eval.yaml
 ```
+
+调用方前提:**Linux** runner(这是 Docker 容器 action),以及把模型凭据存为仓库
+secret。runner 镜像是 public 的,无需额外 registry 鉴权。
 
 主要入参:`engine`、`model`、`provider`、`api-key`、`base-url`、`skill-target`、
 `parallelism`。action 预先把 skill-up 和三个引擎 CLI 烤进 runner 镜像,跑一次
 就是「拉镜像、评测」。完整入参/产出见 [`action.yml`](action.yml)。
+
+### 版本引用
+
+`uses:` 可以指向任何**包含 `action.yml`** 的 git ref。生产建议 pin 一个**含本
+action 的 release tag**(从引入 action 的那个 release 起)或 commit SHA;`@main`
+则始终跟随最新。**早于** action 引入的 release tag 里没有 `action.yml`,不能用作 ref。
 
 ## 许可证
 
