@@ -232,7 +232,7 @@ engine:
 HTTP specifics:
 
 - The request body defaults to the `SessionInput` JSON. A `request_body` field whose value is exactly `${session_input}`, `${messages}`, or `${kwargs}` is injected as a JSON structure (not a string).
-- With `http.files`, the request becomes `multipart/form-data`: the JSON body moves to the `payload` field and each matched file is uploaded under the `files` field, keyed by its workspace-relative path. `path` is a workspace-relative file or glob; `required: false` skips a missing/empty match.
+- With `http.files`, the request becomes `multipart/form-data`: the JSON body moves to the `payload` field and each matched file is uploaded as a separate part under the fixed form field name `files`, with its workspace-relative path carried in that part's `filename` (so the server reads each `files` part's `filename`, not a per-path form key). `path` is a workspace-relative file or glob; `required: false` skips a missing/empty match.
 - Credentials must be referenced from `headers` (or `request_body`), never from `http.url` — a URL that renders `${api_key}` is rejected to keep the key out of request logs.
 - A non-2xx response is treated as an invocation error. Artifacts the agent returns under `artifacts.files[].url` are GET-downloaded (http/https only, no redirects, size/time bounded) into the report directory.
 

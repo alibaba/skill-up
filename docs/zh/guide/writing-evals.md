@@ -215,7 +215,7 @@ engine:
 HTTP 要点：
 
 - 请求体默认是 `SessionInput` JSON。`request_body` 中某个值若恰好是 `${session_input}` / `${messages}` / `${kwargs}`，会以 JSON 结构注入（而非字符串）。
-- 配置了 `http.files` 后请求变为 `multipart/form-data`：JSON 体移到 `payload` 字段，每个命中的文件以 workspace 相对路径为名上传到 `files` 字段。`path` 为 workspace 相对文件或 glob；`required: false` 时缺失/未命中会跳过。
+- 配置了 `http.files` 后请求变为 `multipart/form-data`：JSON 体移到 `payload` 字段，每个命中的文件作为独立 part 上传到固定表单字段 `files`，其 workspace 相对路径放在该 part 的 `filename` 里（服务端应读取每个 `files` part 的 `filename`，而不是按路径找表单 key）。`path` 为 workspace 相对文件或 glob；`required: false` 时缺失/未命中会跳过。
 - 凭据必须从 `headers`（或 `request_body`）引用，不能写进 `http.url` —— URL 渲染出 `${api_key}` 会被拒绝，避免泄漏到请求日志。
 - 非 2xx 响应按调用错误处理。Agent 在 `artifacts.files[].url` 返回的产物会被 GET 下载（仅 http/https、不跟随重定向、有大小与时间上限）到报告目录。
 
