@@ -1,10 +1,8 @@
 # Custom Engine Design
 
-> **Implementation status**: This document describes the full Custom Engine design
-> (both the `local` and `http` transports). The current phase (Phase 1) implements
-> `transport: local`; `transport: http` is fully designed and its config schema is
-> parsed and validated, but the implementation lands in a later PR. Selecting `http`
-> today is rejected by validation with a clear "not yet implemented" error.
+> **Implementation status**: Both the `local` and `http` transports are implemented.
+> `http` covers the JSON request/response core, multipart `http.files` upload, and
+> `artifacts.files[].url` download into the report directory.
 
 This document defines the Custom Engine configuration interface and result contract
 for `skill-up`. A Custom Engine is used to integrate agent executors that are not
@@ -520,8 +518,6 @@ need to enter the report directory, the agent must explicitly declare them in th
 `artifacts` of the result.
 
 ## HTTP transport
-
-> Not yet implemented in Phase 1; this section is the full design.
 
 The `http` transport is used for a remote agent service or a local HTTP agent service.
 It receives the standard `SessionInput`, and after execution returns text, transcript,

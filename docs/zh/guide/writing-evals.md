@@ -140,7 +140,7 @@ report:
 
 ### 自定义 Engine（Custom Engine）
 
-当 `engine.name` 不是内置引擎（`claude_code` / `codex` / `qodercli`）时，必须再写一个 `engine.custom` 段来告诉 skill-up 怎么调用你的 Agent。当前只实现了 `transport: local`；`transport: http` 已设计但尚未实现，validation 会直接报 "not yet implemented"。
+当 `engine.name` 不是内置引擎（`claude_code` / `codex` / `qodercli`）时，必须再写一个 `engine.custom` 段来告诉 skill-up 怎么调用你的 Agent。`transport: local`（在 runtime 内执行命令）和 `transport: http`（调用 HTTP agent 服务）均已支持。
 
 ```yaml
 engine:
@@ -149,7 +149,7 @@ engine:
     provider: anthropic
     name: claude-sonnet-4-6
   custom:
-    transport: local              # local（已实现）| http（规划中）
+    transport: local              # local | http
     response_format: session_result  # session_result（默认）| text
     timeout_seconds: 300
     env:                          # 凭据 / 敏感参数 —— 不要在 command/args 里引用这些
@@ -172,7 +172,7 @@ engine:
 
 - **`transport`**（必填）—— skill-up 调用 agent 的方式。
   - `local`：通过 `runtime.Exec` 在当前 runtime 内执行 `local.command`，agent 进程可访问 runtime workspace、已安装的 skill、fixture、MCP 配置以及进程环境变量。
-  - `http`：调用远程（或本地）HTTP agent 服务。Phase 2 已完成设计，本版本 validate 阶段直接拒绝并提示 "not yet implemented"。
+  - `http`：把 `SessionInput` POST 到远程（或本地）HTTP agent 服务，从响应体读取 `SessionResult`。相关字段配置在 `custom.http` 下（见下文）。
 - **`response_format`**（可选，默认 `session_result`）—— skill-up 如何解析 agent 输出。
   - `session_result`：从 `local.output_file`（若配置）或 stdout 读出完整的 `SessionResult` JSON，包含 `exit_code` / `final_message` / `transcript` / `turns` / `input_tokens` / `output_tokens` / `artifacts`。**推荐保留默认**，可以让 judge 和报告拿到完整上下文。
   - `text`：把 stdout 整体当作 `final_message`，skill-up 自动按输入消息 + 助手回复合成 minimal transcript，使 judge 仍能拿到一段对话。仅适合不输出结构化结果的简易脚本。
@@ -187,6 +187,37 @@ engine:
 
 - `${api_key}` 以及任何看起来像凭据的 kwarg key（`token` / `secret` / `api_key` / `apiKey` / `bearerToken` 等）都不允许出现在 `command` / `args` / `cwd` / `input_file` / `output_file` 中，必须经由 `engine.custom.env` 注入到子进程环境变量里。
 - `${SOMEVAR:-...}` 默认值如果匹配常见凭据特征（`sk-...`、`sk-ant-...`、`ghp_...`、`AIza...`、`AKIA...`、JWT 等），同样会在命令行场景被拒。
+
+`transport: http` 时，把调用配置写在 `custom.http` 下（替代 `custom.local`）：
+
+```yaml
+engine:
+  name: remote-review-agent
+  custom:
+    transport: http
+    response_format: session_result
+    timeout_seconds: 300
+    kwargs:
+      profile: production
+    http:
+      url: ${CUSTOM_AGENT_ENDPOINT}/v1/run   # 必填
+      method: POST                            # 仅支持 POST
+      headers:
+        Authorization: Bearer ${api_key}      # 凭据写在 header，不要写进 URL
+      files:                                  # 可选：以 multipart 上传 workspace 文件
+        - path: diff.patch
+          required: true
+        - path: "src/**/*.go"
+          required: false
+      request_body: ${session_input}          # 可选；默认即 ${session_input}
+```
+
+HTTP 要点：
+
+- 请求体默认是 `SessionInput` JSON。`request_body` 中某个值若恰好是 `${session_input}` / `${messages}` / `${kwargs}`，会以 JSON 结构注入（而非字符串）。
+- 配置了 `http.files` 后请求变为 `multipart/form-data`：JSON 体移到 `payload` 字段，每个命中的文件以 workspace 相对路径为名上传到 `files` 字段。`path` 为 workspace 相对文件或 glob；`required: false` 时缺失/未命中会跳过。
+- 凭据必须从 `headers`（或 `request_body`）引用，不能写进 `http.url` —— URL 渲染出 `${api_key}` 会被拒绝，避免泄漏到请求日志。
+- 非 2xx 响应按调用错误处理。Agent 在 `artifacts.files[].url` 返回的产物会被 GET 下载（仅 http/https、不跟随重定向、有大小与时间上限）到报告目录。
 
 SessionInput / SessionResult 的完整 JSON 契约见 `docs/design/custom-engine.md`。
 
