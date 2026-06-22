@@ -48,13 +48,27 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Resolve tag & push policy
+      - name: Resolve tags & push policy
         id: meta
         env:
           # Fork PRs can't push packages; build-only for them.
           SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
-          echo "tag=${{ inputs.tag || 'v0.1.0' }}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<__TAGS__"
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              # PR dogfood builds publish an isolated, PR-scoped tag — NEVER the
+              # mutable release tags (v0.1.0 / latest), which released action
+              # users consume via alibaba/skill-up@v0.1.0. An unmerged PR must
+              # not be able to replace the production runner image.
+              echo "${IMAGE}:pr-${{ github.event.pull_request.number }}"
+            else
+              # push to main / manual dispatch = release: publish the tag + latest.
+              echo "${IMAGE}:${{ inputs.tag || 'v0.1.0' }}"
+              echo "${IMAGE}:latest"
+            fi
+            echo "__TAGS__"
+          } >> "$GITHUB_OUTPUT"
           echo "push=${SAME_REPO}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -78,8 +92,6 @@ jobs:
           # if self-hosted arm consumers show up.
           platforms: linux/amd64
           push: ${{ steps.meta.outputs.push == 'true' }}
-          tags: |
-            ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
-            ${{ env.IMAGE }}:latest
+          tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

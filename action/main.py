@@ -441,7 +441,14 @@ def main():
     print(f"skill-up exit code: {exit_code}")
 
     _set_output("exit-code", exit_code)
-    _set_output("report-dir", output_dir)
+    # Emit a path relative to GITHUB_WORKSPACE, not the in-container absolute
+    # path (/github/workspace/...). Downstream steps run on the host runner where
+    # that absolute path doesn't exist; a workspace-relative path resolves on both.
+    try:
+        report_dir_out = os.path.relpath(output_dir, workspace)
+    except ValueError:
+        report_dir_out = output_dir
+    _set_output("report-dir", report_dir_out)
 
     sys.exit(exit_code)
 

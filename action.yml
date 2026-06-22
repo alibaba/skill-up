@@ -61,7 +61,7 @@ outputs:
   exit-code:
     description: 'skill-up exit code (0 = all evals passed).'
   report-dir:
-    description: 'Directory containing the JSON / JUnit / HTML reports.'
+    description: 'Directory with the JSON / JUnit / HTML reports, relative to the workspace (e.g. skill-up-workspace), so host steps can consume it.'
 
 # Docker container action: the prebuilt image ships the three engines + skill-up
 # + the action code, so the caller just `uses:` it. The image is published to
