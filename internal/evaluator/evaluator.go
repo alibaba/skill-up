@@ -20,6 +20,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/alibaba/skill-up/internal/agent"
+	"github.com/alibaba/skill-up/internal/agentkind"
 	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/judge"
@@ -656,9 +657,10 @@ func (e *defaultEvaluator) resolveJudgeAgent(ctx context.Context, judgeCfg confi
 
 	judgeAgent := runAgent
 	if e.evalCfg.Engine.Name != "" {
-		judgeParams := credential.ResolveJudgeInitParams(e.evalCfg.Engine.Name, judgeCfg, e.runnerParams, e.resolver)
+		judgeEngine := e.resolveJudgeEngine(judgeCfg)
+		judgeParams := credential.ResolveJudgeInitParams(judgeEngine, judgeCfg, e.runnerParams, e.resolver)
 		var err error
-		judgeAgent, err = agentDetectWithInitParams(e.evalCfg.Engine.Name, judgeParams, e.evalCfg.Engine.Kwargs)
+		judgeAgent, err = agentDetectWithInitParams(judgeEngine, judgeParams, e.evalCfg.Engine.Kwargs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create judge agent: %w", err)
 		}
@@ -668,6 +670,34 @@ func (e *defaultEvaluator) resolveJudgeAgent(ctx context.Context, judgeCfg confi
 	}
 
 	return judgeAgent, nil
+}
+
+// resolveJudgeEngine selects the engine that should drive the agent_judge.
+// The judge is meant to be a fixed, strong model independent of the agent
+// under test, so its engine follows the judge model's provider rather than
+// blindly inheriting the case engine: an `anthropic/*` judge must run on an
+// Anthropic-protocol engine and an `openai/*` judge on an OpenAI-protocol one.
+//
+// The case engine is kept whenever it can already speak the judge model's
+// protocol (e.g. claude_code or qodercli with an anthropic judge, codex with
+// an openai judge) so this only diverges on a genuine protocol mismatch — the
+// codex + anthropic-judge case that previously failed with `codex run failed`.
+// When the judge model carries no provider, or a provider with no known
+// protocol (e.g. a custom proxy namespace), the case engine is preserved.
+func (e *defaultEvaluator) resolveJudgeEngine(judgeCfg config.JudgeConfig) string {
+	caseEngine := e.evalCfg.Engine.Name
+	judgeProvider, _ := credential.ParseJudgeModel(judgeCfg.Model)
+	judgeProtocol, ok := agentkind.ProtocolForProvider(judgeProvider)
+	if !ok {
+		return caseEngine
+	}
+	if caseProtocol, ok := agentkind.ProtocolForEngine(caseEngine); ok && caseProtocol == judgeProtocol {
+		return caseEngine
+	}
+	if engine, ok := agentkind.EngineForProvider(judgeProvider); ok {
+		return engine
+	}
+	return caseEngine
 }
 
 func (e *defaultEvaluator) judgeScriptBaseDir() string {

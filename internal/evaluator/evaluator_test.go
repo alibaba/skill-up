@@ -2724,3 +2724,78 @@ func absoluteSecretPath() string {
 	}
 	return "/tmp/secret.txt"
 }
+
+func TestResolveJudgeEngine(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		caseEngine string
+		judgeModel string
+		want       string
+	}{
+		{
+			name:       "anthropic judge on anthropic-protocol case engine keeps case engine",
+			caseEngine: "claude_code",
+			judgeModel: "anthropic/claude-sonnet-4-6",
+			want:       "claude_code",
+		},
+		{
+			name:       "anthropic judge on qodercli keeps qodercli (also anthropic protocol)",
+			caseEngine: "qodercli",
+			judgeModel: "anthropic/claude-sonnet-4-6",
+			want:       "qodercli",
+		},
+		{
+			name:       "anthropic judge on codex switches to claude_code (the bug)",
+			caseEngine: "codex",
+			judgeModel: "anthropic/claude-sonnet-4-6",
+			want:       "claude_code",
+		},
+		{
+			name:       "openai judge on codex keeps codex",
+			caseEngine: "codex",
+			judgeModel: "openai/gpt-5.5",
+			want:       "codex",
+		},
+		{
+			name:       "openai judge on claude_code switches to codex",
+			caseEngine: "claude_code",
+			judgeModel: "openai/gpt-5.5",
+			want:       "codex",
+		},
+		{
+			name:       "model without provider keeps case engine",
+			caseEngine: "codex",
+			judgeModel: "gpt-5.5",
+			want:       "codex",
+		},
+		{
+			name:       "unknown provider namespace keeps case engine",
+			caseEngine: "codex",
+			judgeModel: "anthropic_modelscope/deepseek-v4-pro",
+			want:       "codex",
+		},
+		{
+			name:       "empty judge model keeps case engine",
+			caseEngine: "claude_code",
+			judgeModel: "",
+			want:       "claude_code",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e := &defaultEvaluator{
+				evalCfg: &config.EvalConfig{
+					Engine: config.EngineConfig{Name: tt.caseEngine},
+				},
+			}
+			got := e.resolveJudgeEngine(config.JudgeConfig{Type: "agent_judge", Model: tt.judgeModel})
+			if got != tt.want {
+				t.Fatalf("resolveJudgeEngine(case=%s, judge=%s) = %s, want %s", tt.caseEngine, tt.judgeModel, got, tt.want)
+			}
+		})
+	}
+}

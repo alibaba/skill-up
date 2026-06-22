@@ -88,7 +88,7 @@ func ResolveRunnerInitParams(engine string, modelCfg config.ModelConfig, custom 
 
 // ResolveJudgeInitParams resolves the final init params for the judge agent.
 func ResolveJudgeInitParams(engine string, judgeCfg config.JudgeConfig, runner AgentInitParams, resolver *Resolver) AgentInitParams {
-	provider, model := parseJudgeModel(judgeCfg.Model)
+	provider, model := ParseJudgeModel(judgeCfg.Model)
 	var fallback *AgentInitParams
 	if runner.Provider != "" || runner.Model != "" || runner.APIKey != "" || runner.BaseURL != "" {
 		fallback = &runner
@@ -106,7 +106,11 @@ func ResolveJudgeInitParams(engine string, judgeCfg config.JudgeConfig, runner A
 	})
 }
 
-func parseJudgeModel(value string) (provider, model string) {
+// ParseJudgeModel splits a judge model identifier into its provider prefix
+// and bare model name. A value of the form `provider/model` (both parts
+// non-empty) yields that pair; anything else is treated as a bare model with
+// no provider.
+func ParseJudgeModel(value string) (provider, model string) {
 	parts := strings.SplitN(value, "/", 2)
 	if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
 		return parts[0], parts[1]
