@@ -4,10 +4,14 @@ package e2e
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -116,6 +120,118 @@ func TestPipeline_CustomEngine_LocalTransport(t *testing.T) {
 	const expectedPrompt = "ping the custom engine"
 	if !strings.Contains(cr.Prompt, expectedPrompt) {
 		t.Errorf("expected prompt to contain %q, got %q", expectedPrompt, cr.Prompt)
+	}
+}
+
+// TestPipeline_CustomEngine_HTTPTransport runs the entire evaluation pipeline
+// against a Custom Engine using transport: http. An in-process httptest server
+// stands in for the remote agent: the framework POSTs the SessionInput JSON to
+// it and parses the SessionResult JSON it returns. The test asserts that:
+//  1. The eval loads and the http custom engine block is env-resolved/validated.
+//  2. The framework POSTs a SessionInput body carrying the case prompt.
+//  3. The server's SessionResult final_message reaches the report and the
+//     expect.must_contain rule passes.
+//
+// Unlike the local transport test, this needs no POSIX shell fixture, so it
+// also runs on Windows.
+func TestPipeline_CustomEngine_HTTPTransport(t *testing.T) {
+	t.Parallel()
+
+	var (
+		mu       sync.Mutex
+		gotBody  []byte
+		gotPath  string
+		gotCType string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotBody = body
+		gotPath = r.URL.Path
+		gotCType = r.Header.Get("Content-Type")
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{
+  "exit_code": 0,
+  "final_message": "custom-engine-handled",
+  "turns": 1,
+  "transcript": [
+    {"role": "user", "content": "ping"},
+    {"role": "assistant", "content": "custom-engine-handled"}
+  ]
+}`)
+	}))
+	defer srv.Close()
+
+	dir := getCustomEngineTestdataDir()
+	evalPath := filepath.Join(dir, "evals", "eval-http.yaml")
+
+	outputDir := t.TempDir()
+	result := Run(t, RunConfig{
+		Env: []string{
+			"PATH=" + os.Getenv("PATH"),
+			"HOME=" + os.Getenv("HOME"),
+			"CUSTOM_AGENT_ENDPOINT=" + srv.URL,
+		},
+		WorkDir: dir,
+		Timeout: 60 * time.Second,
+	}, "run", evalPath, "--no-delete", "--output-dir", outputDir)
+
+	if result.ExitCode != 0 {
+		t.Fatalf("custom engine http run failed: exit=%d\nstdout:\n%s\nstderr:\n%s",
+			result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if !strings.Contains(result.Stdout, "1 passed") {
+		t.Errorf("expected the summary line to report 1 passed, got:\n%s", result.Stdout)
+	}
+
+	// --- Assert the server actually received a SessionInput POST ---
+	mu.Lock()
+	body, reqPath, cType := gotBody, gotPath, gotCType
+	mu.Unlock()
+
+	if reqPath != "/v1/run" {
+		t.Errorf("expected request path /v1/run, got %q", reqPath)
+	}
+	if !strings.Contains(cType, "application/json") {
+		t.Errorf("expected JSON content-type, got %q", cType)
+	}
+	var sess struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &sess); err != nil {
+		t.Fatalf("failed to parse posted SessionInput body: %v\nbody:\n%s", err, body)
+	}
+	if len(sess.Messages) == 0 || !strings.Contains(sess.Messages[len(sess.Messages)-1].Content, "ping the custom engine") {
+		t.Errorf("expected posted SessionInput to carry the case prompt, got messages: %#v", sess.Messages)
+	}
+
+	// --- Assert generated report.json content ---
+	reportPath := filepath.Join(outputDir, "iteration-1", "report.json")
+	reportData, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatalf("failed to read report.json at %s: %v", reportPath, err)
+	}
+	var rpt report.Input
+	if err := json.Unmarshal(reportData, &rpt); err != nil {
+		t.Fatalf("failed to parse report.json: %v", err)
+	}
+	if len(rpt.CaseResults) != 1 {
+		t.Fatalf("expected exactly 1 case result, got %d", len(rpt.CaseResults))
+	}
+	cr := rpt.CaseResults[0]
+	if cr.Response != "custom-engine-handled" {
+		t.Errorf("expected response (final_message) = %q, got %q", "custom-engine-handled", cr.Response)
+	}
+	if cr.Grading == nil {
+		t.Fatalf("expected grading to be non-nil")
+	}
+	if cr.Grading.Status != judge.StatusPass {
+		t.Errorf("expected grading status = %q, got %q", judge.StatusPass, cr.Grading.Status)
 	}
 }
 
