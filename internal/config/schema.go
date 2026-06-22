@@ -128,8 +128,8 @@ type CustomLocalConfig struct {
 }
 
 // CustomHTTPConfig configures the http transport: a remote or local HTTP agent
-// service. JSON request/response is implemented; multipart file upload (Files)
-// is not yet wired and is rejected at validation.
+// service. JSON request/response and multipart file upload (Files) are
+// implemented; URL artifact download in the result is a follow-up.
 type CustomHTTPConfig struct {
 	URL     string            `yaml:"url"`
 	Method  string            `yaml:"method,omitempty"` // POST

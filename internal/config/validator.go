@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -237,10 +238,9 @@ func validateEngine(engine EngineConfig) []string {
 func validateCustomEngine(custom *CustomEngineConfig) []string {
 	var errs []string
 
-	// Both the local and http transports are implemented. The http transport
-	// currently supports JSON request/response only; multipart file upload
-	// (engine.custom.http.files) and URL artifact download are follow-ups, so
-	// they are rejected here rather than silently ignored.
+	// Both the local and http transports are implemented (JSON request/response
+	// and multipart file upload). URL artifact download in the result is a
+	// follow-up.
 	switch custom.Transport {
 	case "":
 		errs = append(errs, "engine.custom.transport is required (local or http)")
@@ -276,9 +276,9 @@ func validateCustomEngine(custom *CustomEngineConfig) []string {
 	return errs
 }
 
-// validateCustomHTTP validates the engine.custom.http block. The http transport
-// supports JSON request/response today; file upload and URL artifact download
-// are follow-ups, so a non-empty files list is rejected as not-yet-implemented.
+// validateCustomHTTP validates the engine.custom.http block: url is required,
+// method must be POST, and each files[].path must be a workspace-relative path
+// or glob. URL artifact download in the result is a follow-up.
 func validateCustomHTTP(h *CustomHTTPConfig) []string {
 	if h == nil {
 		return []string{"engine.custom.http.url is required when transport is http"}
@@ -290,10 +290,21 @@ func validateCustomHTTP(h *CustomHTTPConfig) []string {
 	if h.Method != "" && !strings.EqualFold(h.Method, "POST") {
 		errs = append(errs, fmt.Sprintf("engine.custom.http.method must be POST (got %q)", h.Method))
 	}
-	if len(h.Files) > 0 {
-		errs = append(errs, "engine.custom.http.files (file upload) is not yet implemented")
+	for i := range h.Files {
+		if p := h.Files[i].Path; !WorkspaceRelPathSafe(p) {
+			errs = append(errs, fmt.Sprintf(
+				"engine.custom.http.files[%d].path %q must be a non-empty relative path inside the workspace (no leading / or ..)", i, p))
+		}
 	}
 	return errs
+}
+
+// WorkspaceRelPathSafe reports whether p is a non-empty, workspace-relative
+// path or glob: not absolute and with no ".." segment. It is shared by config
+// validation and the http transport's file expansion so both apply the same
+// rule (agent imports config).
+func WorkspaceRelPathSafe(p string) bool {
+	return p != "" && !strings.HasPrefix(p, "/") && !slices.Contains(strings.Split(p, "/"), "..")
 }
 
 func isValidRuntimeType(t string) bool {
