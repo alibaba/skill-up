@@ -1,0 +1,96 @@
+# GitHub Action: run skill-up Agent Skill evals in CI, across multiple engines.
+#
+# This metadata file lives at the repo ROOT and the repo contains a SINGLE
+# action — both are required for GitHub Marketplace listing/discoverability.
+# `branding` (icon + color) is what renders on the Marketplace card.
+name: 'Agent Skill Eval (skill-up)'
+description: 'Run skill-up behavioral evals on your Agent Skills in CI — across claude_code, codex, and qodercli engines.'
+author: 'skill-up'
+
+branding:
+  icon: 'check-circle'
+  color: 'purple'
+
+inputs:
+  engine:
+    description: 'Agent engine: claude_code / codex / qodercli. Leave empty to let the repo''s eval.yaml declare it.'
+    required: false
+    default: ''
+  model:
+    description: 'Passed to `skill-up run --model` when non-empty; otherwise the eval config / CLI default is used.'
+    required: false
+    default: ''
+  provider:
+    description: 'Resolves base-url from a built-in table (public: dashscope). Ignored when base-url is set.'
+    required: false
+    default: ''
+  api-key:
+    description: 'Model credential. engine non-empty -> routed to ANTHROPIC_API_KEY / OPENAI_API_KEY / QODER_PERSONAL_ACCESS_TOKEN; engine empty -> passed via `skill-up --api-key`. Always source this from a GitHub secret.'
+    required: false
+    default: ''
+  base-url:
+    description: 'Model API endpoint (public). Defaults to the agent CLI''s own public endpoint when empty.'
+    required: false
+    default: ''
+  open-sandbox-api-key:
+    description: 'OPENSANDBOX_API_KEY; only needed when evals use the opensandbox environment.'
+    required: false
+    default: ''
+  skill-target:
+    description: 'Skill directory or eval config path, resolved against the checked-out repo root.'
+    required: false
+    default: '.'
+  skill-up-version:
+    description: 'skill-up version. Ignored when the image already ships skill-up (the default).'
+    required: false
+    default: 'latest'
+  skill-up-command:
+    description: 'The skill-up command itself; must start with `skill-up`.'
+    required: false
+    default: 'skill-up run'
+  parallelism:
+    description: 'Passed to `--parallelism` when non-empty (1-256).'
+    required: false
+    default: ''
+  agent-install-command:
+    description: 'Optional custom install command, for a custom image missing a target engine CLI.'
+    required: false
+    default: ''
+
+outputs:
+  exit-code:
+    description: 'skill-up exit code (0 = all evals passed).'
+  report-dir:
+    description: 'Directory with the JSON / JUnit / HTML reports, relative to the workspace (e.g. skill-up-workspace), so host steps can consume it.'
+
+# Docker container action: the prebuilt image ships the three engines + skill-up
+# + the action code, so the caller just `uses:` it. The image is published to
+# this repo's own org namespace by .github/workflows/build-runner-image.yml;
+# bump the tag together with releases (pin by @sha256 digest for reproducibility).
+# NOTE: Docker container actions run on Linux runners only.
+runs:
+  using: docker
+  image: docker://ghcr.io/alibaba/skill-up-runner:v0.1.0
+  args:
+    - --engine
+    - ${{ inputs.engine }}
+    - --model
+    - ${{ inputs.model }}
+    - --provider
+    - ${{ inputs.provider }}
+    - --api-key
+    - ${{ inputs.api-key }}
+    - --base-url
+    - ${{ inputs.base-url }}
+    - --open-sandbox-api-key
+    - ${{ inputs.open-sandbox-api-key }}
+    - --skill-target
+    - ${{ inputs.skill-target }}
+    - --skill-up-version
+    - ${{ inputs.skill-up-version }}
+    - --skill-up-command
+    - ${{ inputs.skill-up-command }}
+    - --parallelism
+    - ${{ inputs.parallelism }}
+    - --agent-install-command
+    - ${{ inputs.agent-install-command }}
