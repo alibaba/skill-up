@@ -157,7 +157,7 @@ The matched file's path **relative to the workspace root is preserved**, so `rep
 
 ### Custom Engine
 
-When `engine.name` is not one of the built-ins (`claude_code`, `codex`, `qodercli`), declare an `engine.custom` block so skill-up knows how to invoke your agent. Only `transport: local` is implemented today; `transport: http` is reserved and currently fails validation with "not yet implemented".
+When `engine.name` is not one of the built-ins (`claude_code`, `codex`, `qodercli`), declare an `engine.custom` block so skill-up knows how to invoke your agent. Both `transport: local` (run a command inside the runtime) and `transport: http` (call an HTTP agent service) are supported.
 
 ```yaml
 engine:
@@ -166,7 +166,7 @@ engine:
     provider: anthropic
     name: claude-sonnet-4-6
   custom:
-    transport: local             # local (implemented) | http (planned)
+    transport: local             # local | http
     response_format: session_result   # session_result (default) | text
     timeout_seconds: 300
     env:                         # credentials and secrets — NEVER reference these in command/args
@@ -189,7 +189,7 @@ Key fields (full contract in [docs/design/custom-engine.md](../design/custom-eng
 
 - **`transport`** (required) — how skill-up invokes your agent.
   - `local`: run `local.command` inside the current runtime via `runtime.Exec`. The agent process can read the runtime workspace, installed skills, fixtures, MCP config, and process environment variables.
-  - `http`: call a remote (or local) HTTP agent service. Designed in Phase 2 and rejected by validation today with an explicit "not yet implemented".
+  - `http`: POST the `SessionInput` to a remote (or local) HTTP agent service and read its `SessionResult` from the response body. Configure it under `custom.http` (see below).
 - **`response_format`** (optional, default `session_result`) — how skill-up parses the agent's output.
   - `session_result`: read a full `SessionResult` JSON from `local.output_file` (when configured) or stdout. Carries `exit_code` / `final_message` / `transcript` / `turns` / `input_tokens` / `output_tokens` / `artifacts`. **Recommended**: keeps the full context for judges and reports.
   - `text`: take stdout verbatim as `final_message`. skill-up synthesises a minimal transcript (input messages + the assistant reply) so judges still receive a conversation. Use only for simple scripts that do not produce structured output.
@@ -204,6 +204,37 @@ Secret-handling rules (enforced at config load):
 
 - `${api_key}` and any kwarg whose key looks like a credential (`token`, `secret`, `api_key`, `apiKey`, `bearerToken`, …) cannot be referenced from `command` / `args` / `cwd` / `input_file` / `output_file`. Pass them through `engine.custom.env`, where they reach your agent as process environment variables instead of leaking into process listings.
 - `${SOMEVAR:-...}` defaults that contain recognizable credential shapes (`sk-...`, `sk-ant-...`, `ghp_...`, `AIza...`, `AKIA...`, JWTs) are likewise rejected in command-line contexts.
+
+For `transport: http`, configure the call under `custom.http` instead of `custom.local`:
+
+```yaml
+engine:
+  name: remote-review-agent
+  custom:
+    transport: http
+    response_format: session_result
+    timeout_seconds: 300
+    kwargs:
+      profile: production
+    http:
+      url: ${CUSTOM_AGENT_ENDPOINT}/v1/run   # required
+      method: POST                            # only POST is supported
+      headers:
+        Authorization: Bearer ${api_key}      # reference secrets here, not in the URL
+      files:                                  # optional: upload workspace files as multipart
+        - path: diff.patch
+          required: true
+        - path: "src/**/*.go"
+          required: false
+      request_body: ${session_input}          # optional; defaults to ${session_input}
+```
+
+HTTP specifics:
+
+- The request body defaults to the `SessionInput` JSON. A `request_body` field whose value is exactly `${session_input}`, `${messages}`, or `${kwargs}` is injected as a JSON structure (not a string).
+- With `http.files`, the request becomes `multipart/form-data`: the JSON body moves to the `payload` field and each matched file is uploaded as a separate part under the fixed form field name `files`, with its workspace-relative path carried in that part's `filename` (so the server reads each `files` part's `filename`, not a per-path form key). `path` is a workspace-relative file or glob; `required: false` skips a missing/empty match.
+- Credentials must be referenced from `headers` (or `request_body`), never from `http.url` — a URL that renders `${api_key}` is rejected to keep the key out of request logs.
+- A non-2xx response is treated as an invocation error. Artifacts the agent returns under `artifacts.files[].url` are GET-downloaded (http/https only, no redirects, size/time bounded) into the report directory.
 
 See `docs/design/custom-engine.md` for the full SessionInput / SessionResult schema your agent must conform to.
 

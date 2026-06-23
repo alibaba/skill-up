@@ -982,7 +982,7 @@ func (a *CustomAgent) errorResult(exitCode int) *SessionResult {
 
 // SessionInput is the documented contract handed to a Custom Engine for each
 // case (see docs/design/custom-engine.md). Both the local transport (written
-// to ${input_file}) and the planned http transport (sent as the request body
+// to ${input_file}) and the http transport (sent as the request body
 // or multipart payload field) use the same shape, so it is exported here as
 // a public type rather than buried in a transport implementation.
 type SessionInput struct {
