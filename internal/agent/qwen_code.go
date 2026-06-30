@@ -134,6 +134,10 @@ func (a *QwenCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 	if model != "" {
 		envVars[credential.EnvOpenAIModel] = model
 	}
+	// --yolo prints a "running headless ... no sandbox" notice to stderr on
+	// every invocation; the runtime already isolates execution, so silence it
+	// to keep the captured stderr clean.
+	envVars["QWEN_CODE_SUPPRESS_YOLO_WARNING"] = "1"
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))
 	ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, opts.Env)
 
@@ -164,13 +168,17 @@ func (a *QwenCodeAgent) effectiveModelName(_ context.Context) string {
 }
 
 func buildQwenCodeRunCmd(instruction, model string) string {
-	// --yolo auto-approves every action so the run is fully non-interactive;
-	// -p runs the prompt in headless mode and prints the final answer to stdout.
-	cmd := "qwen --yolo"
+	// Feed the instruction on stdin rather than as an argument. qwen reads a
+	// piped prompt in non-interactive mode and prints the final answer to
+	// stdout; doing it this way (a) avoids the deprecated -p/--prompt flag,
+	// which upstream warns "will be removed in a future version", and (b) is
+	// immune to an instruction that begins with "-" being mis-parsed as a flag
+	// (the positional-prompt form is not). --yolo auto-approves every tool
+	// action so the run never blocks on a confirmation prompt.
+	cmd := "printf '%s' " + shellQuote(instruction) + " | qwen --yolo"
 	if model != "" {
 		cmd += " -m " + shellQuote(model)
 	}
-	cmd += " -p " + shellQuote(instruction)
 	return cmd
 }
 

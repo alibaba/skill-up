@@ -84,10 +84,15 @@ func TestBuildQwenCodeRunCmd(t *testing.T) {
 	t.Parallel()
 
 	withModel := buildQwenCodeRunCmd("do it", "qwen3-coder-plus")
-	for _, want := range []string{"qwen --yolo", "-m 'qwen3-coder-plus'", "-p 'do it'"} {
+	// Instruction is piped on stdin (not -p, which upstream deprecated), and
+	// the model is passed via -m.
+	for _, want := range []string{"printf '%s' 'do it' | qwen --yolo", "-m 'qwen3-coder-plus'"} {
 		if !strings.Contains(withModel, want) {
 			t.Fatalf("run cmd missing %q:\n%s", want, withModel)
 		}
+	}
+	if strings.Contains(withModel, "-p ") {
+		t.Fatalf("expected no deprecated -p flag, got %q", withModel)
 	}
 
 	noModel := buildQwenCodeRunCmd("do it", "")
