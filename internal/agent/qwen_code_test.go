@@ -56,6 +56,7 @@ func TestQwenCodeInstall_DefaultCommand(t *testing.T) {
 	}
 }
 
+//nolint:dupl // mirrors TestQoderCLIInstall_UsesDefaultCommand; the probe→install→PATH lifecycle is intentionally identical across CLI agents.
 func TestQwenCodeInstall_UsesDefaultCommand(t *testing.T) {
 	t.Parallel()
 
@@ -106,7 +107,7 @@ func TestQwenCodeRun_BuildsCommandAndMergesEnv(t *testing.T) {
 		},
 	}
 
-	ag := NewQwenCodeAgent(Config{
+	ag := NewQwenCodeAgent(Config{ //nolint:gosec // test dummy key
 		ModelName: "qwen3-coder-plus",
 		APIKey:    "qwen-api-key",
 		BaseURL:   "https://dashscope.example.com/v1",

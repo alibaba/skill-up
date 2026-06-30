@@ -121,6 +121,7 @@ func TestQoderCLIInstall_DefaultCommand(t *testing.T) {
 	}
 }
 
+//nolint:dupl // mirrors TestQwenCodeInstall_UsesDefaultCommand; the probe→install→PATH lifecycle is intentionally identical across CLI agents.
 func TestQoderCLIInstall_UsesDefaultCommand(t *testing.T) {
 	t.Parallel()
 
