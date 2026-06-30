@@ -1,6 +1,6 @@
 # skill-up runner image for the GitHub Action (public github.com / cloud runner).
 #
-# Bakes the three agent engines + skill-up + a python3 interpreter + the action
+# Bakes the agent engines + skill-up + a python3 interpreter + the action
 # code, so the action itself is a thin Docker container action that just runs.
 # Built and pushed to ghcr.io by .github/workflows/build-runner-image.yml.
 #
@@ -14,6 +14,7 @@ FROM node:20-bookworm-slim
 # the image. Keep codex aligned with the codexDefaultVersion skill-up expects.
 ARG CLAUDE_VERSION=latest
 ARG CODEX_VERSION=0.80.0
+ARG QWEN_CODE_VERSION=latest
 ARG SKILL_UP_VERSION=latest
 
 # python3 (for main.py) + curl/bash/git/ca-certificates/unzip (installers).
@@ -25,11 +26,14 @@ RUN apt-get update \
 # Agent engines.
 #   claude_code -> @anthropic-ai/claude-code (npm, CLI binary: claude)
 #   codex       -> @openai/codex             (npm, CLI binary: codex)
+#   qwen_code   -> @qwen-code/qwen-code       (npm, CLI binary: qwen)
 RUN npm install -g \
         "@anthropic-ai/claude-code@${CLAUDE_VERSION}" \
         "@openai/codex@${CODEX_VERSION}" \
+        "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \
     && claude --version \
-    && codex --version
+    && codex --version \
+    && qwen --version
 
 #   qodercli -> official installer (qoder.com/install), NOT npm: the npm
 #   @qoder-ai/qodercli package is a different release line (1.x) whose flags

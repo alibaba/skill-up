@@ -62,7 +62,7 @@ The official [Agent Skills evaluation guide](https://agentskills.io/skill-creati
 
 - Replaces ad hoc run folders with a declarative `eval.yaml` + `cases/*.yaml` format.
 - Automates workspace setup, Skill installation, Agent Engine invocation, judging, and report generation.
-- Supports multiple engines (`claude_code`, `codex`, `qodercli`) instead of tying the workflow to one client.
+- Supports multiple engines (`claude_code`, `codex`, `qodercli`, `qwen_code`) instead of tying the workflow to one client.
 - Keeps compatibility with Anthropic-style `evals.json` while adding richer judges, CI-friendly commands, and structured reports.
 
 ## Recommended Usage: AI-Assisted with skill-upper
@@ -300,7 +300,7 @@ skill-up import ./evals/evals.json --output ./evals
 ## GitHub Action
 
 Run your Agent Skill evals in CI on every pull request — and check the same skill
-**across engines** (`claude_code` / `codex` / `qodercli`) in one step. This repo
+**across engines** (`claude_code` / `codex` / `qodercli` / `qwen_code`) in one step. This repo
 ships an action at its root ([`action.yml`](action.yml)):
 
 ```yaml
@@ -316,7 +316,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: alibaba/skill-up@main  # see "Versioning" below
         with:
-          engine: claude_code        # or codex / qodercli; empty = let eval.yaml decide
+          engine: claude_code        # or codex / qodercli / qwen_code; empty = let eval.yaml decide
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           base-url: https://api.anthropic.com   # your model endpoint
           skill-target: evals/eval.yaml

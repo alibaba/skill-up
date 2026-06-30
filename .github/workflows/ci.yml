@@ -215,6 +215,12 @@ jobs:
           npm install -g --include=optional '@openai/codex@0.80.0'
           codex --version
 
+      - name: Install qwen-code CLI
+        if: steps.secrets.outputs.available == 'true'
+        run: |
+          npm install -g @qwen-code/qwen-code
+          qwen --version
+
       - name: Install qodercli (pinned v1.0.14)
         if: steps.secrets.outputs.available == 'true'
         env:

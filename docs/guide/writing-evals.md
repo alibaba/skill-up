@@ -80,7 +80,7 @@ skills:
 
 # ========== 5. Agent Engine ==========
 engine:
-  name: claude_code               # claude_code / codex / qodercli (also accepts qoder-cli)
+  name: claude_code               # claude_code / codex / qodercli (also accepts qoder-cli) / qwen_code (also accepts qwen-code, qwen)
   model:
     provider: anthropic
     name: claude-sonnet-4-6
@@ -124,6 +124,7 @@ report:
 | `bypass_sandbox` | `codex` | Forces `--dangerously-bypass-approvals-and-sandbox`; overrides the runtime-derived choice. Use when the host kernel lacks Landlock support (e.g. some CI containers) | Default: `none` runtime → `--sandbox workspace-write`; other runtimes already bypass |
 | `bypass_sandbox` | `claude_code` | No-op — claude already runs with `--permission-mode=bypassPermissions` | No-op |
 | `bypass_sandbox` | `qodercli` | No-op — no equivalent flag | No-op |
+| `bypass_sandbox` | `qwen_code` | No-op — qwen always runs with `--yolo` | No-op |
 
 ```bash
 # One-off override at the call site
@@ -157,7 +158,7 @@ The matched file's path **relative to the workspace root is preserved**, so `rep
 
 ### Custom Engine
 
-When `engine.name` is not one of the built-ins (`claude_code`, `codex`, `qodercli`), declare an `engine.custom` block so skill-up knows how to invoke your agent. Both `transport: local` (run a command inside the runtime) and `transport: http` (call an HTTP agent service) are supported.
+When `engine.name` is not one of the built-ins (`claude_code`, `codex`, `qodercli`, `qwen_code`), declare an `engine.custom` block so skill-up knows how to invoke your agent. Both `transport: local` (run a command inside the runtime) and `transport: http` (call an HTTP agent service) are supported.
 
 ```yaml
 engine:
@@ -240,7 +241,7 @@ See `docs/design/custom-engine.md` for the full SessionInput / SessionResult sch
 
 ### MCP configuration
 
-MCP supports `mode: real` and `mode: mocked`. `real` installs a real MCP server into Agents such as `claude_code`, `qodercli`, or `codex`; `mocked` makes `internal/mcp` generate a local stdio mock server that is then installed into the Agent like any other MCP server.
+MCP supports `mode: real` and `mode: mocked`. `real` installs a real MCP server into Agents such as `claude_code`, `qodercli`, `codex`, or `qwen_code`; `mocked` makes `internal/mcp` generate a local stdio mock server that is then installed into the Agent like any other MCP server.
 
 HTTP MCP servers can be declared inline or pulled in via `config_ref`:
 
@@ -637,6 +638,31 @@ qodercli also has model-parameter restrictions:
 
 - `model` must be one of qodercli's predefined values: `lite`, `efficient`, `auto`, `performance`, `ultimate`
 - `base_url` has no effect for qodercli
+
+### qwen_code credentials
+
+[Qwen Code](https://github.com/QwenLM/qwen-code) is an open-source terminal coding agent optimized for Qwen models. The engine name is `qwen_code` (aliases: `qwen-code`, `qwen`), backed by the `@qwen-code/qwen-code` CLI. skill-up installs it on demand via `npm install -g @qwen-code/qwen-code` (Node.js 20+ is bootstrapped automatically), so a manual install is optional.
+
+Qwen Code talks to any **OpenAI-compatible** endpoint, so it reuses the standard OpenAI environment variables — the same plumbing as `codex`:
+
+| Variable          | Purpose                                                    |
+| :---------------: | :-------------------------------------------------------: |
+| `OPENAI_API_KEY`  | API key for the OpenAI-compatible endpoint                 |
+| `OPENAI_BASE_URL` | Endpoint base URL (e.g. DashScope OpenAI-compatible mode)  |
+| `OPENAI_MODEL`    | Model id; set automatically from `engine.model.name`       |
+
+`provider: openai` (or an empty provider) plus a `base_url` points Qwen Code at a custom gateway; `engine.model.name` / `--model` is forwarded both as the `-m` flag and as `OPENAI_MODEL`. A missing `OPENAI_API_KEY` is informational only — Qwen Code can fall back to local login state under `~/.qwen/` (e.g. Qwen OAuth). Each case runs non-interactively via `qwen --yolo -p <instruction>`, which auto-approves tool actions.
+
+> **Protocol:** Qwen Code only speaks the **OpenAI-compatible** API (plus Qwen OAuth); it has **no** native Anthropic Messages API mode. To evaluate against an Anthropic-protocol endpoint, use the `claude_code` engine instead (it reads `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`), or front the endpoint with an Anthropic→OpenAI-compatible proxy and pass that proxy's URL as `base_url`.
+
+Minimal local run:
+
+```bash
+export OPENAI_API_KEY=sk-xxx
+export OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+
+skill-up run ./evals/eval.yaml --engine qwen_code --model qwen3-coder-plus
+```
 
 ---
 

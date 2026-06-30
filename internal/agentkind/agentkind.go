@@ -16,6 +16,9 @@ const (
 	QoderCLI        = "qodercli"
 	QoderAlias      = "qoder"
 	QoderCLIAlias   = "qoder-cli"
+	QwenCode        = "qwen_code"
+	QwenCodeAlias   = "qwen-code"
+	QwenAlias       = "qwen"
 )
 
 var builtinNames = map[string]struct{}{
@@ -25,6 +28,9 @@ var builtinNames = map[string]struct{}{
 	QoderCLI:        {},
 	QoderAlias:      {},
 	QoderCLIAlias:   {},
+	QwenCode:        {},
+	QwenCodeAlias:   {},
+	QwenAlias:       {},
 }
 
 // IsBuiltin reports whether name matches a built-in agent engine.

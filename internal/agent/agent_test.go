@@ -148,6 +148,24 @@ func TestDetectAgent_Codex(t *testing.T) {
 	}
 }
 
+func TestDetectAgent_QwenCode(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{agentkind.QwenCode, agentkind.QwenCodeAlias, agentkind.QwenAlias} {
+		cfg := Config{Name: name}
+		ag, err := DetectAgent(name, cfg)
+		if err != nil {
+			t.Fatalf("DetectAgent(%q) failed: %v", name, err)
+		}
+		if _, ok := ag.(*QwenCodeAgent); !ok {
+			t.Fatalf("DetectAgent(%q) returned %T, want *QwenCodeAgent", name, ag)
+		}
+		if ag.Name() != name {
+			t.Errorf("expected %s, got %s", name, ag.Name())
+		}
+	}
+}
+
 func TestNewBaseAgent_PreservesExplicitConfig(t *testing.T) {
 	base := NewBaseAgent(Config{
 		EnvVars: map[string]string{"AGENT_TEST_FLAG": "1"},

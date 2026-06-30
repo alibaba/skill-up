@@ -1,5 +1,8 @@
 #!/bin/bash
-# mock-engine.sh - A deterministic mock that impersonates qodercli.
+# mock-engine.sh - A deterministic mock that impersonates qodercli (and the
+# other CLI agents symlinked to it: claude, codex, qwen — they all pass the
+# instruction via -p, and any extra flags like --yolo / -m <model> are skipped
+# harmlessly by the arg loop below).
 #
 # The QoderCLIAgent invokes: qodercli -p "<prompt>" 2>&1
 # This script:

@@ -21,6 +21,8 @@ func DetectAgent(engineName string, cfg Config) (Agent, error) {
 		return NewClaudeCodeAgent(cfg), nil
 	case agentkind.Codex:
 		return NewCodexAgent(cfg), nil
+	case agentkind.QwenCode, agentkind.QwenCodeAlias, agentkind.QwenAlias:
+		return NewQwenCodeAgent(cfg), nil
 	default:
 		// A non-built-in engine name is a Custom Engine when engine.custom
 		// is configured; otherwise it is unsupported.

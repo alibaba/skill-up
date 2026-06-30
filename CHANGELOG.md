@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Built-in `qwen_code` engine (aliases `qwen-code`, `qwen`), backed by the
+  [Qwen Code](https://github.com/QwenLM/qwen-code) CLI (`@qwen-code/qwen-code`).
+  Installed on demand via npm (Node.js bootstrapped automatically) and run
+  non-interactively with `qwen --yolo -p <instruction>`. Authenticates against
+  any OpenAI-compatible endpoint through `OPENAI_API_KEY` / `OPENAI_BASE_URL`,
+  with `engine.model.name` / `--model` forwarded as both the `-m` flag and
+  `OPENAI_MODEL`; MCP servers install via `qwen mcp add`.
 - Custom Engine `http` transport (`engine.custom.transport: http`): calls a
   remote (or local) HTTP agent service, POSTing the `SessionInput` and parsing
   the `SessionResult` from the response. Renders `${...}` references in

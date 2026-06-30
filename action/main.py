@@ -18,7 +18,7 @@ build:
     (api.anthropic.com / api.openai.com).
   * Results are also exported to ``$GITHUB_OUTPUT`` for downstream steps.
 
-The agent engines (claude / codex / qodercli) and skill-up are baked into the
+The agent engines (claude / codex / qodercli / qwen) and skill-up are baked into the
 Docker image (see Dockerfile), so the runtime install paths are skipped when the
 binaries are already present.
 """
@@ -47,6 +47,7 @@ ENGINE_PROTOCOL = {
     "claude_code": "anthropic",
     "codex": "openai",
     "qodercli": None,
+    "qwen_code": "openai",
 }
 
 # engine -> built-in default base-url. Empty on the public build: when no
@@ -91,7 +92,7 @@ def resolve_base_url(engine, provider, base_url):
 def engine_env(engine, api_key, base_url):
     """Route the unified api-key / base-url into engine-scoped env vars.
 
-    These are read by the agent CLI itself (claude / codex / qodercli). engine=""
+    These are read by the agent CLI itself (claude / codex / qodercli / qwen). engine=""
     returns {} — the caller takes the unified_base_url_env + ``skill-up --api-key``
     pass-through path instead.
     """
@@ -104,7 +105,10 @@ def engine_env(engine, api_key, base_url):
             env["ANTHROPIC_AUTH_TOKEN"] = api_key
         if base_url:
             env["ANTHROPIC_BASE_URL"] = base_url
-    elif engine == "codex":
+    elif engine in ("codex", "qwen_code"):
+        # Both speak the OpenAI wire protocol and read OPENAI_API_KEY /
+        # OPENAI_BASE_URL (qwen_code is a Gemini CLI fork talking to any
+        # OpenAI-compatible endpoint; see internal/agent/qwen_code.go).
         if api_key:
             env["OPENAI_API_KEY"] = api_key
         if base_url:
@@ -131,7 +135,7 @@ def engine_model_env(engine, model):
         return {}
     if engine == "claude_code":
         return {"ANTHROPIC_MODEL": model}
-    if engine == "codex":
+    if engine in ("codex", "qwen_code"):
         return {"OPENAI_MODEL": model}
     return {}
 
