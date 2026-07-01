@@ -1,9 +1,16 @@
 name: Self-eval (dogfood the action)
 
 # Dogfoods the Agent Skill Eval action (action.yml) against this repo's own
-# skill-upper skill — once per engine (claude_code / codex / qodercli /
-# qwen_code) — so a green check here is the action's end-to-end integration
-# test for every engine it claims to support.
+# skill-upper skill — once per engine (claude_code / codex / qodercli) — so a
+# green check here is the action's end-to-end integration test for every engine
+# it claims to support.
+#
+# NOTE: the runner image bakes skill-up from the public GitHub Releases
+# (Dockerfile: install.sh … latest), so an engine can only be dogfooded here
+# once a skill-up RELEASE ships it. qwen_code is intentionally NOT in the matrix
+# yet — the released skill-up would reject `--engine qwen_code` as unsupported.
+# Add the row once a release includes the engine (the action image already
+# bakes the qwen CLI, and action/main.py already maps qwen_code -> openai).
 #
 # Uses `uses: ./` (the action from this checkout) so it validates the PR's own
 # version before any release tag exists. All model traffic is pinned to
@@ -69,12 +76,6 @@ jobs:
           # the combination validated in the internal CI. (Currently blocked by
           # the agent_judge limitation above, hence non-blocking.)
           - engine: codex
-            provider: dashscope
-            model: qwen3-coder-plus
-          # qwen_code (Qwen Code CLI) speaks the OpenAI wire protocol, same as
-          # codex — point it at dashscope's coder model. Its pass-rate gate is
-          # waived for the same agent_judge reason as codex (see below).
-          - engine: qwen_code
             provider: dashscope
             model: qwen3-coder-plus
           # qodercli authenticates with a Qoder PAT; no base-url/model routing.
@@ -163,25 +164,24 @@ jobs:
           path: skill-up-workspace/**
           if-no-files-found: warn
 
-      # The OpenAI-protocol engines' gates are waived (not enforced) pending the
-      # upstream agent_judge fix: skill-upper's cases pin an anthropic judge
-      # model and skill-up runs agent_judge on the case engine, so codex /
-      # qwen_code (OpenAI protocol) can't drive the judge — an upstream
-      # limitation, not an action defect. See
-      # https://github.com/alibaba/skill-up/issues/104. The agents themselves
-      # work (verified end-to-end with an OpenAI-protocol judge); they still run
-      # here for visibility (report uploaded above). Remove this skip to
+      # codex's gate is waived (not enforced) pending the upstream agent_judge
+      # fix: skill-upper's cases pin an anthropic judge model and skill-up runs
+      # agent_judge on the case engine, so codex (OpenAI protocol) can't drive
+      # the judge — an upstream limitation, not an action defect. See
+      # https://github.com/alibaba/skill-up/issues/104. The codex agent itself
+      # works (verified end-to-end with an OpenAI-protocol judge); codex still
+      # runs here for visibility (report uploaded above). Remove this skip to
       # re-enable the gate once #104 lands.
-      - name: OpenAI-protocol engine gate waived (see skill-up#104)
-        if: contains(fromJSON('["codex","qwen_code"]'), matrix.engine) && steps.secrets.outputs.available == 'true'
-        run: echo "::notice::${{ matrix.engine }} pass-rate gate waived pending alibaba/skill-up#104"
+      - name: codex gate waived (see skill-up#104)
+        if: matrix.engine == 'codex' && steps.secrets.outputs.available == 'true'
+        run: echo "::notice::codex pass-rate gate waived pending alibaba/skill-up#104"
 
       # Real gate (claude_code / qodercli): pass rate must meet the threshold.
       # Tolerates the occasional flaky case from the stand-in model while still
       # catching a broadly broken run. Full per-case status is printed and also
       # in the uploaded artifact.
       - name: Enforce pass-rate threshold
-        if: ${{ !contains(fromJSON('["codex","qwen_code"]'), matrix.engine) && steps.secrets.outputs.available == 'true' }}
+        if: matrix.engine != 'codex' && steps.secrets.outputs.available == 'true'
         env:
           MIN_PASS_PCT: '60'
         run: |
