@@ -1,8 +1,11 @@
 package agent
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -190,7 +193,14 @@ func buildQwenCodeRunCmd(instruction, model string) string {
 	return cmd
 }
 
+// buildSessionResult prefers qwen's own session JSONL (full transcript, tool
+// calls and usageMetadata token counts) when it can be located and downloaded,
+// and falls back to a minimal stdout-derived transcript otherwise.
 func (a *QwenCodeAgent) buildSessionResult(ctx context.Context, rt Runtime, opts ExecOptions, instruction string, start time.Time, result ExecResult) *SessionResult {
+	var trans transcript.Transcript
+	var finalMsg string
+	var inputTokens, outputTokens int
+
 	cleanupCtx, cleanupCancel := sessionCleanupContext(ctx)
 	defer cleanupCancel()
 
@@ -201,14 +211,34 @@ func (a *QwenCodeAgent) buildSessionResult(ctx context.Context, rt Runtime, opts
 		}
 	}
 
-	var trans transcript.Transcript
-	var finalMsg string
-	if final := strings.TrimSpace(result.Stdout); final != "" {
-		trans = transcript.Transcript{
-			{Role: transcript.RoleUser, Content: instruction, Turn: 1},
-			{Role: transcript.RoleAssistant, Content: final, Turn: 1},
+	var cleanupSession func()
+	generatedFiles, cleanupSession = withDownloadedSession(
+		cleanupCtx, rt, opts.ArtifactDir, findQwenCodeSessionFile(cleanupCtx, rt), generatedFiles,
+		func(artifactPath string) {
+			t, f, inTok, outTok := parseQwenSessionFile(artifactPath)
+			if len(t) > 0 {
+				trans = t
+				finalMsg = f
+			}
+			inputTokens, outputTokens = inTok, outTok
+		},
+	)
+	defer cleanupSession()
+
+	// Fallback: build a minimal transcript from stdout when no session file was
+	// found (e.g. qwen session logging disabled, or a sandboxed run whose file
+	// could not be downloaded).
+	if trans == nil {
+		if final := strings.TrimSpace(result.Stdout); final != "" {
+			trans = transcript.Transcript{
+				{Role: transcript.RoleUser, Content: instruction, Turn: 1},
+				{Role: transcript.RoleAssistant, Content: final, Turn: 1},
+			}
+			finalMsg = final
 		}
-		finalMsg = final
+	}
+	if finalMsg == "" {
+		finalMsg = trans.FinalAssistantMessage()
 	}
 
 	return &SessionResult{
@@ -216,6 +246,8 @@ func (a *QwenCodeAgent) buildSessionResult(ctx context.Context, rt Runtime, opts
 		ExitCode:     result.ExitCode,
 		DurationMs:   time.Since(start).Milliseconds(),
 		Turns:        countTurns(trans),
+		InputTokens:  inputTokens,
+		OutputTokens: outputTokens,
 		FinalMessage: finalMsg,
 		Stderr:       result.Stderr,
 		Transcript:   trans,
@@ -223,4 +255,155 @@ func (a *QwenCodeAgent) buildSessionResult(ctx context.Context, rt Runtime, opts
 			GeneratedFiles: generatedFiles,
 		},
 	}
+}
+
+// findQwenCodeSessionFile resolves the newest chat JSONL under qwen's projects
+// tree (~/.qwen/projects/<workspace-key>/chats/) for this workspace, using the
+// shared project-tree lookup (HOME + tree are read only inside the runtime).
+func findQwenCodeSessionFile(ctx context.Context, rt Runtime) string {
+	return findAgentSessionJSONL(ctx, rt, agentSessionLookup{
+		envVar:   "SKILL_UP_QWEN_WSKEY",
+		rootTmpl: "$home/.qwen/projects/$SKILL_UP_QWEN_WSKEY/chats",
+	})
+}
+
+// qwenSessionEvent is one line of qwen's chat JSONL. qwen is a Gemini CLI fork,
+// so messages use the Gemini shape: role ∈ {user, model} and a `parts` array
+// whose entries carry text, functionCall or functionResponse.
+type qwenSessionEvent struct {
+	Type          string              `json:"type"` // user | assistant | system
+	Model         string              `json:"model,omitempty"`
+	Message       *qwenSessionMessage `json:"message,omitempty"`
+	UsageMetadata *qwenUsageMetadata  `json:"usageMetadata,omitempty"`
+}
+
+type qwenSessionMessage struct {
+	Role  string            `json:"role"`
+	Parts []qwenSessionPart `json:"parts"`
+}
+
+type qwenSessionPart struct {
+	Text             string                `json:"text,omitempty"`
+	FunctionCall     *qwenFunctionCall     `json:"functionCall,omitempty"`
+	FunctionResponse *qwenFunctionResponse `json:"functionResponse,omitempty"`
+}
+
+type qwenFunctionCall struct {
+	ID   string         `json:"id,omitempty"`
+	Name string         `json:"name"`
+	Args map[string]any `json:"args,omitempty"`
+}
+
+type qwenFunctionResponse struct {
+	ID       string `json:"id,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Response any    `json:"response,omitempty"`
+}
+
+// qwenUsageMetadata mirrors Gemini's usageMetadata. totalTokenCount ==
+// promptTokenCount + candidatesTokenCount (+ thoughtsTokenCount); cachedContent
+// is a subset of prompt, so it is NOT added again to avoid double counting.
+type qwenUsageMetadata struct {
+	PromptTokenCount        int `json:"promptTokenCount"`
+	CandidatesTokenCount    int `json:"candidatesTokenCount"`
+	ThoughtsTokenCount      int `json:"thoughtsTokenCount"`
+	CachedContentTokenCount int `json:"cachedContentTokenCount"`
+	TotalTokenCount         int `json:"totalTokenCount"`
+}
+
+// parseQwenSessionFile reads qwen's chat JSONL and returns the transcript, the
+// final assistant message, and high-water token counts. Token semantics follow
+// the other agents: max input (promptTokenCount) and max output
+// (candidatesTokenCount + thoughtsTokenCount) across assistant lines.
+func parseQwenSessionFile(sf string) (trans transcript.Transcript, finalMsg string, inputTokens, outputTokens int) { //nolint:nonamedreturns // named returns document the four positional results
+	file, err := os.Open(sf)
+	if err != nil {
+		return nil, "", 0, 0
+	}
+	defer file.Close() //nolint:errcheck
+
+	var messages []transcript.Message
+	turn := 0
+
+	scanner := bufio.NewScanner(file)
+	const maxTokenLen = 1024 * 1024
+	scanner.Buffer(make([]byte, maxTokenLen), maxTokenLen)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || line == "[]" || line == "{}" {
+			continue
+		}
+		var ev qwenSessionEvent
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			continue
+		}
+		if ev.Type == "user" {
+			turn++
+		}
+		if ev.Message == nil {
+			continue
+		}
+		if final := appendQwenMessageParts(&messages, ev, max(turn, 1)); final != "" {
+			finalMsg = final
+		}
+		if ev.Type == "assistant" && ev.UsageMetadata != nil {
+			inputTokens = max(inputTokens, ev.UsageMetadata.PromptTokenCount)
+			outputTokens = max(outputTokens, ev.UsageMetadata.CandidatesTokenCount+ev.UsageMetadata.ThoughtsTokenCount)
+		}
+	}
+
+	if finalMsg == "" {
+		finalMsg = transcript.Transcript(messages).FinalAssistantMessage()
+	}
+	return messages, finalMsg, inputTokens, outputTokens
+}
+
+// appendQwenMessageParts projects one session line's parts into transcript
+// messages (text → user/assistant, functionCall → tool_call, functionResponse
+// → tool_result) and returns the assistant text when the line is an assistant
+// turn, so the caller can track the final message.
+func appendQwenMessageParts(messages *[]transcript.Message, ev qwenSessionEvent, turn int) string {
+	role := transcript.RoleAssistant
+	if ev.Type == "user" {
+		role = transcript.RoleUser
+	}
+
+	var textParts []string
+	for _, p := range ev.Message.Parts {
+		switch {
+		case p.FunctionCall != nil:
+			*messages = append(*messages, transcript.Message{
+				Role: transcript.RoleToolCall,
+				ToolCall: &transcript.ToolCallInfo{
+					ID:        p.FunctionCall.ID,
+					Name:      p.FunctionCall.Name,
+					Arguments: p.FunctionCall.Args,
+				},
+				Turn: turn,
+			})
+		case p.FunctionResponse != nil:
+			*messages = append(*messages, transcript.Message{
+				Role: transcript.RoleToolResult,
+				ToolResult: &transcript.ToolResultInfo{
+					CallID:  p.FunctionResponse.ID,
+					Status:  toolStatusSuccess,
+					Content: contentBlockToString(p.FunctionResponse.Response),
+				},
+				Turn: turn,
+			})
+		case p.Text != "":
+			textParts = append(textParts, p.Text)
+		}
+	}
+
+	if len(textParts) == 0 {
+		return ""
+	}
+	content := strings.Join(textParts, "\n\n")
+	*messages = append(*messages, transcript.Message{Role: role, Content: content, Turn: turn})
+	if role == transcript.RoleAssistant {
+		return content
+	}
+	return ""
 }

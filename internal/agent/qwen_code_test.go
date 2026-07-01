@@ -2,7 +2,10 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -130,8 +133,8 @@ func TestQwenCodeRun_BuildsCommandAndMergesEnv(t *testing.T) {
 		t.Fatalf("run qwen_code: %v", err)
 	}
 
-	if !strings.Contains(rt.lastCommand, "qwen --yolo") || !strings.Contains(rt.lastCommand, "-m 'qwen3-coder-plus'") {
-		t.Fatalf("unexpected run command: %s", rt.lastCommand)
+	if !strings.Contains(rt.runCommand, "qwen --yolo") || !strings.Contains(rt.runCommand, "-m 'qwen3-coder-plus'") {
+		t.Fatalf("unexpected run command: %s", rt.runCommand)
 	}
 	if rt.lastExecEnv[credential.EnvOpenAIAPIKey] != "qwen-api-key" {
 		t.Fatalf("expected OPENAI_API_KEY to be set, got %q", rt.lastExecEnv[credential.EnvOpenAIAPIKey])
@@ -185,6 +188,66 @@ func TestQwenCodeRun_SuppressesWarningOnlyWhenRuntimeIsolates(t *testing.T) {
 	}
 }
 
+func TestParseQwenSessionFile(t *testing.T) {
+	t.Parallel()
+
+	// One user turn, an assistant tool call, the tool response, then the final
+	// assistant answer with usageMetadata. Mirrors qwen's Gemini-style schema
+	// (role model/user, parts[], functionCall/functionResponse).
+	lines := []string{
+		`{"type":"user","message":{"role":"user","parts":[{"text":"List the files."}]}}`,
+		`{"type":"system","subtype":"ui_telemetry","systemPayload":{}}`,
+		`{"type":"assistant","model":"qwen3-coder-plus","message":{"role":"model","parts":[{"functionCall":{"id":"call_1","name":"run_shell_command","args":{"command":"ls"}}}]}}`,
+		`{"type":"user","message":{"role":"user","parts":[{"functionResponse":{"id":"call_1","name":"run_shell_command","response":{"output":"a.txt\nb.txt"}}}]}}`,
+		`{"type":"assistant","model":"qwen3-coder-plus","message":{"role":"model","parts":[{"text":"There are two files: a.txt and b.txt."}]},"usageMetadata":{"promptTokenCount":123,"candidatesTokenCount":45,"thoughtsTokenCount":6,"totalTokenCount":174,"cachedContentTokenCount":0}}`,
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	trans, finalMsg, inTok, outTok := parseQwenSessionFile(path)
+
+	if finalMsg != "There are two files: a.txt and b.txt." {
+		t.Fatalf("unexpected final message: %q", finalMsg)
+	}
+	if inTok != 123 {
+		t.Fatalf("expected input tokens 123 (promptTokenCount), got %d", inTok)
+	}
+	if outTok != 51 { // candidates 45 + thoughts 6
+		t.Fatalf("expected output tokens 51 (candidates+thoughts), got %d", outTok)
+	}
+	// Expect: user, tool_call, tool_result, assistant.
+	roles := make([]transcript.Role, 0, len(trans))
+	for _, m := range trans {
+		roles = append(roles, m.Role)
+	}
+	want := []transcript.Role{transcript.RoleUser, transcript.RoleToolCall, transcript.RoleToolResult, transcript.RoleAssistant}
+	if len(roles) != len(want) {
+		t.Fatalf("expected %d messages %v, got %d: %v", len(want), want, len(roles), roles)
+	}
+	for i := range want {
+		if roles[i] != want[i] {
+			t.Fatalf("message %d role = %q, want %q", i, roles[i], want[i])
+		}
+	}
+	if tc := trans[1].ToolCall; tc == nil || tc.Name != "run_shell_command" || tc.ID != "call_1" {
+		t.Fatalf("unexpected tool call: %+v", trans[1].ToolCall)
+	}
+	if tr := trans[2].ToolResult; tr == nil || tr.CallID != "call_1" || !strings.Contains(fmt.Sprint(tr.Content), "a.txt") {
+		t.Fatalf("unexpected tool result: %+v", trans[2].ToolResult)
+	}
+}
+
+func TestParseQwenSessionFile_Missing(t *testing.T) {
+	t.Parallel()
+	trans, finalMsg, inTok, outTok := parseQwenSessionFile(filepath.Join(t.TempDir(), "nope.jsonl"))
+	if trans != nil || finalMsg != "" || inTok != 0 || outTok != 0 {
+		t.Fatalf("expected empty result for missing file, got %v %q %d %d", trans, finalMsg, inTok, outTok)
+	}
+}
+
 func TestQwenCodeMCPInstallCmd(t *testing.T) {
 	t.Parallel()
 
@@ -209,6 +272,7 @@ type qwenTestRuntime struct {
 	workspace           string
 	execResult          runtime.ExecResult
 	lastCommand         string
+	runCommand          string // the `qwen --yolo ...` invocation specifically
 	lastExecEnv         map[string]string
 	probeResponseStdout string
 	mergedEnv           map[string]string
@@ -237,6 +301,9 @@ func (r *qwenTestRuntime) Exec(_ context.Context, command string, opts runtime.E
 	r.lastCommand = command
 	if strings.Contains(command, "qwen --yolo") || strings.Contains(command, "@qwen-code/qwen-code") {
 		r.lastExecEnv = mapsClone(opts.Env)
+	}
+	if strings.Contains(command, "qwen --yolo") {
+		r.runCommand = command
 	}
 	return r.execResult, nil
 }
