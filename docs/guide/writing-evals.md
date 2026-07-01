@@ -124,7 +124,7 @@ report:
 | `bypass_sandbox` | `codex` | Forces `--dangerously-bypass-approvals-and-sandbox`; overrides the runtime-derived choice. Use when the host kernel lacks Landlock support (e.g. some CI containers) | Default: `none` runtime → `--sandbox workspace-write`; other runtimes already bypass |
 | `bypass_sandbox` | `claude_code` | No-op — claude already runs with `--permission-mode=bypassPermissions` | No-op |
 | `bypass_sandbox` | `qodercli` | No-op — no equivalent flag | No-op |
-| `bypass_sandbox` | `qwen_code` | No-op — qwen always runs with `--yolo` | No-op |
+| `bypass_sandbox` | `qwen_code` | No-op — `qwen_code` never imposes its own sandbox (`--yolo` only auto-approves tool calls; it does **not** isolate). Like `claude_code`/`qodercli`, isolation is the runtime's job | No-op |
 
 ```bash
 # One-off override at the call site
@@ -651,7 +651,9 @@ Qwen Code talks to any **OpenAI-compatible** endpoint, so it reuses the standard
 | `OPENAI_BASE_URL` | Endpoint base URL (e.g. DashScope OpenAI-compatible mode)  |
 | `OPENAI_MODEL`    | Model id; set automatically from `engine.model.name`       |
 
-`provider: openai` (or an empty provider) plus a `base_url` points Qwen Code at a custom gateway; `engine.model.name` / `--model` is forwarded both as the `-m` flag and as `OPENAI_MODEL`. A missing `OPENAI_API_KEY` is informational only — Qwen Code can fall back to local login state under `~/.qwen/` (e.g. Qwen OAuth). Each case runs non-interactively via `qwen --yolo -p <instruction>`, which auto-approves tool actions.
+`provider: openai` (or an empty provider) plus a `base_url` points Qwen Code at a custom gateway; `engine.model.name` / `--model` is forwarded both as the `-m` flag and as `OPENAI_MODEL`. A missing `OPENAI_API_KEY` is informational only — Qwen Code can fall back to local login state under `~/.qwen/` (e.g. Qwen OAuth). Each case runs non-interactively by piping the instruction to `qwen --yolo`, which auto-approves tool actions.
+
+> **Sandboxing:** `--yolo` auto-approves tool calls but does **not** isolate them — so on the `none` runtime `qwen_code` executes shell/write tools with your host privileges, the same as `claude_code` and `qodercli`. `qwen_code` deliberately does not force qwen's own `-s` sandbox (it requires docker/podman on Linux and is unreliable elsewhere); instead, run untrusted skills under a sandboxed runtime (`environment.type: docker` or `opensandbox`), which isolates every engine uniformly. On the `none` runtime qwen's "running without a sandbox" notice is left visible as a reminder; under a sandboxed runtime it is silenced (the container is the sandbox).
 
 > **Protocol:** Qwen Code only speaks the **OpenAI-compatible** API (plus Qwen OAuth); it has **no** native Anthropic Messages API mode. To evaluate against an Anthropic-protocol endpoint, use the `claude_code` engine instead (it reads `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`), or front the endpoint with an Anthropic→OpenAI-compatible proxy and pass that proxy's URL as `base_url`.
 

@@ -134,10 +134,18 @@ func (a *QwenCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 	if model != "" {
 		envVars[credential.EnvOpenAIModel] = model
 	}
-	// --yolo prints a "running headless ... no sandbox" notice to stderr on
-	// every invocation; the runtime already isolates execution, so silence it
-	// to keep the captured stderr clean.
-	envVars["QWEN_CODE_SUPPRESS_YOLO_WARNING"] = "1"
+	// --yolo auto-approves tool calls but does NOT sandbox: like claude_code
+	// (--permission-mode=bypassPermissions) and qodercli, qwen_code relies on
+	// the runtime for isolation rather than imposing its own sandbox (qwen's
+	// `-s` needs docker/podman on Linux and is unreliable elsewhere). So the
+	// "running headless without a sandbox" notice is silenced only when the
+	// runtime already isolates execution (docker/opensandbox). On the none
+	// runtime (host execution) it is left to surface — it is the user's signal
+	// that tools run at host privilege; for untrusted skills, use a sandboxed
+	// runtime. See docs/guide/writing-evals.md (engine kwargs / qwen_code).
+	if !rt.RequiresProcessSandbox() {
+		envVars["QWEN_CODE_SUPPRESS_YOLO_WARNING"] = "1"
+	}
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))
 	ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, opts.Env)
 

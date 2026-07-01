@@ -633,7 +633,9 @@ Qwen Code 对接任意 **OpenAI 兼容**端点，复用标准 OpenAI 环境变�
 | `OPENAI_BASE_URL` | 端点地址（如 DashScope 的 OpenAI 兼容模式）           |
 | `OPENAI_MODEL`    | 模型 id；由 `engine.model.name` 自动写入              |
 
-`provider: openai`（或留空 provider）配合 `base_url` 即可指向自定义网关；`engine.model.name` / `--model` 会同时作为 `-m` 参数和 `OPENAI_MODEL` 传入。`OPENAI_API_KEY` 缺失只是提示信息——Qwen Code 可回退到 `~/.qwen/` 下的本地登录态（如 Qwen OAuth）。每个 case 通过 `qwen --yolo -p <instruction>` 非交互执行，自动确认工具操作。
+`provider: openai`（或留空 provider）配合 `base_url` 即可指向自定义网关；`engine.model.name` / `--model` 会同时作为 `-m` 参数和 `OPENAI_MODEL` 传入。`OPENAI_API_KEY` 缺失只是提示信息——Qwen Code 可回退到 `~/.qwen/` 下的本地登录态（如 Qwen OAuth）。每个 case 通过把指令用管道喂给 `qwen --yolo` 非交互执行，自动确认工具操作。
+
+> **沙箱说明**：`--yolo` 只是自动确认工具调用，并**不**做隔离——因此在 `none` runtime 上 `qwen_code` 会以宿主机权限执行 shell/write 等工具，这一点与 `claude_code`、`qodercli` 一致。`qwen_code` 故意不强制开启 qwen 自带的 `-s` 沙箱（它在 Linux 上依赖 docker/podman，其他环境并不可靠）；如需运行不受信任的 skill，请改用带隔离的 runtime（`environment.type: docker` 或 `opensandbox`），它会统一隔离所有引擎。在 `none` runtime 上会保留 qwen 的“未启用沙箱”提示作为风险提醒；在隔离 runtime 下该提示会被静默（容器本身即沙箱）。
 
 > **协议说明**：Qwen Code 只支持 **OpenAI 兼容**协议（外加 Qwen OAuth），**没有**原生的 Anthropic Messages API 模式。如果要评测 Anthropic 协议的端点，请改用 `claude_code` 引擎（它读取 `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`）；或在端点前挂一层 Anthropic→OpenAI 兼容的转换代理，把代理地址填入 `base_url`。
 

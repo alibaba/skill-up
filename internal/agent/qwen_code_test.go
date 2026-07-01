@@ -154,6 +154,35 @@ func TestQwenCodeRun_BuildsCommandAndMergesEnv(t *testing.T) {
 	if result.Turns != 1 {
 		t.Fatalf("expected 1 turn, got %d", result.Turns)
 	}
+	// On a host-executing runtime (RequiresProcessSandbox=true) the "running
+	// unsandboxed" notice must NOT be hidden — it is the user's signal that
+	// tools run at host privilege.
+	if _, ok := rt.lastExecEnv["QWEN_CODE_SUPPRESS_YOLO_WARNING"]; ok {
+		t.Fatalf("expected the yolo/no-sandbox warning NOT to be suppressed on a host-executing runtime")
+	}
+}
+
+// TestQwenCodeRun_SuppressesWarningOnlyWhenRuntimeIsolates checks the inverse:
+// an isolating runtime (docker/opensandbox) is the sandbox, so the spurious
+// "no sandbox" notice is silenced there.
+func TestQwenCodeRun_SuppressesWarningOnlyWhenRuntimeIsolates(t *testing.T) {
+	t.Parallel()
+
+	rt := &qwenTestRuntime{
+		workspace:        t.TempDir(),
+		execResult:       runtime.ExecResult{Stdout: "ok\n", ExitCode: 0},
+		noProcessSandbox: true, // runtime isolates execution
+	}
+	ag := NewQwenCodeAgent(Config{ModelName: "qwen3-coder-plus"})
+
+	if _, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{
+		Role: transcript.RoleUser, Content: "hi", Turn: 1,
+	}}); err != nil {
+		t.Fatalf("run qwen_code: %v", err)
+	}
+	if rt.lastExecEnv["QWEN_CODE_SUPPRESS_YOLO_WARNING"] != "1" {
+		t.Fatalf("expected the notice to be suppressed on an isolating runtime, env=%v", rt.lastExecEnv)
+	}
 }
 
 func TestQwenCodeMCPInstallCmd(t *testing.T) {
@@ -183,6 +212,10 @@ type qwenTestRuntime struct {
 	lastExecEnv         map[string]string
 	probeResponseStdout string
 	mergedEnv           map[string]string
+	// noProcessSandbox flips RequiresProcessSandbox to false, modelling an
+	// isolating runtime (docker/opensandbox); the default (false) keeps it
+	// true, modelling the host-executing none runtime.
+	noProcessSandbox bool
 }
 
 func (r *qwenTestRuntime) Create(context.Context) error                       { return nil }
@@ -208,7 +241,7 @@ func (r *qwenTestRuntime) Exec(_ context.Context, command string, opts runtime.E
 	return r.execResult, nil
 }
 func (r *qwenTestRuntime) Workspace() string            { return r.workspace }
-func (r *qwenTestRuntime) RequiresProcessSandbox() bool { return true }
+func (r *qwenTestRuntime) RequiresProcessSandbox() bool { return !r.noProcessSandbox }
 func (r *qwenTestRuntime) MergeEnv(env map[string]string) {
 	if r.mergedEnv == nil {
 		r.mergedEnv = make(map[string]string, len(env))

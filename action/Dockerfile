@@ -8,7 +8,10 @@
 # no internal Alibaba network is required, so this builds on github.com hosted
 # runners with GITHUB_TOKEN. (The internal Aone variant bakes from
 # hub.docker.alibaba-inc.com instead; the two images are intentionally separate.)
-FROM node:20-bookworm-slim
+# node:22 — @qwen-code/qwen-code declares engines.node ">=22.0.0"; the older
+# node:20 base tripped an engine mismatch at `qwen --version`. 22 also suits
+# claude-code / codex and matches skill-up's own Node bootstrap default.
+FROM node:22-bookworm-slim
 
 # Pin the agent CLI versions. Bump these in a PR; the build workflow republishes
 # the image. Keep codex aligned with the codexDefaultVersion skill-up expects.
