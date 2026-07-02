@@ -4,7 +4,7 @@
 # action — both are required for GitHub Marketplace listing/discoverability.
 # `branding` (icon + color) is what renders on the Marketplace card.
 name: 'Agent Skill Eval (skill-up)'
-description: 'Run skill-up behavioral evals on your Agent Skills in CI — across claude_code, codex, and qodercli engines.'
+description: 'Run skill-up behavioral evals on your Agent Skills in CI — across claude_code, codex, qodercli, and qwen_code engines.'
 author: 'skill-up'
 
 branding:
@@ -13,7 +13,7 @@ branding:
 
 inputs:
   engine:
-    description: 'Agent engine: claude_code / codex / qodercli. Leave empty to let the repo''s eval.yaml declare it.'
+    description: 'Agent engine: claude_code / codex / qodercli / qwen_code. Leave empty to let the repo''s eval.yaml declare it.'
     required: false
     default: ''
   model:

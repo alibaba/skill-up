@@ -351,6 +351,27 @@ func TestContract_Run_EngineOverride(t *testing.T) {
 	}
 }
 
+// TestContract_Run_EngineOverride_QwenCode asserts that the built-in qwen_code
+// engine name is accepted by the CLI (config validation + factory dispatch),
+// without requiring the real qwen CLI or a model. A dry run never executes the
+// agent, so this exercises the engine-name surface end-to-end.
+func TestContract_Run_EngineOverride_QwenCode(t *testing.T) {
+	t.Parallel()
+
+	mockDir := getMockEngineTestdataDir()
+	evalPath := filepath.Join(mockDir, "evals", "eval.yaml")
+
+	result := RunSimple(t, "run", evalPath, "--dry-run", "--engine", "qwen_code")
+
+	if result.ExitCode != 0 {
+		t.Fatalf("DOC: --engine qwen_code override should work, got exit %d\nstderr: %s",
+			result.ExitCode, result.Stderr)
+	}
+	if !strings.Contains(result.Stdout, "qwen_code") {
+		t.Errorf("DOC: output should mention overridden engine qwen_code")
+	}
+}
+
 func TestContract_Run_ModelOverride(t *testing.T) {
 	t.Parallel()
 

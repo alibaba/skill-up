@@ -62,7 +62,7 @@
 
 - 用声明式的 `eval.yaml` + `cases/*.yaml` 取代临时拼出来的运行目录。
 - 自动完成 workspace 准备、Skill 安装、Agent Engine 调用、评分和报告生成。
-- 支持多个引擎（`claude_code`、`codex`、`qodercli`），不绑定单一客户端。
+- 支持多个引擎（`claude_code`、`codex`、`qodercli`、`qwen_code`），不绑定单一客户端。
 - 兼容 Anthropic 风格的 `evals.json`，同时提供更丰富的 judge、适合 CI 的命令和结构化报告。
 
 ## 推荐使用方式：AI 辅助配合 skill-upper
@@ -224,7 +224,7 @@ skill-up import ./evals/evals.json --output ./evals
 ## GitHub Action
 
 在 CI 上对你的 Agent Skill 跑评测,每个 PR 自动触发——并在一步内**跨引擎**
-(`claude_code` / `codex` / `qodercli`)校验同一个 skill。本仓库根目录提供了
+(`claude_code` / `codex` / `qodercli` / `qwen_code`)校验同一个 skill。本仓库根目录提供了
 action([`action.yml`](action.yml)):
 
 ```yaml
@@ -240,7 +240,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: alibaba/skill-up@main  # 见下方「版本引用」
         with:
-          engine: claude_code        # 或 codex / qodercli;留空则由 eval.yaml 自行声明
+          engine: claude_code        # 或 codex / qodercli / qwen_code;留空则由 eval.yaml 自行声明
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           base-url: https://api.anthropic.com   # 你的模型端点
           skill-target: evals/eval.yaml

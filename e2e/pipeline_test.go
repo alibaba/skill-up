@@ -13,13 +13,13 @@ import (
 )
 
 // mockEngineHome creates a fake HOME whose $HOME/.local/bin contains symlinks
-// named "qodercli", "claude", "codex" (all pointing at mock-engine/engine.sh).
-// The e2e pipeline uses environment.type: none and supplies PATH explicitly
-// via mockEngineEnv, so the framework's normal probe-PATH-at-Install flow
-// (see internal/agent.probeAndMergePATH, only invoked for envType != "none")
-// doesn't run here. We still override HOME so that the symlinks under our
-// fake $HOME/.local/bin win over any real claude/codex/qodercli on the
-// developer's machine.
+// named "qodercli", "claude", "codex", "qwen" (all pointing at
+// mock-engine/engine.sh). The e2e pipeline uses environment.type: none and
+// supplies PATH explicitly via mockEngineEnv, so the framework's normal
+// probe-PATH-at-Install flow (see internal/agent.probeAndMergePATH, only
+// invoked for envType != "none") doesn't run here. We still override HOME so
+// that the symlinks under our fake $HOME/.local/bin win over any real
+// claude/codex/qodercli/qwen on the developer's machine.
 func mockEngineHome(t *testing.T) (home, binDir string) {
 	t.Helper()
 
@@ -32,7 +32,7 @@ func mockEngineHome(t *testing.T) (home, binDir string) {
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatalf("create fake HOME bin dir: %v", err)
 	}
-	for _, name := range []string{"qodercli", "claude", "codex"} {
+	for _, name := range []string{"qodercli", "claude", "codex", "qwen"} {
 		dst := filepath.Join(binDir, name)
 		if err := os.Symlink(mockScript, dst); err != nil {
 			t.Fatalf("symlink mock %s: %v", name, err)

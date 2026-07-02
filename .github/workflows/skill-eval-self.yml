@@ -5,6 +5,13 @@ name: Self-eval (dogfood the action)
 # green check here is the action's end-to-end integration test for every engine
 # it claims to support.
 #
+# NOTE: the runner image bakes skill-up from the public GitHub Releases
+# (Dockerfile: install.sh … latest), so an engine can only be dogfooded here
+# once a skill-up RELEASE ships it. qwen_code is intentionally NOT in the matrix
+# yet — the released skill-up would reject `--engine qwen_code` as unsupported.
+# Add the row once a release includes the engine (the action image already
+# bakes the qwen CLI, and action/main.py already maps qwen_code -> openai).
+#
 # Uses `uses: ./` (the action from this checkout) so it validates the PR's own
 # version before any release tag exists. All model traffic is pinned to
 # dashscope's qwen3.6-plus — same as the repo's e2e jobs — so no path ever

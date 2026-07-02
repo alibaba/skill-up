@@ -80,7 +80,7 @@ skills:
 
 # ========== 5. Agent Engine ==========
 engine:
-  name: claude_code               # claude_code / codex / qodercli（也兼容 qoder-cli）
+  name: claude_code               # claude_code / codex / qodercli（也兼容 qoder-cli）/ qwen_code（也兼容 qwen-code、qwen）
   model:
     provider: anthropic           # 模型供应商
     name: claude-sonnet-4-6       # 模型名称
@@ -140,7 +140,7 @@ report:
 
 ### 自定义 Engine（Custom Engine）
 
-当 `engine.name` 不是内置引擎（`claude_code` / `codex` / `qodercli`）时，必须再写一个 `engine.custom` 段来告诉 skill-up 怎么调用你的 Agent。`transport: local`（在 runtime 内执行命令）和 `transport: http`（调用 HTTP agent 服务）均已支持。
+当 `engine.name` 不是内置引擎（`claude_code` / `codex` / `qodercli` / `qwen_code`）时，必须再写一个 `engine.custom` 段来告诉 skill-up 怎么调用你的 Agent。`transport: local`（在 runtime 内执行命令）和 `transport: http`（调用 HTTP agent 服务）均已支持。
 
 ```yaml
 engine:
@@ -223,7 +223,7 @@ SessionInput / SessionResult 的完整 JSON 契约见 `docs/design/custom-engine
 
 ### MCP 配置说明
 
-MCP 支持 `mode: real` 和 `mode: mocked`。`real` 用于把真实 MCP Server 安装到 `claude_code`、`qodercli` 或 `codex` 等 Agent；`mocked` 会由 `internal/mcp` 生成本地 stdio Mock Server，并按普通 MCP 配置安装到 Agent。
+MCP 支持 `mode: real` 和 `mode: mocked`。`real` 用于把真实 MCP Server 安装到 `claude_code`、`qodercli`、`codex` 或 `qwen_code` 等 Agent；`mocked` 会由 `internal/mcp` 生成本地 stdio Mock Server，并按普通 MCP 配置安装到 Agent。
 
 HTTP MCP 可以直接在 `eval.yaml` 中声明，也可以用 `config_ref` 引用 `evals/fixtures/mcp/*.yaml`：
 
@@ -620,6 +620,33 @@ qodercli 的模型参数也有特殊限制：
 
 - `model` 仅支持 qodercli 自己识别的值：`lite`、`efficient`、`auto`、`performance`、`ultimate`
 - `base_url` 对 qodercli 不生效
+
+### qwen_code 凭据说明
+
+[Qwen Code](https://github.com/QwenLM/qwen-code) 是面向 Qwen 模型优化的开源终端编码 Agent。引擎名为 `qwen_code`（别名 `qwen-code`、`qwen`），底层使用 `@qwen-code/qwen-code` CLI。skill-up 会按需通过 `npm install -g @qwen-code/qwen-code` 自动安装（并自动引导 Node.js 20+），因此无需手动安装。
+
+Qwen Code 对接任意 **OpenAI 兼容**端点，复用标准 OpenAI 环境变量——与 `codex` 同一套机制：
+
+| 环境变量          | 用途                                                  |
+| :---------------: | :--------------------------------------------------: |
+| `OPENAI_API_KEY`  | OpenAI 兼容端点的 API key                             |
+| `OPENAI_BASE_URL` | 端点地址（如 DashScope 的 OpenAI 兼容模式）           |
+| `OPENAI_MODEL`    | 模型 id；由 `engine.model.name` 自动写入              |
+
+`provider: openai`（或留空 provider）配合 `base_url` 即可指向自定义网关；`engine.model.name` / `--model` 会同时作为 `-m` 参数和 `OPENAI_MODEL` 传入。`OPENAI_API_KEY` 缺失只是提示信息——Qwen Code 可回退到 `~/.qwen/` 下的本地登录态（如 Qwen OAuth）。每个 case 通过把指令用管道喂给 `qwen --yolo` 非交互执行，自动确认工具操作。
+
+> **沙箱说明**：`--yolo` 只是自动确认工具调用，并**不**做隔离——因此在 `none` runtime 上 `qwen_code` 会以宿主机权限执行 shell/write 等工具，这一点与 `claude_code`、`qodercli` 一致。`qwen_code` 故意不强制开启 qwen 自带的 `-s` 沙箱（它在 Linux 上依赖 docker/podman，其他环境并不可靠）；如需运行不受信任的 skill，请改用带隔离的 runtime（`environment.type: docker` 或 `opensandbox`），它会统一隔离所有引擎。在 `none` runtime 上会保留 qwen 的“未启用沙箱”提示作为风险提醒；在隔离 runtime 下该提示会被静默（容器本身即沙箱）。
+
+> **协议说明**：Qwen Code 只支持 **OpenAI 兼容**协议（外加 Qwen OAuth），**没有**原生的 Anthropic Messages API 模式。如果要评测 Anthropic 协议的端点，请改用 `claude_code` 引擎（它读取 `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`）；或在端点前挂一层 Anthropic→OpenAI 兼容的转换代理，把代理地址填入 `base_url`。
+
+最小本地运行示例：
+
+```bash
+export OPENAI_API_KEY=sk-xxx
+export OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+
+skill-up run ./evals/eval.yaml --engine qwen_code --model qwen3-coder-plus
+```
 
 ---
 

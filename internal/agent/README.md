@@ -50,6 +50,7 @@ internal/agent/
 ├── claude_code.go     # ClaudeCodeAgent implementation
 ├── qodercli.go        # QoderCLIAgent implementation
 ├── codex.go           # CodexAgent implementation (OpenAI Codex CLI)
+├── qwen_code.go       # QwenCodeAgent implementation (Qwen Code CLI, OpenAI-compatible)
 ├── cli.go             # CLIAgent base implementation (for generic CLI tools)
 ├── mcp.go             # MCP server installation helpers
 ├── node_install.go    # Node.js / npm install helpers
@@ -79,7 +80,7 @@ export NVM_NODEJS_ORG_MIRROR=https://mirrors.aliyun.com/nodejs-release
 export NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
 ```
 
-The bootstrap is invoked from `ensureNodeRuntime`, which runs as its **own** `rt.Exec` call before the agent invocation (or MCP install). The script's first line short-circuits with `exit 0` when the CLI binary (`claude`, `codex`) is already on `PATH`, so the happy-path cost is one `command -v` check. Splitting the bootstrap into a separate Exec keeps the agent run's stdout/stderr clean of nvm/curl noise and makes bootstrap failures distinguishable in errors (`node bootstrap failed: ...`) and traces.
+The bootstrap is invoked from `ensureNodeRuntime`, which runs as its **own** `rt.Exec` call before the agent invocation (or MCP install). The script's first line short-circuits with `exit 0` when the CLI binary (`claude`, `codex`, `qwen`) is already on `PATH`, so the happy-path cost is one `command -v` check. Splitting the bootstrap into a separate Exec keeps the agent run's stdout/stderr clean of nvm/curl noise and makes bootstrap failures distinguishable in errors (`node bootstrap failed: ...`) and traces.
 
 ## Agent Interface
 
