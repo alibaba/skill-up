@@ -1,0 +1,134 @@
+---
+title: "{{yaml_title}}"
+authors:
+  - "{{yaml_author}}"
+creation-date: {{date}}
+last-updated: {{date}}
+status: {{status_metadata}}
+---
+
+# SUP-{{proposal_id}}: {{title}}
+
+Language: English | [中文](zh/{{proposal_filename}})
+
+<!-- toc -->
+- [Summary](#summary)
+- [Motivation](#motivation)
+  - [Goals](#goals)
+  - [Non-Goals](#non-goals)
+- [Requirements](#requirements)
+- [Proposal](#proposal)
+  - [Notes/Constraints/Caveats](#notesconstraintscaveats)
+  - [Risks and Mitigations](#risks-and-mitigations)
+- [Design Details](#design-details)
+- [Test Plan](#test-plan)
+- [Drawbacks](#drawbacks)
+- [Alternatives](#alternatives)
+- [Infrastructure Needed](#infrastructure-needed)
+- [Upgrade & Migration Strategy](#upgrade--migration-strategy)
+<!-- /toc -->
+
+## Summary
+
+<!--
+Brief summary of the proposal. Describe the feature/change and why it matters.
+Aim for 2-3 sentences that explain the problem and proposed solution.
+-->
+
+## Motivation
+
+<!--
+Explain why this work matters and the problem it solves.
+What is the current pain point? Why should skill-up care?
+-->
+
+### Goals
+
+<!--
+Specific, measurable objectives. What does success look like?
+Examples:
+- Reduce evaluation time by X%
+- Enable feature Y for skill developers
+- Improve reliability of Z
+-->
+
+### Non-Goals
+
+<!--
+Clarify what is intentionally out of scope.
+What will NOT be addressed by this proposal?
+-->
+
+## Requirements
+
+<!--
+List any constraints that must be satisfied.
+What are the hard requirements vs nice-to-haves?
+-->
+
+## Proposal
+
+<!--
+High-level description of the proposed approach.
+Focus on what, not how. Avoid implementation details.
+Include diagrams or examples if helpful.
+-->
+
+### Notes/Constraints/Caveats
+
+<!--
+(Optional) Any additional context that reviewers should know up front.
+-->
+
+### Risks and Mitigations
+
+<!--
+Highlight critical risks and how they will be managed.
+Consider: performance, security, compatibility, operational aspects.
+-->
+
+## Design Details
+
+<!--
+Detailed implementation specifics:
+- APIs and interfaces
+- Data models and schema changes
+- Algorithm or logic flow
+- Configuration changes
+-->
+
+## Test Plan
+
+<!--
+Outline how the change will be verified and tested.
+Include: unit tests, integration tests, QA/E2E tests, manual testing.
+What scenarios must be covered?
+-->
+
+## Drawbacks
+
+<!--
+What arguments exist against this direction?
+What are the trade-offs?
+-->
+
+## Alternatives
+
+<!--
+Summarize other approaches that were evaluated.
+Why was this proposal chosen over alternatives?
+-->
+
+## Infrastructure Needed
+
+<!--
+(Optional) List any new tooling, repos, or environments required.
+Do we need new services, storage, or third-party dependencies?
+-->
+
+## Upgrade & Migration Strategy
+
+<!--
+(Optional) Describe the migration path for users/operators if needed.
+How will existing setups be upgraded? Are there breaking changes?
+-->
