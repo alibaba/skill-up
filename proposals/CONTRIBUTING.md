@@ -49,7 +49,7 @@ front matter followed by the title and TOC:
 
 ```yaml
 ---
-title: My First Proposal
+title: "My First Proposal"
 authors:
   - "@your-github-handle"
 creation-date: 2025-12-21
@@ -57,7 +57,7 @@ last-updated: 2025-12-21
 status: draft
 ---
 
-# Proposal-0001: My First Proposal
+# SUP-0001: My First Proposal
 
 <!-- toc -->
 - [Summary](#summary)

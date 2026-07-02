@@ -96,6 +96,22 @@ validate_status() {
     exit 1
 }
 
+require_value() {
+    local option="$1"
+    if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        echo "Error: option $option requires an argument" >&2
+        usage >&2
+        exit 1
+    fi
+}
+
+yaml_double_quote_escape() {
+    local value="$1"
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    printf '%s' "$value"
+}
+
 # Parse arguments
 TITLE=""
 STATUS="draft"
@@ -109,14 +125,17 @@ while [[ $# -gt 0 ]]; do
             exit 0
             ;;
         -s|--status)
+            require_value "$1" "${2:-}"
             STATUS=$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')
             shift 2
             ;;
         -a|--author)
+            require_value "$1" "${2:-}"
             AUTHOR="$2"
             shift 2
             ;;
         -o|--output)
+            require_value "$1" "${2:-}"
             OUTPUT="$2"
             shift 2
             ;;
@@ -155,6 +174,11 @@ fi
 
 DATE=$(date +%Y-%m-%d)
 SLUG=$(slugify "$TITLE")
+if [[ -z "$SLUG" ]]; then
+    SLUG="proposal"
+fi
+YAML_TITLE=$(yaml_double_quote_escape "$TITLE")
+YAML_AUTHOR=$(yaml_double_quote_escape "$AUTHOR")
 
 # Determine destination
 if [[ -z "$OUTPUT" ]]; then
@@ -170,7 +194,13 @@ if [[ -z "$OUTPUT" ]]; then
     done
 else
     DESTINATION="$OUTPUT"
-    PROPOSAL_ID=$(basename "$DESTINATION" | sed -E 's/^([0-9]+)-.*/\1/')
+    DESTINATION_BASENAME=$(basename "$DESTINATION")
+    if [[ "$DESTINATION_BASENAME" =~ ^([0-9]+)- ]]; then
+        PROPOSAL_ID=$(printf "%04d" "$((10#${BASH_REMATCH[1]}))")
+    else
+        SEQ=$(next_sequence)
+        PROPOSAL_ID=$(printf "%04d" "$SEQ")
+    fi
 fi
 
 # Check if destination exists
@@ -188,10 +218,12 @@ fi
 # Render template using pure bash substitution (avoids sed escaping issues)
 content=$(<"$TEMPLATE")
 content="${content//\{\{title\}\}/$TITLE}"
-content="${content//\{\{author\}\}/$AUTHOR}"
+content="${content//\{\{yaml_title\}\}/$YAML_TITLE}"
+content="${content//\{\{yaml_author\}\}/$YAML_AUTHOR}"
 content="${content//\{\{status_metadata\}\}/$STATUS}"
 content="${content//\{\{date\}\}/$DATE}"
 content="${content//\{\{proposal_id\}\}/$PROPOSAL_ID}"
+mkdir -p "$(dirname "$DESTINATION")"
 printf '%s\n' "$content" > "$DESTINATION"
 
 echo "Created $DESTINATION"

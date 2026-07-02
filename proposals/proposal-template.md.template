@@ -1,13 +1,13 @@
 ---
-title: {{title}}
+title: "{{yaml_title}}"
 authors:
-  - "{{author}}"
+  - "{{yaml_author}}"
 creation-date: {{date}}
 last-updated: {{date}}
 status: {{status_metadata}}
 ---
 
-# Proposal-{{proposal_id}}: {{title}}
+# SUP-{{proposal_id}}: {{title}}
 
 <!-- toc -->
 - [Summary](#summary)
