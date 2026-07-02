@@ -16,10 +16,13 @@ on:
 
 # Cancel superseded runs for the same PR so a new push does not leave the
 # previous run occupying a shared GitHub-hosted runner slot. Pushes to main
-# are never cancelled (cancel-in-progress only on pull_request) so the
-# coverage-badge commit job always runs to completion.
+# fall back to the unique run_id, giving every main run its own group so it is
+# never cancelled — not while executing (cancel-in-progress is false off PRs)
+# and not while queued (a shared group drops an older pending run when a newer
+# one lands, regardless of cancel-in-progress), so the full matrix and the
+# coverage-badge commit job always run to completion.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Default the workflow token to read-only. Jobs that execute PR-supplied
