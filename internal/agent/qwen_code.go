@@ -30,6 +30,9 @@ const (
 	qwenCodePackage    = "@qwen-code/qwen-code"
 	// qwenCodeBinary is the executable name installed by the npm package.
 	qwenCodeBinary = "qwen"
+	// Session-line type discriminators in qwen's chat JSONL.
+	qwenTypeUser      = "user"
+	qwenTypeAssistant = "assistant"
 )
 
 // qwenCodeExecPathProbeCmd resolves both $HOME/.local/bin (where `npm install
@@ -119,8 +122,8 @@ func (a *QwenCodeAgent) CheckCredentials(ctx context.Context) error {
 	return nil
 }
 
-// Run executes qwen non-interactively (`qwen --yolo -p <instruction>`) and
-// converts stdout into a transcript.
+// Run executes qwen non-interactively (instruction piped to `qwen --yolo`) and
+// builds a transcript from the session file (falling back to stdout).
 func (a *QwenCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (*SessionResult, error) {
 	if err := requireBashOnWindowsHost(rt); err != nil {
 		return nil, fmt.Errorf("%s: %w", a.Name(), err)
@@ -338,7 +341,7 @@ func parseQwenSessionFile(sf string) (trans transcript.Transcript, finalMsg stri
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
 			continue
 		}
-		if ev.Type == "user" {
+		if ev.Type == qwenTypeUser {
 			turn++
 		}
 		if ev.Message == nil {
@@ -347,7 +350,7 @@ func parseQwenSessionFile(sf string) (trans transcript.Transcript, finalMsg stri
 		if final := appendQwenMessageParts(&messages, ev, max(turn, 1)); final != "" {
 			finalMsg = final
 		}
-		if ev.Type == "assistant" && ev.UsageMetadata != nil {
+		if ev.Type == qwenTypeAssistant && ev.UsageMetadata != nil {
 			inputTokens = max(inputTokens, ev.UsageMetadata.PromptTokenCount)
 			outputTokens = max(outputTokens, ev.UsageMetadata.CandidatesTokenCount+ev.UsageMetadata.ThoughtsTokenCount)
 		}
@@ -365,7 +368,7 @@ func parseQwenSessionFile(sf string) (trans transcript.Transcript, finalMsg stri
 // turn, so the caller can track the final message.
 func appendQwenMessageParts(messages *[]transcript.Message, ev qwenSessionEvent, turn int) string {
 	role := transcript.RoleAssistant
-	if ev.Type == "user" {
+	if ev.Type == qwenTypeUser {
 		role = transcript.RoleUser
 	}
 

@@ -191,6 +191,8 @@ func TestQwenCodeRun_SuppressesWarningOnlyWhenRuntimeIsolates(t *testing.T) {
 func TestParseQwenSessionFile(t *testing.T) {
 	t.Parallel()
 
+	const callID = "call_1" // referenced below so goconst doesn't flag the literal
+
 	// One user turn, an assistant tool call, the tool response, then the final
 	// assistant answer with usageMetadata. Mirrors qwen's Gemini-style schema
 	// (role model/user, parts[], functionCall/functionResponse).
@@ -232,10 +234,10 @@ func TestParseQwenSessionFile(t *testing.T) {
 			t.Fatalf("message %d role = %q, want %q", i, roles[i], want[i])
 		}
 	}
-	if tc := trans[1].ToolCall; tc == nil || tc.Name != "run_shell_command" || tc.ID != "call_1" {
+	if tc := trans[1].ToolCall; tc == nil || tc.Name != "run_shell_command" || tc.ID != callID {
 		t.Fatalf("unexpected tool call: %+v", trans[1].ToolCall)
 	}
-	if tr := trans[2].ToolResult; tr == nil || tr.CallID != "call_1" || !strings.Contains(fmt.Sprint(tr.Content), "a.txt") {
+	if tr := trans[2].ToolResult; tr == nil || tr.CallID != callID || !strings.Contains(fmt.Sprint(tr.Content), "a.txt") {
 		t.Fatalf("unexpected tool result: %+v", trans[2].ToolResult)
 	}
 }
