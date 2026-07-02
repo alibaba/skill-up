@@ -5,10 +5,13 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"text/template"
 	"time"
 
 	"github.com/alibaba/skill-up/internal/observability"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
@@ -121,6 +124,9 @@ func (a *CLIAgent) InstallSkill(ctx context.Context, rt Runtime, skillCfg runtim
 
 // Run executes the agent with the given messages and returns the session result.
 func (a *CLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (*SessionResult, error) {
+	if err := requireBashOnWindowsHost(rt); err != nil {
+		return nil, fmt.Errorf("%s: %w", a.Name(), err)
+	}
 	start := time.Now()
 
 	instruction := BuildInstructionFromMessages(messages)
@@ -151,12 +157,42 @@ func (a *CLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messag
 	return sessionResult, nil
 }
 
+// commandVRegexp matches a POSIX `command -v <binary> [rest]` check. The
+// regex form (vs strings.CutPrefix) lets us capture the binary separately
+// from any trailing redirect or pipe, and supports surrounding whitespace
+// the way a real shell would.
+var commandVRegexp = regexp.MustCompile(`^\s*command\s+-v\s+(\S+)(\s.*)?$`)
+
+// checkCommandForOS adapts a POSIX `command -v X` availability check to the
+// target OS. Windows cmd.exe has no `command` builtin; `where` is the
+// equivalent. Common POSIX-only redirect targets (`/dev/null`) are rewritten
+// to their cmd equivalent (`nul`) so a quiet probe like
+// `command -v codex >/dev/null 2>&1` continues to silence its output
+// instead of failing to open the missing /dev/null path. Other command
+// forms are returned unchanged.
+func checkCommandForOS(checkCmd, goos string) string {
+	if goos != platform.GOOSWindows {
+		return checkCmd
+	}
+	m := commandVRegexp.FindStringSubmatch(checkCmd)
+	if m == nil {
+		return checkCmd
+	}
+	binary, rest := m[1], m[2]
+	rest = strings.ReplaceAll(rest, "/dev/null", "nul")
+	return "where " + binary + rest
+}
+
 // Check verifies the agent executable is available.
 func (a *CLIAgent) Check(ctx context.Context, rt Runtime) error {
+	if err := requireBashOnWindowsHost(rt); err != nil {
+		return fmt.Errorf("%s: %w", a.Name(), err)
+	}
 	checkCmd := a.Cfg.CheckCmd
 	if checkCmd == "" {
 		return fmt.Errorf("CheckCmd not configured for agent %s", a.Name())
 	}
+	checkCmd = checkCommandForOS(checkCmd, rt.TargetGOOS())
 
 	result, err := rt.Exec(ctx, checkCmd, a.mergeExecOptionsEnv(ctx, ExecOptions{}, nil, nil))
 	if err != nil {
@@ -167,13 +203,4 @@ func (a *CLIAgent) Check(ctx context.Context, rt Runtime) error {
 	}
 
 	return nil
-}
-
-func (a *CLIAgent) installSkillDefault(ctx context.Context, rt Runtime, skillCfg runtime.SkillConfig) error {
-	target := skillCfg.Target
-	if target == "" && a.Cfg.SkillPath != "" {
-		target = filepath.Join(a.Cfg.SkillPath, filepath.Base(skillCfg.Source))
-	}
-
-	return installSkill(ctx, rt, skillCfg.Source, target)
 }

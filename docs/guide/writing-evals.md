@@ -80,11 +80,12 @@ skills:
 
 # ========== 5. Agent Engine ==========
 engine:
-  name: claude_code               # claude_code / codex / qodercli (also accepts qoder-cli)
+  name: claude_code               # claude_code / codex / qodercli (also accepts qoder-cli) / qwen_code (also accepts qwen-code, qwen)
   model:
     provider: anthropic
     name: claude-sonnet-4-6
     base_url: ""                  # Custom API endpoint (optional)
+  # kwargs: { ... }               # Agent-specific switches — see "Engine kwargs" below
 
 # ========== 6. Cases ==========
 cases:
@@ -94,6 +95,9 @@ cases:
   defaults:
     timeout_seconds: 300          # Per-case timeout, default 300s
     max_turns: 12                 # Max conversation turns, default 12
+    collect_artifacts:            # Glob patterns selecting workspace files to download (see below)
+      - "**/*.json"
+      - "report/**"
   parallelism: 2                  # Case parallelism, default 1
   retry_policy:
     max_retries: 1
@@ -111,9 +115,133 @@ report:
 
 `cases.parallelism` is the file-level default. To override it for a single run, use `skill-up run --parallelism N` without modifying `eval.yaml`. Allowed range: **1 to 256**.
 
+### Engine kwargs (agent-specific switches)
+
+`engine.kwargs` is a free-form string map. Each agent reads only the keys it recognises; unknown keys are ignored. Unrecognised keys (typos like `bypas_sandbox`) emit a DEBUG log line — run with `-v` to surface them. CLI override: `--engine-kwarg key=value` (alias `--ek`), repeatable. Precedence: `--engine-kwarg` > `engine.kwargs` > default.
+
+| key | agent | `true` behaviour | unset / `false` |
+| :---: | :---: | :--- | :--- |
+| `bypass_sandbox` | `codex` | Forces `--dangerously-bypass-approvals-and-sandbox`; overrides the runtime-derived choice. Use when the host kernel lacks Landlock support (e.g. some CI containers) | Default: `none` runtime → `--sandbox workspace-write`; other runtimes already bypass |
+| `bypass_sandbox` | `claude_code` | No-op — claude already runs with `--permission-mode=bypassPermissions` | No-op |
+| `bypass_sandbox` | `qodercli` | No-op — no equivalent flag | No-op |
+| `bypass_sandbox` | `qwen_code` | No-op — `qwen_code` never imposes its own sandbox (`--yolo` only auto-approves tool calls; it does **not** isolate). Like `claude_code`/`qodercli`, isolation is the runtime's job | No-op |
+
+```bash
+# One-off override at the call site
+skill-up run evals/eval.yaml --engine-kwarg bypass_sandbox=true
+```
+
+### Collecting workspace artifacts (`collect_artifacts`)
+
+`collect_artifacts` declares glob patterns that select files from the case workspace to download as run artifacts. After every agent run — **whether it succeeded, failed, or timed out** — matching files are copied to:
+
+```
+<output-dir>/<case-id>/<configuration>/outputs/workspace/<relative-path>
+```
+
+The matched file's path **relative to the workspace root is preserved**, so `report/run-1/summary.json` lands at `outputs/workspace/report/run-1/summary.json`.
+
+- **Glob syntax** uses [doublestar](https://github.com/bmatcuk/doublestar): `*` matches within a single path segment, `**` matches across directories. Examples: `*.md`, `src/**/*.go`, `report/**`, `**/*.json`.
+- **Two layers, merged as a union.** `cases.defaults.collect_artifacts` applies to every case; a case may add its own:
+
+  ```yaml
+  # in a case.yaml
+  collect_artifacts:
+    - "out/**"
+  ```
+
+  The per-case list is appended to the defaults and de-duplicated (defaults first).
+- **Always collected**, independent of the judge type and of whether the workspace is a git repo. Collection is read-only — it never modifies the workspace.
+- The workspace `.git/` directory is **excluded** (an `agent_judge` run commits a baseline there), so a broad pattern like `**` won't sweep VCS internals into the artifacts.
+
+> **Not to be confused with `report.artifacts`** (which selects artifact *types* like `transcript`/`logs`), or with the git workspace diff used by `agent_judge` (a diff *string* fed to the judge, not downloaded files). `collect_artifacts` downloads actual file contents and is orthogonal to both.
+
+### Custom Engine
+
+When `engine.name` is not one of the built-ins (`claude_code`, `codex`, `qodercli`, `qwen_code`), declare an `engine.custom` block so skill-up knows how to invoke your agent. Both `transport: local` (run a command inside the runtime) and `transport: http` (call an HTTP agent service) are supported.
+
+```yaml
+engine:
+  name: my-agent
+  model:
+    provider: anthropic
+    name: claude-sonnet-4-6
+  custom:
+    transport: local             # local | http
+    response_format: session_result   # session_result (default) | text
+    timeout_seconds: 300
+    env:                         # credentials and secrets — NEVER reference these in command/args
+      MY_AGENT_TOKEN: ${MY_AGENT_TOKEN}
+    kwargs:                      # non-secret knobs exposed as ${kwargs.<key>}
+      profile: production
+    local:
+      command: /opt/my-agent/bin/run
+      args:
+        - --input
+        - ${input_file}          # path to the SessionInput JSON skill-up writes
+        - --output
+        - ${output_file}         # path your agent should write its SessionResult JSON to
+      cwd: ${workspace}          # optional; confined to the runtime workspace
+      input_file: inputs/messages.json   # optional override (relative to workspace)
+      output_file: outputs/session-result.json   # optional override
+```
+
+Key fields (full contract in [docs/design/custom-engine.md](../design/custom-engine.md)):
+
+- **`transport`** (required) — how skill-up invokes your agent.
+  - `local`: run `local.command` inside the current runtime via `runtime.Exec`. The agent process can read the runtime workspace, installed skills, fixtures, MCP config, and process environment variables.
+  - `http`: POST the `SessionInput` to a remote (or local) HTTP agent service and read its `SessionResult` from the response body. Configure it under `custom.http` (see below).
+- **`response_format`** (optional, default `session_result`) — how skill-up parses the agent's output.
+  - `session_result`: read a full `SessionResult` JSON from `local.output_file` (when configured) or stdout. Carries `exit_code` / `final_message` / `transcript` / `turns` / `input_tokens` / `output_tokens` / `artifacts`. **Recommended**: keeps the full context for judges and reports.
+  - `text`: take stdout verbatim as `final_message`. skill-up synthesises a minimal transcript (input messages + the assistant reply) so judges still receive a conversation. Use only for simple scripts that do not produce structured output.
+- **`timeout_seconds`** (optional) — per-call deadline. Falls back to the case-level timeout when unset; when both are set, skill-up takes the smaller of the two so the value handed to the agent matches the real wall-clock budget.
+- **`env`** (optional) — credentials and secret parameters. Values are injected into the agent process as environment variables. **This is the only channel allowed to carry credentials**: `command` / `args` / `cwd` / `input_file` / `output_file` reject secret-shaped values at config load.
+- **`kwargs`** (optional) — non-secret knobs exposed to templates as `${kwargs.<key>}`. Unlike `env`, kwargs are subject to the same strict secret-rejection as command-line fields, so they must not carry credentials or credential-shaped keys.
+
+Template variables available in `command` / `args` / `cwd` / `env` / `input_file` / `output_file`:
+`${workspace}`, `${input_file}`, `${output_file}`, `${model}`, `${model_provider}`, `${model_name}`, `${case_id}`, `${variant}`, `${max_turns}`, `${timeout_seconds}`, `${kwargs.<key>}`, plus environment variables via `${VAR}` / `${VAR:-default}` / `${VAR?error message}`.
+
+Secret-handling rules (enforced at config load):
+
+- `${api_key}` and any kwarg whose key looks like a credential (`token`, `secret`, `api_key`, `apiKey`, `bearerToken`, …) cannot be referenced from `command` / `args` / `cwd` / `input_file` / `output_file`. Pass them through `engine.custom.env`, where they reach your agent as process environment variables instead of leaking into process listings.
+- `${SOMEVAR:-...}` defaults that contain recognizable credential shapes (`sk-...`, `sk-ant-...`, `ghp_...`, `AIza...`, `AKIA...`, JWTs) are likewise rejected in command-line contexts.
+
+For `transport: http`, configure the call under `custom.http` instead of `custom.local`:
+
+```yaml
+engine:
+  name: remote-review-agent
+  custom:
+    transport: http
+    response_format: session_result
+    timeout_seconds: 300
+    kwargs:
+      profile: production
+    http:
+      url: ${CUSTOM_AGENT_ENDPOINT}/v1/run   # required
+      method: POST                            # only POST is supported
+      headers:
+        Authorization: Bearer ${api_key}      # reference secrets here, not in the URL
+      files:                                  # optional: upload workspace files as multipart
+        - path: diff.patch
+          required: true
+        - path: "src/**/*.go"
+          required: false
+      request_body: ${session_input}          # optional; defaults to ${session_input}
+```
+
+HTTP specifics:
+
+- The request body defaults to the `SessionInput` JSON. A `request_body` field whose value is exactly `${session_input}`, `${messages}`, or `${kwargs}` is injected as a JSON structure (not a string).
+- With `http.files`, the request becomes `multipart/form-data`: the JSON body moves to the `payload` field and each matched file is uploaded as a separate part under the fixed form field name `files`, with its workspace-relative path carried in that part's `filename` (so the server reads each `files` part's `filename`, not a per-path form key). `path` is a workspace-relative file or glob; `required: false` skips a missing/empty match.
+- Credentials must be referenced from `headers` (or `request_body`), never from `http.url` — a URL that renders `${api_key}` is rejected to keep the key out of request logs.
+- A non-2xx response is treated as an invocation error. Artifacts the agent returns under `artifacts.files[].url` are GET-downloaded (http/https only, no redirects, size/time bounded) into the report directory.
+
+See `docs/design/custom-engine.md` for the full SessionInput / SessionResult schema your agent must conform to.
+
 ### MCP configuration
 
-MCP supports `mode: real` and `mode: mocked`. `real` installs a real MCP server into Agents such as `claude_code`, `qodercli`, or `codex`; `mocked` makes `internal/mcp` generate a local stdio mock server that is then installed into the Agent like any other MCP server.
+MCP supports `mode: real` and `mode: mocked`. `real` installs a real MCP server into Agents such as `claude_code`, `qodercli`, `codex`, or `qwen_code`; `mocked` makes `internal/mcp` generate a local stdio mock server that is then installed into the Agent like any other MCP server.
 
 HTTP MCP servers can be declared inline or pulled in via `config_ref`:
 
@@ -510,6 +638,33 @@ qodercli also has model-parameter restrictions:
 
 - `model` must be one of qodercli's predefined values: `lite`, `efficient`, `auto`, `performance`, `ultimate`
 - `base_url` has no effect for qodercli
+
+### qwen_code credentials
+
+[Qwen Code](https://github.com/QwenLM/qwen-code) is an open-source terminal coding agent optimized for Qwen models. The engine name is `qwen_code` (aliases: `qwen-code`, `qwen`), backed by the `@qwen-code/qwen-code` CLI. skill-up installs it on demand via `npm install -g @qwen-code/qwen-code` (Node.js 20+ is bootstrapped automatically), so a manual install is optional.
+
+Qwen Code talks to any **OpenAI-compatible** endpoint, so it reuses the standard OpenAI environment variables — the same plumbing as `codex`:
+
+| Variable          | Purpose                                                    |
+| :---------------: | :-------------------------------------------------------: |
+| `OPENAI_API_KEY`  | API key for the OpenAI-compatible endpoint                 |
+| `OPENAI_BASE_URL` | Endpoint base URL (e.g. DashScope OpenAI-compatible mode)  |
+| `OPENAI_MODEL`    | Model id; set automatically from `engine.model.name`       |
+
+`provider: openai` (or an empty provider) plus a `base_url` points Qwen Code at a custom gateway; `engine.model.name` / `--model` is forwarded both as the `-m` flag and as `OPENAI_MODEL`. A missing `OPENAI_API_KEY` is informational only — Qwen Code can fall back to local login state under `~/.qwen/` (e.g. Qwen OAuth). Each case runs non-interactively by piping the instruction to `qwen --yolo`, which auto-approves tool actions.
+
+> **Sandboxing:** `--yolo` auto-approves tool calls but does **not** isolate them — so on the `none` runtime `qwen_code` executes shell/write tools with your host privileges, the same as `claude_code` and `qodercli`. `qwen_code` deliberately does not force qwen's own `-s` sandbox (it requires docker/podman on Linux and is unreliable elsewhere); instead, run untrusted skills under a sandboxed runtime (`environment.type: docker` or `opensandbox`), which isolates every engine uniformly. On the `none` runtime qwen's "running without a sandbox" notice is left visible as a reminder; under a sandboxed runtime it is silenced (the container is the sandbox).
+
+> **Protocol:** Qwen Code only speaks the **OpenAI-compatible** API (plus Qwen OAuth); it has **no** native Anthropic Messages API mode. To evaluate against an Anthropic-protocol endpoint, use the `claude_code` engine instead (it reads `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`), or front the endpoint with an Anthropic→OpenAI-compatible proxy and pass that proxy's URL as `base_url`.
+
+Minimal local run:
+
+```bash
+export OPENAI_API_KEY=sk-xxx
+export OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+
+skill-up run ./evals/eval.yaml --engine qwen_code --model qwen3-coder-plus
+```
 
 ---
 

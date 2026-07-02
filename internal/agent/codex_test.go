@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/logging"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
@@ -98,8 +100,11 @@ func TestCodexInstall_DefaultsToPinnedVersion(t *testing.T) {
 	if !strings.Contains(rt.lastCommand, "@openai/codex@"+codexDefaultVersion) {
 		t.Fatalf("install command %q does not pin codex version %s", rt.lastCommand, codexDefaultVersion)
 	}
-	if got := rt.lastExecEnv["PATH"]; got != agentExecutablePath {
-		t.Fatalf("install PATH = %q, want agent executable path", got)
+	if _, ok := rt.lastExecEnv["PATH"]; ok {
+		t.Fatalf("install env should not carry PATH from agent; PATH flows via runtime baseline. got %q", rt.lastExecEnv["PATH"])
+	}
+	if got := rt.mergedEnv["PATH"]; got == "" {
+		t.Fatalf("expected probeAndMergePATH to populate runtime baseline with PATH; mergedEnv=%+v", rt.mergedEnv)
 	}
 	if got := rt.lastExecEnv[credential.EnvOpenAIAPIKey]; got != "" {
 		t.Fatalf("install env leaked %s = %q", credential.EnvOpenAIAPIKey, got)
@@ -716,6 +721,76 @@ func TestCodexRun_MergesConfiguredEnvVars(t *testing.T) {
 	}
 }
 
+func TestCodexRun_SandboxFlagHonoursKwargAndRuntime(t *testing.T) {
+	t.Parallel()
+
+	stdout := `{"type":"thread.started","thread_id":"thread-123"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"done"}}
+{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":1}}`
+
+	cases := []struct {
+		name        string
+		workspace   string // codexTestRuntime returns RequiresProcessSandbox() == (workspace != "opensandbox")
+		kwargs      map[string]string
+		wantFlag    string
+		notWantFlag string
+	}{
+		{
+			name:        "none runtime, no kwarg -> auto workspace-write",
+			workspace:   t.TempDir(),
+			kwargs:      nil,
+			wantFlag:    "--sandbox workspace-write",
+			notWantFlag: "--dangerously-bypass-approvals-and-sandbox",
+		},
+		{
+			name:        "none runtime, bypass_sandbox=true -> forced bypass",
+			workspace:   t.TempDir(),
+			kwargs:      map[string]string{KwargBypassSandbox: "true"},
+			wantFlag:    "--dangerously-bypass-approvals-and-sandbox",
+			notWantFlag: "--sandbox workspace-write",
+		},
+		{
+			name:        "opensandbox runtime, no kwarg -> bypass (unchanged)",
+			workspace:   "opensandbox",
+			kwargs:      nil,
+			wantFlag:    "--dangerously-bypass-approvals-and-sandbox",
+			notWantFlag: "--sandbox workspace-write",
+		},
+		{
+			name:        "none runtime, bypass_sandbox=garbage -> auto workspace-write (ParseBool fails)",
+			workspace:   t.TempDir(),
+			kwargs:      map[string]string{KwargBypassSandbox: "garbage"},
+			wantFlag:    "--sandbox workspace-write",
+			notWantFlag: "--dangerously-bypass-approvals-and-sandbox",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rt := &codexTestRuntime{
+				workspace:  tc.workspace,
+				execResult: runtime.ExecResult{Stdout: stdout, ExitCode: 0},
+			}
+			ag := NewCodexAgent(Config{Kwargs: tc.kwargs})
+			if _, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{
+				Role:    transcript.RoleUser,
+				Content: "hi",
+				Turn:    1,
+			}}); err != nil {
+				t.Fatalf("Run failed: %v", err)
+			}
+			if !containsCommand(rt.commands, tc.wantFlag) {
+				t.Fatalf("no command contains %q; commands=%v", tc.wantFlag, rt.commands)
+			}
+			if containsCommand(rt.commands, tc.notWantFlag) {
+				t.Fatalf("commands unexpectedly contain %q; commands=%v", tc.notWantFlag, rt.commands)
+			}
+		})
+	}
+}
+
 func TestCodexRun_KeepsStreamFinalMessageWhenSessionHasNoFinalMessage(t *testing.T) {
 	t.Parallel()
 
@@ -878,15 +953,17 @@ func TestCodexRun_PropagatesObservabilityEnv(t *testing.T) {
 }
 
 type codexTestRuntime struct {
-	workspace        string
-	sessionPath      string
-	sessionBytes     []byte
-	lastMessagePath  string
-	lastMessageBytes []byte
-	execResult       runtime.ExecResult
-	commands         []string
-	lastCommand      string
-	lastExecEnv      map[string]string
+	workspace           string
+	sessionPath         string
+	sessionBytes        []byte
+	lastMessagePath     string
+	lastMessageBytes    []byte
+	execResult          runtime.ExecResult
+	commands            []string
+	lastCommand         string
+	lastExecEnv         map[string]string
+	probeResponseStdout string
+	mergedEnv           map[string]string
 }
 
 func (r *codexTestRuntime) Create(context.Context) error { return nil }
@@ -912,6 +989,25 @@ func (r *codexTestRuntime) DownloadFile(_ context.Context, sourcePath, targetPat
 }
 func (r *codexTestRuntime) DownloadDir(context.Context, string, string) error { return nil }
 func (r *codexTestRuntime) Exec(_ context.Context, command string, opts runtime.ExecOptions) (runtime.ExecResult, error) {
+	// Probe calls (agent.Install via probeAndMergePATH) get a canned
+	// literal PATH and are NOT recorded as a real command. Exact-match
+	// the probe constant so unrelated `printf '%s' "$HOME/..."` tests
+	// aren't silently intercepted.
+	if command == codexExecPathProbeCmd {
+		stdout := r.probeResponseStdout
+		if stdout == "" {
+			stdout = "/fake/.local/bin:/fake/.nvm/current/bin:/usr/bin"
+		}
+		return runtime.ExecResult{Stdout: stdout}, nil
+	}
+	// ensureNodeRuntime emits a script whose first conditional short-circuits
+	// when codex is already on PATH. Treat it as a no-op success so the
+	// subsequent agent-command Exec is what tests observe via lastCommand /
+	// execResult — otherwise the bootstrap call would consume the configured
+	// non-zero exit codes meant for the codex invocation.
+	if strings.Contains(command, "if command -v 'codex' >/dev/null 2>&1; then exit 0; fi") {
+		return runtime.ExecResult{ExitCode: 0}, nil
+	}
 	r.commands = append(r.commands, command)
 	r.lastCommand = command
 	if strings.Contains(command, "SKILL_UP_CODEX_THREAD_ID") {
@@ -936,3 +1032,12 @@ func (r *codexTestRuntime) Workspace() string { return r.workspace }
 func (r *codexTestRuntime) RequiresProcessSandbox() bool {
 	return r.workspace != "opensandbox"
 }
+
+func (r *codexTestRuntime) MergeEnv(env map[string]string) {
+	if r.mergedEnv == nil {
+		r.mergedEnv = make(map[string]string, len(env))
+	}
+	maps.Copy(r.mergedEnv, env)
+}
+
+func (r *codexTestRuntime) TargetGOOS() string { return platform.GOOSLinux }

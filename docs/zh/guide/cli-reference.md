@@ -266,11 +266,15 @@ skill-up import ./evals/evals.json --output ./new-evals
     <case-id>/
       with_skill/                 # Skill 安装后的执行结果
         outputs/                  # Agent 生成的文件
+          workspace/              # collect_artifacts 命中的文件（保留相对路径）
         grading.json              # 评估结果
       without_skill/              # 基线对比结果（仅 benchmark.enabled=true 时）
         outputs/
+          workspace/
         grading.json
 ```
+
+`outputs/workspace/` 子目录仅在配置了 `collect_artifacts` 时出现，详见[编写评测 → 采集 workspace 产物](writing-evals.md#采集-workspace-产物collect_artifacts)。
 
 ### grading.json 格式
 

@@ -11,15 +11,40 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/observability"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
+	"github.com/alibaba/skill-up/internal/shellquote"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
 
 // ErrAgentNotFound is returned when the agent executable is not found.
 var ErrAgentNotFound = errors.New("agent not found in PATH")
+
+// ErrAgentRequiresBash is returned when an agent CLI is invoked on a Windows
+// host where Git Bash (or another bash discoverable by platform.DiscoverBash)
+// is not available. Agent commands are POSIX-quoted and assume a bash
+// interpreter; running them through the cmd.exe fallback would let metachars
+// (`& | " %VAR%`) in the instruction reach the shell unprotected. See
+// docs/guide/windows.md for the documented limitation.
+var ErrAgentRequiresBash = errors.New("agent CLI execution on Windows requires bash; install Git for Windows or set SKILL_UP_BASH")
+
+// requireBashOnWindowsHost rejects agent execution when the runtime's target
+// is Windows but the host shell would be cmd.exe. We only enforce this for
+// runtimes whose target matches the host (NoneRuntime today); sandboxed
+// runtimes target a non-Windows guest and never go through platform.Host().
+func requireBashOnWindowsHost(rt Runtime) error {
+	if rt.TargetGOOS() != platform.GOOSWindows {
+		return nil
+	}
+	if platform.Host().IsBash {
+		return nil
+	}
+	return ErrAgentRequiresBash
+}
 
 // ErrAgentInstallFailed is returned when agent installation fails.
 var ErrAgentInstallFailed = errors.New("agent installation failed")
@@ -41,9 +66,21 @@ type SessionResult struct {
 
 // SessionArtifacts holds artifacts produced during an agent session.
 type SessionArtifacts struct {
-	WorkspaceDiff  string   `json:"workspace_diff,omitempty"`
-	GeneratedFiles []string `json:"generated_files,omitempty"` // Runtime file paths, e.g. ["outputs/stdout.json", "outputs/transcript.jsonl"]
-	Logs           string   `json:"logs,omitempty"`
+	WorkspaceDiff  string         `json:"workspace_diff,omitempty"`
+	GeneratedFiles []string       `json:"generated_files,omitempty"` // Runtime file paths, e.g. ["outputs/stdout.json", "outputs/transcript.jsonl"]
+	Files          []ArtifactFile `json:"files,omitempty"`           // Structured artifact declarations (Custom Engine).
+	Logs           string         `json:"logs,omitempty"`
+}
+
+// ArtifactFile is a structured artifact declaration returned by an agent.
+// Exactly one of Path, URL, Content, ContentBase64 should be set.
+type ArtifactFile struct {
+	Name          string `json:"name"`
+	Path          string `json:"path,omitempty"`
+	URL           string `json:"url,omitempty"`
+	Content       string `json:"content,omitempty"`
+	ContentBase64 string `json:"content_base64,omitempty"`
+	ContentType   string `json:"content_type,omitempty"`
 }
 
 // Config configures the agent.
@@ -65,6 +102,13 @@ type Config struct {
 	ModelProvider string
 	APIKey        string
 	BaseURL       string
+	// Kwargs carries agent-specific key/value options forwarded from
+	// EngineConfig.Kwargs. Each agent reads only the keys it understands;
+	// unknown keys are ignored. See agent kwargs helpers in kwargs.go.
+	Kwargs map[string]string
+	// Custom carries the custom engine configuration when Name does not match
+	// a built-in agent. It is nil for built-in agents.
+	Custom *config.CustomEngineConfig
 }
 
 // Runtime is an alias for runtime.Runtime for agent package convenience.
@@ -110,7 +154,6 @@ const ExitCodeSignalKilled = -1
 const (
 	agentProviderOpenAI    = "openai"
 	agentProviderAnthropic = "anthropic"
-	agentExecutablePath    = "$HOME/.local/bin:$HOME/.nvm/current/bin:$PATH"
 )
 
 // NewBaseAgent creates a new BaseAgent with the given config.
@@ -165,8 +208,7 @@ func (a *BaseAgent) logCredentialStatus(ctx context.Context, apiKeyEnv, baseURLE
 	// This does not scan unrelated providers.
 	if apiKey := os.Getenv(apiKeyEnv); apiKey != "" {
 		logging.DebugContextf(ctx, "%s detected for %s (source=process_env)", apiKeyEnv, a.Name())
-		if baseURL := os.Getenv(baseURLEnv); baseURLEnv != "" && baseURL != "" {
-			_ = baseURL
+		if baseURLEnv != "" && os.Getenv(baseURLEnv) != "" {
 			logging.DebugContextf(ctx, "%s detected for %s (source=process_env)", baseURLEnv, a.Name())
 		}
 		return
@@ -184,6 +226,19 @@ func (a *BaseAgent) credentialEnvVars(apiKeyEnv, baseURLEnv string) map[string]s
 	}
 
 	return envVars
+}
+
+// installSkillDefault is the fallback skill installer used when an agent does
+// not configure its own InstallSkillCmd template. It installs the skill source
+// under a.Cfg.SkillPath (or the caller-supplied target). Defined on BaseAgent
+// so both CLIAgent and CustomAgent share it via embedding, without making
+// CustomAgent inherit the rest of CLIAgent.
+func (a *BaseAgent) installSkillDefault(ctx context.Context, rt Runtime, skillCfg runtime.SkillConfig) error {
+	target := skillCfg.Target
+	if target == "" && a.Cfg.SkillPath != "" {
+		target = filepath.Join(a.Cfg.SkillPath, filepath.Base(skillCfg.Source))
+	}
+	return installSkill(ctx, rt, skillCfg.Source, target)
 }
 
 func persistRuntimeArtifact(ctx context.Context, rt Runtime, targetPath, content string) error {
@@ -254,12 +309,33 @@ func downloadSessionArtifact(ctx context.Context, rt Runtime, artifactDir, sessi
 }
 
 func (a *BaseAgent) mergeExecOptionsEnv(ctx context.Context, opts ExecOptions, envVars map[string]string, attrs map[string]string) ExecOptions {
-	merged := map[string]string{"PATH": agentExecutablePath}
+	merged := map[string]string{}
 	maps.Copy(merged, envVars)
 	maps.Copy(merged, opts.Env)
 	maps.Copy(merged, observability.AgentEnv(ctx, merged, attrs))
 	opts.Env = merged
 	return opts
+}
+
+// probeAndMergePATH runs probeCmd against rt and merges the literal result
+// into rt's env baseline under key "PATH". Each agent's Install calls this
+// with its own probeCmd (e.g. claudeCodeExecPathProbeCmd) so the resolved
+// PATH covers the directories where that agent's binaries actually live.
+//
+// On probe failure the runtime's default PATH stands and a warning is
+// logged; the install command still runs (its own bootstrap, if any, may
+// still succeed).
+func (a *BaseAgent) probeAndMergePATH(ctx context.Context, rt Runtime, probeCmd string) {
+	res, err := rt.Exec(ctx, probeCmd, ExecOptions{})
+	if err != nil || res.ExitCode != 0 {
+		logging.WarnContextf(ctx, "agent %s: PATH probe failed (err=%v exit=%d); using runtime default PATH", a.Name(), err, res.ExitCode)
+		return
+	}
+	path := strings.TrimSpace(res.Stdout)
+	if path == "" {
+		return
+	}
+	rt.MergeEnv(map[string]string{"PATH": path})
 }
 
 func (a *BaseAgent) buildAgentObservabilityAttrs(extra map[string]string) map[string]string {
@@ -286,22 +362,13 @@ func formatAgentModel(provider, model string) string {
 	return provider + "/" + model
 }
 
-// shellQuote quotes a string for safe shell usage.
+// shellQuote quotes a string for safe POSIX shell usage. Agent commands are
+// always composed for and executed by bash (via the Node/nvm bootstrap), so
+// POSIX quoting is correct even when skill-up itself runs on a Windows host.
+// It delegates to internal/shellquote so the project keeps a single quoting
+// implementation.
 func shellQuote(s string) string {
-	if s == "" {
-		return "''"
-	}
-	var result strings.Builder
-	result.WriteByte('\'')
-	for _, c := range s {
-		if c == '\'' {
-			result.WriteString(`'\''`)
-		} else {
-			result.WriteRune(c)
-		}
-	}
-	result.WriteByte('\'')
-	return result.String()
+	return shellquote.QuotePOSIX(s)
 }
 
 // BuildInstructionFromMessages converts messages to a single instruction string.

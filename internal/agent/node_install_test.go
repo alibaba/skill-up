@@ -1,8 +1,13 @@
 package agent
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/alibaba/skill-up/internal/platform"
+	"github.com/alibaba/skill-up/internal/runtime"
 )
 
 func TestNodeBootstrapLines(t *testing.T) {
@@ -44,30 +49,95 @@ func TestNodeBootstrapLinesUsesDefaultVersion(t *testing.T) {
 	}
 }
 
-func TestNodeRuntimeCommandGuardSkipsBootstrapWhenCLIPresent(t *testing.T) {
+func TestEnsureNodeRuntime_ScriptShape(t *testing.T) {
 	t.Parallel()
 
-	cmd := nodeRuntimeCommandWithGuard("claude", "claude --help")
-	if !strings.Contains(cmd, "if ! command -v 'claude' >/dev/null 2>&1; then") {
-		t.Fatalf("guarded runtime command missing CLI guard:\n%s", cmd)
+	rt := &nodeBootstrapTestRuntime{result: runtime.ExecResult{ExitCode: 0}}
+	if err := ensureNodeRuntime(context.Background(), rt, "claude", ExecOptions{}); err != nil {
+		t.Fatalf("ensureNodeRuntime returned error: %v", err)
 	}
-	// Bootstrap must live inside the guarded block, not at top level — verify
-	// the trailing `fi` precedes the actual command invocation.
-	guardClose := strings.Index(cmd, "\nfi\n")
-	cmdIdx := strings.Index(cmd, "claude --help")
-	if guardClose < 0 || cmdIdx < guardClose {
-		t.Fatalf("guarded runtime command should run cli after closing the guard block:\n%s", cmd)
+	if len(rt.commands) != 1 {
+		t.Fatalf("expected 1 Exec call, got %d: %v", len(rt.commands), rt.commands)
 	}
-}
-
-func TestNodeRuntimeCommandWithoutGuardKeepsBootstrap(t *testing.T) {
-	t.Parallel()
-
-	cmd := nodeRuntimeCommand("echo hi")
-	if strings.Contains(cmd, "if ! command -v") && strings.Contains(cmd, ">/dev/null 2>&1; then\n  export NVM_DIR") {
-		t.Fatalf("unguarded runtime command should not wrap bootstrap in a CLI guard:\n%s", cmd)
+	cmd := rt.commands[0]
+	// The guard short-circuit must precede the bootstrap so it never executes
+	// when the CLI is already on PATH.
+	if !strings.HasPrefix(cmd, "set -e\nif command -v 'claude' >/dev/null 2>&1; then exit 0; fi\n") {
+		t.Fatalf("bootstrap script missing CLI short-circuit at top:\n%s", cmd)
 	}
 	if !strings.Contains(cmd, "nvm install '"+agentNodeDefaultVersion+"'") {
-		t.Fatalf("unguarded runtime command should still emit bootstrap:\n%s", cmd)
+		t.Fatalf("bootstrap script missing nvm install:\n%s", cmd)
 	}
 }
+
+func TestEnsureNodeRuntime_WrapsExecError(t *testing.T) {
+	t.Parallel()
+
+	sentinel := errors.New("network down")
+	rt := &nodeBootstrapTestRuntime{err: sentinel}
+	err := ensureNodeRuntime(context.Background(), rt, "claude", ExecOptions{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected wrapped sentinel error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "node bootstrap failed") {
+		t.Fatalf("expected 'node bootstrap failed' prefix, got %v", err)
+	}
+}
+
+func TestEnsureNodeRuntime_WrapsNonZeroExit(t *testing.T) {
+	t.Parallel()
+
+	rt := &nodeBootstrapTestRuntime{result: runtime.ExecResult{ExitCode: 7, Stderr: "checksum mismatch"}}
+	err := ensureNodeRuntime(context.Background(), rt, "codex", ExecOptions{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "node bootstrap failed") {
+		t.Fatalf("expected 'node bootstrap failed' prefix, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("expected stderr to be surfaced, got %v", err)
+	}
+}
+
+func TestEnsureNodeRuntime_RejectsEmptyCLIBin(t *testing.T) {
+	t.Parallel()
+
+	rt := &nodeBootstrapTestRuntime{}
+	if err := ensureNodeRuntime(context.Background(), rt, "", ExecOptions{}); err == nil {
+		t.Fatal("expected error when cliBin is empty")
+	}
+	if len(rt.commands) != 0 {
+		t.Fatalf("expected no Exec calls when cliBin is empty, got %v", rt.commands)
+	}
+}
+
+type nodeBootstrapTestRuntime struct {
+	commands []string
+	result   runtime.ExecResult
+	err      error
+}
+
+func (r *nodeBootstrapTestRuntime) Create(context.Context) error { return nil }
+func (r *nodeBootstrapTestRuntime) Close() error                 { return nil }
+func (r *nodeBootstrapTestRuntime) Start(context.Context) error  { return nil }
+func (r *nodeBootstrapTestRuntime) Stop(context.Context) error   { return nil }
+func (r *nodeBootstrapTestRuntime) UploadFile(context.Context, string, string) error {
+	return nil
+}
+func (r *nodeBootstrapTestRuntime) UploadDir(context.Context, string, string) error { return nil }
+func (r *nodeBootstrapTestRuntime) DownloadFile(context.Context, string, string) error {
+	return nil
+}
+func (r *nodeBootstrapTestRuntime) DownloadDir(context.Context, string, string) error { return nil }
+func (r *nodeBootstrapTestRuntime) Exec(_ context.Context, command string, _ runtime.ExecOptions) (runtime.ExecResult, error) {
+	r.commands = append(r.commands, command)
+	return r.result, r.err
+}
+func (r *nodeBootstrapTestRuntime) Workspace() string            { return "/workspace" }
+func (r *nodeBootstrapTestRuntime) RequiresProcessSandbox() bool { return false }
+func (r *nodeBootstrapTestRuntime) MergeEnv(map[string]string)   {}
+func (r *nodeBootstrapTestRuntime) TargetGOOS() string           { return platform.GOOSLinux }

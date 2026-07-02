@@ -1,0 +1,29 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+
+mcp:
+  servers: []
+
+engine:
+  name: e2e-custom-http-agent
+  custom:
+    transport: http
+    response_format: session_result
+    http:
+      url: ${CUSTOM_AGENT_ENDPOINT}/v1/run
+      method: POST
+      headers:
+        Content-Type: application/json
+
+cases:
+  files:
+    - evals/cases/hello.yaml
+  defaults:
+    timeout_seconds: 60
+    max_turns: 3
+  parallelism: 1
+
+report:
+  formats: [json]

@@ -1234,6 +1234,50 @@ func TestApplyRunConfigOverrides_RuntimeKwargs(t *testing.T) {
 	}
 }
 
+func TestApplyRunConfigOverrides_EngineKwargs(t *testing.T) {
+	t.Parallel()
+
+	cmd := &cobra.Command{}
+	cmd.Flags().SetNormalizeFunc(normalizeRunFlagName)
+	cmd.Flags().StringArray(runtimeKwargFlagName, nil, "")
+	cmd.Flags().StringArray(engineKwargFlagName, nil, "")
+	if err := cmd.Flags().Set("engine-kwarg", "bypass_sandbox=1"); err != nil {
+		t.Fatalf("set engine-kwarg: %v", err)
+	}
+	if err := cmd.Flags().Set("ek", "future_key=abc"); err != nil {
+		t.Fatalf("set ek: %v", err)
+	}
+
+	cfg := config.DefaultEvalConfig()
+	cfg.Engine.Kwargs = map[string]string{"bypass_sandbox": "0"}
+	if err := applyRunConfigOverrides(cfg, cmd); err != nil {
+		t.Fatalf("applyRunConfigOverrides: %v", err)
+	}
+	if got := cfg.Engine.Kwargs["bypass_sandbox"]; got != "1" {
+		t.Fatalf("bypass_sandbox kwarg = %q, want CLI override %q", got, "1")
+	}
+	if got := cfg.Engine.Kwargs["future_key"]; got != "abc" {
+		t.Fatalf("future_key kwarg = %q, want CLI value abc", got)
+	}
+}
+
+func TestApplyRunConfigOverrides_EngineKwargInvalid(t *testing.T) {
+	t.Parallel()
+
+	cmd := &cobra.Command{}
+	cmd.Flags().SetNormalizeFunc(normalizeRunFlagName)
+	cmd.Flags().StringArray(runtimeKwargFlagName, nil, "")
+	cmd.Flags().StringArray(engineKwargFlagName, nil, "")
+	if err := cmd.Flags().Set("engine-kwarg", "no_equals_sign"); err != nil {
+		t.Fatalf("set engine-kwarg: %v", err)
+	}
+
+	cfg := config.DefaultEvalConfig()
+	if err := applyRunConfigOverrides(cfg, cmd); err == nil {
+		t.Fatal("expected error for malformed --engine-kwarg")
+	}
+}
+
 func TestApplyRunConfigOverrides_RuntimeType(t *testing.T) {
 	t.Parallel()
 

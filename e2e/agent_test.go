@@ -33,6 +33,11 @@ func isCodexInstalled() bool {
 	return err == nil
 }
 
+func isQwenCodeInstalled() bool {
+	_, err := exec.LookPath("qwen")
+	return err == nil
+}
+
 func openSandboxE2EAPIKey() string {
 	return os.Getenv("OPENSANDBOX_API_KEY")
 }
@@ -528,6 +533,106 @@ expect:
 
 	if result.ExitCode != 0 {
 		t.Fatalf("qodercli run failed: exit=%d\nstdout:\n%s\nstderr:\n%s",
+			result.ExitCode, result.Stdout, result.Stderr)
+	}
+
+	iterationDir := filepath.Join(outputDir, "iteration-1")
+	for _, rel := range []string{"benchmark.json", "result.json"} {
+		if _, err := os.Stat(filepath.Join(iterationDir, rel)); err != nil {
+			t.Errorf("%s not created under iteration-1: %v", rel, err)
+		}
+	}
+
+	responsePath := filepath.Join(iterationDir, "test-case", "with_skill", "outputs", "response.md")
+	if _, err := os.Stat(responsePath); err != nil {
+		t.Errorf("response.md not created at %s: %v", responsePath, err)
+	}
+}
+
+// TestAgent_QwenCode_NoneRuntime drives the full CLI pipeline with the
+// built-in qwen_code engine against the mock engine (no real qwen CLI, no
+// model). The mock binary is symlinked as "qwen" by mockEngineHome and the
+// agent's node bootstrap short-circuits because `command -v qwen` resolves it,
+// so this runs on every PR without secrets — the qwen_code analogue of
+// TestAgent_QoderCLI_NoneRuntime.
+func TestAgent_QwenCode_NoneRuntime(t *testing.T) {
+	t.Parallel()
+
+	evalDir := createTestEvalDir(t, "test-skill-qwen")
+
+	evalContent := `schema_version: v1alpha1
+
+environment:
+  type: none
+  workspace_mount: /workspace
+  env:
+    TZ: UTC
+
+mcp:
+  servers: []
+
+engine:
+  name: qwen_code
+  model:
+    provider: openai
+    name: qwen3-coder-plus
+
+skills: []
+
+cases:
+  files:
+    - evals/cases/test-case.yaml
+  defaults:
+    timeout_seconds: 300
+    max_turns: 1
+  parallelism: 1
+  retry_policy:
+    max_retries: 1
+    retry_on:
+      - timeout
+
+judge:
+  type: rule_based
+  rule_based:
+    must_contain:
+      - "Hello"
+
+report:
+  formats: [json]
+  artifacts: []
+`
+
+	evalPath := filepath.Join(evalDir, "eval.yaml")
+	if err := os.WriteFile(evalPath, []byte(evalContent), 0o644); err != nil {
+		t.Fatalf("failed to write eval.yaml: %v", err)
+	}
+
+	caseContent := `id: test-case
+title: Test Case
+description: A test case for e2e testing
+
+input:
+  prompt: Please say hello to the user.
+
+constraints:
+  timeout_seconds: 300
+  max_turns: 1
+
+expect:
+  must_contain:
+    - "Hello"
+`
+	if err := os.WriteFile(filepath.Join(evalDir, "evals", "cases", "test-case.yaml"), []byte(caseContent), 0o644); err != nil {
+		t.Fatalf("failed to rewrite case file: %v", err)
+	}
+
+	outputDir := filepath.Join(evalDir, "output")
+	env := mockEngineEnv(t)
+	result := Run(t, RunConfig{Env: env, Timeout: 60 * time.Second},
+		"run", evalPath, "--output-dir", outputDir)
+
+	if result.ExitCode != 0 {
+		t.Fatalf("qwen_code run failed: exit=%d\nstdout:\n%s\nstderr:\n%s",
 			result.ExitCode, result.Stdout, result.Stderr)
 	}
 
@@ -1367,6 +1472,95 @@ expect:
 	}
 
 	// Verify result.json was produced in the iteration directory.
+	resultPath := filepath.Join(workspaceDir, "iteration-1", "result.json")
+	resultData, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Logf("result.json not found at %s (may be expected if agent errored): %v", resultPath, err)
+		return
+	}
+	t.Logf("result.json: %s", string(resultData))
+}
+
+// TestAgent_QwenCode_NoneRuntime_FullRun drives the real qwen CLI against a
+// live OpenAI-compatible endpoint (DashScope in CI, via OPENAI_API_KEY /
+// OPENAI_BASE_URL / OPENAI_MODEL). It self-skips when the qwen binary is not
+// installed, so local runs without it are unaffected; CI installs it first.
+// Mirrors TestAgent_QoderCLI_NoneRuntime_FullRun.
+func TestAgent_QwenCode_NoneRuntime_FullRun(t *testing.T) {
+	t.Parallel()
+	if !isQwenCodeInstalled() {
+		t.Skip("qwen (qwen-code) not installed locally")
+	}
+
+	base := t.TempDir()
+	projectDir := filepath.Join(base, "test-skill-qwen-none")
+	evalsDir := filepath.Join(projectDir, "evals")
+	casesDir := filepath.Join(evalsDir, "cases")
+
+	writeFile(t, filepath.Join(projectDir, "SKILL.md"), "# Test Skill\nThis is a test skill.\n")
+
+	evalContent := `schema_version: v1alpha1
+
+environment:
+  type: none
+
+skills:
+  - source: local_path
+    path: .
+
+engine:
+  name: qwen_code
+  model:
+    provider: openai
+    name: qwen3-coder-plus
+
+cases:
+  files:
+    - evals/cases/test-case.yaml
+  defaults:
+    timeout_seconds: 120
+    max_turns: 3
+  parallelism: 1
+
+report:
+  formats: [json]
+  artifacts: []
+`
+	evalPath := filepath.Join(evalsDir, "eval.yaml")
+	writeFile(t, evalPath, evalContent)
+
+	caseContent := `id: test-case
+title: Test Case
+input:
+  prompt: Reply with exactly the word hello. Do not run commands.
+constraints:
+  timeout_seconds: 120
+  max_turns: 1
+expect:
+  must_contain:
+    - "hello"
+`
+	writeFile(t, filepath.Join(casesDir, "test-case.yaml"), caseContent)
+
+	workspaceDir := filepath.Join(base, "test-skill-qwen-none-workspace")
+	preserveWorkspaceArtifacts(t, workspaceDir)
+	result := Run(t, RunConfig{Timeout: 180e9}, "run", evalPath)
+
+	if result.ExitCode != 0 && result.ExitCode != -1 {
+		if strings.Contains(result.Stderr, "qwen_code") ||
+			strings.Contains(result.Stdout, "qwen_code") ||
+			strings.Contains(result.Stderr, "authentication") ||
+			strings.Contains(result.Stderr, "OPENAI_API_KEY") {
+			t.Logf("qwen_code engine invoked as expected, exit code: %d", result.ExitCode)
+		} else {
+			t.Fatalf("qwen_code run failed unexpectedly: exit=%d stdout=%s stderr=%s", result.ExitCode, result.Stdout, result.Stderr)
+		}
+	}
+
+	if _, err := os.Stat(workspaceDir); os.IsNotExist(err) {
+		t.Fatalf("expected workspace directory at %s", workspaceDir)
+	}
+
 	resultPath := filepath.Join(workspaceDir, "iteration-1", "result.json")
 	resultData, err := os.ReadFile(resultPath)
 	if err != nil {

@@ -80,7 +80,7 @@ skills:
 
 # ========== 5. Agent Engine ==========
 engine:
-  name: claude_code               # claude_code / codex / qodercli（也兼容 qoder-cli）
+  name: claude_code               # claude_code / codex / qodercli（也兼容 qoder-cli）/ qwen_code（也兼容 qwen-code、qwen）
   model:
     provider: anthropic           # 模型供应商
     name: claude-sonnet-4-6       # 模型名称
@@ -94,6 +94,9 @@ cases:
   defaults:                       # 用例默认值
     timeout_seconds: 300          # 超时时间（秒），默认 300
     max_turns: 12                 # 最大交互轮数，默认 12
+    collect_artifacts:            # 用 glob 指定要下载的 workspace 产物文件（见下文）
+      - "**/*.json"
+      - "report/**"
   parallelism: 2                  # 用例并行数，默认 1
   retry_policy:                   # 重试策略
     max_retries: 1
@@ -111,9 +114,116 @@ report:
 
 `cases.parallelism` 是配置文件中的默认用例并行数；临时运行时可以用 `skill-up run --parallelism N` 覆盖它，不需要修改 `eval.yaml`。命令行覆盖值必须在 1 到 256 之间。
 
+### 采集 workspace 产物（`collect_artifacts`）
+
+`collect_artifacts` 用 glob 声明要从用例 workspace 采集的文件。每次 Agent 运行后——**无论成功、失败还是超时**——命中的文件都会被下载到：
+
+```
+<output-dir>/<case-id>/<configuration>/outputs/workspace/<相对路径>
+```
+
+文件相对 workspace 根目录的**路径结构会被保留**，例如 `report/run-1/summary.json` 会落到 `outputs/workspace/report/run-1/summary.json`。
+
+- **Glob 语法** 采用 [doublestar](https://github.com/bmatcuk/doublestar)：`*` 仅匹配单层路径段，`**` 跨目录递归匹配。示例：`*.md`、`src/**/*.go`、`report/**`、`**/*.json`。
+- **两层配置，按并集合并。** `cases.defaults.collect_artifacts` 对所有用例生效；单个用例可在 `case.yaml` 中追加：
+
+  ```yaml
+  collect_artifacts:
+    - "out/**"
+  ```
+
+  per-case 列表会追加到默认值之后并去重（默认值在前）。
+- **始终采集**，与 judge 类型、workspace 是否为 git 仓库无关；采集过程只读，不会修改 workspace。
+- workspace 下的 `.git/` 目录会被**排除**（`agent_judge` 会在其中提交一份 baseline），因此 `**` 这类宽模式不会把 VCS 内部文件扫进产物。
+
+> **请勿与 `report.artifacts` 混淆**（后者选择产物*类型*，如 `transcript`/`logs`），也不同于 `agent_judge` 使用的 git workspace diff（那是喂给 judge 的 diff *字符串*，不落盘成文件）。`collect_artifacts` 下载的是文件实体，与二者正交。
+
+### 自定义 Engine（Custom Engine）
+
+当 `engine.name` 不是内置引擎（`claude_code` / `codex` / `qodercli` / `qwen_code`）时，必须再写一个 `engine.custom` 段来告诉 skill-up 怎么调用你的 Agent。`transport: local`（在 runtime 内执行命令）和 `transport: http`（调用 HTTP agent 服务）均已支持。
+
+```yaml
+engine:
+  name: my-agent
+  model:
+    provider: anthropic
+    name: claude-sonnet-4-6
+  custom:
+    transport: local              # local | http
+    response_format: session_result  # session_result（默认）| text
+    timeout_seconds: 300
+    env:                          # 凭据 / 敏感参数 —— 不要在 command/args 里引用这些
+      MY_AGENT_TOKEN: ${MY_AGENT_TOKEN}
+    kwargs:                       # 非敏感开关，模板里以 ${kwargs.<key>} 暴露
+      profile: production
+    local:
+      command: /opt/my-agent/bin/run
+      args:
+        - --input
+        - ${input_file}           # skill-up 写入的 SessionInput JSON 路径
+        - --output
+        - ${output_file}          # 你的 Agent 应写入 SessionResult JSON 的路径
+      cwd: ${workspace}           # 可选；被限制在 runtime workspace 内
+      input_file: inputs/messages.json     # 可选覆盖（相对 workspace）
+      output_file: outputs/session-result.json
+```
+
+关键字段说明（完整契约见 [docs/design/custom-engine.md](../../design/custom-engine.md)）：
+
+- **`transport`**（必填）—— skill-up 调用 agent 的方式。
+  - `local`：通过 `runtime.Exec` 在当前 runtime 内执行 `local.command`，agent 进程可访问 runtime workspace、已安装的 skill、fixture、MCP 配置以及进程环境变量。
+  - `http`：把 `SessionInput` POST 到远程（或本地）HTTP agent 服务，从响应体读取 `SessionResult`。相关字段配置在 `custom.http` 下（见下文）。
+- **`response_format`**（可选，默认 `session_result`）—— skill-up 如何解析 agent 输出。
+  - `session_result`：从 `local.output_file`（若配置）或 stdout 读出完整的 `SessionResult` JSON，包含 `exit_code` / `final_message` / `transcript` / `turns` / `input_tokens` / `output_tokens` / `artifacts`。**推荐保留默认**，可以让 judge 和报告拿到完整上下文。
+  - `text`：把 stdout 整体当作 `final_message`，skill-up 自动按输入消息 + 助手回复合成 minimal transcript，使 judge 仍能拿到一段对话。仅适合不输出结构化结果的简易脚本。
+- **`timeout_seconds`**（可选）—— 单次调用的超时时间。未设时回退到 case 级 timeout；两者都设置时 skill-up 取较小值，保证传给 agent 的预算与真实墙钟一致。
+- **`env`**（可选）—— 凭据 / 敏感参数通道。值会以进程环境变量形式注入到 agent。**这是唯一允许携带凭据的字段**：`command` / `args` / `cwd` / `input_file` / `output_file` 在配置加载阶段会拒绝凭据形态的值。
+- **`kwargs`**（可选）—— 非敏感开关，模板里以 `${kwargs.<key>}` 暴露。与 `env` 不同，kwargs 也走严格凭据检查，不允许携带凭据值或凭据形态的 key（如 `token` / `api_key` / `bearerToken` 等）。
+
+`command` / `args` / `cwd` / `env` / `input_file` / `output_file` 中可用的模板变量：
+`${workspace}`、`${input_file}`、`${output_file}`、`${model}`、`${model_provider}`、`${model_name}`、`${case_id}`、`${variant}`、`${max_turns}`、`${timeout_seconds}`、`${kwargs.<key>}`，以及环境变量形式 `${VAR}` / `${VAR:-default}` / `${VAR?error message}`。
+
+凭据收敛规则（配置加载期强校验）：
+
+- `${api_key}` 以及任何看起来像凭据的 kwarg key（`token` / `secret` / `api_key` / `apiKey` / `bearerToken` 等）都不允许出现在 `command` / `args` / `cwd` / `input_file` / `output_file` 中，必须经由 `engine.custom.env` 注入到子进程环境变量里。
+- `${SOMEVAR:-...}` 默认值如果匹配常见凭据特征（`sk-...`、`sk-ant-...`、`ghp_...`、`AIza...`、`AKIA...`、JWT 等），同样会在命令行场景被拒。
+
+`transport: http` 时，把调用配置写在 `custom.http` 下（替代 `custom.local`）：
+
+```yaml
+engine:
+  name: remote-review-agent
+  custom:
+    transport: http
+    response_format: session_result
+    timeout_seconds: 300
+    kwargs:
+      profile: production
+    http:
+      url: ${CUSTOM_AGENT_ENDPOINT}/v1/run   # 必填
+      method: POST                            # 仅支持 POST
+      headers:
+        Authorization: Bearer ${api_key}      # 凭据写在 header，不要写进 URL
+      files:                                  # 可选：以 multipart 上传 workspace 文件
+        - path: diff.patch
+          required: true
+        - path: "src/**/*.go"
+          required: false
+      request_body: ${session_input}          # 可选；默认即 ${session_input}
+```
+
+HTTP 要点：
+
+- 请求体默认是 `SessionInput` JSON。`request_body` 中某个值若恰好是 `${session_input}` / `${messages}` / `${kwargs}`，会以 JSON 结构注入（而非字符串）。
+- 配置了 `http.files` 后请求变为 `multipart/form-data`：JSON 体移到 `payload` 字段，每个命中的文件作为独立 part 上传到固定表单字段 `files`，其 workspace 相对路径放在该 part 的 `filename` 里（服务端应读取每个 `files` part 的 `filename`，而不是按路径找表单 key）。`path` 为 workspace 相对文件或 glob；`required: false` 时缺失/未命中会跳过。
+- 凭据必须从 `headers`（或 `request_body`）引用，不能写进 `http.url` —— URL 渲染出 `${api_key}` 会被拒绝，避免泄漏到请求日志。
+- 非 2xx 响应按调用错误处理。Agent 在 `artifacts.files[].url` 返回的产物会被 GET 下载（仅 http/https、不跟随重定向、有大小与时间上限）到报告目录。
+
+SessionInput / SessionResult 的完整 JSON 契约见 `docs/design/custom-engine.md`。
+
 ### MCP 配置说明
 
-MCP 支持 `mode: real` 和 `mode: mocked`。`real` 用于把真实 MCP Server 安装到 `claude_code`、`qodercli` 或 `codex` 等 Agent；`mocked` 会由 `internal/mcp` 生成本地 stdio Mock Server，并按普通 MCP 配置安装到 Agent。
+MCP 支持 `mode: real` 和 `mode: mocked`。`real` 用于把真实 MCP Server 安装到 `claude_code`、`qodercli`、`codex` 或 `qwen_code` 等 Agent；`mocked` 会由 `internal/mcp` 生成本地 stdio Mock Server，并按普通 MCP 配置安装到 Agent。
 
 HTTP MCP 可以直接在 `eval.yaml` 中声明，也可以用 `config_ref` 引用 `evals/fixtures/mcp/*.yaml`：
 
@@ -510,6 +620,33 @@ qodercli 的模型参数也有特殊限制：
 
 - `model` 仅支持 qodercli 自己识别的值：`lite`、`efficient`、`auto`、`performance`、`ultimate`
 - `base_url` 对 qodercli 不生效
+
+### qwen_code 凭据说明
+
+[Qwen Code](https://github.com/QwenLM/qwen-code) 是面向 Qwen 模型优化的开源终端编码 Agent。引擎名为 `qwen_code`（别名 `qwen-code`、`qwen`），底层使用 `@qwen-code/qwen-code` CLI。skill-up 会按需通过 `npm install -g @qwen-code/qwen-code` 自动安装（并自动引导 Node.js 20+），因此无需手动安装。
+
+Qwen Code 对接任意 **OpenAI 兼容**端点，复用标准 OpenAI 环境变量——与 `codex` 同一套机制：
+
+| 环境变量          | 用途                                                  |
+| :---------------: | :--------------------------------------------------: |
+| `OPENAI_API_KEY`  | OpenAI 兼容端点的 API key                             |
+| `OPENAI_BASE_URL` | 端点地址（如 DashScope 的 OpenAI 兼容模式）           |
+| `OPENAI_MODEL`    | 模型 id；由 `engine.model.name` 自动写入              |
+
+`provider: openai`（或留空 provider）配合 `base_url` 即可指向自定义网关；`engine.model.name` / `--model` 会同时作为 `-m` 参数和 `OPENAI_MODEL` 传入。`OPENAI_API_KEY` 缺失只是提示信息——Qwen Code 可回退到 `~/.qwen/` 下的本地登录态（如 Qwen OAuth）。每个 case 通过把指令用管道喂给 `qwen --yolo` 非交互执行，自动确认工具操作。
+
+> **沙箱说明**：`--yolo` 只是自动确认工具调用，并**不**做隔离——因此在 `none` runtime 上 `qwen_code` 会以宿主机权限执行 shell/write 等工具，这一点与 `claude_code`、`qodercli` 一致。`qwen_code` 故意不强制开启 qwen 自带的 `-s` 沙箱（它在 Linux 上依赖 docker/podman，其他环境并不可靠）；如需运行不受信任的 skill，请改用带隔离的 runtime（`environment.type: docker` 或 `opensandbox`），它会统一隔离所有引擎。在 `none` runtime 上会保留 qwen 的“未启用沙箱”提示作为风险提醒；在隔离 runtime 下该提示会被静默（容器本身即沙箱）。
+
+> **协议说明**：Qwen Code 只支持 **OpenAI 兼容**协议（外加 Qwen OAuth），**没有**原生的 Anthropic Messages API 模式。如果要评测 Anthropic 协议的端点，请改用 `claude_code` 引擎（它读取 `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`）；或在端点前挂一层 Anthropic→OpenAI 兼容的转换代理，把代理地址填入 `base_url`。
+
+最小本地运行示例：
+
+```bash
+export OPENAI_API_KEY=sk-xxx
+export OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+
+skill-up run ./evals/eval.yaml --engine qwen_code --model qwen3-coder-plus
+```
 
 ---
 

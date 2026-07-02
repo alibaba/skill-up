@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -905,4 +906,55 @@ func containsHelper(s, substr string) bool {
 
 func float64Ptr(v float64) *float64 {
 	return &v
+}
+
+func TestValidator_CollectArtifacts(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	t.Run("valid globs on eval config", func(t *testing.T) {
+		t.Parallel()
+		cfg := &EvalConfig{
+			SchemaVersion: "v1alpha1",
+			Environment:   Environment{Type: "none"},
+			Engine:        EngineConfig{Name: "claude_code"},
+			Cases: CasesConfig{
+				Files:    []string{"evals/cases/a.yaml"},
+				Defaults: CaseDefaults{CollectArtifacts: []string{"**/*.json", "docs/*.md", "out/**"}},
+			},
+		}
+		if err := validator.ValidateEvalConfig(cfg); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("empty glob on eval config", func(t *testing.T) {
+		t.Parallel()
+		cfg := &EvalConfig{
+			SchemaVersion: "v1alpha1",
+			Environment:   Environment{Type: "none"},
+			Engine:        EngineConfig{Name: "claude_code"},
+			Cases: CasesConfig{
+				Files:    []string{"evals/cases/a.yaml"},
+				Defaults: CaseDefaults{CollectArtifacts: []string{"  "}},
+			},
+		}
+		err := validator.ValidateEvalConfig(cfg)
+		if err == nil || !strings.Contains(err.Error(), "cases.defaults.collect_artifacts[0] must not be empty") {
+			t.Fatalf("expected empty-glob error, got %v", err)
+		}
+	})
+
+	t.Run("invalid glob on case config", func(t *testing.T) {
+		t.Parallel()
+		cfg := &CaseConfig{
+			ID:               "c1",
+			Input:            Input{Prompt: "hi"},
+			CollectArtifacts: []string{"[unterminated"},
+		}
+		err := validator.ValidateCaseConfig(cfg)
+		if err == nil || !strings.Contains(err.Error(), "collect_artifacts[0] is not a valid glob pattern") {
+			t.Fatalf("expected invalid-glob error, got %v", err)
+		}
+	})
 }

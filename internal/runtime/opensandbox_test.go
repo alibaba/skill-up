@@ -277,33 +277,6 @@ func TestOpenSandboxLocalHelpersRejectUnsafePathsAndPreserveRemoteScope(t *testi
 	}
 }
 
-func TestOpenSandboxCommandHelpers(t *testing.T) {
-	t.Parallel()
-
-	env := map[string]string{
-		"PATH":  "$PATH:/custom/bin",
-		"PLAIN": "value",
-	}
-	literal := literalRemoteEnv(env)
-	if _, ok := literal["PATH"]; ok {
-		t.Fatalf("literalRemoteEnv kept expandable PATH: %v", literal)
-	}
-	if literal["PLAIN"] != "value" {
-		t.Fatalf("literalRemoteEnv dropped PLAIN: %v", literal)
-	}
-
-	command := withRemoteEnvExpansion("echo ok", env)
-	if !strings.HasPrefix(command, `export PATH="$PATH:/custom/bin"`+"\n") {
-		t.Fatalf("withRemoteEnvExpansion = %q", command)
-	}
-	if got := withRemoteEnvExpansion("echo ok", map[string]string{"PATH": "/usr/bin"}); got != "echo ok" {
-		t.Fatalf("withRemoteEnvExpansion without expansion = %q, want original command", got)
-	}
-	if got := shellDoubleQuote(`a"b\c` + "`d"); got != `"a\"b\\c\`+"`"+`d"` {
-		t.Fatalf("shellDoubleQuote returned %q", got)
-	}
-}
-
 func TestOpenSandboxExecutionToResult(t *testing.T) {
 	t.Parallel()
 
@@ -725,11 +698,14 @@ func TestOpenSandboxExecMapsOptionsAndResult(t *testing.T) {
 	if req.Cwd != "/workspace/repo" || req.Timeout != 5000 || req.Envs["X"] != "Y" || req.Envs["CUSTOM_BIN"] != "/agent/bin" {
 		t.Fatalf("unexpected exec request: %+v", req)
 	}
-	if _, ok := req.Envs["PATH"]; ok {
-		t.Fatalf("PATH should be expanded remotely instead of passed literally: %+v", req.Envs)
+	// Env values forward literally — including $-bearing PATH. Callers
+	// that need shell expansion must resolve the value first (see
+	// internal/agent.probeAndMergePATH).
+	if got := req.Envs["PATH"]; got != "$CUSTOM_BIN:$PATH" {
+		t.Fatalf("PATH should forward literally; got %q in %+v", got, req.Envs)
 	}
-	if !strings.Contains(req.Command, `export PATH="$CUSTOM_BIN:$PATH"`) || !strings.Contains(req.Command, "echo hello") {
-		t.Fatalf("unexpected command with env expansion: %q", req.Command)
+	if req.Command != "echo hello" {
+		t.Fatalf("command should forward unchanged; got %q", req.Command)
 	}
 }
 
@@ -1089,4 +1065,22 @@ func (f *fakeOpenSandbox) RunCommandWithOpts(_ context.Context, req opensandbox.
 
 func intPtr(v int) *int {
 	return &v
+}
+
+func TestOpenSandboxRuntime_MergeEnv_AppliesToSubsequentExec(t *testing.T) {
+	rt := &OpenSandboxRuntime{
+		workspace: "/workspace",
+		sandbox: &fakeOpenSandbox{
+			execResult: &opensandbox.Execution{ExitCode: intPtr(0)},
+		},
+	}
+	rt.MergeEnv(map[string]string{"FROM_MERGE": "yes"})
+
+	if _, err := rt.Exec(context.Background(), "true", ExecOptions{}); err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	fake, _ := rt.sandbox.(*fakeOpenSandbox)
+	if got := fake.lastExec.Envs["FROM_MERGE"]; got != "yes" {
+		t.Fatalf("Envs[FROM_MERGE] = %q, want yes; got envs=%+v", got, fake.lastExec.Envs)
+	}
 }

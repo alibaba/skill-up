@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/logging"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
@@ -82,8 +84,11 @@ func TestClaudeCodeInstall_UsesDefaultCommand(t *testing.T) {
 	if !strings.Contains(rt.lastCommand, "npm install -g --include=optional '"+claudeCodePackage+"'") {
 		t.Fatalf("install command does not install claude-code:\n%s", rt.lastCommand)
 	}
-	if got := rt.lastExecEnv["PATH"]; got != agentExecutablePath {
-		t.Fatalf("install PATH = %q, want agent executable path", got)
+	if _, ok := rt.lastExecEnv["PATH"]; ok {
+		t.Fatalf("install env should not carry PATH from agent; PATH flows via runtime baseline. got %q", rt.lastExecEnv["PATH"])
+	}
+	if got := rt.mergedEnv["PATH"]; got == "" {
+		t.Fatalf("expected probeAndMergePATH to populate runtime baseline with PATH; mergedEnv=%+v", rt.mergedEnv)
 	}
 	if got := rt.lastExecEnv[credential.EnvAnthropicAPIKey]; got != "" {
 		t.Fatalf("install env leaked %s = %q", credential.EnvAnthropicAPIKey, got)
@@ -700,11 +705,13 @@ func TestProviderRateLimitSignal_PrefersSessionFinalMessage(t *testing.T) {
 }
 
 type claudeCodeTestRuntime struct {
-	workspace   string
-	execResult  runtime.ExecResult
-	lastCommand string
-	lastExecEnv map[string]string
-	execCount   int
+	workspace           string
+	execResult          runtime.ExecResult
+	lastCommand         string
+	lastExecEnv         map[string]string
+	execCount           int
+	probeResponseStdout string            // canned stdout for PATH probe; defaults to a fake bin
+	mergedEnv           map[string]string // accumulates entries from MergeEnv calls
 }
 
 func (r *claudeCodeTestRuntime) Create(context.Context) error { return nil }
@@ -728,6 +735,24 @@ func (r *claudeCodeTestRuntime) DownloadDir(context.Context, string, string) err
 }
 
 func (r *claudeCodeTestRuntime) Exec(_ context.Context, command string, opts runtime.ExecOptions) (runtime.ExecResult, error) {
+	// Probe calls (issued by agent.Install via probeAndMergePATH) get a
+	// canned literal PATH and are NOT recorded as the agent's own
+	// command. Match the exact probe constant rather than a prefix so a
+	// future test that legitimately runs `printf '%s' "$HOME/..."` for
+	// some other purpose isn't silently swallowed.
+	if command == claudeCodeExecPathProbeCmd {
+		stdout := r.probeResponseStdout
+		if stdout == "" {
+			stdout = "/fake/.local/bin:/fake/.nvm/current/bin:/usr/bin"
+		}
+		return runtime.ExecResult{Stdout: stdout}, nil
+	}
+	// ensureNodeRuntime emits a script whose first conditional short-circuits
+	// when claude is already on PATH. Treat it as a no-op success so the
+	// subsequent agent-command Exec is what tests observe via lastCommand.
+	if strings.Contains(command, "if command -v 'claude' >/dev/null 2>&1; then exit 0; fi") {
+		return runtime.ExecResult{ExitCode: 0}, nil
+	}
 	r.lastCommand = command
 	r.execCount++
 	if r.execCount == 1 {
@@ -741,3 +766,12 @@ func (r *claudeCodeTestRuntime) Workspace() string { return r.workspace }
 func (r *claudeCodeTestRuntime) RequiresProcessSandbox() bool {
 	return true
 }
+
+func (r *claudeCodeTestRuntime) MergeEnv(env map[string]string) {
+	if r.mergedEnv == nil {
+		r.mergedEnv = make(map[string]string, len(env))
+	}
+	maps.Copy(r.mergedEnv, env)
+}
+
+func (r *claudeCodeTestRuntime) TargetGOOS() string { return platform.GOOSLinux }

@@ -622,7 +622,7 @@ func TestDockerRuntime_ExecPassesCwdEnvAndCommand(t *testing.T) {
 	}
 }
 
-func TestDockerRuntime_ExecExpandsPATHInCommand(t *testing.T) {
+func TestDockerRuntime_ExecPassesEnvLiterallyIncludingDollar(t *testing.T) {
 	t.Parallel()
 	script := append(createScript("abc"),
 		scriptedCall{match: "exec", response: fakeDockerResponse{stdout: "ok", exitCode: 0}},
@@ -632,10 +632,15 @@ func TestDockerRuntime_ExecExpandsPATHInCommand(t *testing.T) {
 	if err := r.Create(context.Background()); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	// All env values are forwarded literally — including $-bearing ones
+	// and $(...) command-substitution forms. The runtime no longer
+	// special-cases PATH (or rejects anything); callers that need shell
+	// expansion must resolve the value first (see agent.probeAndMergePATH).
 	_, err := r.Exec(context.Background(), "echo hi", ExecOptions{
 		Env: map[string]string{
-			"PATH":    "$HOME/.local/bin:$PATH",
-			"API_KEY": "secret",
+			"PATH":      "$HOME/.local/bin:$PATH",
+			"API_KEY":   "secret",
+			"WEIRD_VAR": "$(touch /tmp/pwn):$PATH",
 		},
 	})
 	if err != nil {
@@ -643,35 +648,18 @@ func TestDockerRuntime_ExecExpandsPATHInCommand(t *testing.T) {
 	}
 	args := fd.callArgs(createCallCount)
 	joined := strings.Join(args, " ")
-	if strings.Contains(joined, "--env PATH=") {
-		t.Errorf("PATH with $ should NOT be passed via --env; got %v", args)
-	}
-	if !strings.Contains(joined, "--env API_KEY=secret") {
-		t.Errorf("expected --env API_KEY=secret; got %v", args)
+	for _, want := range []string{
+		"--env PATH=$HOME/.local/bin:$PATH",
+		"--env API_KEY=secret",
+		"--env WEIRD_VAR=$(touch /tmp/pwn):$PATH",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("expected %q in args; got %v", want, args)
+		}
 	}
 	cmd := args[len(args)-1]
-	if !strings.HasPrefix(cmd, "export PATH=\"$HOME/.local/bin:$PATH\"\n") {
-		t.Errorf("expected PATH export prepended to command; got command: %q", cmd)
-	}
-	if !strings.HasSuffix(cmd, "echo hi") {
-		t.Errorf("expected original command at end; got command: %q", cmd)
-	}
-}
-
-func TestDockerRuntime_ExecRejectsCommandSubstitutionInPATH(t *testing.T) {
-	t.Parallel()
-	fd := newFakeDocker(t, createScript("abc"))
-	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
-	if err := r.Create(context.Background()); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	_, err := r.Exec(context.Background(), "echo hi", ExecOptions{
-		Env: map[string]string{
-			"PATH": "$(touch /tmp/pwn):$PATH",
-		},
-	})
-	if err == nil || !strings.Contains(err.Error(), "command substitution") {
-		t.Fatalf("Exec with PATH=$(...) should fail with command-substitution error, got %v", err)
+	if cmd != "echo hi" {
+		t.Errorf("command should be forwarded unchanged; got %q", cmd)
 	}
 }
 
@@ -1013,3 +1001,26 @@ func TestOverlayEnvList_CallEnvWins(t *testing.T) {
 
 // Compile-time check: DockerRuntime satisfies Runtime.
 var _ Runtime = (*DockerRuntime)(nil)
+
+func TestDockerRuntime_MergeEnv_AppliesToSubsequentExec(t *testing.T) {
+	t.Parallel()
+	script := append(createScript("abc"),
+		scriptedCall{match: "exec", response: fakeDockerResponse{stdout: "ok"}},
+	)
+	fd := newFakeDocker(t, script)
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+	if err := r.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	r.MergeEnv(map[string]string{"FROM_MERGE": "1"})
+
+	if _, err := r.Exec(context.Background(), "true", ExecOptions{}); err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+
+	args := fd.callArgs(createCallCount)
+	if !strings.Contains(strings.Join(args, " "), "--env FROM_MERGE=1") {
+		t.Errorf("post-MergeEnv exec missing --env FROM_MERGE=1; got %v", args)
+	}
+}

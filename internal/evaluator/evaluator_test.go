@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,6 +25,7 @@ import (
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/judge"
 	"github.com/alibaba/skill-up/internal/logging"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
@@ -92,10 +94,13 @@ type mockRuntime struct {
 	execFunc         func(ctx context.Context, command string, opts runtime.ExecOptions) (runtime.ExecResult, error)
 }
 
-func (m *mockRuntime) Create(_ context.Context) error                  { return nil }
-func (m *mockRuntime) Close() error                                    { return nil }
-func (m *mockRuntime) Workspace() string                               { return m.workspace }
-func (m *mockRuntime) RequiresProcessSandbox() bool                    { return true }
+func (m *mockRuntime) Create(_ context.Context) error { return nil }
+func (m *mockRuntime) Close() error                   { return nil }
+func (m *mockRuntime) Workspace() string              { return m.workspace }
+func (m *mockRuntime) RequiresProcessSandbox() bool   { return true }
+func (m *mockRuntime) MergeEnv(_ map[string]string)   {}
+
+func (m *mockRuntime) TargetGOOS() string                              { return platform.GOOSLinux }
 func (m *mockRuntime) Start(_ context.Context) error                   { return nil }
 func (m *mockRuntime) Stop(_ context.Context) error                    { return nil }
 func (m *mockRuntime) UploadFile(_ context.Context, _, _ string) error { return nil }
@@ -963,7 +968,7 @@ func TestExecuteCase_AgentTimeoutDoesNotInvokeAgentJudge(t *testing.T) {
 	})
 
 	origDetect := agentDetectWithInitParams
-	agentDetectWithInitParams = func(_ string, _ credential.AgentInitParams) (agent.Agent, error) {
+	agentDetectWithInitParams = func(_ string, _ credential.AgentInitParams, _ map[string]string) (agent.Agent, error) {
 		return judgeAgent, nil
 	}
 	defer func() { agentDetectWithInitParams = origDetect }()
@@ -2490,7 +2495,7 @@ func TestContextFilesUploader_RejectsUnsafePaths(t *testing.T) {
 	}{
 		{name: "empty", path: ""},
 		{name: "workspace root", path: "."},
-		{name: "absolute", path: filepath.Join(string(filepath.Separator), "tmp", "secret.txt")},
+		{name: "absolute", path: absoluteSecretPath()},
 		{name: "parent traversal", path: "../secret.txt"},
 		{name: "nested parent traversal", path: "fixtures/../../secret.txt"},
 	}
@@ -2708,4 +2713,14 @@ func TestGitInitUploader_InitWithRemotes(t *testing.T) {
 	if !strings.Contains(result.Stdout, "https://github.com/example/repo.git") {
 		t.Fatalf("expected remote URL in output, got %s", result.Stdout)
 	}
+}
+
+// absoluteSecretPath returns a path that filepath.IsAbs reports as absolute on
+// the host OS. On Windows that requires a drive letter; `\tmp\secret.txt`
+// alone is considered relative.
+func absoluteSecretPath() string {
+	if goruntime.GOOS == "windows" {
+		return `C:\tmp\secret.txt`
+	}
+	return "/tmp/secret.txt"
 }

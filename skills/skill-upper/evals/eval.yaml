@@ -18,8 +18,12 @@ cases:
     - evals/cases/scaffold-with-script-judge.yaml
     - evals/cases/english-context-generates-english-only-cases.yaml
   defaults:
-    timeout_seconds: 300
-    max_turns: 15
+    # Budget sized to be engine-agnostic: claude_code finishes well under this,
+    # but slower coding agents (codex on a coder model) need more wall-clock and
+    # turns to complete the multi-file scaffolding cases. A timeout is a ceiling,
+    # so raising it does not slow the fast engines.
+    timeout_seconds: 600
+    max_turns: 25
 
 report:
   formats: [json, html]

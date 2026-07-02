@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,8 +11,13 @@ import (
 
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/alibaba/skill-up/internal/agentkind"
 	"github.com/alibaba/skill-up/internal/credential"
+	"github.com/alibaba/skill-up/internal/platform"
 )
+
+// modelAuto is the QoderCLI "auto" model tier, shared across agent tests.
+const modelAuto = "auto"
 
 func TestListSkillFiles_ExcludesEvals(t *testing.T) {
 	t.Parallel()
@@ -93,26 +99,26 @@ func TestListSkillFiles_EmptyDir(t *testing.T) {
 func TestDetectAgent_QoderCLI(t *testing.T) {
 	t.Parallel()
 
-	cfg := Config{Name: qoderCLIEngineAlias}
-	agent, err := DetectAgent(qoderCLIEngineAlias, cfg)
+	cfg := Config{Name: agentkind.QoderCLIAlias}
+	agent, err := DetectAgent(agentkind.QoderCLIAlias, cfg)
 	if err != nil {
 		t.Fatalf("DetectAgent failed: %v", err)
 	}
-	if agent.Name() != qoderCLIEngineAlias {
-		t.Errorf("expected %s, got %s", qoderCLIEngineAlias, agent.Name())
+	if agent.Name() != agentkind.QoderCLIAlias {
+		t.Errorf("expected %s, got %s", agentkind.QoderCLIAlias, agent.Name())
 	}
 }
 
 func TestDetectAgent_QoderCLILegacyAlias(t *testing.T) {
 	t.Parallel()
 
-	cfg := Config{Name: qoderCLIEngineName}
-	agent, err := DetectAgent(qoderCLIEngineName, cfg)
+	cfg := Config{Name: agentkind.QoderCLI}
+	agent, err := DetectAgent(agentkind.QoderCLI, cfg)
 	if err != nil {
 		t.Fatalf("DetectAgent failed: %v", err)
 	}
-	if agent.Name() != qoderCLIEngineName {
-		t.Errorf("expected legacy alias %s, got %s", qoderCLIEngineName, agent.Name())
+	if agent.Name() != agentkind.QoderCLI {
+		t.Errorf("expected legacy alias %s, got %s", agentkind.QoderCLI, agent.Name())
 	}
 }
 
@@ -139,6 +145,24 @@ func TestDetectAgent_Codex(t *testing.T) {
 	}
 	if agent.Name() != "codex" {
 		t.Errorf("expected codex, got %s", agent.Name())
+	}
+}
+
+func TestDetectAgent_QwenCode(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{agentkind.QwenCode, agentkind.QwenCodeAlias, agentkind.QwenAlias} {
+		cfg := Config{Name: name}
+		ag, err := DetectAgent(name, cfg)
+		if err != nil {
+			t.Fatalf("DetectAgent(%q) failed: %v", name, err)
+		}
+		if _, ok := ag.(*QwenCodeAgent); !ok {
+			t.Fatalf("DetectAgent(%q) returned %T, want *QwenCodeAgent", name, ag)
+		}
+		if ag.Name() != name {
+			t.Errorf("expected %s, got %s", name, ag.Name())
+		}
 	}
 }
 
@@ -202,8 +226,8 @@ func TestBaseAgentMergeExecOptionsEnvMergesRuntimeAndTelemetry(t *testing.T) {
 	if got := opts.Env["BASE_ONLY"]; got != "1" {
 		t.Fatalf("BASE_ONLY = %q, want preserved base env", got)
 	}
-	if got := opts.Env["PATH"]; got != agentExecutablePath {
-		t.Fatalf("PATH = %q, want agent executable path", got)
+	if _, ok := opts.Env["PATH"]; ok {
+		t.Fatalf("PATH should not be injected by mergeExecOptionsEnv; PATH now flows from runtime baseline via probeAndMergePATH. got %q", opts.Env["PATH"])
 	}
 	if got := opts.Env["OTEL_EXPORTER_OTLP_ENDPOINT"]; got != "http://call-collector:4318" {
 		t.Fatalf("OTEL_EXPORTER_OTLP_ENDPOINT = %q, want call env to override process env", got)
@@ -242,6 +266,81 @@ func TestMergeExecOptionsEnv_PreservesConfiguredPATH(t *testing.T) {
 	}
 }
 
+// probeMergeTestRuntime captures probe Exec calls and MergeEnv calls so
+// TestProbeAndMergePATH can verify the helper's wiring without dragging
+// in a full agent test fixture.
+type probeMergeTestRuntime struct {
+	probeCmd    string
+	probeStdout string
+	probeExit   int
+	probeErr    error
+	merged      map[string]string
+}
+
+func (r *probeMergeTestRuntime) Create(context.Context) error                     { return nil }
+func (r *probeMergeTestRuntime) Close() error                                     { return nil }
+func (r *probeMergeTestRuntime) Start(context.Context) error                      { return nil }
+func (r *probeMergeTestRuntime) Stop(context.Context) error                       { return nil }
+func (r *probeMergeTestRuntime) UploadFile(context.Context, string, string) error { return nil }
+func (r *probeMergeTestRuntime) UploadDir(context.Context, string, string) error  { return nil }
+func (r *probeMergeTestRuntime) DownloadFile(context.Context, string, string) error {
+	return nil
+}
+func (r *probeMergeTestRuntime) DownloadDir(context.Context, string, string) error { return nil }
+func (r *probeMergeTestRuntime) Workspace() string                                 { return "" }
+func (r *probeMergeTestRuntime) RequiresProcessSandbox() bool                      { return false }
+func (r *probeMergeTestRuntime) Exec(_ context.Context, cmd string, _ ExecOptions) (ExecResult, error) {
+	r.probeCmd = cmd
+	return ExecResult{Stdout: r.probeStdout, ExitCode: r.probeExit}, r.probeErr
+}
+
+func (r *probeMergeTestRuntime) MergeEnv(env map[string]string) {
+	if r.merged == nil {
+		r.merged = make(map[string]string, len(env))
+	}
+	maps.Copy(r.merged, env)
+}
+func (r *probeMergeTestRuntime) TargetGOOS() string { return platform.GOOSLinux }
+
+func TestProbeAndMergePATH_HappyPath(t *testing.T) {
+	t.Parallel()
+	base := NewBaseAgent(Config{Name: "claude-code"})
+	rt := &probeMergeTestRuntime{probeStdout: "  /resolved/bin:/usr/bin\n"}
+
+	base.probeAndMergePATH(context.Background(), rt, `printf '%s' "$HOME/.local/bin:$PATH"`)
+
+	if rt.probeCmd != `printf '%s' "$HOME/.local/bin:$PATH"` {
+		t.Fatalf("probe cmd = %q, want the supplied probeCmd verbatim", rt.probeCmd)
+	}
+	if got := rt.merged["PATH"]; got != "/resolved/bin:/usr/bin" {
+		t.Fatalf("merged PATH = %q, want trimmed probe stdout", got)
+	}
+}
+
+func TestProbeAndMergePATH_SkipsMergeOnProbeFailure(t *testing.T) {
+	t.Parallel()
+	base := NewBaseAgent(Config{Name: "claude-code"})
+	rt := &probeMergeTestRuntime{probeExit: 127, probeStdout: "garbage"}
+
+	base.probeAndMergePATH(context.Background(), rt, `printf '%s' "$HOME/.local/bin:$PATH"`)
+
+	if rt.merged != nil {
+		t.Fatalf("MergeEnv should not have been called on probe failure; got %+v", rt.merged)
+	}
+}
+
+func TestProbeAndMergePATH_SkipsMergeOnEmptyStdout(t *testing.T) {
+	t.Parallel()
+	base := NewBaseAgent(Config{Name: "claude-code"})
+	rt := &probeMergeTestRuntime{probeStdout: "   \n"} // whitespace only
+
+	base.probeAndMergePATH(context.Background(), rt, `printf '%s' "$HOME/.local/bin:$PATH"`)
+
+	if rt.merged != nil {
+		t.Fatalf("MergeEnv should not have been called on empty probe stdout; got %+v", rt.merged)
+	}
+}
+
 func TestDetectAgentWithInitParams_SetsTypedCredentialFields(t *testing.T) {
 	t.Parallel()
 
@@ -250,7 +349,7 @@ func TestDetectAgentWithInitParams_SetsTypedCredentialFields(t *testing.T) {
 		Model:    "gpt-5.4",
 		APIKey:   "openai-test-token",
 		BaseURL:  "https://openai.example.com/v1",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("DetectAgentWithInitParams failed: %v", err)
 	}
@@ -280,7 +379,7 @@ func TestDetectAgentWithInitParams_QoderMapsAPIKeyToRuntimeEnv(t *testing.T) {
 	ag, err := DetectAgentWithInitParams("qoder-cli", credential.AgentInitParams{
 		Provider: "qoder",
 		Model:    "auto",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("DetectAgentWithInitParams failed: %v", err)
 	}
@@ -301,7 +400,7 @@ func TestDetectAgentWithInitParams_QoderIgnoresParamsAPIKey(t *testing.T) {
 		Provider: "anthropic",
 		Model:    "auto",
 		APIKey:   "sk-ant-should-not-appear",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("DetectAgentWithInitParams failed: %v", err)
 	}
@@ -333,7 +432,7 @@ func TestUnsupportedAgentError(t *testing.T) {
 	t.Parallel()
 
 	err := &UnsupportedAgentError{Name: "test-agent"}
-	if err.Error() != "unsupported agent: test-agent" {
+	if err.Error() != `unsupported agent "test-agent": missing engine.custom` {
 		t.Errorf("unexpected error message: %s", err.Error())
 	}
 }
@@ -343,7 +442,7 @@ func TestDetectAgentWithInitParams_StripsAutoForNonQoderEngines(t *testing.T) {
 
 	ag, err := DetectAgentWithInitParams("claude-code", credential.AgentInitParams{
 		Model: "auto",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("DetectAgentWithInitParams failed: %v", err)
 	}
@@ -362,7 +461,7 @@ func TestDetectAgentWithInitParams_PreservesAutoForQoderCLI(t *testing.T) {
 
 	ag, err := DetectAgentWithInitParams("qoder-cli", credential.AgentInitParams{
 		Model: "auto",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("DetectAgentWithInitParams failed: %v", err)
 	}
@@ -373,5 +472,29 @@ func TestDetectAgentWithInitParams_PreservesAutoForQoderCLI(t *testing.T) {
 	}
 	if got := qoderAgent.Cfg.ModelName; got != "auto" {
 		t.Fatalf("ModelName = %q, want auto (should be preserved for qoder-cli)", got)
+	}
+}
+
+func TestDetectAgentWithInitParams_ForwardsKwargs(t *testing.T) {
+	t.Parallel()
+
+	kwargs := map[string]string{KwargBypassSandbox: "true", "future_key": "x"}
+	ag, err := DetectAgentWithInitParams("codex", credential.AgentInitParams{
+		Provider: "openai",
+		Model:    "gpt-5.4",
+	}, kwargs)
+	if err != nil {
+		t.Fatalf("DetectAgentWithInitParams failed: %v", err)
+	}
+
+	codexAgent, ok := ag.(*CodexAgent)
+	if !ok {
+		t.Fatalf("expected *CodexAgent, got %T", ag)
+	}
+	if got := codexAgent.Cfg.Kwargs[KwargBypassSandbox]; got != "true" {
+		t.Fatalf("Cfg.Kwargs[%s] = %q, want true", KwargBypassSandbox, got)
+	}
+	if got := codexAgent.Cfg.Kwargs["future_key"]; got != "x" {
+		t.Fatalf("Cfg.Kwargs[future_key] = %q, want x", got)
 	}
 }

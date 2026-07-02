@@ -5,8 +5,8 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -225,7 +225,13 @@ func TestNoneRuntime_ExecReturnsContextErrorOnTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	result, err := rt.Exec(ctx, "sleep 1", ExecOptions{})
+	// `sleep 1` is POSIX; on Windows cmd.exe falls back to a long ping
+	// so the process actually outlives the deadline and gets killed.
+	sleepCmd := "sleep 1"
+	if goruntime.GOOS == "windows" {
+		sleepCmd = "ping -n 3 127.0.0.1 > nul"
+	}
+	result, err := rt.Exec(ctx, sleepCmd, ExecOptions{})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected context deadline exceeded, got %v", err)
 	}
@@ -278,6 +284,40 @@ func TestNoneRuntime_ExecOmitsDeadlineDelta_OnManualCancel(t *testing.T) {
 	// not appear (it would read "deadline elapsed by -…").
 	if strings.Contains(output, "deadline elapsed by") {
 		t.Fatalf("must not annotate deadline on manual cancel, got: %s", output)
+	}
+}
+
+func TestNoneRuntime_ExecKillsDescendantsOnTimeout(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		// Windows has no POSIX process-group equivalent: a backgrounded
+		// grandchild spawned by `&` keeps running after its parent shell is
+		// killed by ctx-cancel. configureProcessGroup is a no-op on Windows,
+		// so we cannot guarantee descendant termination here. The cleanup
+		// contract for native Windows agent runs is documented as best-effort.
+		t.Skip("POSIX process-group kill semantics; no Windows equivalent")
+	}
+	t.Parallel()
+
+	rt := &NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	// A backgrounded descendant tries to write a marker 3s in; if the process
+	// group is killed on timeout it never runs.
+	_, err := rt.Exec(ctx, "(sleep 3 && touch leaked.txt) & sleep 10", ExecOptions{})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context deadline exceeded, got %v", err)
+	}
+
+	// Wait past the descendant's would-be write time.
+	time.Sleep(4 * time.Second)
+	if _, statErr := os.Stat(filepath.Join(rt.Workspace(), "leaked.txt")); statErr == nil {
+		t.Fatal("descendant process survived the timeout and wrote leaked.txt")
 	}
 }
 
@@ -403,18 +443,30 @@ func TestNoneRuntime_ExecWithEnv(t *testing.T) {
 	}
 }
 
-func TestNoneRuntime_ExecExpandsPathFromRuntimeEnv(t *testing.T) {
-	bashPath, err := exec.LookPath("bash")
-	if err != nil {
-		t.Fatal(err)
+// TestNoneRuntime_ForwardsEnvLiterally verifies that NoneRuntime forwards
+// $-bearing env values literally — matching the docker and opensandbox
+// runtimes. Callers that want shell expansion must resolve the value first
+// (see internal/agent.probeAndMergePATH) or prepend `export X=...` to the
+// command themselves. The runtime never expands.
+//
+// printf '%s' "$VAR" prints whatever string the runtime handed to the
+// shell. If the runtime pre-expanded $CUSTOM_BIN / $PATH the child would
+// see "/agent/bin:..." instead of the literal "$CUSTOM_BIN:$PATH".
+func TestNoneRuntime_ForwardsEnvLiterally(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		// printf '%s' "$VAR" is POSIX-shell syntax; cmd.exe (Windows host
+		// shell when no bash is discovered) has no printf and no $VAR
+		// expansion. The behavioural contract (env values forwarded
+		// literally) is the same on Windows, but this specific assertion
+		// can't be expressed there.
+		t.Skip("POSIX printf/$VAR assertion; no Windows equivalent")
 	}
-	basePath := filepath.Dir(bashPath)
-	t.Setenv("PATH", basePath)
 
 	rt := &NoneRuntime{cfg: Config{
 		Env: map[string]string{
-			"CUSTOM_BIN": "/agent/bin",
-			"PATH":       "$CUSTOM_BIN:$PATH",
+			"CUSTOM_BIN":      "/agent/bin",
+			"LITERAL_PATH":    "$CUSTOM_BIN:$PATH",
+			"ALSO_UNEXPANDED": "${HOME}/foo",
 		},
 	}}
 	if err := rt.Create(context.Background()); err != nil {
@@ -422,12 +474,13 @@ func TestNoneRuntime_ExecExpandsPathFromRuntimeEnv(t *testing.T) {
 	}
 	defer func() { _ = rt.Close() }()
 
-	result, err := rt.Exec(context.Background(), "printf %s \"$PATH\"", ExecOptions{})
+	result, err := rt.Exec(context.Background(), `printf '%s\n%s\n' "$LITERAL_PATH" "$ALSO_UNEXPANDED"`, ExecOptions{})
 	if err != nil {
 		t.Fatalf("Exec returned error: %v", err)
 	}
-	if got, want := result.Stdout, "/agent/bin:"+basePath; got != want {
-		t.Fatalf("PATH = %q, want %q", got, want)
+	want := "$CUSTOM_BIN:$PATH\n${HOME}/foo\n"
+	if result.Stdout != want {
+		t.Fatalf("env values should be passed literally; got %q want %q", result.Stdout, want)
 	}
 }
 
@@ -577,5 +630,77 @@ func TestMaskCommand(t *testing.T) {
 				t.Errorf("maskCommand() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNoneRuntime_MergeEnv(t *testing.T) {
+	t.Parallel()
+	rt := &NoneRuntime{}
+	rt.MergeEnv(map[string]string{"FOO": "1", "BAR": "2"})
+	if got := rt.cfg.Env["FOO"]; got != "1" {
+		t.Fatalf("FOO = %q, want 1", got)
+	}
+	if got := rt.cfg.Env["BAR"]; got != "2" {
+		t.Fatalf("BAR = %q, want 2", got)
+	}
+	// Second call overlays; later keys win.
+	rt.MergeEnv(map[string]string{"BAR": "overridden", "BAZ": "3"})
+	if got := rt.cfg.Env["BAR"]; got != "overridden" {
+		t.Fatalf("BAR after overlay = %q, want overridden", got)
+	}
+	if got := rt.cfg.Env["BAZ"]; got != "3" {
+		t.Fatalf("BAZ = %q, want 3", got)
+	}
+	if got := rt.cfg.Env["FOO"]; got != "1" {
+		t.Fatalf("FOO after overlay = %q, want 1 preserved", got)
+	}
+	// Empty map is a no-op.
+	rt.MergeEnv(nil)
+	rt.MergeEnv(map[string]string{})
+	if len(rt.cfg.Env) != 3 {
+		t.Fatalf("env length = %d, want 3 after no-op calls", len(rt.cfg.Env))
+	}
+}
+
+func TestNoneRuntime_MergeEnv_VisibleToSubsequentExec(t *testing.T) {
+	t.Parallel()
+	rt := &NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	rt.MergeEnv(map[string]string{"SKILL_UP_MERGE_TEST": "visible"})
+
+	res, err := rt.Exec(context.Background(), `printf '%s' "$SKILL_UP_MERGE_TEST"`, ExecOptions{})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if res.Stdout != "visible" {
+		t.Fatalf("Exec saw SKILL_UP_MERGE_TEST=%q, want visible", res.Stdout)
+	}
+}
+
+func TestNoneRuntime_Exec_WaitDelayWithCleanExitIsSuccess(t *testing.T) {
+	// A process that exits 0 but leaves a background child holding stdout
+	// past WaitDelay must surface as a successful exec — not a hard error.
+	// Before the fix, classifyExecError returned (-1, exec.ErrWaitDelay)
+	// and built-in agents were reported as failed even after producing
+	// valid output.
+	rt := &NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	result, err := rt.Exec(context.Background(), `echo hello; (sleep 30 &); exit 0`, ExecOptions{})
+	if err != nil {
+		t.Fatalf("Exec: %v (WaitDelay must not surface as a hard error)", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0", result.ExitCode)
+	}
+	if !strings.Contains(result.Stdout, "hello") {
+		t.Fatalf("Stdout = %q, want it to contain the pre-WaitDelay output", result.Stdout)
 	}
 }

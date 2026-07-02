@@ -1,5 +1,8 @@
 #!/bin/bash
-# mock-engine.sh - A deterministic mock that impersonates qodercli.
+# mock-engine.sh - A deterministic mock that impersonates qodercli (and the
+# other CLI agents symlinked to it: claude, codex, qwen — they all pass the
+# instruction via -p, and any extra flags like --yolo / -m <model> are skipped
+# harmlessly by the arg loop below).
 #
 # The QoderCLIAgent invokes: qodercli -p "<prompt>" 2>&1
 # This script:
@@ -26,7 +29,8 @@ set -euo pipefail
 
 PROMPT=""
 
-# Parse arguments - qodercli uses: qodercli -p "<prompt>"
+# Parse arguments - qodercli/claude pass: -p "<prompt>". Any other flags
+# (e.g. qwen's --yolo / -m <model>) are skipped harmlessly.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -p)
@@ -36,6 +40,13 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+# qwen passes the prompt on stdin (not -p, which it deprecated). When no -p was
+# given and stdin is a pipe, read the prompt from there so the mock impersonates
+# qwen faithfully. The -z guard means -p callers are unaffected.
+if [[ -z "$PROMPT" && ! -t 0 ]]; then
+  PROMPT="$(cat)"
+fi
 
 # Handle timeout simulation
 if [[ -n "${MOCK_TIMEOUT:-}" ]]; then

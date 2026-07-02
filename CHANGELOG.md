@@ -5,6 +5,143 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Built-in `qwen_code` engine (aliases `qwen-code`, `qwen`), backed by the
+  [Qwen Code](https://github.com/QwenLM/qwen-code) CLI (`@qwen-code/qwen-code`).
+  Installed on demand via npm (Node.js bootstrapped automatically) and run
+  non-interactively with `qwen --yolo -p <instruction>`. Authenticates against
+  any OpenAI-compatible endpoint through `OPENAI_API_KEY` / `OPENAI_BASE_URL`,
+  with `engine.model.name` / `--model` forwarded as both the `-m` flag and
+  `OPENAI_MODEL`; MCP servers install via `qwen mcp add`.
+- Custom Engine `http` transport (`engine.custom.transport: http`): calls a
+  remote (or local) HTTP agent service, POSTing the `SessionInput` and parsing
+  the `SessionResult` from the response. Renders `${...}` references in
+  `http.url` / `http.headers` / `http.request_body`; a `request_body` field
+  whose value is exactly `${session_input}`, `${messages}`, or `${kwargs}` is
+  injected as a JSON structure rather than a string. A non-2xx status is treated
+  as an engine execution error, and the API key is rejected in the URL (use a
+  header or the request body instead) and masked in responses.
+- Custom Engine `http` transport multipart file upload (`engine.custom.http.files`):
+  when files are declared the request becomes `multipart/form-data` — the JSON
+  body is sent as the `payload` field and each matched workspace file as a
+  `files` part (the part filename is the workspace-relative path). Paths may be
+  exact or doublestar globs (`*`, `**`), are confined to the workspace, and only
+  regular files are uploaded; `required: true` (the default) errors when an
+  entry matches nothing, `required: false` skips it.
+- Custom Engine: download `artifacts.files[].url` artifacts into the report. A
+  result that declares a downloadable `url` is fetched (http/https only) and
+  written into the case artifact directory under `name`. The download is
+  best-effort and bounded (256 MB cap, request timeout): a non-2xx status,
+  transport error, non-http(s) scheme, or over-cap body is logged and skipped
+  without failing the run. A URL embedding the configured API key is refused, and
+  logged errors are scrubbed of the configured `api_key` / `engine.custom.env`
+  secrets.
+
+## [0.2.4] - 2026-06-03
+
+### Added
+- `collect_artifacts`: glob patterns (doublestar syntax — `*` within a
+  path segment, `**` across directories) that select workspace files to
+  download as run artifacts. Configurable at `cases.defaults.collect_artifacts`
+  (all cases) and per-case `collect_artifacts` (merged as a de-duplicated
+  union). Matches are downloaded — preserving their workspace-relative path —
+  to `<output-dir>/<case>/<config>/outputs/workspace/`, **regardless of whether
+  the agent succeeded, failed, or timed out**. Collection is read-only and
+  orthogonal to `report.artifacts` (artifact types) and the `agent_judge`
+  workspace diff.
+- Custom Engine with `local` transport (`engine.custom` in `eval.yaml`):
+  plug in any agent executor as a user-provided command without modifying
+  `skill-up`. The framework runs the command inside the current runtime via
+  `runtime.Exec`, passes a standard `SessionInput` (JSON), and parses a
+  standard `SessionResult`. Supports `session_result` and `text` response
+  formats, structured file artifacts, `env` / `kwargs` forwarding, and
+  `${VAR}` / `${VAR:-default}` / `${VAR?msg}` env references resolved at
+  load time. API keys and custom env values are masked in reports.
+  `http` transport config is parsed and validated but returns an explicit
+  "not yet implemented" error — HTTP lands in a follow-up.
+- `runtime.Runtime.MergeEnv(env)`: new interface method that lets
+  setup-time callers (notably each agent's `Install`) seed the runtime's
+  persistent env baseline. Subsequent `Exec` calls inherit these vars
+  unless overridden by `opts.Env`. Implementations are intended for
+  one-time setup; concurrent `MergeEnv`/`Exec` is not safe.
+- **First-class Windows support** for the CLI, the `none` runtime, and the
+  script judge. Native Windows builds run all unit tests, the script judge
+  routes `.ps1`/`.cmd`/`.bat` directly and `.sh` through Git Bash when
+  available, and CI gains a `windows-latest` build/test matrix plus a
+  dedicated `E2E (none runtime, Windows)` contract job.
+  See [Windows Support](docs/guide/windows.md) for the full guide.
+- `SKILL_UP_BASH` environment variable: explicit path to a `bash`
+  executable for skill-up's `none` runtime to use. Honored on every
+  platform (read once at startup, takes precedence over `PATH`).
+- PowerShell tooling under `scripts/windows/`: `hooks.ps1`,
+  `lint-tools.ps1`, and `verify.ps1` mirror the Makefile targets for
+  contributors on Windows; `examples/judge-debug-eval.ps1` provides a
+  runnable PowerShell script-judge example.
+- `.gitattributes` pins line endings (LF for `*.sh`, CRLF for `*.ps1` /
+  `*.cmd` / `*.bat`) so Git checkout on Windows does not break scripts.
+
+### Changed
+- Agent layer no longer injects PATH into the env map. Each agent's
+  `Install` now probes the target shell for the resolved PATH (a
+  per-agent `printf '%s' "$HOME/..."` command) and merges the literal
+  result into the runtime's env baseline via `runtime.MergeEnv`.
+  Runtimes treat env keys uniformly — no key is special-cased anywhere.
+- `NoneRuntime` no longer expands `$VAR` / `${VAR}` in user-provided env
+  values (`environment.env` / `opts.Env`). Values forward literally,
+  matching docker and opensandbox. If your `eval.yaml` relied on
+  host-side expansion (e.g. `MY_VAR: "$HOME/foo"`), switch to a literal
+  value or `export` it inside a `setup_steps` step.
+- `docker` / `opensandbox`: the same "values forward literally" rule
+  now applies — previously the docker runtime silently dropped
+  `environment.env.PATH` values containing `$` (the alternative was
+  passing them to `docker create --env` literally, which would have
+  broken container startup because the entrypoint's PATH lookup can't
+  resolve directories named `$HOME` / `$PATH`). After this PR no key
+  is special-cased, so passing such a value will now make the
+  container/sandbox fail to start; use a literal PATH or move the
+  manipulation into a `setup_steps` `export`.
+- `environment.type: none`: the framework no longer force-prepends
+  `$HOME/.local/bin:$HOME/.nvm/current/bin:$PATH` to agent commands.
+  Because `ag.Install` is skipped for type=none, the new probe doesn't
+  run either; the host shell's PATH is used as-is. Add the dirs to
+  your shell rc if `claude` / `codex` / `qodercli` isn't already on it.
+- Non-built-in `engine.name` values with an `engine.custom` block now
+  dispatch to `CustomAgent`; without the block the error is
+  `unsupported agent "x": missing engine.custom`.
+- Agent CLIs (Claude Code, Codex, Qoder CLI) now hard-fail on Windows
+  hosts without a discoverable bash, with a clear error pointing at
+  Git Bash or `SKILL_UP_BASH`. Previously the cmd.exe fallback would
+  accept agent commands but leak shell metacharacters from instructions
+  into the host shell.
+- `internal/platform` centralizes host shell, quoter, and bash discovery
+  behind a single `platform.Host()` (cached for the process lifetime).
+  Replaces the previous ad-hoc platform branching in `NoneRuntime.Exec`
+  and the script-judge planner.
+- `Runtime.TargetGOOS() string` is now a required interface method so
+  future runtimes get a compile-time error rather than silently
+  defaulting to `"linux"`.
+
+### Fixed
+- Skill name in reports (`result.json`, benchmark, JUnit, HTML) now
+  reads the `name:` field from SKILL.md frontmatter instead of using
+  the directory basename. Falls back to basename when SKILL.md is
+  missing, has no frontmatter, or declares no name.
+
+## [0.2.3] - 2026-05-27
+
+### Added
+- `engine.kwargs` (CLI: `--engine-kwarg key=value`, alias `--ek`): an
+  agent-specific switch map mirroring `environment.kwargs`/`--runtime-kwarg`.
+  Each agent reads only the keys it understands; unknown keys are silently
+  ignored. First key: `bypass_sandbox` — `codex` honours it by forcing
+  `--dangerously-bypass-approvals-and-sandbox` and skipping its Landlock-based
+  `linux-sandbox` wrapper, useful on CI runners whose kernel/seccomp profile
+  does not allow Landlock setup (typical Aone CI symptom:
+  `error running landlock: Sandbox(LandlockRestrict)`, exit 101 on every
+  shell call). `claude_code` and `qodercli` accept the key but no-op.
+
 ## [0.2.2] - 2026-05-26
 
 ### Added
@@ -174,6 +311,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project and delivers the end-to-end capability to declare eval environments,
   run cases and emit structured reports as described in [README.md](README.md).
 
+[0.2.4]: https://github.com/alibaba/skill-up/releases/tag/v0.2.4
+[0.2.3]: https://github.com/alibaba/skill-up/releases/tag/v0.2.3
+[0.2.2]: https://github.com/alibaba/skill-up/releases/tag/v0.2.2
 [0.2.1]: https://github.com/alibaba/skill-up/releases/tag/v0.2.1
 [0.2.0]: https://github.com/alibaba/skill-up/releases/tag/v0.2.0
 [0.1.2]: https://github.com/alibaba/skill-up/releases/tag/v0.1.2

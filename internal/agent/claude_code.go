@@ -26,6 +26,12 @@ type ClaudeCodeAgent struct {
 
 const claudeCodePackage = "@anthropic-ai/claude-code"
 
+// claudeCodeExecPathProbeCmd resolves both $HOME/.local/bin (where `npm
+// install -g` puts the claude binary via the bootstrap's npm_config_prefix)
+// and $HOME/.nvm/current/bin (where the node interpreter lives — claude's
+// `#!/usr/bin/env node` shebang needs to find node at exec time).
+const claudeCodeExecPathProbeCmd = `printf '%s' "$HOME/.local/bin:$HOME/.nvm/current/bin:$PATH"`
+
 // NewClaudeCodeAgent creates a new ClaudeCodeAgent.
 func NewClaudeCodeAgent(cfg Config) *ClaudeCodeAgent {
 	if cfg.Name == "" {
@@ -40,7 +46,11 @@ func NewClaudeCodeAgent(cfg Config) *ClaudeCodeAgent {
 }
 
 // Install installs Claude Code when it is not already available in the runtime.
+//
+//nolint:dupl // each agent Install shares the same probe→merge→exec lifecycle; the deltas (probe const, default install cmd) are pulled out, leaving the orchestration intentionally similar.
 func (a *ClaudeCodeAgent) Install(ctx context.Context, rt Runtime) error {
+	a.probeAndMergePATH(ctx, rt, claudeCodeExecPathProbeCmd)
+
 	opts := ExecOptions{Cwd: "/"}
 	opts = a.mergeExecOptionsEnv(ctx, opts, nil, nil)
 
@@ -61,15 +71,17 @@ func (a *ClaudeCodeAgent) Install(ctx context.Context, rt Runtime) error {
 
 // InstallMCP installs MCP servers with the Claude Code CLI.
 func (a *ClaudeCodeAgent) InstallMCP(ctx context.Context, rt Runtime, mcpCfg runtime.MCPConfig) error {
+	if len(mcpCfg.Servers) == 0 {
+		return nil
+	}
+	if err := ensureNodeRuntime(ctx, rt, "claude", ExecOptions{}); err != nil {
+		return err
+	}
 	return installMCPServers(ctx, rt, mcpCfg, buildClaudeMCPInstallCmd)
 }
 
 func buildClaudeMCPInstallCmd(server runtime.MCPServerConfig) (string, error) {
-	cmd, err := buildClaudeCompatibleMCPInstallCmd("claude", "claude-code", server)
-	if err != nil {
-		return "", err
-	}
-	return nodeRuntimeCommandWithGuard("claude", cmd), nil
+	return buildClaudeCompatibleMCPInstallCmd("claude", "claude-code", server)
 }
 
 func defaultClaudeCodeInstallCmd() string {
@@ -96,6 +108,9 @@ func (a *ClaudeCodeAgent) CheckCredentials(ctx context.Context) error {
 // Run executes the claude-code agent with the given messages via stream-json.
 // It streams messages to stdin and parses stream-json output to build the transcript.
 func (a *ClaudeCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (*SessionResult, error) {
+	if err := requireBashOnWindowsHost(rt); err != nil {
+		return nil, fmt.Errorf("%s: %w", a.Name(), err)
+	}
 	start := time.Now()
 
 	sessionID := uuid.New().String()
@@ -124,7 +139,15 @@ func (a *ClaudeCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions,
 	ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, opts.Env)
 
 	instruction := BuildInstructionFromMessages(messages)
-	cmd := nodeRuntimeCommandWithGuard("claude", buildClaudePrintCmd(sessionID, a.effectiveModelName(ctx), instruction))
+	if err := ensureNodeRuntime(ctx, rt, "claude", opts); err != nil {
+		return &SessionResult{
+			Engine:     a.Name(),
+			ExitCode:   1,
+			DurationMs: time.Since(start).Milliseconds(),
+			Artifacts:  &SessionArtifacts{},
+		}, err
+	}
+	cmd := buildClaudePrintCmd(sessionID, a.effectiveModelName(ctx), instruction)
 
 	result, err := rt.Exec(ctx, cmd, opts)
 	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result)

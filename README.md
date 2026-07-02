@@ -50,7 +50,7 @@
 ## Features
 
 - **Declarative Eval Config**: Define evaluation environment, engine, model, and cases through YAML (`eval.yaml` + `cases/*.yaml`).
-- **Multi-Engine Support**: Works with Qoder CLI, Claude Code, and Codex as Agent Engines.
+- **Multi-Engine Support**: Works with Qoder CLI, Claude Code, and Codex as built-in Agent Engines, plus user-defined agents via `engine.custom` (local transport — see [docs/design/custom-engine.md](docs/design/custom-engine.md)).
 - **Flexible Judging**: Supports `rule_based`, `script`, and `agent_judge` evaluation strategies.
 - **Structured Reports**: Outputs Anthropic-compatible `grading.json`, `benchmark.json`, `benchmark.md`, plus `result.json`, JUnit XML, and HTML reports.
 - **Anthropic Compatible**: Import `evals.json` via `skill-up import`, or auto-detect with `--auto`.
@@ -62,7 +62,7 @@ The official [Agent Skills evaluation guide](https://agentskills.io/skill-creati
 
 - Replaces ad hoc run folders with a declarative `eval.yaml` + `cases/*.yaml` format.
 - Automates workspace setup, Skill installation, Agent Engine invocation, judging, and report generation.
-- Supports multiple engines (`claude_code`, `codex`, `qodercli`) instead of tying the workflow to one client.
+- Supports multiple engines (`claude_code`, `codex`, `qodercli`, `qwen_code`) instead of tying the workflow to one client.
 - Keeps compatibility with Anthropic-style `evals.json` while adding richer judges, CI-friendly commands, and structured reports.
 
 ## Recommended Usage: AI-Assisted with skill-upper
@@ -143,6 +143,11 @@ make build
 # or
 go build -o bin/skill-up ./cmd/skill-up
 ```
+
+**Windows users**: skill-up runs natively on Windows. See
+[Windows Support](docs/guide/windows.md) for the recommended workflow,
+known limitations (notably: native agent CLI execution requires Git
+Bash), and the PowerShell tooling under `scripts/windows/`.
 
 ## Quick Start
 
@@ -291,6 +296,47 @@ skill-up import ./evals/evals.json --output ./evals
 | `skill-up import <evals.json>`       | Import Anthropic `evals.json` to YAML cases |
 | `skill-up debug judge <input.json>`  | Debug judge module with a JSON input        |
 | `skill-up debug report <input.json>` | Debug report module with a JSON input       |
+
+## GitHub Action
+
+Run your Agent Skill evals in CI on every pull request — and check the same skill
+**across engines** (`claude_code` / `codex` / `qodercli` / `qwen_code`) in one step. This repo
+ships an action at its root ([`action.yml`](action.yml)):
+
+```yaml
+# .github/workflows/skill-eval.yml
+name: Skill Eval
+on:
+  pull_request:
+    paths: ['skills/**', 'evals/**', '**/SKILL.md']
+jobs:
+  eval:
+    runs-on: ubuntu-latest          # Docker container action — Linux only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: alibaba/skill-up@main  # see "Versioning" below
+        with:
+          engine: claude_code        # or codex / qodercli / qwen_code; empty = let eval.yaml decide
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          base-url: https://api.anthropic.com   # your model endpoint
+          skill-target: evals/eval.yaml
+```
+
+Requirements for the caller: a **Linux** runner (it's a Docker container action),
+and your model credential stored as a repo secret. The runner image is public, so
+no extra registry auth is needed.
+
+Key inputs: `engine`, `model`, `provider`, `api-key`, `base-url`, `skill-target`,
+`parallelism`. The action prebuilds skill-up + the three engine CLIs into its
+runner image, so a run is just "pull image, eval". See [`action.yml`](action.yml)
+for the full input/output reference.
+
+### Versioning
+
+`uses:` points at any git ref that contains `action.yml`. Pin a **release tag**
+(the first release that includes the action onward) or a commit SHA for stability;
+`@main` always tracks the latest. Release tags published **before** the action was
+added do not contain `action.yml` and cannot be used as the ref.
 
 ## License
 

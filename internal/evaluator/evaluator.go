@@ -238,6 +238,24 @@ func casePromptAndTurnsTotal(caseCfg *config.CaseConfig) (string, int) {
 	return prompt, turnsTotal
 }
 
+// caseMaxTurns returns the case max-turns constraint, falling back to the
+// global cases.defaults value.
+func caseMaxTurns(evalCfg *config.EvalConfig, caseCfg *config.CaseConfig) int {
+	if caseCfg.Constraints.MaxTurns > 0 {
+		return caseCfg.Constraints.MaxTurns
+	}
+	return evalCfg.Cases.Defaults.MaxTurns
+}
+
+// caseTimeoutSeconds returns the case timeout constraint, falling back to the
+// global cases.defaults value.
+func caseTimeoutSeconds(evalCfg *config.EvalConfig, caseCfg *config.CaseConfig) int {
+	if caseCfg.Constraints.TimeoutSeconds > 0 {
+		return caseCfg.Constraints.TimeoutSeconds
+	}
+	return evalCfg.Cases.Defaults.TimeoutSeconds
+}
+
 // buildCaseMessages builds transcript messages from case input (single prompt or multi-turn).
 func buildCaseMessages(caseCfg *config.CaseConfig) []transcript.Message {
 	if caseCfg.Input.Prompt != "" {
@@ -381,13 +399,26 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	if observability.LinkedTraceTopologyEnabled() {
 		logging.DebugContextf(agentCtx, "Evaluator: linked agent trace started for case %s (%s)", caseCfg.ID, configName)
 	}
-	sessionResult, execErr := runAgent.Run(agentCtx, rt, agent.ExecOptions{ArtifactDir: agentArtifactDir}, messages)
+	agentExecOpts := agent.ExecOptions{
+		ArtifactDir: agentArtifactDir,
+		TimeoutSec:  caseTimeoutSeconds(e.evalCfg, caseCfg),
+		AgentMetadata: &runtime.AgentMetadata{
+			CaseID:   caseCfg.ID,
+			Variant:  configName,
+			MaxTurns: caseMaxTurns(e.evalCfg, caseCfg),
+		},
+	}
+	sessionResult, execErr := runAgent.Run(agentCtx, rt, agentExecOpts, messages)
 	agentSpan.End()
 	finalizeArtifacts(sessionResult)
 	result.SessionResult = normalizeSessionResult(sessionResult)
 	if sessionResult != nil && sessionResult.Artifacts != nil && len(sessionResult.Artifacts.GeneratedFiles) > 0 {
 		e.ensureArtifactsInOutputDir(ctx, rt, configName, caseCfg.ID, "agent/run", agentArtifactDir, sessionResult)
 	}
+	// Download glob-selected workspace artifacts unconditionally — before the
+	// timeout/error early-return below and before the deferred rt.Close() — so
+	// they are captured even when the agent failed or timed out.
+	e.collectGlobArtifacts(ctx, rt, configName, caseCfg)
 	if shouldReturn := e.handleExecutionResult(ctx, caseCfg, configName, startTime, &result, execErr); shouldReturn {
 		return result
 	}
@@ -627,7 +658,7 @@ func (e *defaultEvaluator) resolveJudgeAgent(ctx context.Context, judgeCfg confi
 	if e.evalCfg.Engine.Name != "" {
 		judgeParams := credential.ResolveJudgeInitParams(e.evalCfg.Engine.Name, judgeCfg, e.runnerParams, e.resolver)
 		var err error
-		judgeAgent, err = agentDetectWithInitParams(e.evalCfg.Engine.Name, judgeParams)
+		judgeAgent, err = agentDetectWithInitParams(e.evalCfg.Engine.Name, judgeParams, e.evalCfg.Engine.Kwargs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create judge agent: %w", err)
 		}

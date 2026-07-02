@@ -50,7 +50,7 @@
 ## 特性
 
 - **声明式评测配置**：通过 YAML（`eval.yaml` + `cases/*.yaml`）定义评测环境、引擎、模型和用例。
-- **多引擎支持**：支持 Qoder CLI、Claude Code、Codex 等 Agent 引擎。
+- **多引擎支持**：内置支持 Qoder CLI、Claude Code、Codex；亦可通过 `engine.custom` 接入用户自定义 Agent（本地传输，详见 [docs/design/custom-engine.md](docs/design/custom-engine.md)）。
 - **灵活评分**：支持 `rule_based`（规则匹配）、`script`（脚本评分）、`agent_judge`（Agent 评分）三种评估策略。
 - **结构化报告**：输出 Anthropic 兼容的 `grading.json`、`benchmark.json`、`benchmark.md`，以及 `result.json`、JUnit XML 和 HTML 报告。
 - **Anthropic 兼容**：通过 `skill-up import` 导入 `evals.json`，或使用 `--auto` 自动识别。
@@ -62,7 +62,7 @@
 
 - 用声明式的 `eval.yaml` + `cases/*.yaml` 取代临时拼出来的运行目录。
 - 自动完成 workspace 准备、Skill 安装、Agent Engine 调用、评分和报告生成。
-- 支持多个引擎（`claude_code`、`codex`、`qodercli`），不绑定单一客户端。
+- 支持多个引擎（`claude_code`、`codex`、`qodercli`、`qwen_code`），不绑定单一客户端。
 - 兼容 Anthropic 风格的 `evals.json`，同时提供更丰富的 judge、适合 CI 的命令和结构化报告。
 
 ## 推荐使用方式：AI 辅助配合 skill-upper
@@ -141,6 +141,11 @@ make build
 go build -o bin/skill-up ./cmd/skill-up
 ```
 
+**Windows 用户**：skill-up 原生支持 Windows。请参阅
+[Windows 支持指南](docs/zh/guide/windows.md) 了解推荐工作流、已知限制
+（特别是：原生运行 agent CLI 需要 Git Bash）以及 `scripts/windows/`
+下的 PowerShell 工具脚本。
+
 ## 快速上手
 
 ### 第一步：创建评测配置
@@ -215,6 +220,44 @@ skill-up import ./evals/evals.json --output ./evals
 | `skill-up import <evals.json>`       | 将 Anthropic `evals.json` 导入为 YAML 用例 |
 | `skill-up debug judge <input.json>`  | 使用 JSON 输入调试 judge 模块              |
 | `skill-up debug report <input.json>` | 使用 JSON 输入调试 report 模块             |
+
+## GitHub Action
+
+在 CI 上对你的 Agent Skill 跑评测,每个 PR 自动触发——并在一步内**跨引擎**
+(`claude_code` / `codex` / `qodercli` / `qwen_code`)校验同一个 skill。本仓库根目录提供了
+action([`action.yml`](action.yml)):
+
+```yaml
+# .github/workflows/skill-eval.yml
+name: Skill Eval
+on:
+  pull_request:
+    paths: ['skills/**', 'evals/**', '**/SKILL.md']
+jobs:
+  eval:
+    runs-on: ubuntu-latest          # Docker 容器 action —— 仅 Linux
+    steps:
+      - uses: actions/checkout@v4
+      - uses: alibaba/skill-up@main  # 见下方「版本引用」
+        with:
+          engine: claude_code        # 或 codex / qodercli / qwen_code;留空则由 eval.yaml 自行声明
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          base-url: https://api.anthropic.com   # 你的模型端点
+          skill-target: evals/eval.yaml
+```
+
+调用方前提:**Linux** runner(这是 Docker 容器 action),以及把模型凭据存为仓库
+secret。runner 镜像是 public 的,无需额外 registry 鉴权。
+
+主要入参:`engine`、`model`、`provider`、`api-key`、`base-url`、`skill-target`、
+`parallelism`。action 预先把 skill-up 和三个引擎 CLI 烤进 runner 镜像,跑一次
+就是「拉镜像、评测」。完整入参/产出见 [`action.yml`](action.yml)。
+
+### 版本引用
+
+`uses:` 可以指向任何**包含 `action.yml`** 的 git ref。生产建议 pin 一个**含本
+action 的 release tag**(从引入 action 的那个 release 起)或 commit SHA;`@main`
+则始终跟随最新。**早于** action 引入的 release tag 里没有 `action.yml`,不能用作 ref。
 
 ## 许可证
 

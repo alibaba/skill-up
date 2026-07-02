@@ -34,6 +34,9 @@ cases:
   defaults:
     timeout_seconds: 300
     max_turns: 12
+    collect_artifacts:          # 可选：用 glob 采集 workspace 产物文件
+      - "**/*.json"
+      - "report/**"
   parallelism: 2
   retry_policy:
     max_retries: 1
@@ -48,6 +51,8 @@ report:
 ```
 
 `cases.parallelism` 可被 `skill-up run --parallelism N`（1–256）临时覆盖。
+
+`collect_artifacts`（`cases.defaults` 级，或单个 `case.yaml` 内追加）用 [doublestar](https://github.com/bmatcuk/doublestar) glob（`*` 单层、`**` 跨目录）声明要采集的 workspace 文件。无论 Agent 成功/失败/超时，命中文件都会保留相对路径下载到 `<output-dir>/<case>/<config>/outputs/workspace/`。两层按并集去重合并。它与 `report.artifacts`（产物*类型*）、`agent_judge` 的 git diff（字符串）正交。
 
 ## 运行环境
 
@@ -103,6 +108,23 @@ environment:
 - `engine.model` 可选；省略时由引擎本地默认模型接管。
 - `provider` / `name` 组合在 CLI 中形如 `anthropic/claude-sonnet-4-6`、`openai/gpt-4` 等。
 - `qodercli` 通常无需配置 `model`。
+
+### `engine.kwargs` —— agent 私有开关
+
+`engine.kwargs` 是字符串键值对，每个 agent 只读取自己关心的 key，未知 key 被忽略。无人认识的 key（拼写错误，如 `bypas_sandbox`）会在 verbose 日志里打 DEBUG，`-v` 可见。CLI 等价开关：`--engine-kwarg key=value`（别名 `--ek`），可重复。优先级 `--engine-kwarg` > `engine.kwargs` > 缺省。
+
+```yaml
+engine:
+  name: codex
+  kwargs:
+    bypass_sandbox: "true"
+```
+
+| key | agent | true 时行为 | 缺省 / false |
+|---|---|---|---|
+| `bypass_sandbox` | `codex` | 命令行强制 `--dangerously-bypass-approvals-and-sandbox`，覆盖根据 runtime 自动决定的 sandbox flag。用于宿主内核不支持 Landlock 的场景（典型：部分 CI 容器） | 维持现状：`none` runtime 用 `--sandbox workspace-write`，其它 runtime 已是 bypass |
+| `bypass_sandbox` | `claude_code` | no-op（claude 现有命令已固定 `--permission-mode=bypassPermissions`） | no-op |
+| `bypass_sandbox` | `qodercli` | no-op（qoder CLI 无对应 flag） | no-op |
 
 ## 常见错误
 

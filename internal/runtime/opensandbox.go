@@ -488,10 +488,10 @@ func (r *OpenSandboxRuntime) Exec(ctx context.Context, command string, opts Exec
 	env := mergeEnvMaps(r.cfg.Env, opts.Env)
 
 	req := opensandbox.RunCommandRequest{
-		Command: withRemoteEnvExpansion(command, env),
+		Command: command,
 		Cwd:     r.execCwd(opts.Cwd),
 		Timeout: int64(opts.TimeoutSec) * 1000,
-		Envs:    literalRemoteEnv(env),
+		Envs:    env,
 	}
 	span.SetAttributes(
 		attribute.String("process.command", command),
@@ -541,33 +541,6 @@ func (r *OpenSandboxRuntime) Exec(ctx context.Context, command string, opts Exec
 	return result, nil
 }
 
-func literalRemoteEnv(env map[string]string) map[string]string {
-	if len(env) == 0 {
-		return nil
-	}
-	literal := make(map[string]string, len(env))
-	for k, v := range env {
-		if k == "PATH" && strings.Contains(v, "$") {
-			continue
-		}
-		literal[k] = v
-	}
-	return literal
-}
-
-func withRemoteEnvExpansion(command string, env map[string]string) string {
-	pathValue, ok := env["PATH"]
-	if !ok || !strings.Contains(pathValue, "$") {
-		return command
-	}
-	return "export PATH=" + shellDoubleQuote(pathValue) + "\n" + command
-}
-
-func shellDoubleQuote(s string) string {
-	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "`", "\\`")
-	return `"` + replacer.Replace(s) + `"`
-}
-
 // Workspace returns the sandbox workspace path.
 func (r *OpenSandboxRuntime) Workspace() string {
 	return r.workspace
@@ -576,6 +549,18 @@ func (r *OpenSandboxRuntime) Workspace() string {
 // RequiresProcessSandbox reports that OpenSandbox already isolates agent execution.
 func (r *OpenSandboxRuntime) RequiresProcessSandbox() bool {
 	return false
+}
+
+// MergeEnv layers entries into the runtime's persistent env baseline. See
+// Runtime.MergeEnv for the contract.
+func (r *OpenSandboxRuntime) MergeEnv(env map[string]string) {
+	mergeIntoEnvBaseline(&r.cfg.Env, env)
+}
+
+// TargetGOOS reports "linux": OpenSandbox always executes commands inside a
+// Linux sandbox regardless of the host OS.
+func (r *OpenSandboxRuntime) TargetGOOS() string {
+	return "linux"
 }
 
 func (r *OpenSandboxRuntime) connectionConfig() opensandbox.ConnectionConfig {
@@ -688,7 +673,7 @@ func (r *OpenSandboxRuntime) ensureDirectory(ctx context.Context, dir string, mo
 	if err == nil {
 		return nil
 	}
-	quoted := shellquote.Quote(dir)
+	quoted := shellquote.QuotePOSIX(dir)
 	result, execErr := r.runCommand(ctx, "/", "mkdir -p "+quoted+" && test -d "+quoted+" && test -w "+quoted, 30)
 	if execErr != nil {
 		return err
@@ -711,7 +696,7 @@ func (r *OpenSandboxRuntime) ensureDirectories(ctx context.Context, dirs []strin
 	command.WriteString("mkdir -p")
 	for _, dir := range dirs {
 		command.WriteByte(' ')
-		command.WriteString(shellquote.Quote(dir))
+		command.WriteString(shellquote.QuotePOSIX(dir))
 	}
 	result, err := r.runCommand(ctx, "/", command.String(), 30)
 	if err != nil {
@@ -816,7 +801,12 @@ func safeLocalTarget(root, rel string) (string, error) {
 	if clean == "." {
 		return root, nil
 	}
-	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+	// On Windows filepath.IsAbs requires a volume name, so a POSIX-style
+	// "/absolute" supplied via the SDK would otherwise slip through; also
+	// reject any rooted path (leading separator) so the guard behaves the
+	// same on both OSes.
+	rooted := strings.HasPrefix(clean, "/") || strings.HasPrefix(clean, `\`)
+	if filepath.IsAbs(clean) || rooted || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("unsafe sandbox file path: %s", rel)
 	}
 	return filepath.Join(root, clean), nil

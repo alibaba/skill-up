@@ -17,42 +17,21 @@ const (
 	ClaudeFileMode = 0o600
 )
 
+// mergeEnv returns the host env (os.Environ) with persistentEnv and callEnv
+// overlaid, in that order (callEnv wins). Values are forwarded LITERALLY: no
+// $VAR / ${VAR} expansion. This matches the docker and opensandbox runtimes,
+// which also pass env literally — callers that need shell expansion should
+// either resolve the value first or prepend `export X=...` to the command.
 func mergeEnv(persistentEnv, callEnv map[string]string) []string {
-	baseEnv := envMapFromList(os.Environ())
-	envMap := expandEnvMap(baseEnv, mergeEnvMaps(persistentEnv, callEnv))
-	if envMap == nil {
-		envMap = baseEnv
-	}
-	for k, v := range baseEnv {
-		if _, ok := envMap[k]; !ok {
-			envMap[k] = v
-		}
-	}
+	envMap := envMapFromList(os.Environ())
+	maps.Copy(envMap, persistentEnv)
+	maps.Copy(envMap, callEnv)
 
 	env := make([]string, 0, len(envMap))
 	for k, v := range envMap {
 		env = append(env, k+"="+v)
 	}
 	return env
-}
-
-func expandEnvMap(baseEnv, overlay map[string]string) map[string]string {
-	if len(overlay) == 0 {
-		return nil
-	}
-	expanded := make(map[string]string, len(overlay))
-	for key, value := range overlay {
-		expanded[key] = os.Expand(value, func(name string) string {
-			if name == key {
-				return baseEnv[name]
-			}
-			if overlayValue, ok := overlay[name]; ok {
-				return overlayValue
-			}
-			return baseEnv[name]
-		})
-	}
-	return expanded
 }
 
 func envMapFromList(env []string) map[string]string {
@@ -76,11 +55,35 @@ func mergeEnvMaps(persistentEnv, callEnv map[string]string) map[string]string {
 	return env
 }
 
+// mergeIntoEnvBaseline overlays src onto *target. Single shared
+// implementation for Runtime.MergeEnv across the three concrete runtimes;
+// they each retain a 1-line method so they continue to satisfy the
+// interface, but the behaviour itself lives here.
+func mergeIntoEnvBaseline(target *map[string]string, src map[string]string) {
+	if len(src) == 0 {
+		return
+	}
+	if *target == nil {
+		*target = make(map[string]string, len(src))
+	}
+	maps.Copy(*target, src)
+}
+
 // ExecResult holds the output and exit code of a command execution.
 type ExecResult struct {
 	Stdout   string
 	Stderr   string
 	ExitCode int
+}
+
+// AgentMetadata carries case-level metadata that only agents building a
+// structured session input (e.g. the Custom Engine) consume. It is threaded
+// per-Run via ExecOptions.AgentMetadata rather than baked into the agent at
+// construction, because a single agent instance is reused across cases.
+type AgentMetadata struct {
+	CaseID   string
+	Variant  string
+	MaxTurns int
 }
 
 // ExecOptions configures how a command is executed.
@@ -89,6 +92,21 @@ type ExecOptions struct {
 	Env         map[string]string
 	TimeoutSec  int
 	ArtifactDir string
+
+	// AgentMetadata carries case-level metadata for agents that build a
+	// structured session input (e.g. Custom Engine). It is nil for runs that
+	// do not need it; built-in agents ignore it. Read it via AgentMeta, which
+	// is nil-safe.
+	AgentMetadata *AgentMetadata
+}
+
+// AgentMeta returns the case-level agent metadata, or a zero value when unset,
+// so callers can read its fields without a nil check.
+func (o ExecOptions) AgentMeta() AgentMetadata {
+	if o.AgentMetadata == nil {
+		return AgentMetadata{}
+	}
+	return *o.AgentMetadata
 }
 
 // Runtime defines the interface for sandbox runtimes.
@@ -109,9 +127,25 @@ type Runtime interface {
 	DownloadDir(ctx context.Context, sourceDir, targetDir string) error
 
 	Exec(ctx context.Context, command string, opts ExecOptions) (ExecResult, error)
+	// MergeEnv layers entries onto the runtime's persistent env baseline
+	// (Config.Env). Subsequent Exec calls see these vars unless overridden
+	// by opts.Env. Used by orchestrators (e.g. the evaluator) to seed
+	// runtime-resolved values — for example the agent's PATH expanded
+	// against the target shell — without each Exec caller needing to
+	// know about them. Idempotent; later calls overwrite same-key values.
+	MergeEnv(env map[string]string)
 	Workspace() string
 	// RequiresProcessSandbox reports whether agents should enable their own process sandbox.
 	RequiresProcessSandbox() bool
+	// TargetGOOS reports the GOOS value of the environment where Exec
+	// runs commands. NoneRuntime executes on the host so it returns
+	// runtime.GOOS; OpenSandboxRuntime always returns "linux" because
+	// it executes inside a Linux sandbox. Implementations must return a
+	// non-empty value -- callers (most importantly the script-judge
+	// planner) use it to choose between POSIX and Windows command shapes,
+	// and silently defaulting to "linux" would mask configuration
+	// mistakes in any future Windows-targeting runtime.
+	TargetGOOS() string
 }
 
 // FileReadSeeker combines io.ReadSeeker for file access.

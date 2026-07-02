@@ -8,17 +8,27 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/observability"
+	"github.com/alibaba/skill-up/internal/platform"
 )
 
 const (
 	noneDirMode  = 0o755
 	noneFileMode = 0o600
+	// noneExecWaitDelay bounds how long Exec waits after ctx-cancel before
+	// forcibly closing the child's stdio pipes. On POSIX,
+	// configureProcessGroup kills the whole tree on cancellation so a short
+	// grace is enough. On Windows there is no process group equivalent and
+	// a Git Bash grandchild (ping/sleep/git) can still hold the stderr pipe;
+	// this delay ultimately closes it so the pipe-reader goroutines unblock
+	// and Exec returns within the deadline.
+	noneExecWaitDelay = 2 * time.Second
 )
 
 // pathInWorkspaceOrAbs returns p if it is an absolute host path, otherwise filepath.Join(r.workspace, p).
@@ -35,6 +45,13 @@ func (r *NoneRuntime) pathInWorkspaceOrAbs(p string) string {
 type NoneRuntime struct {
 	cfg       Config
 	workspace string
+}
+
+// MergeEnv layers entries into the runtime's persistent env baseline. See
+// Runtime.MergeEnv for the contract (callers MUST sequence MergeEnv before
+// any concurrent Exec; the intended use is a one-time setup step).
+func (r *NoneRuntime) MergeEnv(env map[string]string) {
+	mergeIntoEnvBaseline(&r.cfg.Env, env)
 }
 
 // Create allocates the temporary workspace used by the runtime.
@@ -168,7 +185,16 @@ func (r *NoneRuntime) Exec(ctx context.Context, command string, opts ExecOptions
 	defer span.End()
 	startTime := time.Now()
 
-	cmd := exec.CommandContext(ctx, "bash", "-c", command)
+	shell := platform.Host()
+	cmd := shell.Cmd(ctx, command)
+	// Run in a dedicated process group (POSIX only — no-op on Windows) and
+	// kill the whole group on cancellation, so a timed-out command's
+	// descendants do not outlive it.
+	configureProcessGroup(cmd)
+	// Bound how long Wait blocks after ctx-cancel so a child holding the
+	// stdio pipes can't pin Exec past the deadline. See noneExecWaitDelay
+	// above for the per-OS reasoning.
+	cmd.WaitDelay = noneExecWaitDelay
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	} else {
@@ -180,6 +206,10 @@ func (r *NoneRuntime) Exec(ctx context.Context, command string, opts ExecOptions
 	)
 
 	env := mergeEnv(r.cfg.Env, opts.Env)
+	// The shell descriptor may need its own env tweaks (MSYS_NO_PATHCONV on
+	// Windows-bash, ...) — append them once here so the same "use bash →
+	// disable MSYS argv rewrite" decision lives in a single place.
+	env = append(env, shell.Env...)
 	cmd.Env = env
 
 	var stdout, stderr bytes.Buffer
@@ -241,19 +271,33 @@ func (r *NoneRuntime) Exec(ctx context.Context, command string, opts ExecOptions
 //	nil err                            → (0, nil)
 //	*exec.ExitError + ctx.Err() == nil → (exitCode, nil)
 //	*exec.ExitError + ctx.Err() != nil → (exitCode, ctxErr)   // process was killed by ctx
+//	exec.ErrWaitDelay (no ExitError)   → (0, nil)             // process exited 0, only pipes outlived it
 //	non-ExitError                      → (-1, ctxErr or err)
 func classifyExecError(ctx context.Context, runErr error) (int, error) {
 	if runErr == nil {
 		return 0, nil
 	}
-	ctxErr := ctx.Err()
-
+	// When the context terminated the process, force -1 regardless of the
+	// OS-reported exit code. On POSIX a killed `sleep` propagates as -1
+	// (signal), but on Windows bash's `sleep 1` killed by ctx-cancel
+	// surfaces as exit 1 — which would otherwise be indistinguishable from
+	// a normal failure. -1 + ctxErr is the canonical "killed by context"
+	// signal callers (and the surrounding switch in Exec) look for.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return -1, ctxErr
+	}
 	var exitErr *exec.ExitError
 	if errors.As(runErr, &exitErr) {
-		return exitErr.ExitCode(), ctxErr
+		return exitErr.ExitCode(), nil
 	}
-	if ctxErr != nil {
-		return -1, ctxErr
+	// exec.ErrWaitDelay (no ExitError wrapped) means the process itself
+	// exited successfully but Wait closed lingering stdio pipes held by a
+	// background descendant. The captured stdout/stderr up to that point are
+	// still valid output — surface this as a normal exit 0 rather than a
+	// hard exec failure, so an otherwise-successful built-in agent run is
+	// not reported as failed just because a child held the pipe.
+	if errors.Is(runErr, exec.ErrWaitDelay) {
+		return 0, nil
 	}
 	return -1, runErr
 }
@@ -304,4 +348,10 @@ func (r *NoneRuntime) Workspace() string {
 // RequiresProcessSandbox keeps local agent execution constrained.
 func (r *NoneRuntime) RequiresProcessSandbox() bool {
 	return true
+}
+
+// TargetGOOS reports the host OS, since NoneRuntime executes commands directly
+// on the host.
+func (r *NoneRuntime) TargetGOOS() string {
+	return goruntime.GOOS
 }

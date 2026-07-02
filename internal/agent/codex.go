@@ -45,9 +45,12 @@ const (
 	codexFnCall                 = "function_call"
 	codexFnCallOut              = "function_call_output"
 	codexTokenCount             = "token_count"
-	codexStatusSuccess          = "success"
-	codexStatusError            = "error"
 )
+
+// codexExecPathProbeCmd resolves $HOME/.local/bin (the codex binary, installed
+// via `npm install -g` under the bootstrap's npm_config_prefix) and
+// $HOME/.nvm/current/bin (node, needed by codex's #!/usr/bin/env node shebang).
+const codexExecPathProbeCmd = `printf '%s' "$HOME/.local/bin:$HOME/.nvm/current/bin:$PATH"`
 
 // NewCodexAgent creates a new CodexAgent.
 func NewCodexAgent(cfg Config) *CodexAgent {
@@ -67,7 +70,11 @@ func NewCodexAgent(cfg Config) *CodexAgent {
 }
 
 // Install installs Codex CLI when it is not already available in the runtime.
+//
+//nolint:dupl // each agent Install shares the same probe→merge→exec lifecycle; the deltas (probe const, default install cmd) are pulled out, leaving the orchestration intentionally similar.
 func (a *CodexAgent) Install(ctx context.Context, rt Runtime) error {
+	a.probeAndMergePATH(ctx, rt, codexExecPathProbeCmd)
+
 	opts := ExecOptions{Cwd: "/"}
 	opts = a.mergeExecOptionsEnv(ctx, opts, nil, nil)
 
@@ -88,6 +95,12 @@ func (a *CodexAgent) Install(ctx context.Context, rt Runtime) error {
 
 // InstallMCP installs MCP servers with the Codex CLI.
 func (a *CodexAgent) InstallMCP(ctx context.Context, rt Runtime, mcpCfg runtime.MCPConfig) error {
+	if len(mcpCfg.Servers) == 0 {
+		return nil
+	}
+	if err := ensureNodeRuntime(ctx, rt, codexEngineName, ExecOptions{}); err != nil {
+		return err
+	}
 	return installMCPServers(ctx, rt, mcpCfg, buildCodexMCPInstallCmd)
 }
 
@@ -133,7 +146,7 @@ func buildCodexMCPInstallCmd(server runtime.MCPServerConfig) (string, error) {
 	default:
 		return "", fmt.Errorf("mcp server %q transport %q is not supported by codex", server.Name, server.Transport)
 	}
-	return nodeRuntimeCommandWithGuard("codex", cmd.String()), nil
+	return cmd.String(), nil
 }
 
 func buildCodexMCPRemoteInstallCmd(server runtime.MCPServerConfig) (string, error) {
@@ -168,7 +181,7 @@ func buildCodexMCPRemoteInstallCmd(server runtime.MCPServerConfig) (string, erro
 		return "", fmt.Errorf("mcp server %q endpoint is invalid: %w", server.Name, err)
 	}
 	cmd.WriteString(endpoint)
-	return nodeRuntimeCommandWithGuard("codex", cmd.String()), nil
+	return cmd.String(), nil
 }
 
 func buildCodexMCPRemoteBridgeScript(server runtime.MCPServerConfig) (string, error) {
@@ -224,20 +237,35 @@ func (a *CodexAgent) CheckCredentials(ctx context.Context) error {
 //
 //nolint:dupl
 func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (*SessionResult, error) {
+	if err := requireBashOnWindowsHost(rt); err != nil {
+		return nil, fmt.Errorf("%s: %w", a.Name(), err)
+	}
 	start := time.Now()
 
 	instruction := BuildInstructionFromMessages(messages)
+	// bypass_sandbox kwarg overrides the runtime-derived choice; useful when
+	// the host kernel does not support codex's Landlock-based linux-sandbox
+	// (e.g. CI containers that block Landlock syscalls).
 	sandboxFlag := codexBypassSandbox
-	if rt.RequiresProcessSandbox() {
+	if rt.RequiresProcessSandbox() && !EngineKwargBool(a.Cfg.Kwargs, KwargBypassSandbox) {
 		sandboxFlag = codexProcessSandbox
 	}
 	lastMessagePath := filepath.Join(rt.Workspace(), ".skill-up", "codex-last-message.txt")
-	cmd := "mkdir -p " + shellQuote(filepath.Dir(lastMessagePath)) + "\n" +
-		nodeRuntimeCommandWithGuard("codex", buildCodexRunCmdWithLastMessage(instruction, a.effectiveModelName(ctx), a.runProviderConfig(ctx), sandboxFlag, lastMessagePath))
 
 	envVars := a.credentialEnvVars(credential.EnvOpenAIAPIKey, credential.EnvOpenAIBaseURL)
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))
 	ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, opts.Env)
+
+	if err := ensureNodeRuntime(ctx, rt, codexEngineName, opts); err != nil {
+		return &SessionResult{
+			Engine:     a.Name(),
+			ExitCode:   1,
+			DurationMs: time.Since(start).Milliseconds(),
+			Artifacts:  &SessionArtifacts{},
+		}, err
+	}
+	cmd := "mkdir -p " + shellQuote(filepath.Dir(lastMessagePath)) + "\n" +
+		buildCodexRunCmdWithLastMessage(instruction, a.effectiveModelName(ctx), a.runProviderConfig(ctx), sandboxFlag, lastMessagePath)
 
 	result, err := rt.Exec(ctx, cmd, opts)
 	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result, lastMessagePath)

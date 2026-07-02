@@ -112,6 +112,46 @@ skill-up init --config ./team-config.yaml --print
 
 ---
 
+## 环境变量
+
+除了 YAML 配置文件外，skill-up 还支持若干影响运行时行为的环境变量。这些变量
+与 `config.yaml` 中的 `env` 字典（用于向子进程注入环境变量）是分开的。
+
+### `SKILL_UP_BASH`
+
+覆盖 skill-up 用于 `.sh` script judge 和 shell 命令的 bash 解释器。
+
+| 属性         | 说明                                                                   |
+| :----------- | :--------------------------------------------------------------------- |
+| **用途**     | 让 skill-up 使用指定的 `bash` 可执行文件                               |
+| **适用平台** | 所有平台 —— Linux、macOS、Windows                                      |
+| **默认值**   | 未设置；回退到 `PATH` 上的 `bash`（Windows 上还会探测常见 Git Bash 路径） |
+
+**优先级：** 设置 `SKILL_UP_BASH` 且其值指向有效文件时，skill-up 会无条件使用它
+—— 该变量的检查**先于**任何 `PATH` 查找或知名路径探测。
+
+**完全信任要求：** 你提供的路径会被原样使用，不经过额外沙箱。你有责任确保它指向
+一个可信的 bash 可执行文件。
+
+示例（macOS / Linux）：
+
+```bash
+export SKILL_UP_BASH=/opt/homebrew/bin/bash
+skill-up run ./evals/eval.yaml
+```
+
+示例（Windows —— Git Bash 安装在非标准位置）：
+
+```powershell
+$env:SKILL_UP_BASH = "D:\tools\git\bin\bash.exe"
+skill-up run .\evals\eval.yaml
+```
+
+在 Windows 上，即使通过 `SKILL_UP_BASH` 显式指定 `C:\Windows\System32\bash.exe`
+（WSL shim）也会被拒绝；详见 [Windows 支持](./windows.md#在-windows-上运行-sh-script-judge)。
+
+---
+
 ## 示例
 
 ### 默认导出 trace 到本地 collector

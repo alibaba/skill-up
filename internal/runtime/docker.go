@@ -19,6 +19,7 @@ import (
 
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/observability"
+	"github.com/alibaba/skill-up/internal/platform"
 )
 
 const (
@@ -165,9 +166,6 @@ func (r *DockerRuntime) buildCreateArgs(name string) []string {
 		args = append(args, "--network", "none")
 	}
 	for k, v := range r.cfg.Env {
-		if k == "PATH" && strings.Contains(v, "$") {
-			continue
-		}
 		args = append(args, "--env", k+"="+v)
 	}
 	entry := r.cfg.Entrypoint
@@ -248,6 +246,11 @@ func (r *DockerRuntime) Close() error {
 	r.mu.Unlock()
 	return nil
 }
+
+// TargetGOOS reports the GOOS of the container's guest OS. skill-up's
+// docker runtime currently provisions a Linux image, so commands executed
+// via `docker exec` run on a Linux guest regardless of the host platform.
+func (r *DockerRuntime) TargetGOOS() string { return platform.GOOSLinux }
 
 // Start starts the container if it is not already running.
 func (r *DockerRuntime) Start(ctx context.Context) error {
@@ -410,31 +413,13 @@ func (r *DockerRuntime) Exec(ctx context.Context, command string, opts ExecOptio
 		}
 	}
 	args = append(args, "--workdir", cwd)
-	// mergeEnv covers cfg.Env + opts.Env, but here we want to keep the
-	// container's own env (PATH, HOME, ...) intact and just layer the
-	// caller-supplied vars on top — so pass only the merged overlay to
-	// docker, not the full host env.
-	//
-	// PATH requires special handling: docker --env sets values literally
-	// (no variable expansion), so "$HOME/.local/bin:$PATH" would become
-	// the literal string. Instead, prepend an `export PATH=...` line to
-	// the command so expansion happens inside the container's shell.
-	var pathPrefix string
+	// Pass only the cfg.Env + opts.Env overlay to docker, not the full
+	// host env, so the container's own PATH/HOME/... stay intact and
+	// only caller-supplied vars layer on top. Values are forwarded
+	// literally; callers that need shell expansion (e.g. an agent's
+	// $HOME-referencing PATH) should resolve the value first and pass
+	// the literal — see internal/agent.probeAndMergePATH.
 	for _, kv := range overlayEnvList(r.cfg.Env, opts.Env) {
-		if k, v, _ := strings.Cut(kv, "="); k == "PATH" && strings.Contains(v, "$") {
-			// shellDoubleQuote escapes \ " `, but not $ — so $VAR
-			// expansion still works (intended), but $(...) command
-			// substitution would also still fire and silently
-			// execute arbitrary commands. Reject the substitution
-			// form rather than try to escape it (escaping $ would
-			// also kill the legitimate $VAR / ${VAR} expansion this
-			// branch exists for).
-			if strings.Contains(v, "$(") {
-				return ExecResult{}, fmt.Errorf("docker runtime: PATH %q contains command substitution $(...), which is not allowed", v)
-			}
-			pathPrefix = "export PATH=" + shellDoubleQuote(v) + "\n"
-			continue
-		}
 		args = append(args, "--env", kv)
 	}
 	// Use `sh -c` rather than `bash -c` so the docker runtime works on
@@ -447,7 +432,7 @@ func (r *DockerRuntime) Exec(ctx context.Context, command string, opts ExecOptio
 	// install, MCP install, judge scripts) is shell-driven end-to-end,
 	// so an image without /bin/sh isn't usable here even if Exec
 	// itself bypassed `sh -c`. Pick a base image with a POSIX shell.
-	args = append(args, id, "sh", "-c", pathPrefix+command)
+	args = append(args, id, "sh", "-c", command)
 	span.SetAttributes(
 		attribute.String("process.command", command),
 		attribute.String("process.cwd", cwd),
@@ -512,6 +497,15 @@ func (r *DockerRuntime) Workspace() string {
 // agent execution; agents do not need to enable their own process sandbox.
 func (r *DockerRuntime) RequiresProcessSandbox() bool {
 	return false
+}
+
+// MergeEnv layers entries into the runtime's persistent env baseline. See
+// Runtime.MergeEnv for the contract. Note: the container's entrypoint (e.g.
+// `sleep infinity`) is started with the env present at Create time, so
+// post-Create MergeEnv calls only affect subsequent `docker exec`
+// invocations, not the long-running entrypoint process.
+func (r *DockerRuntime) MergeEnv(env map[string]string) {
+	mergeIntoEnvBaseline(&r.cfg.Env, env)
 }
 
 // snapshotContainerID returns the current container id under the mutex,

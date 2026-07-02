@@ -107,6 +107,15 @@ func (r *Runner) Evaluate(ctx context.Context, cases []*config.CaseConfig, ag ag
 		cwd, _ := os.Getwd()
 		skillName = filepath.Base(cwd)
 	}
+	// reportName is the identity shown in reports (result.json, benchmark,
+	// JUnit, HTML). It prefers the authoritative `name` from SKILL.md
+	// frontmatter and falls back to the directory basename (skillName) when
+	// SKILL.md is missing or declares no name. The dir-based skillName is kept
+	// for the workspace layout below so existing paths are unaffected.
+	reportName := skillName
+	if name, ok := r.loader.SkillName(); ok {
+		reportName = name
+	}
 	concurrency := r.evalCfg.Cases.Parallelism
 
 	workspaceDir := opts.OutputDir
@@ -142,7 +151,7 @@ func (r *Runner) Evaluate(ctx context.Context, cases []*config.CaseConfig, ag ag
 		logging.DebugContextf(ctx, "Runner: benchmark=%t concurrency=%d output_dir=%s iteration=%d", r.evalCfg.Benchmark.Enabled, concurrency, workspaceDir, runNumber)
 
 		ev := newEvaluator(evaluator.EvalOptions{
-			SkillName:       skillName,
+			SkillName:       reportName,
 			SkillDir:        skillDir,
 			EvalCfg:         r.evalCfg,
 			Loader:          r.loader,
@@ -163,7 +172,7 @@ func (r *Runner) Evaluate(ctx context.Context, cases []*config.CaseConfig, ag ag
 		allResults = append(allResults, results...)
 		r.endTime = time.Now()
 
-		if err := r.WriteResults(ctx, results, skillName, skillDir, runNumber, opts.Formats); err != nil {
+		if err := r.WriteResults(ctx, results, reportName, skillDir, runNumber, opts.Formats); err != nil {
 			logging.WarnContextf(ctx, "Runner: failed to write results for run %d: %v", runNumber, err)
 		}
 	}

@@ -3,7 +3,12 @@ package config
 import (
 	"fmt"
 	"path"
+	"slices"
 	"strings"
+
+	"github.com/bmatcuk/doublestar/v4"
+
+	"github.com/alibaba/skill-up/internal/agentkind"
 )
 
 // Judge type constants.
@@ -20,6 +25,20 @@ const (
 	runtimeTypeOpenSandbox = "opensandbox"
 	runtimeTypeDocker      = "docker"
 )
+
+// Custom engine transport constants.
+const (
+	customTransportLocal = "local"
+	customTransportHTTP  = "http"
+)
+
+// IsBuiltinEngineName reports whether name matches a built-in agent. A
+// built-in engine ignores any engine.custom block. The set of names is
+// defined once in internal/agentkind so the agent factory and config
+// validator share a single source of truth (no more "keep in sync" lists).
+func IsBuiltinEngineName(name string) bool {
+	return agentkind.IsBuiltin(name)
+}
 
 // Validator checks eval and case documents against the v1alpha1 schema.
 type Validator struct{}
@@ -61,6 +80,9 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 		errs = append(errs, "engine.name is required")
 	}
 
+	// engine.custom validation is deferred to ResolveCustomEngineConfig, which
+	// runs after CLI overrides settle the final engine name.
+
 	// engine.model.provider and engine.model.name are optional.
 	// When omitted, the engine uses its local default model configuration.
 
@@ -71,6 +93,8 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	if cfg.Cases.RetryPolicy.MaxRetries > maxRetryPolicyRetries {
 		errs = append(errs, fmt.Sprintf("cases.retry_policy.max_retries must be <= %d", maxRetryPolicyRetries))
 	}
+
+	errs = append(errs, validateCollectArtifacts("cases.defaults.collect_artifacts", cfg.Cases.Defaults.CollectArtifacts)...)
 
 	if len(errs) > 0 {
 		return fmt.Errorf("validation errors:\n  - %s", strings.Join(errs, "\n  - "))
@@ -105,6 +129,8 @@ func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 	if cfg.Judge.Type != "" {
 		errs = append(errs, validateJudgeTypeAndFields(cfg.Judge)...)
 	}
+
+	errs = append(errs, validateCollectArtifacts("collect_artifacts", cfg.CollectArtifacts)...)
 
 	if len(errs) > 0 {
 		return fmt.Errorf("validation errors:\n  - %s", strings.Join(errs, "\n  - "))
@@ -144,6 +170,23 @@ func validateJudgeTypeAndFields(judge JudgeConfig) []string {
 	return errs
 }
 
+// validateCollectArtifacts checks that every collect_artifacts entry is a
+// non-empty, valid doublestar glob. field is the YAML path used in error
+// messages (e.g. "cases.defaults.collect_artifacts").
+func validateCollectArtifacts(field string, patterns []string) []string {
+	var errs []string
+	for i, p := range patterns {
+		if strings.TrimSpace(p) == "" {
+			errs = append(errs, fmt.Sprintf("%s[%d] must not be empty", field, i))
+			continue
+		}
+		if !doublestar.ValidatePattern(p) {
+			errs = append(errs, fmt.Sprintf("%s[%d] is not a valid glob pattern: %q", field, i, p))
+		}
+	}
+	return errs
+}
+
 func validatePassThreshold(threshold *float64) []string {
 	if threshold == nil {
 		return nil
@@ -155,6 +198,13 @@ func validatePassThreshold(threshold *float64) []string {
 }
 
 // ValidateAll validates an eval config and all its cases.
+//
+// NOTE: this does NOT validate the engine.custom block. That validation is
+// deferred to ResolveCustomEngineConfig because the final engine name is only
+// known after CLI overrides (e.g. --engine) settle, and a custom block must
+// only be enforced for non-built-in engines. Callers MUST also invoke
+// ResolveCustomEngineConfig after applying any CLI overrides; cli/run.go and
+// cli/validate.go both do this.
 func (v *Validator) ValidateAll(result *EvalResult) error {
 	if err := v.ValidateEvalConfig(result.Eval); err != nil {
 		return err
@@ -167,6 +217,94 @@ func (v *Validator) ValidateAll(result *EvalResult) error {
 	}
 
 	return nil
+}
+
+// validateEngine checks engine.custom against the Custom Engine contract.
+// A non-built-in engine.name requires an engine.custom block; a built-in
+// engine.name ignores engine.custom entirely.
+func validateEngine(engine EngineConfig) []string {
+	if engine.Name == "" {
+		return nil
+	}
+	if IsBuiltinEngineName(engine.Name) {
+		return nil
+	}
+	if engine.Custom == nil {
+		return []string{fmt.Sprintf("unsupported agent %q: missing engine.custom", engine.Name)}
+	}
+	return validateCustomEngine(engine.Custom)
+}
+
+func validateCustomEngine(custom *CustomEngineConfig) []string {
+	var errs []string
+
+	// Both the local and http transports are implemented (JSON request/response
+	// and multipart file upload). URL artifact download in the result is a
+	// follow-up.
+	switch custom.Transport {
+	case "":
+		errs = append(errs, "engine.custom.transport is required (local or http)")
+	case customTransportLocal:
+		if custom.Local == nil || custom.Local.Command == "" {
+			errs = append(errs, "engine.custom.local.command is required when transport is local")
+		}
+	case customTransportHTTP:
+		errs = append(errs, validateCustomHTTP(custom.HTTP)...)
+	default:
+		errs = append(errs, fmt.Sprintf("engine.custom.transport must be \"local\" or \"http\" (got %q)", custom.Transport))
+	}
+
+	if custom.ResponseFormat != "" &&
+		custom.ResponseFormat != "session_result" && custom.ResponseFormat != "text" {
+		errs = append(errs, fmt.Sprintf("engine.custom.response_format must be one of: session_result, text (got %q)", custom.ResponseFormat))
+	}
+
+	if custom.TimeoutSeconds < 0 {
+		errs = append(errs, "engine.custom.timeout_seconds must be non-negative")
+	}
+
+	// kwargs are exposed to templates as ${kwargs.<key>}; a key that
+	// collides with a built-in template variable (e.g. `model`, `case_id`)
+	// would shadow or be shadowed by the built-in depending on overlay
+	// order. Reject the collision so the user fixes the name explicitly.
+	for k := range custom.Kwargs {
+		if IsBuiltinTemplateVar(k) {
+			errs = append(errs, fmt.Sprintf("engine.custom.kwargs key %q collides with a built-in template variable; rename it", k))
+		}
+	}
+
+	return errs
+}
+
+// validateCustomHTTP validates the engine.custom.http block: url is required,
+// method must be POST, and each files[].path must be a workspace-relative path
+// or glob. URL artifact download in the result is a follow-up.
+func validateCustomHTTP(h *CustomHTTPConfig) []string {
+	if h == nil {
+		return []string{"engine.custom.http.url is required when transport is http"}
+	}
+	var errs []string
+	if h.URL == "" {
+		errs = append(errs, "engine.custom.http.url is required when transport is http")
+	}
+	if h.Method != "" && !strings.EqualFold(h.Method, "POST") {
+		errs = append(errs, fmt.Sprintf("engine.custom.http.method must be POST (got %q)", h.Method))
+	}
+	for i := range h.Files {
+		if p := h.Files[i].Path; !WorkspaceRelPathSafe(p) {
+			errs = append(errs, fmt.Sprintf(
+				"engine.custom.http.files[%d].path %q must be a non-empty relative path inside the workspace (no leading / or ..)", i, p))
+		}
+	}
+	return errs
+}
+
+// WorkspaceRelPathSafe reports whether p is a non-empty, workspace-relative
+// path or glob: not absolute and with no ".." segment. It is shared by config
+// validation and the http transport's file expansion so both apply the same
+// rule (agent imports config).
+func WorkspaceRelPathSafe(p string) bool {
+	return p != "" && !strings.HasPrefix(p, "/") && !slices.Contains(strings.Split(p, "/"), "..")
 }
 
 func isValidRuntimeType(t string) bool {

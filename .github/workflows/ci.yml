@@ -21,15 +21,19 @@ permissions:
 jobs:
   build:
     name: Build & Test
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      # Surface failures on every OS independently instead of cancelling the
+      # whole matrix when one runner fails.
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         go-version: ["1.25.x"]
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: ${{ matrix.go-version }}
           cache: true
@@ -40,14 +44,22 @@ jobs:
       - name: Build
         run: go build ./...
 
+      # Force bash on Windows runners too: pwsh's legacy native-argument
+      # passing splits `-coverprofile=coverage.out` and feeds `.out` to go
+      # as a package import path, producing `FAIL .out [setup failed]`.
+      # Git Bash is preinstalled on windows-latest and parses args verbatim.
       - name: Test (with race detector and coverage)
+        shell: bash
         run: go test -race -timeout 120s -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
 
       # Self-hosted coverage badge: parse the total from `go tool cover -func`
       # and rewrite .github/badges/coverage.json. The shields.io endpoint badge
       # in README.md reads this JSON via raw.githubusercontent.com.
+      # Ubuntu-only: the Windows leg of the matrix uses a different shell
+      # toolchain and we only need one canonical coverage number.
       - name: Compute coverage and update badge
         id: coverage
+        if: matrix.os == 'ubuntu-latest'
         run: |
           pct=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%","",$3); print $3}')
           if [ -z "$pct" ]; then
@@ -76,8 +88,8 @@ jobs:
       # upload would silently match nothing and, combined with
       # if-no-files-found: error, fail the build job on every push to main.
       - name: Upload coverage badge artifact
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v5
+        if: matrix.os == 'ubuntu-latest' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: coverage-badge
           path: .github/badges/coverage.json
@@ -95,12 +107,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: badges
 
       - name: Download coverage badge artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: coverage-badge
           path: .github/badges/
@@ -118,11 +130,48 @@ jobs:
           git commit -m "chore(ci): update coverage badge to ${pct} [skip ci]"
           git push origin badges
 
+  e2e-windows:
+    # Windows e2e is intentionally narrower than the Linux e2e: it does not
+    # set SKILL_UP_FULL_E2E, so the LLM-dependent tests in e2e/cli_test.go,
+    # e2e/agent_test.go and e2e/mcp_test.go self-skip. The mock-engine and
+    # script-judge contract tests still exercise the Windows-specific code
+    # paths added by issue #31 — shell selection, MSYS argv handling,
+    # QuoteWindows, NewShellCmd's WaitDelay, the script-judge interpreter
+    # dispatch — through the full CLI pipeline. Real-LLM coverage stays on
+    # the Linux e2e job below.
+    name: E2E (none runtime, Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      # Match the Build & Test step's shell choice so pwsh's legacy argv
+      # passing does not split `-coverprofile`-style flags.
+      - name: Run e2e tests (none runtime, quick mode)
+        shell: bash
+        run: go test -tags e2e -timeout 1200s -count=1 -v ./e2e
+        env:
+          SKILL_UP_E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-artifacts
+
+      - name: Upload e2e workspace artifacts
+        if: always() && hashFiles('e2e-artifacts/**') != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: e2e-windows-workspaces
+          path: e2e-artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
+
   e2e:
     name: E2E (none runtime)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       # Fork PRs run without access to repository secrets. Detect that early
       # and skip the rest of the job so we don't burn CI minutes installing
@@ -139,13 +188,13 @@ jobs:
             echo "available=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         if: steps.secrets.outputs.available == 'true'
         with:
           go-version: "1.25.x"
           cache: true
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         if: steps.secrets.outputs.available == 'true'
         with:
           node-version: "22"
@@ -163,12 +212,24 @@ jobs:
           npm install -g --include=optional '@openai/codex@0.80.0'
           codex --version
 
-      - name: Install qodercli
+      - name: Install qwen-code CLI
         if: steps.secrets.outputs.available == 'true'
         run: |
-          curl -fsSL https://qoder.com/install | bash
-          # qoder.com installer drops the binary under ~/.qoder/bin by default;
-          # surface it on PATH for the rest of the job.
+          npm install -g @qwen-code/qwen-code
+          qwen --version
+
+      - name: Install qodercli (pinned v1.0.14)
+        if: steps.secrets.outputs.available == 'true'
+        env:
+          QODER_VERSION: "1.0.14"
+          QODER_SHA256: "4d83ec3d3a0948b73012cfdd6e2757be0a5da5c89a288425a5607fd42be1de7b"
+        run: |
+          TARBALL=$(mktemp)
+          curl -fsSL "https://qoder-ide.oss-accelerate.aliyuncs.com/qodercli/releases/${QODER_VERSION}/qodercli-linux-x64.tar.gz" -o "$TARBALL"
+          echo "$QODER_SHA256  $TARBALL" | sha256sum -c -
+          mkdir -p "$HOME/.qoder/bin"
+          tar -xzf "$TARBALL" -C "$HOME/.qoder/bin"
+          rm -f "$TARBALL"
           echo "$HOME/.qoder/bin" >> "$GITHUB_PATH"
 
       - name: Verify qodercli on PATH
@@ -210,7 +271,7 @@ jobs:
 
       - name: Upload e2e workspace artifacts
         if: always() && steps.secrets.outputs.available == 'true' && hashFiles('e2e-artifacts/**') != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: e2e-workspaces
           path: e2e-artifacts/
@@ -224,7 +285,7 @@ jobs:
     # sandbox is slower than the none-runtime job; give it generous headroom.
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       # The opensandbox runtime is self-hosted on the runner (see below), so no
       # OPENSANDBOX_* secret is needed — but the agent under test still calls a
@@ -241,7 +302,7 @@ jobs:
             echo "available=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         if: steps.secrets.outputs.available == 'true'
         with:
           go-version: "1.25.x"
@@ -249,7 +310,7 @@ jobs:
 
       - name: Install uv
         if: steps.secrets.outputs.available == 'true'
-        uses: astral-sh/setup-uv@v8.1.0
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
 
       - name: Install OpenSandbox server
         if: steps.secrets.outputs.available == 'true'
@@ -333,7 +394,7 @@ jobs:
 
       - name: Upload OpenSandbox server log
         if: always() && steps.secrets.outputs.available == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: opensandbox-server-log
           path: ${{ runner.temp }}/opensandbox-server.log
@@ -342,7 +403,7 @@ jobs:
 
       - name: Upload opensandbox e2e workspace artifacts
         if: always() && steps.secrets.outputs.available == 'true' && hashFiles('e2e-opensandbox-artifacts/**') != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: e2e-opensandbox-workspaces
           path: e2e-opensandbox-artifacts/
@@ -359,9 +420,9 @@ jobs:
     # runtime against a real daemon directly, no agent or model in the loop.
     # That also means they run on fork PRs, unlike the other two e2e jobs.
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.25.x"
           cache: true
@@ -391,7 +452,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Check secret availability
         id: secrets
@@ -405,7 +466,7 @@ jobs:
             echo "available=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         if: steps.secrets.outputs.available == 'true'
         with:
           go-version: "1.25.x"
@@ -427,7 +488,7 @@ jobs:
 
       - name: Upload docker full e2e artifacts
         if: always() && steps.secrets.outputs.available == 'true' && hashFiles('e2e-docker-full-artifacts/**') != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: e2e-docker-full-workspaces
           path: e2e-docker-full-artifacts/
@@ -438,9 +499,9 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.25.x"
           cache: true
@@ -454,7 +515,7 @@ jobs:
           fi
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9
         with:
           version: v2.11.4
 
@@ -468,24 +529,24 @@ jobs:
     name: GoReleaser Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.25.x"
           cache: true
 
       - name: GoReleaser check
-        uses: goreleaser/goreleaser-action@v7
+        uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7
         with:
           distribution: goreleaser
           version: "~> v2"
           args: check
 
       - name: GoReleaser snapshot build
-        uses: goreleaser/goreleaser-action@v7
+        uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7
         with:
           distribution: goreleaser
           version: "~> v2"

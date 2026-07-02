@@ -28,6 +28,12 @@ var validateCmd = &cobra.Command{
 		if err := validator.ValidateAll(result); err != nil {
 			return fmt.Errorf("validation failed: %w", err)
 		}
+		// engine.custom env resolution and validation are deferred by the
+		// loader (the final engine name can be changed by --engine); run them
+		// here so `validate` still checks the custom engine block.
+		if err := config.ResolveCustomEngineConfig(result.Eval); err != nil {
+			return fmt.Errorf("validation failed: %w", err)
+		}
 
 		fmt.Printf("✓ eval.yaml is valid (loaded %d case(s))\n", len(result.Cases)) //nolint:forbidigo
 
