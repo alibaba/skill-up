@@ -9,6 +9,8 @@ status: {{status_metadata}}
 
 # SUP-{{proposal_id}}: {{title}}
 
+Language: English | [中文](zh/{{proposal_filename}})
+
 <!-- toc -->
 - [Summary](#summary)
 - [Motivation](#motivation)

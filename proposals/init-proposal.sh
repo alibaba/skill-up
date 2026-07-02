@@ -223,6 +223,7 @@ content="${content//\{\{yaml_author\}\}/$YAML_AUTHOR}"
 content="${content//\{\{status_metadata\}\}/$STATUS}"
 content="${content//\{\{date\}\}/$DATE}"
 content="${content//\{\{proposal_id\}\}/$PROPOSAL_ID}"
+content="${content//\{\{proposal_filename\}\}/$(basename "$DESTINATION")}"
 mkdir -p "$(dirname "$DESTINATION")"
 printf '%s\n' "$content" > "$DESTINATION"
 

@@ -4,6 +4,6 @@ See the [proposal contributing guide](CONTRIBUTING.md) for information on propos
 
 This is the complete list of skill-up Enhancement Proposals:
 
-|                     Proposal                     |                     Title                      |    Status   | Last Updated |
-| :----------------------------------------------: | :--------------------------------------------: | :---------: | :----------: |
-| [SUP-0001](0001-multi-turn-conversation-eval.md) | Multi-Turn Conversation Evaluation Support | provisional |  2026-05-19  |
+|                     Proposal                     |                     Title                      | Chinese Version |    Status   | Last Updated |
+| :----------------------------------------------: | :--------------------------------------------: | :-------------: | :---------: | :----------: |
+| [SUP-0001](0001-multi-turn-conversation-eval.md) | Multi-Turn Conversation Evaluation Support | [中文](zh/0001-multi-turn-conversation-eval.md) | provisional |  2026-05-19  |
