@@ -20,9 +20,11 @@ on:
 # never cancelled — not while executing (cancel-in-progress is false off PRs)
 # and not while queued (a shared group drops an older pending run when a newer
 # one lands, regardless of cancel-in-progress), so the full matrix and the
-# coverage-badge commit job always run to completion.
+# coverage-badge commit job always run to completion. The group is prefixed
+# with github.workflow because concurrency groups are repo-wide, not scoped to
+# a single workflow.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Default the workflow token to read-only. Jobs that execute PR-supplied
