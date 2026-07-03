@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Config validation now rejects duplicate case IDs and duplicate `cases.files`
+  references. Since reports and artifacts are keyed by case ID and one case runs
+  per `cases.files` entry, a collision would silently overwrite results or
+  double-run a case. `skill-up validate` (and the preflight in `skill-up run`)
+  fails with the conflicting ID and the offending source files. Covers both
+  explicit `id:` fields and filename-derived IDs, and collapses
+  differently-spelled paths (e.g. `cases/a.yaml` vs `./cases/a.yaml`).
+
 ### Fixed
 - Skill installation preserves source file permissions, notably the executable
   bit on scripts. The `none` runtime's per-file upload previously wrote every
