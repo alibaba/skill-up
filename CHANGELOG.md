@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-03
+
 ### Added
 - Built-in `qwen_code` engine (aliases `qwen-code`, `qwen`), backed by the
   [Qwen Code](https://github.com/QwenLM/qwen-code) CLI (`@qwen-code/qwen-code`).
@@ -311,6 +313,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project and delivers the end-to-end capability to declare eval environments,
   run cases and emit structured reports as described in [README.md](README.md).
 
+[0.3.0]: https://github.com/alibaba/skill-up/releases/tag/v0.3.0
 [0.2.4]: https://github.com/alibaba/skill-up/releases/tag/v0.2.4
 [0.2.3]: https://github.com/alibaba/skill-up/releases/tag/v0.2.3
 [0.2.2]: https://github.com/alibaba/skill-up/releases/tag/v0.2.2
