@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Skill installation preserves source file permissions, notably the executable
+  bit on scripts. The `none` runtime's per-file upload previously wrote every
+  file with a fixed `0600` mode, so skills shipping runnable helper scripts
+  installed non-executable and failed without a chmod workaround. The
+  file-transfer contract now documents permission preservation, matching the
+  `opensandbox` and `docker` runtimes which already carried the mode across.
+
 ## [0.3.0] - 2026-07-03
 
 ### Added

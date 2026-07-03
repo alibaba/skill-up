@@ -122,6 +122,38 @@ func TestNoneRuntime_UploadDownloadFile(t *testing.T) {
 	}
 }
 
+func TestNoneRuntime_UploadFile_PreservesExecutableBit(t *testing.T) {
+	t.Parallel()
+	if goruntime.GOOS == "windows" {
+		t.Skip("Unix file modes are not meaningful on Windows")
+	}
+
+	rt := &NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	// A skill helper script shipped with the executable bit set.
+	srcDir := t.TempDir()
+	srcFile := filepath.Join(srcDir, "run.sh")
+	if err := os.WriteFile(srcFile, []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := rt.UploadFile(context.Background(), srcFile, "scripts/run.sh"); err != nil {
+		t.Fatalf("UploadFile failed: %v", err)
+	}
+
+	info, err := os.Stat(filepath.Join(rt.Workspace(), "scripts", "run.sh"))
+	if err != nil {
+		t.Fatalf("uploaded script should exist: %v", err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Errorf("installed script lost its executable bit: mode = %o, want executable", info.Mode().Perm())
+	}
+}
+
 func TestNoneRuntime_UploadDownloadDir(t *testing.T) {
 	t.Parallel()
 

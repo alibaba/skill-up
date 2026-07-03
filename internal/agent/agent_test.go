@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/alibaba/skill-up/internal/agentkind"
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/platform"
+	"github.com/alibaba/skill-up/internal/runtime"
 )
 
 // modelAuto is the QoderCLI "auto" model tier, shared across agent tests.
@@ -79,6 +81,44 @@ func TestListSkillFiles_ExcludesEvals(t *testing.T) {
 	}
 	if fileSet[filepath.Join("evals", "nested", "data", "file.txt")] {
 		t.Error("evals/nested/data/file.txt should be excluded")
+	}
+}
+
+func TestInstallSkill_PreservesExecutableScripts(t *testing.T) {
+	t.Parallel()
+	if goruntime.GOOS == "windows" {
+		t.Skip("Unix file modes are not meaningful on Windows")
+	}
+
+	// A skill that ships an executable helper script alongside SKILL.md.
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "SKILL.md"), []byte("# Skill"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(src, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(src, "scripts", "run.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := &runtime.NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	if err := installSkill(context.Background(), rt, src, "skill"); err != nil {
+		t.Fatalf("installSkill failed: %v", err)
+	}
+
+	info, err := os.Stat(filepath.Join(rt.Workspace(), "skill", "scripts", "run.sh"))
+	if err != nil {
+		t.Fatalf("installed script should exist: %v", err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Errorf("installed script lost its executable bit: mode = %o", info.Mode().Perm())
 	}
 }
 
