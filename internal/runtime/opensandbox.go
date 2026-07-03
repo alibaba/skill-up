@@ -54,7 +54,7 @@ type openSandboxClient interface {
 	Ping(ctx context.Context) error
 	CreateDirectory(ctx context.Context, remotePath string, mode int) error
 	UploadFiles(ctx context.Context, entries []opensandbox.UploadFileEntry) error
-	DownloadFile(ctx context.Context, remotePath, rangeHeader string) (io.ReadCloser, error)
+	DownloadFile(ctx context.Context, remotePath, rangeHeader string, opts ...opensandbox.DownloadFileOptions) (io.ReadCloser, error)
 	SearchFiles(ctx context.Context, dir, pattern string) ([]opensandbox.FileInfo, error)
 	RunCommandWithOpts(ctx context.Context, req opensandbox.RunCommandRequest, handlers *opensandbox.ExecutionHandlers) (*opensandbox.Execution, error)
 }
