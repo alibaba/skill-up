@@ -1028,7 +1028,7 @@ func (f *fakeOpenSandbox) UploadFiles(ctx context.Context, entries []opensandbox
 	return nil
 }
 
-func (f *fakeOpenSandbox) DownloadFile(_ context.Context, remotePath, _ string) (io.ReadCloser, error) {
+func (f *fakeOpenSandbox) DownloadFile(_ context.Context, remotePath, _ string, _ ...opensandbox.DownloadFileOptions) (io.ReadCloser, error) {
 	if f.downloadDelay > 0 {
 		f.downloadMu.Lock()
 		f.activeDownloads++
