@@ -14,6 +14,19 @@ on:
       - '*.md'
       - '.github/workflows/docs.yml'
 
+# Cancel superseded runs for the same PR so a new push does not leave the
+# previous run occupying a shared GitHub-hosted runner slot. Pushes to main
+# fall back to the unique run_id, giving every main run its own group so it is
+# never cancelled — not while executing (cancel-in-progress is false off PRs)
+# and not while queued (a shared group drops an older pending run when a newer
+# one lands, regardless of cancel-in-progress), so the full matrix and the
+# coverage-badge commit job always run to completion. The group is prefixed
+# with github.workflow because concurrency groups are repo-wide, not scoped to
+# a single workflow.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Default the workflow token to read-only. Jobs that execute PR-supplied
 # code (build/test, e2e, lint) must never be able to push to the repo, even
 # on same-repository PRs where GITHUB_TOKEN would otherwise be writable.
@@ -30,7 +43,10 @@ jobs:
       # whole matrix when one runner fails.
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # Windows runners sit in a smaller, longer-queuing pool. PRs run
+        # Linux-only to keep the shared-runner queue short; the full matrix
+        # (including windows-latest) still runs on pushes to main.
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "windows-latest"]') }}
         go-version: ["1.25.x"]
 
     steps:
@@ -143,6 +159,9 @@ jobs:
     # dispatch — through the full CLI pipeline. Real-LLM coverage stays on
     # the Linux e2e job below.
     name: E2E (none runtime, Windows)
+    # Skip on PRs to avoid the longer-queuing Windows runner pool; the
+    # Windows-specific code paths are still exercised on every push to main.
+    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
