@@ -411,3 +411,306 @@ func TestArgsMatch_Empty(t *testing.T) {
 		t.Fatal("empty expected should always match")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// turn_response_contains
+// ---------------------------------------------------------------------------
+
+func TestRuleBased_TurnResponseContains_ContainsAll_Pass(t *testing.T) {
+	turns := []InputTurnResult{
+		{TurnNumber: 1, Response: "hello world", Status: "completed"},
+		{TurnNumber: 2, Response: "I created file.go and test_file.go", Status: "completed"},
+	}
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			TurnResponseContains: &config.TurnResponseContainsRule{
+				Turn:        2,
+				ContainsAll: []string{"file.go", "test_file.go"},
+			},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{TurnResults: turns, TurnsTotal: 2, TurnsExecuted: 2})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusPass)
+}
+
+func TestRuleBased_TurnResponseContains_ContainsAll_Fail(t *testing.T) {
+	turns := []InputTurnResult{
+		{TurnNumber: 1, Response: "I created file.go only", Status: "completed"},
+	}
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			TurnResponseContains: &config.TurnResponseContainsRule{
+				Turn:        1,
+				ContainsAll: []string{"file.go", "test_file.go"},
+			},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{TurnResults: turns, TurnsTotal: 1, TurnsExecuted: 1})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusFail)
+	if r.AssertionResults[0].Evidence == "" {
+		t.Fatal("expected evidence with missing keywords")
+	}
+}
+
+func TestRuleBased_TurnResponseContains_ContainsAny_Pass(t *testing.T) {
+	turns := []InputTurnResult{
+		{TurnNumber: 1, Response: "result is success", Status: "completed"},
+	}
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			TurnResponseContains: &config.TurnResponseContainsRule{
+				Turn:        1,
+				ContainsAny: []string{"success", "ok"},
+			},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{TurnResults: turns, TurnsTotal: 1, TurnsExecuted: 1})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusPass)
+}
+
+func TestRuleBased_TurnResponseContains_ContainsAny_Fail(t *testing.T) {
+	turns := []InputTurnResult{
+		{TurnNumber: 1, Response: "something else", Status: "completed"},
+	}
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			TurnResponseContains: &config.TurnResponseContainsRule{
+				Turn:        1,
+				ContainsAny: []string{"success", "ok"},
+			},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{TurnResults: turns, TurnsTotal: 1, TurnsExecuted: 1})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusFail)
+}
+
+func TestRuleBased_TurnResponseContains_MissingTurn(t *testing.T) {
+	turns := []InputTurnResult{
+		{TurnNumber: 1, Response: "only one turn", Status: "completed"},
+	}
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			TurnResponseContains: &config.TurnResponseContainsRule{
+				Turn:        3,
+				ContainsAll: []string{"something"},
+			},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{TurnResults: turns, TurnsTotal: 3, TurnsExecuted: 1})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusFail)
+	if r.AssertionResults[0].Evidence == "" {
+		t.Fatal("expected evidence about missing turn")
+	}
+}
+
+func TestRuleBased_TurnResponseContains_SkippedTurn(t *testing.T) {
+	turns := []InputTurnResult{
+		{TurnNumber: 1, Response: "hello", Status: "completed"},
+		{TurnNumber: 2, Response: "", Status: "skipped", Reason: "post_condition skip_remaining"},
+	}
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			TurnResponseContains: &config.TurnResponseContainsRule{
+				Turn:        2,
+				ContainsAll: []string{"hello"},
+			},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{TurnResults: turns, TurnsTotal: 2, TurnsExecuted: 2})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusFail)
+	if r.AssertionResults[0].Evidence == "" {
+		t.Fatal("expected evidence about skipped turn")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// turn_response_not_contains
+// ---------------------------------------------------------------------------
+
+func TestRuleBased_TurnResponseNotContains_PerTurn_Pass(t *testing.T) {
+	turns := []InputTurnResult{
+		{TurnNumber: 1, Response: "clean output", Status: "completed"},
+	}
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			TurnResponseNotContains: &config.TurnResponseNotContainsRule{
+				Turn:        1,
+				NotContains: []string{"error", "panic"},
+			},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{TurnResults: turns, TurnsTotal: 1, TurnsExecuted: 1})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusPass)
+}
+
+func TestRuleBased_TurnResponseNotContains_PerTurn_Fail(t *testing.T) {
+	turns := []InputTurnResult{
+		{TurnNumber: 1, Response: "runtime error occurred", Status: "completed"},
+	}
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			TurnResponseNotContains: &config.TurnResponseNotContainsRule{
+				Turn:        1,
+				NotContains: []string{"error", "panic"},
+			},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{TurnResults: turns, TurnsTotal: 1, TurnsExecuted: 1})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusFail)
+}
+
+func TestRuleBased_TurnResponseNotContains_MissingTurn(t *testing.T) {
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			TurnResponseNotContains: &config.TurnResponseNotContainsRule{
+				Turn:        1,
+				NotContains: []string{"error"},
+			},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{TurnResults: nil, TurnsTotal: 1, TurnsExecuted: 0})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusFail)
+}
+
+// ---------------------------------------------------------------------------
+// tool_called_in_turn
+// ---------------------------------------------------------------------------
+
+func TestRuleBased_ToolCalledInTurn_Pass(t *testing.T) {
+	turns := []InputTurnResult{
+		{
+			TurnNumber: 1,
+			Response:   "done",
+			Status:     "completed",
+			Transcript: transcript.Transcript{
+				{Role: "tool_call", ToolCall: &transcript.ToolCallInfo{Name: "write_file", Arguments: map[string]any{"path": "main.go"}}},
+			},
+		},
+	}
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			ToolCalledInTurn: &config.ToolCalledInTurnRule{
+				Turn: 1,
+				Name: "write_file",
+			},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{TurnResults: turns, TurnsTotal: 1, TurnsExecuted: 1})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusPass)
+}
+
+func TestRuleBased_ToolCalledInTurn_WithArgs_Pass(t *testing.T) {
+	turns := []InputTurnResult{
+		{
+			TurnNumber: 1,
+			Response:   "done",
+			Status:     "completed",
+			Transcript: transcript.Transcript{
+				{Role: "tool_call", ToolCall: &transcript.ToolCallInfo{Name: "write_file", Arguments: map[string]any{"path": "main.go", "content": "pkg"}}},
+			},
+		},
+	}
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			ToolCalledInTurn: &config.ToolCalledInTurnRule{
+				Turn: 1,
+				Name: "write_file",
+				Args: map[string]any{"path": "main.go"},
+			},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{TurnResults: turns, TurnsTotal: 1, TurnsExecuted: 1})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusPass)
+}
+
+func TestRuleBased_ToolCalledInTurn_Fail(t *testing.T) {
+	turns := []InputTurnResult{
+		{TurnNumber: 1, Response: "done", Status: "completed", Transcript: transcript.Transcript{
+			{Role: "tool_call", ToolCall: &transcript.ToolCallInfo{Name: "read_file"}},
+		}},
+	}
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			ToolCalledInTurn: &config.ToolCalledInTurnRule{Turn: 1, Name: "write_file"},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{TurnResults: turns, TurnsTotal: 1, TurnsExecuted: 1})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusFail)
+}
+
+func TestRuleBased_ToolCalledInTurn_FailedTurn(t *testing.T) {
+	turns := []InputTurnResult{
+		{TurnNumber: 1, Response: "", Status: "failed", Reason: "post_condition failed"},
+	}
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			ToolCalledInTurn: &config.ToolCalledInTurnRule{
+				Turn: 1,
+				Name: "write_file",
+			},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{TurnResults: turns, TurnsTotal: 1, TurnsExecuted: 1})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusFail)
+}
+
+// ---------------------------------------------------------------------------
+// tool_not_called_in_turn
+// ---------------------------------------------------------------------------
+
+func TestRuleBased_ToolNotCalledInTurn_PassAndFail(t *testing.T) {
+	tests := []struct {
+		name       string
+		toolName   string
+		ruleName   string
+		wantStatus Status
+	}{
+		{"pass_tool_absent", "read_file", "delete_file", StatusPass},
+		{"fail_tool_present", "delete_file", "delete_file", StatusFail},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			turns := []InputTurnResult{
+				{TurnNumber: 1, Response: "done", Status: "completed", Transcript: transcript.Transcript{
+					{Role: "tool_call", ToolCall: &transcript.ToolCallInfo{Name: tt.toolName}},
+					{Role: "assistant", Content: "result"},
+				}},
+			}
+			j := NewRuleBasedJudge(config.JudgeConfig{
+				Success: []config.Rule{{
+					ToolNotCalledInTurn: &config.ToolNotCalledInTurnRule{Turn: 1, Name: tt.ruleName},
+				}},
+			})
+			r, err := j.Evaluate(context.Background(), Input{TurnResults: turns, TurnsTotal: 1, TurnsExecuted: 1})
+			assertNoError(t, err)
+			assertStatus(t, r, tt.wantStatus)
+		})
+	}
+}
+
+func TestRuleBased_ToolNotCalledInTurn_MissingTurn(t *testing.T) {
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			ToolNotCalledInTurn: &config.ToolNotCalledInTurnRule{
+				Turn: 5,
+				Name: "delete_file",
+			},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{TurnResults: nil, TurnsTotal: 5, TurnsExecuted: 0})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusFail)
+}

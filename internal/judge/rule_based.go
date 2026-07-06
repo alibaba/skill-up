@@ -84,6 +84,14 @@ func evaluateAssertion(rule config.Rule, in Input) AssertionResult {
 		return evalFilesExist(rule.FilesExist, in.WorkspacePath)
 	case len(rule.FilesNotExist) > 0:
 		return evalFilesNotExist(rule.FilesNotExist, in.WorkspacePath)
+	case rule.TurnResponseContains != nil:
+		return evalTurnResponseContains(rule.TurnResponseContains, in.TurnResults)
+	case rule.TurnResponseNotContains != nil:
+		return evalTurnResponseNotContains(rule.TurnResponseNotContains, in.TurnResults)
+	case rule.ToolCalledInTurn != nil:
+		return evalToolCalledInTurn(rule.ToolCalledInTurn, in.TurnResults)
+	case rule.ToolNotCalledInTurn != nil:
+		return evalToolNotCalledInTurn(rule.ToolNotCalledInTurn, in.TurnResults)
 	default:
 		return AssertionResult{
 			Text:     "unknown_rule",
@@ -295,4 +303,175 @@ func argsMatch(expected, actual map[string]any) bool {
 		}
 	}
 	return true
+}
+
+// ---------------------------------------------------------------------------
+// Per-turn rule evaluators
+// ---------------------------------------------------------------------------
+
+// lookupTurn retrieves the turn result for a given 1-based turn number.
+// Returns (turn, ok). If the turn is missing or not completed, it returns a
+// failing AssertionResult describing why.
+func lookupTurn(turnNum int, turns []InputTurnResult, ruleName string) (*InputTurnResult, *AssertionResult) {
+	if turnNum < 1 || turnNum > len(turns) {
+		ar := AssertionResult{
+			Text:     fmt.Sprintf("%s[turn=%d]", ruleName, turnNum),
+			Passed:   false,
+			Evidence: fmt.Sprintf("turn %d does not exist (executed %d turns)", turnNum, len(turns)),
+		}
+		return nil, &ar
+	}
+	tr := &turns[turnNum-1]
+	if tr.Status != "completed" {
+		ar := AssertionResult{
+			Text:     fmt.Sprintf("%s[turn=%d]", ruleName, turnNum),
+			Passed:   false,
+			Evidence: fmt.Sprintf("turn %d has status %q (reason: %s); assertion requires completed turn", turnNum, tr.Status, tr.Reason),
+		}
+		return nil, &ar
+	}
+	return tr, nil
+}
+
+// evalTurnResponseContains checks a specific turn's response for required keywords.
+func evalTurnResponseContains(rule *config.TurnResponseContainsRule, turns []InputTurnResult) AssertionResult {
+	tr, failAR := lookupTurn(rule.Turn, turns, "turn_response_contains")
+	if failAR != nil {
+		return *failAR
+	}
+
+	// Check contains_all.
+	var missing []string
+	for _, kw := range rule.ContainsAll {
+		if !strings.Contains(tr.Response, kw) {
+			missing = append(missing, kw)
+		}
+	}
+	if len(missing) > 0 {
+		return AssertionResult{
+			Text:     fmt.Sprintf("turn_response_contains[turn=%d].contains_all", rule.Turn),
+			Passed:   false,
+			Evidence: fmt.Sprintf("turn %d response missing keywords: %v", rule.Turn, missing),
+		}
+	}
+
+	// Check contains_any.
+	if len(rule.ContainsAny) > 0 {
+		found := false
+		for _, kw := range rule.ContainsAny {
+			if strings.Contains(tr.Response, kw) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return AssertionResult{
+				Text:     fmt.Sprintf("turn_response_contains[turn=%d].contains_any", rule.Turn),
+				Passed:   false,
+				Evidence: fmt.Sprintf("turn %d response does not contain any of %v", rule.Turn, rule.ContainsAny),
+			}
+		}
+	}
+
+	return AssertionResult{
+		Text:     fmt.Sprintf("turn_response_contains[turn=%d]", rule.Turn),
+		Passed:   true,
+		Evidence: fmt.Sprintf("turn %d response satisfies all contains checks", rule.Turn),
+	}
+}
+
+// evalTurnResponseNotContains checks a specific turn's response for forbidden keywords.
+func evalTurnResponseNotContains(rule *config.TurnResponseNotContainsRule, turns []InputTurnResult) AssertionResult {
+	tr, failAR := lookupTurn(rule.Turn, turns, "turn_response_not_contains")
+	if failAR != nil {
+		return *failAR
+	}
+
+	for _, kw := range rule.NotContains {
+		if strings.Contains(tr.Response, kw) {
+			return AssertionResult{
+				Text:     fmt.Sprintf("turn_response_not_contains[turn=%d]", rule.Turn),
+				Passed:   false,
+				Evidence: fmt.Sprintf("turn %d response contains forbidden keyword %q", rule.Turn, kw),
+			}
+		}
+	}
+
+	return AssertionResult{
+		Text:     fmt.Sprintf("turn_response_not_contains[turn=%d]", rule.Turn),
+		Passed:   true,
+		Evidence: fmt.Sprintf("turn %d response does not contain any forbidden keywords", rule.Turn),
+	}
+}
+
+// evalToolCalledInTurn checks that a specific tool was called during a specific turn.
+func evalToolCalledInTurn(rule *config.ToolCalledInTurnRule, turns []InputTurnResult) AssertionResult {
+	tr, failAR := lookupTurn(rule.Turn, turns, "tool_called_in_turn")
+	if failAR != nil {
+		return *failAR
+	}
+
+	calls := tr.Transcript.ToolCalls()
+	for _, msg := range calls {
+		if msg.ToolCall == nil {
+			continue
+		}
+		if msg.ToolCall.Name != rule.Name {
+			continue
+		}
+		// Name matched; check args if specified.
+		if len(rule.Args) == 0 {
+			return AssertionResult{
+				Text:     fmt.Sprintf("tool_called_in_turn[turn=%d]: %s", rule.Turn, rule.Name),
+				Passed:   true,
+				Evidence: fmt.Sprintf("tool %q was called in turn %d", rule.Name, rule.Turn),
+			}
+		}
+		if argsMatch(rule.Args, msg.ToolCall.Arguments) {
+			return AssertionResult{
+				Text:     fmt.Sprintf("tool_called_in_turn[turn=%d]: %s (with args)", rule.Turn, rule.Name),
+				Passed:   true,
+				Evidence: fmt.Sprintf("tool %q was called in turn %d with matching args", rule.Name, rule.Turn),
+			}
+		}
+	}
+
+	// Not found.
+	evidence := fmt.Sprintf("tool %q was not called in turn %d", rule.Name, rule.Turn)
+	if len(rule.Args) > 0 {
+		evidence = fmt.Sprintf("tool %q was not called in turn %d with matching args %v", rule.Name, rule.Turn, rule.Args)
+	}
+	return AssertionResult{
+		Text:     fmt.Sprintf("tool_called_in_turn[turn=%d]: %s", rule.Turn, rule.Name),
+		Passed:   false,
+		Evidence: evidence,
+	}
+}
+
+// evalToolNotCalledInTurn checks that a specific tool was NOT called during a specific turn.
+func evalToolNotCalledInTurn(rule *config.ToolNotCalledInTurnRule, turns []InputTurnResult) AssertionResult {
+	tr, failAR := lookupTurn(rule.Turn, turns, "tool_not_called_in_turn")
+	if failAR != nil {
+		return *failAR
+	}
+
+	calls := tr.Transcript.ToolCalls()
+	for _, msg := range calls {
+		if msg.ToolCall == nil {
+			continue
+		}
+		if msg.ToolCall.Name == rule.Name {
+			return AssertionResult{
+				Text:     fmt.Sprintf("tool_not_called_in_turn[turn=%d]: %s", rule.Turn, rule.Name),
+				Passed:   false,
+				Evidence: fmt.Sprintf("tool %q was called in turn %d but should not have been", rule.Name, rule.Turn),
+			}
+		}
+	}
+
+	return AssertionResult{
+		Text:     fmt.Sprintf("tool_not_called_in_turn[turn=%d]: %s", rule.Turn, rule.Name),
+		Passed:   true,
+		Evidence: fmt.Sprintf("tool %q was not called in turn %d as expected", rule.Name, rule.Turn),
+	}
 }

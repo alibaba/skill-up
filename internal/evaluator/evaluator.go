@@ -500,6 +500,7 @@ func (e *defaultEvaluator) evaluateCaseSession(
 		WorkspaceDiff:  sessionWorkspaceDiff(sessionResult),
 		GeneratedFiles: sessionGeneratedFiles(sessionResult),
 		SessionResult:  sessionResult,
+		TurnResults:    toJudgeTurnResults(result.TurnResults),
 	}
 
 	if failed := e.runExpectPreCheck(ctx, caseCfg, configName, judgeInput, turnsTotal, result); failed {
@@ -1013,6 +1014,25 @@ func sessionGeneratedFiles(sessionResult *agent.SessionResult) []string {
 		return nil
 	}
 	return sessionResult.Artifacts.GeneratedFiles
+}
+
+// toJudgeTurnResults converts evaluator TurnResults to judge InputTurnResults.
+func toJudgeTurnResults(turns []TurnResult) []judge.InputTurnResult {
+	if len(turns) == 0 {
+		return nil
+	}
+	out := make([]judge.InputTurnResult, len(turns))
+	for i, tr := range turns {
+		out[i] = judge.InputTurnResult{
+			TurnNumber: tr.TurnNumber,
+			Content:    tr.Content,
+			Response:   tr.Response,
+			Transcript: tr.Transcript,
+			Status:     string(tr.Status),
+			Reason:     tr.Reason,
+		}
+	}
+	return out
 }
 
 func prepareWorkspaceDiffState(ctx context.Context, rt runtime.Runtime, gitCtx *config.GitContext) (workspaceDiffState, error) {
