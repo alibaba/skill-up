@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"path"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -110,25 +111,44 @@ func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 	// id is optional - Loader auto-generates from filename if not specified
 	// See loader.go:LoadCaseConfig for the fallback logic
 
-	// input.prompt or input.turns is required
+	// input.prompt or input.turns is required, but not both
 	if cfg.Input.Prompt == "" && len(cfg.Input.Turns) == 0 {
 		errs = append(errs, "input.prompt or input.turns is required")
 	}
+	if cfg.Input.Prompt != "" && len(cfg.Input.Turns) > 0 {
+		errs = append(errs, "input.prompt and input.turns are mutually exclusive")
+	}
 
-	// if turns is specified, each turn must have role and content
+	// if turns is specified, each turn must have role=user and content
 	for i, turn := range cfg.Input.Turns {
 		if turn.Role == "" {
 			errs = append(errs, fmt.Sprintf("input.turns[%d].role is required", i))
+		} else if turn.Role != "user" {
+			errs = append(errs, fmt.Sprintf("input.turns[%d].role must be \"user\", got %q", i, turn.Role))
 		}
 		if turn.Content == "" {
 			errs = append(errs, fmt.Sprintf("input.turns[%d].content is required", i))
 		}
+		if turn.TimeoutSeconds < 0 {
+			errs = append(errs, fmt.Sprintf("input.turns[%d].timeout_seconds must be non-negative", i))
+		}
+		if turn.PostCondition != nil {
+			errs = append(errs, validatePostCondition(i, turn.PostCondition)...)
+		}
+		for j, cr := range turn.Capture {
+			errs = append(errs, validateCaptureRule(i, j, cr)...)
+		}
 	}
 
-	// validate judge config if specified at case level
+	// validate per-turn judge rules reference valid turn numbers
+	turnsTotal := len(cfg.Input.Turns)
 	if cfg.Judge.Type != "" {
 		errs = append(errs, validateJudgeTypeAndFields(cfg.Judge)...)
 	}
+	var allRules []Rule
+	allRules = append(allRules, cfg.Judge.Success...)
+	allRules = append(allRules, cfg.Judge.Failure...)
+	errs = append(errs, validatePerTurnRules(allRules, turnsTotal)...)
 
 	errs = append(errs, validateCollectArtifacts("collect_artifacts", cfg.CollectArtifacts)...)
 
@@ -339,6 +359,130 @@ func validateDockerEnvironment(env Environment) []string {
 
 func isValidJudgeType(t string) bool {
 	return t == judgeTypeRuleBased || t == judgeTypeScript || t == judgeTypeAgentJudge
+}
+
+// captureVariablePattern is the allowed pattern for capture variable names.
+var captureVariablePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// validatePostCondition validates a turn's post_condition block.
+func validatePostCondition(turnIdx int, pc *PostCondition) []string {
+	var errs []string
+	prefix := fmt.Sprintf("input.turns[%d].post_condition", turnIdx)
+
+	// on_fail must be empty, "fail", or "skip_remaining"
+	if pc.OnFail != "" && pc.OnFail != "fail" && pc.OnFail != "skip_remaining" {
+		errs = append(errs, fmt.Sprintf("%s.on_fail must be empty, \"fail\", or \"skip_remaining\", got %q", prefix, pc.OnFail))
+	}
+
+	// Must include at least one check field
+	if len(pc.MustContainAny) == 0 && len(pc.MustContainAll) == 0 && len(pc.MustNotContain) == 0 {
+		errs = append(errs, prefix+" must include at least one of must_contain_any, must_contain_all, or must_not_contain")
+	}
+
+	return errs
+}
+
+// validateCaptureRule validates a single capture rule.
+func validateCaptureRule(turnIdx, capIdx int, cr CaptureRule) []string {
+	var errs []string
+	prefix := fmt.Sprintf("input.turns[%d].capture[%d]", turnIdx, capIdx)
+
+	// variable must match identifier pattern
+	if cr.Variable == "" {
+		errs = append(errs, prefix+".variable is required")
+	} else if !captureVariablePattern.MatchString(cr.Variable) {
+		errs = append(errs, fmt.Sprintf("%s.variable %q must match pattern [A-Za-z_][A-Za-z0-9_]*", prefix, cr.Variable))
+	}
+
+	// Exactly one extractor must be specified
+	hasPattern := cr.Pattern != ""
+	hasJSONPath := cr.JSONPath != ""
+	if !hasPattern && !hasJSONPath {
+		errs = append(errs, prefix+" must specify exactly one extractor: pattern or jsonpath")
+	} else if hasPattern && hasJSONPath {
+		errs = append(errs, prefix+" must specify exactly one extractor: pattern or jsonpath (both set)")
+	}
+
+	// Regex pattern must compile
+	if hasPattern {
+		if _, err := regexp.Compile(cr.Pattern); err != nil {
+			errs = append(errs, fmt.Sprintf("%s.pattern is invalid regex: %v", prefix, err))
+		}
+	}
+
+	return errs
+}
+
+// validatePerTurnRules validates per-turn judge rules reference valid turn numbers.
+func validatePerTurnRules(rules []Rule, turnsTotal int) []string {
+	var errs []string
+	for _, rule := range rules {
+		if rule.TurnResponseContains != nil {
+			errs = append(errs, validateTurnResponseContainsRule(rule.TurnResponseContains, turnsTotal)...)
+		}
+		if rule.TurnResponseNotContains != nil {
+			errs = append(errs, validateTurnResponseNotContainsRule(rule.TurnResponseNotContains, turnsTotal)...)
+		}
+		if rule.ToolCalledInTurn != nil {
+			errs = append(errs, validateToolCalledInTurnRule(rule.ToolCalledInTurn, turnsTotal)...)
+		}
+		if rule.ToolNotCalledInTurn != nil {
+			errs = append(errs, validateToolNotCalledInTurnRule(rule.ToolNotCalledInTurn, turnsTotal)...)
+		}
+	}
+	return errs
+}
+
+func validateTurnResponseContainsRule(r *TurnResponseContainsRule, turnsTotal int) []string {
+	var errs []string
+	if r.Turn < 1 {
+		errs = append(errs, "turn_response_contains.turn must be >= 1")
+	} else if turnsTotal > 0 && r.Turn > turnsTotal {
+		errs = append(errs, fmt.Sprintf("turn_response_contains.turn %d exceeds total turns %d", r.Turn, turnsTotal))
+	}
+	if len(r.ContainsAll) == 0 && len(r.ContainsAny) == 0 {
+		errs = append(errs, "turn_response_contains must specify contains_all or contains_any")
+	}
+	return errs
+}
+
+func validateTurnResponseNotContainsRule(r *TurnResponseNotContainsRule, turnsTotal int) []string {
+	var errs []string
+	if r.Turn < 1 {
+		errs = append(errs, "turn_response_not_contains.turn must be >= 1")
+	} else if turnsTotal > 0 && r.Turn > turnsTotal {
+		errs = append(errs, fmt.Sprintf("turn_response_not_contains.turn %d exceeds total turns %d", r.Turn, turnsTotal))
+	}
+	if len(r.NotContains) == 0 {
+		errs = append(errs, "turn_response_not_contains.not_contains is required")
+	}
+	return errs
+}
+
+func validateToolCalledInTurnRule(r *ToolCalledInTurnRule, turnsTotal int) []string {
+	var errs []string
+	if r.Turn < 1 {
+		errs = append(errs, "tool_called_in_turn.turn must be >= 1")
+	} else if turnsTotal > 0 && r.Turn > turnsTotal {
+		errs = append(errs, fmt.Sprintf("tool_called_in_turn.turn %d exceeds total turns %d", r.Turn, turnsTotal))
+	}
+	if r.Name == "" {
+		errs = append(errs, "tool_called_in_turn.name is required")
+	}
+	return errs
+}
+
+func validateToolNotCalledInTurnRule(r *ToolNotCalledInTurnRule, turnsTotal int) []string {
+	var errs []string
+	if r.Turn < 1 {
+		errs = append(errs, "tool_not_called_in_turn.turn must be >= 1")
+	} else if turnsTotal > 0 && r.Turn > turnsTotal {
+		errs = append(errs, fmt.Sprintf("tool_not_called_in_turn.turn %d exceeds total turns %d", r.Turn, turnsTotal))
+	}
+	if r.Name == "" {
+		errs = append(errs, "tool_not_called_in_turn.name is required")
+	}
+	return errs
 }
 
 func validateNetworkPolicy(env Environment) []string {
