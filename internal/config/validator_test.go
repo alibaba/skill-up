@@ -888,94 +888,86 @@ func TestValidator_ValidateAll(t *testing.T) {
 			t.Error("ValidateAll() expected error for invalid case")
 		}
 	})
+}
 
-	t.Run("duplicate explicit case id", func(t *testing.T) {
-		t.Parallel()
-		eval := &EvalConfig{
+// TestValidator_ValidateAll_Duplicates covers rejection of duplicate case IDs
+// (explicit and filename-derived) and duplicate cases.files references. files
+// and ids are index-aligned, mirroring LoadAllCases' one-case-per-entry order.
+func TestValidator_ValidateAll_Duplicates(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	evalWithFiles := func(files ...string) *EvalConfig {
+		return &EvalConfig{
 			SchemaVersion: "v1alpha1",
 			Environment:   Environment{Type: "none"},
 			Engine:        EngineConfig{Name: "claude_code"},
-			Cases:         CasesConfig{Files: []string{"evals/cases/a.yaml", "evals/cases/b.yaml"}},
+			Cases:         CasesConfig{Files: files},
 		}
-		result := &EvalResult{
-			Eval: eval,
-			Cases: []*CaseConfig{
-				{ID: "dup", Input: Input{Prompt: "x"}},
-				{ID: "dup", Input: Input{Prompt: "y"}},
-			},
+	}
+	casesWithIDs := func(ids ...string) []*CaseConfig {
+		cases := make([]*CaseConfig, len(ids))
+		for i, id := range ids {
+			cases[i] = &CaseConfig{ID: id, Input: Input{Prompt: "x"}}
 		}
-		err := validator.ValidateAll(result)
-		if err == nil || !strings.Contains(err.Error(), `duplicate case id "dup"`) {
-			t.Fatalf("expected duplicate-id error naming both files, got %v", err)
-		}
-		if !strings.Contains(err.Error(), "evals/cases/a.yaml") || !strings.Contains(err.Error(), "evals/cases/b.yaml") {
-			t.Errorf("duplicate-id error should list both source files, got %v", err)
-		}
-	})
+		return cases
+	}
 
-	t.Run("duplicate filename-derived case id", func(t *testing.T) {
-		t.Parallel()
-		// Two files in different dirs whose basenames collide; the loader would
-		// derive the same implicit ID "smoke" for both.
-		eval := &EvalConfig{
-			SchemaVersion: "v1alpha1",
-			Environment:   Environment{Type: "none"},
-			Engine:        EngineConfig{Name: "claude_code"},
-			Cases:         CasesConfig{Files: []string{"evals/cases/smoke.yaml", "evals/full/smoke.yaml"}},
-		}
-		result := &EvalResult{
-			Eval: eval,
-			Cases: []*CaseConfig{
-				{ID: "smoke", Input: Input{Prompt: "x"}},
-				{ID: "smoke", Input: Input{Prompt: "y"}},
-			},
-		}
-		if err := validator.ValidateAll(result); err == nil || !strings.Contains(err.Error(), `duplicate case id "smoke"`) {
-			t.Fatalf("expected duplicate implicit-id error, got %v", err)
-		}
-	})
+	tests := []struct {
+		name      string
+		files     []string
+		ids       []string
+		wantParts []string // non-empty ⇒ expect an error containing every part
+	}{
+		{
+			name:      "duplicate explicit id names both files",
+			files:     []string{"evals/cases/a.yaml", "evals/cases/b.yaml"},
+			ids:       []string{"dup", "dup"},
+			wantParts: []string{`duplicate case id "dup"`, "evals/cases/a.yaml", "evals/cases/b.yaml"},
+		},
+		{
+			// Files in different dirs with colliding basenames ⇒ same implicit ID.
+			name:      "duplicate filename-derived id",
+			files:     []string{"evals/cases/smoke.yaml", "evals/full/smoke.yaml"},
+			ids:       []string{"smoke", "smoke"},
+			wantParts: []string{`duplicate case id "smoke"`},
+		},
+		{
+			// Same file, differently spelled; normalization must collapse them.
+			name:      "duplicate file reference after normalization",
+			files:     []string{"evals/cases/a.yaml", "./evals/cases/a.yaml"},
+			ids:       []string{"a", "a"},
+			wantParts: []string{"cases.files lists"},
+		},
+		{
+			name:      "unique ids and files pass",
+			files:     []string{"evals/cases/a.yaml", "evals/cases/b.yaml"},
+			ids:       []string{"a", "b"},
+			wantParts: nil,
+		},
+	}
 
-	t.Run("duplicate file reference", func(t *testing.T) {
-		t.Parallel()
-		eval := &EvalConfig{
-			SchemaVersion: "v1alpha1",
-			Environment:   Environment{Type: "none"},
-			Engine:        EngineConfig{Name: "claude_code"},
-			// Same file listed twice with different spellings; normalization
-			// must collapse them.
-			Cases: CasesConfig{Files: []string{"evals/cases/a.yaml", "./evals/cases/a.yaml"}},
-		}
-		result := &EvalResult{
-			Eval: eval,
-			Cases: []*CaseConfig{
-				{ID: "a", Input: Input{Prompt: "x"}},
-				{ID: "a", Input: Input{Prompt: "x"}},
-			},
-		}
-		if err := validator.ValidateAll(result); err == nil || !strings.Contains(err.Error(), "cases.files lists") {
-			t.Fatalf("expected duplicate file-reference error, got %v", err)
-		}
-	})
-
-	t.Run("unique ids and files pass", func(t *testing.T) {
-		t.Parallel()
-		eval := &EvalConfig{
-			SchemaVersion: "v1alpha1",
-			Environment:   Environment{Type: "none"},
-			Engine:        EngineConfig{Name: "claude_code"},
-			Cases:         CasesConfig{Files: []string{"evals/cases/a.yaml", "evals/cases/b.yaml"}},
-		}
-		result := &EvalResult{
-			Eval: eval,
-			Cases: []*CaseConfig{
-				{ID: "a", Input: Input{Prompt: "x"}},
-				{ID: "b", Input: Input{Prompt: "y"}},
-			},
-		}
-		if err := validator.ValidateAll(result); err != nil {
-			t.Errorf("ValidateAll() error = %v, want nil", err)
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := &EvalResult{Eval: evalWithFiles(tt.files...), Cases: casesWithIDs(tt.ids...)}
+			err := validator.ValidateAll(result)
+			if len(tt.wantParts) == 0 {
+				if err != nil {
+					t.Fatalf("ValidateAll() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %v, got nil", tt.wantParts)
+			}
+			for _, part := range tt.wantParts {
+				if !strings.Contains(err.Error(), part) {
+					t.Errorf("error %q missing expected substring %q", err.Error(), part)
+				}
+			}
+		})
+	}
 }
 
 func contains(s, substr string) bool {

@@ -99,6 +99,7 @@ func TestInstallSkill_PreservesExecutableScripts(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := filepath.Join(src, "scripts", "run.sh")
+	//nolint:gosec // fixture must be executable to verify permission preservation
 	if err := os.WriteFile(script, []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
