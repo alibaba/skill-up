@@ -158,6 +158,8 @@ func (r *JUnitReporter) buildTestSuite(in Input) junitTestSuites {
 }
 
 // buildFailureBody extracts failed assertion details for the <failure> body.
+// Turn-scoped assertions already include turn numbers in their text field,
+// making CI failure output directly actionable.
 func buildFailureBody(cr CaseResult) string {
 	if cr.Grading == nil {
 		return ""
@@ -166,6 +168,14 @@ func buildFailureBody(cr CaseResult) string {
 	for _, ar := range cr.Grading.AssertionResults {
 		if !ar.Passed {
 			lines = append(lines, fmt.Sprintf("- %s: %s", ar.Text, ar.Evidence))
+		}
+	}
+	// Append turn summary when multi-turn results are present.
+	if len(cr.TurnResults) > 0 {
+		for _, tr := range cr.TurnResults {
+			if tr.Status != "completed" {
+				lines = append(lines, fmt.Sprintf("- turn %d: status=%s reason=%s", tr.TurnNumber, tr.Status, tr.Reason))
+			}
 		}
 	}
 	return strings.Join(lines, "\n")

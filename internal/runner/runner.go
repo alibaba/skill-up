@@ -449,11 +449,29 @@ func evalResultToCaseResult(res *evaluator.EvalResult) report.CaseResult {
 		Configuration: res.Configuration,
 		Prompt:        res.Prompt,
 		Response:      responseContent(res),
+		TurnResults:   evalTurnResultsToReport(res.TurnResults),
 	}
 	if res.Error != nil {
 		cr.Error = res.Error.Error()
 	}
 	return cr
+}
+
+func evalTurnResultsToReport(turns []evaluator.TurnResult) []report.CaseTurnResult {
+	if len(turns) == 0 {
+		return nil
+	}
+	out := make([]report.CaseTurnResult, len(turns))
+	for i, tr := range turns {
+		out[i] = report.CaseTurnResult{
+			TurnNumber: tr.TurnNumber,
+			Content:    tr.Content,
+			Response:   tr.Response,
+			Status:     string(tr.Status),
+			Reason:     tr.Reason,
+		}
+	}
+	return out
 }
 
 func responseContent(res *evaluator.EvalResult) string {
