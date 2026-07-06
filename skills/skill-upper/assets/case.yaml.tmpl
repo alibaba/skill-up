@@ -16,8 +16,11 @@ input:
 #       post_condition:
 #         must_contain_any: ["keywordA", "keywordB"]
 #         on_fail: skip_remaining    # or fail
+#       capture:
+#         - variable: var_name
+#           pattern: "(?P<value>pattern)"
 #     - role: user
-#       content: "Second request"
+#       content: "Follow-up using {{var_name}}"
 
 # context:                            # Optional: initialize workspace
 #   repo_fixture: fixtures/repos/sample-project
@@ -59,3 +62,20 @@ judge:
 #     - "Output correctly identifies user intent"
 #     - "Does not fabricate non-existent fields"
 #   pass_threshold: 0.7
+
+# Per-turn assertions (use with input.turns):
+# judge:
+#   type: rule_based
+#   success:
+#     - turn_response_contains:
+#         turn: 1
+#         contains_all: ["expected_keyword"]
+#     - turn_response_not_contains:
+#         turn: 2
+#         not_contains: ["forbidden_word"]
+#     - tool_called_in_turn:
+#         turn: 1
+#         name: write_file
+#     - tool_not_called_in_turn:
+#         turn: 2
+#         name: delete_file
