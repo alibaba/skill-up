@@ -20,6 +20,11 @@ import (
 	"github.com/alibaba/skill-up/internal/logging"
 )
 
+// osWindows is the goruntime.GOOS value for Windows, used by tests that skip
+// POSIX-only behavior. Named to satisfy goconst (the literal recurs across
+// several skip guards).
+const osWindows = "windows"
+
 var logCaptureMu sync.Mutex
 
 func TestNoneRuntime_CreateAndClose(t *testing.T) {
@@ -119,6 +124,39 @@ func TestNoneRuntime_UploadDownloadFile(t *testing.T) {
 	}
 	if string(dlData) != content {
 		t.Errorf("downloaded content mismatch: got %q, want %q", string(dlData), content)
+	}
+}
+
+func TestNoneRuntime_UploadFile_PreservesExecutableBit(t *testing.T) {
+	t.Parallel()
+	if goruntime.GOOS == osWindows {
+		t.Skip("Unix file modes are not meaningful on Windows")
+	}
+
+	rt := &NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	// A skill helper script shipped with the executable bit set.
+	srcDir := t.TempDir()
+	srcFile := filepath.Join(srcDir, "run.sh")
+	//nolint:gosec // fixture must be executable to verify permission preservation
+	if err := os.WriteFile(srcFile, []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := rt.UploadFile(context.Background(), srcFile, "scripts/run.sh"); err != nil {
+		t.Fatalf("UploadFile failed: %v", err)
+	}
+
+	info, err := os.Stat(filepath.Join(rt.Workspace(), "scripts", "run.sh"))
+	if err != nil {
+		t.Fatalf("uploaded script should exist: %v", err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Errorf("installed script lost its executable bit: mode = %o, want executable", info.Mode().Perm())
 	}
 }
 
@@ -228,7 +266,7 @@ func TestNoneRuntime_ExecReturnsContextErrorOnTimeout(t *testing.T) {
 	// `sleep 1` is POSIX; on Windows cmd.exe falls back to a long ping
 	// so the process actually outlives the deadline and gets killed.
 	sleepCmd := "sleep 1"
-	if goruntime.GOOS == "windows" {
+	if goruntime.GOOS == osWindows {
 		sleepCmd = "ping -n 3 127.0.0.1 > nul"
 	}
 	result, err := rt.Exec(ctx, sleepCmd, ExecOptions{})
@@ -288,7 +326,7 @@ func TestNoneRuntime_ExecOmitsDeadlineDelta_OnManualCancel(t *testing.T) {
 }
 
 func TestNoneRuntime_ExecKillsDescendantsOnTimeout(t *testing.T) {
-	if goruntime.GOOS == "windows" {
+	if goruntime.GOOS == osWindows {
 		// Windows has no POSIX process-group equivalent: a backgrounded
 		// grandchild spawned by `&` keeps running after its parent shell is
 		// killed by ctx-cancel. configureProcessGroup is a no-op on Windows,
@@ -453,7 +491,7 @@ func TestNoneRuntime_ExecWithEnv(t *testing.T) {
 // shell. If the runtime pre-expanded $CUSTOM_BIN / $PATH the child would
 // see "/agent/bin:..." instead of the literal "$CUSTOM_BIN:$PATH".
 func TestNoneRuntime_ForwardsEnvLiterally(t *testing.T) {
-	if goruntime.GOOS == "windows" {
+	if goruntime.GOOS == osWindows {
 		// printf '%s' "$VAR" is POSIX-shell syntax; cmd.exe (Windows host
 		// shell when no bash is discovered) has no printf and no $VAR
 		// expansion. The behavioural contract (env values forwarded

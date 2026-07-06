@@ -119,6 +119,12 @@ type Runtime interface {
 	Start(ctx context.Context) error
 	Stop(ctx context.Context) error
 
+	// UploadFile and UploadDir copy host files into the runtime workspace.
+	// Implementations MUST preserve the source permission bits — in
+	// particular the executable bit — so skills that ship runnable helper
+	// scripts install without a chmod workaround. This holds for every
+	// runtime whose target filesystem supports Unix file modes (none,
+	// opensandbox, docker).
 	UploadFile(ctx context.Context, sourcePath, targetPath string) error
 	UploadDir(ctx context.Context, sourceDir, targetDir string) error
 	DownloadFile(ctx context.Context, sourcePath, targetPath string) error

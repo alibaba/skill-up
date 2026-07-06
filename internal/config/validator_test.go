@@ -890,6 +890,86 @@ func TestValidator_ValidateAll(t *testing.T) {
 	})
 }
 
+// TestValidator_ValidateAll_Duplicates covers rejection of duplicate case IDs
+// (explicit and filename-derived) and duplicate cases.files references. files
+// and ids are index-aligned, mirroring LoadAllCases' one-case-per-entry order.
+func TestValidator_ValidateAll_Duplicates(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	evalWithFiles := func(files ...string) *EvalConfig {
+		return &EvalConfig{
+			SchemaVersion: "v1alpha1",
+			Environment:   Environment{Type: "none"},
+			Engine:        EngineConfig{Name: "claude_code"},
+			Cases:         CasesConfig{Files: files},
+		}
+	}
+	casesWithIDs := func(ids ...string) []*CaseConfig {
+		cases := make([]*CaseConfig, len(ids))
+		for i, id := range ids {
+			cases[i] = &CaseConfig{ID: id, Input: Input{Prompt: "x"}}
+		}
+		return cases
+	}
+
+	tests := []struct {
+		name      string
+		files     []string
+		ids       []string
+		wantParts []string // non-empty ⇒ expect an error containing every part
+	}{
+		{
+			name:      "duplicate explicit id names both files",
+			files:     []string{"evals/cases/a.yaml", "evals/cases/b.yaml"},
+			ids:       []string{"dup", "dup"},
+			wantParts: []string{`duplicate case id "dup"`, "evals/cases/a.yaml", "evals/cases/b.yaml"},
+		},
+		{
+			// Files in different dirs with colliding basenames ⇒ same implicit ID.
+			name:      "duplicate filename-derived id",
+			files:     []string{"evals/cases/smoke.yaml", "evals/full/smoke.yaml"},
+			ids:       []string{"smoke", "smoke"},
+			wantParts: []string{`duplicate case id "smoke"`},
+		},
+		{
+			// Same file, differently spelled; normalization must collapse them.
+			name:      "duplicate file reference after normalization",
+			files:     []string{"evals/cases/a.yaml", "./evals/cases/a.yaml"},
+			ids:       []string{"a", "a"},
+			wantParts: []string{"cases.files lists"},
+		},
+		{
+			name:      "unique ids and files pass",
+			files:     []string{"evals/cases/a.yaml", "evals/cases/b.yaml"},
+			ids:       []string{"a", "b"},
+			wantParts: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := &EvalResult{Eval: evalWithFiles(tt.files...), Cases: casesWithIDs(tt.ids...)}
+			err := validator.ValidateAll(result)
+			if len(tt.wantParts) == 0 {
+				if err != nil {
+					t.Fatalf("ValidateAll() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %v, got nil", tt.wantParts)
+			}
+			for _, part := range tt.wantParts {
+				if !strings.Contains(err.Error(), part) {
+					t.Errorf("error %q missing expected substring %q", err.Error(), part)
+				}
+			}
+		})
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
 }

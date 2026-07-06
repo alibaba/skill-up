@@ -87,9 +87,19 @@ func (r *NoneRuntime) Stop(ctx context.Context) error {
 	return nil
 }
 
-// UploadFile copies a single file into the runtime workspace.
+// UploadFile copies a single file into the runtime workspace, preserving the
+// source file's permission bits (notably the executable bit on scripts).
 // targetPath may be relative to the workspace or an absolute host path (written as-is).
+//
+// Skill installation uploads helper scripts through this method one file at a
+// time, so a fixed mode here would strip the executable bit and break any skill
+// that ships runnable scripts. This matches UploadDir and the opensandbox
+// runtime, both of which already carry the source mode across.
 func (r *NoneRuntime) UploadFile(ctx context.Context, sourcePath, targetPath string) error {
+	info, err := os.Stat(sourcePath)
+	if err != nil {
+		return fmt.Errorf("failed to stat source file %s: %w", sourcePath, err)
+	}
 	data, err := os.ReadFile(sourcePath)
 	if err != nil {
 		return fmt.Errorf("failed to read source file %s: %w", sourcePath, err)
@@ -99,8 +109,16 @@ func (r *NoneRuntime) UploadFile(ctx context.Context, sourcePath, targetPath str
 		return fmt.Errorf("failed to create target directory: %w", err)
 	}
 
-	//nolint:gosec // target is joined with workspace, writing within sandbox is expected behavior
-	return os.WriteFile(target, data, noneFileMode)
+	mode := info.Mode().Perm()
+	//nolint:gosec // target is joined with workspace; info.Mode() preserves source permissions
+	if err := os.WriteFile(target, data, mode); err != nil {
+		return err
+	}
+	// WriteFile only applies the mode when it creates the file and is subject to
+	// the process umask; Chmod makes the executable bit deterministic even when
+	// re-installing over an existing file or under a restrictive umask.
+	//nolint:gosec // target is joined with workspace
+	return os.Chmod(target, mode)
 }
 
 // UploadDir recursively copies a directory into the runtime workspace.
