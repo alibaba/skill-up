@@ -522,7 +522,7 @@ input:
 |------|---------|------|
 | `claude_code` | 是 | `--resume` 标志 + 会话 ID |
 | `qodercli` | 是 | `-r <session-id>` 标志 |
-| `codex` | 尚不支持 | 回退为批量模式（所有轮次合并为单条 prompt） |
+| `codex` | 是 | `codex resume <thread-id>` 命令 |
 | `custom` | 尚不支持 | 回退为批量模式 |
 
 当 Agent 不支持会话恢复时，所有轮次内容会拼接为单条 prompt 发送，并记录警告日志。

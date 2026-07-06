@@ -15,8 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-turn judge assertions: `turn_response_contains`,
   `turn_response_not_contains`, `tool_called_in_turn`,
   `tool_not_called_in_turn` — all scoped by turn number.
-- Session resumption support for `claude_code` (`--resume`) and `qodercli`
-  (`-r <session-id>`) engines; unsupported engines fall back to batch mode.
+- Session resumption support for `claude_code` (`--resume`), `qodercli`
+  (`-r <session-id>`), and `codex` (`codex resume <thread-id>`) engines;
+  unsupported engines fall back to batch mode.
 - `TurnResults` field in JSON, HTML, and JUnit reports (`turn_results` in
   `result.json`; turn-scoped failure details in JUnit XML).
 

@@ -233,6 +233,71 @@ func (a *CodexAgent) CheckCredentials(ctx context.Context) error {
 	return nil
 }
 
+// RunTurn implements SessionResumer for multi-turn conversation support.
+// First turn (sessionID=="") delegates to Run; subsequent turns use
+// `codex resume <sessionID>` to continue the existing session.
+func (a *CodexAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, message transcript.Message, sessionID string) (*SessionResult, error) {
+	if sessionID == "" {
+		// First turn — delegate to Run which creates a new session.
+		return a.Run(ctx, rt, opts, []transcript.Message{message})
+	}
+
+	if err := requireBashOnWindowsHost(rt); err != nil {
+		return nil, fmt.Errorf("%s: %w", a.Name(), err)
+	}
+	start := time.Now()
+
+	instruction := message.Content
+	sandboxFlag := codexBypassSandbox
+	if rt.RequiresProcessSandbox() && !EngineKwargBool(a.Cfg.Kwargs, KwargBypassSandbox) {
+		sandboxFlag = codexProcessSandbox
+	}
+	lastMessagePath := filepath.Join(rt.Workspace(), ".skill-up", "codex-last-message.txt")
+
+	envVars := a.credentialEnvVars(credential.EnvOpenAIAPIKey, credential.EnvOpenAIBaseURL)
+	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(map[string]string{
+		"codex.session_id": sessionID,
+	}))
+	ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, opts.Env)
+
+	if err := ensureNodeRuntime(ctx, rt, codexEngineName, opts); err != nil {
+		return &SessionResult{
+			Engine:     a.Name(),
+			SessionID:  sessionID,
+			ExitCode:   1,
+			DurationMs: time.Since(start).Milliseconds(),
+			Artifacts:  &SessionArtifacts{},
+		}, err
+	}
+	cmd := "mkdir -p " + shellQuote(filepath.Dir(lastMessagePath)) + "\n" +
+		buildCodexResumeCmdWithLastMessage(sessionID, instruction, a.effectiveModelName(ctx), a.runProviderConfig(ctx), sandboxFlag, lastMessagePath)
+
+	result, err := rt.Exec(ctx, cmd, opts)
+	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result, lastMessagePath)
+	if sessionResult != nil {
+		sessionResult.SessionID = sessionID
+	}
+	if err != nil {
+		if sessionResult == nil {
+			sessionResult = &SessionResult{
+				Engine:     a.Name(),
+				SessionID:  sessionID,
+				ExitCode:   1,
+				DurationMs: time.Since(start).Milliseconds(),
+				Stderr:     result.Stderr,
+				Artifacts:  &SessionArtifacts{},
+			}
+		}
+		return sessionResult, fmt.Errorf("codex resume failed: %w", err)
+	}
+
+	if result.ExitCode != 0 {
+		return sessionResult, fmt.Errorf("codex resume failed (exit %d): %s", result.ExitCode, result.Stderr)
+	}
+
+	return sessionResult, nil
+}
+
 // Run executes codex in non-interactive JSON mode and converts events into a transcript.
 //
 //nolint:dupl
@@ -411,6 +476,7 @@ func (a *CodexAgent) buildSessionResult(
 
 	return &SessionResult{
 		Engine:       a.Name(),
+		SessionID:    streamParsed.threadID,
 		ExitCode:     result.ExitCode,
 		DurationMs:   time.Since(start).Milliseconds(),
 		Turns:        codexTurns(trans),
@@ -465,6 +531,26 @@ func buildCodexRunCmdWithLastMessage(instruction, model string, provider codexPr
 	if lastMessagePath != "" {
 		cmd += " --output-last-message " + shellQuote(lastMessagePath)
 	}
+	cmd += " " + shellQuote(instruction)
+
+	return cmd
+}
+
+// buildCodexResumeCmdWithLastMessage constructs a codex CLI command that resumes
+// an existing session identified by sessionID and sends a new user message.
+func buildCodexResumeCmdWithLastMessage(sessionID, instruction, model string, provider codexProviderConfig, sandboxFlag, lastMessagePath string) string {
+	cmd := "codex resume --json --skip-git-repo-check"
+	if sandboxFlag != "" {
+		cmd += " " + sandboxFlag
+	}
+	cmd += codexProviderFlags(provider)
+	if model != "" {
+		cmd += " -m " + shellQuote(model)
+	}
+	if lastMessagePath != "" {
+		cmd += " --output-last-message " + shellQuote(lastMessagePath)
+	}
+	cmd += " " + shellQuote(sessionID)
 	cmd += " " + shellQuote(instruction)
 
 	return cmd

@@ -330,6 +330,103 @@ func TestCodexRunProviderConfig_OpenAIWithoutBaseURLEmitsNothing(t *testing.T) {
 	}
 }
 
+func TestCodexRunTurn_FirstTurnDelegatesToRun(t *testing.T) {
+	t.Parallel()
+
+	threadEvent := `{"type":"thread.started","thread_id":"thread-abc"}`
+	rt := &codexTestRuntime{
+		workspace: t.TempDir(),
+		execResult: runtime.ExecResult{
+			Stdout:   threadEvent + "\n",
+			ExitCode: 0,
+		},
+	}
+	ag := NewCodexAgent(Config{ModelName: "o3"})
+
+	result, err := ag.RunTurn(context.Background(), rt, ExecOptions{}, transcript.Message{
+		Role:    transcript.RoleUser,
+		Content: "start task",
+		Turn:    1,
+	}, "")
+	if err != nil {
+		t.Fatalf("RunTurn (first turn): %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	// First turn should use "codex exec", not "codex resume"
+	if containsCommand(rt.commands, "codex resume") {
+		t.Fatalf("first turn should not use codex resume: %v", rt.commands)
+	}
+	if !containsCommand(rt.commands, "codex exec") {
+		t.Fatalf("first turn should use codex exec: %v", rt.commands)
+	}
+	// SessionID should be extracted from thread event
+	if result.SessionID != "thread-abc" {
+		t.Fatalf("expected SessionID = %q, got %q", "thread-abc", result.SessionID)
+	}
+}
+
+func TestCodexRunTurn_ResumeUsesCorrectCommand(t *testing.T) {
+	t.Parallel()
+
+	rt := &codexTestRuntime{
+		workspace: t.TempDir(),
+		execResult: runtime.ExecResult{
+			Stdout:   `{"type":"turn.started"}` + "\n" + `{"type":"item.completed","item":{"type":"agent_message","text":"resumed"}}` + "\n",
+			ExitCode: 0,
+		},
+	}
+	ag := NewCodexAgent(Config{ModelName: "o3"})
+
+	result, err := ag.RunTurn(context.Background(), rt, ExecOptions{}, transcript.Message{
+		Role:    transcript.RoleUser,
+		Content: "continue working",
+		Turn:    2,
+	}, "thread-xyz-456")
+	if err != nil {
+		t.Fatalf("RunTurn (resume): %v", err)
+	}
+	if result.SessionID != "thread-xyz-456" {
+		t.Fatalf("expected SessionID = %q, got %q", "thread-xyz-456", result.SessionID)
+	}
+	// Should use "codex resume" with the session ID
+	if !containsCommand(rt.commands, "codex resume") {
+		t.Fatalf("expected codex resume command, got %v", rt.commands)
+	}
+	if !containsCommand(rt.commands, "'thread-xyz-456'") {
+		t.Fatalf("expected session ID in command, got %v", rt.commands)
+	}
+	if !containsCommand(rt.commands, "'continue working'") {
+		t.Fatalf("expected instruction in command, got %v", rt.commands)
+	}
+}
+
+func TestBuildCodexResumeCmdWithLastMessage(t *testing.T) {
+	t.Parallel()
+
+	cmd := buildCodexResumeCmdWithLastMessage(
+		"sess-123", "do something", "o3",
+		codexProviderConfig{},
+		codexBypassSandbox, "/tmp/last.txt",
+	)
+	if !strings.HasPrefix(cmd, "codex resume --json --skip-git-repo-check") {
+		t.Fatalf("expected codex resume prefix, got %q", cmd)
+	}
+	if !strings.Contains(cmd, "'sess-123'") {
+		t.Fatalf("expected session ID, got %q", cmd)
+	}
+	if !strings.Contains(cmd, "'do something'") {
+		t.Fatalf("expected instruction, got %q", cmd)
+	}
+	if !strings.Contains(cmd, "-m 'o3'") {
+		t.Fatalf("expected model flag, got %q", cmd)
+	}
+	if !strings.Contains(cmd, "--output-last-message") {
+		t.Fatalf("expected --output-last-message flag, got %q", cmd)
+	}
+}
+
 func TestShellQuoteEscapesSingleQuote(t *testing.T) {
 	t.Parallel()
 
