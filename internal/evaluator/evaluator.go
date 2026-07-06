@@ -82,6 +82,10 @@ type EvalResult struct {
 	// TurnsTotal is the total number of turns defined in the case.
 	TurnsTotal int
 
+	// TurnResults holds per-turn outcomes for multi-turn evaluations.
+	// Nil for single-turn cases.
+	TurnResults []TurnResult
+
 	// Grading is the judge evaluation result (nil if judge was skipped).
 	Grading *judge.Result
 
@@ -380,6 +384,25 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	logging.DebugContextf(ctx, "Runner: case %s (%s): %s", caseCfg.ID, configName, caseCfg.Title)
 
 	judgeCfg := judge.MergeJudgeConfig(e.evalCfg.Judge, caseCfg.Judge)
+
+	// Multi-turn branch: delegate to dedicated engine when the case defines
+	// more than one turn AND the agent supports session resumption. Agents
+	// that do not implement SessionResumer fall through to the existing
+	// single-shot path (all messages in one Run call).
+	if len(caseCfg.Input.Turns) > 1 {
+		if _, ok := runAgent.(agent.SessionResumer); ok {
+			agentExecOpts := agent.ExecOptions{
+				ArtifactDir: e.prepareOutputDir(ctx, configName, caseCfg.ID, "agent/run"),
+				TimeoutSec:  caseTimeoutSeconds(e.evalCfg, caseCfg),
+				AgentMetadata: &runtime.AgentMetadata{
+					CaseID:   caseCfg.ID,
+					Variant:  configName,
+					MaxTurns: caseMaxTurns(e.evalCfg, caseCfg),
+				},
+			}
+			return e.executeMultiTurnCase(ctx, rt, caseCfg, configName, runAgent, agentExecOpts, startTime, judgeCfg, &result)
+		}
+	}
 
 	var cleanupArtifacts func()
 	finalizeArtifacts := func(*agent.SessionResult) {}
