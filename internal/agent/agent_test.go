@@ -498,3 +498,27 @@ func TestDetectAgentWithInitParams_ForwardsKwargs(t *testing.T) {
 		t.Fatalf("Cfg.Kwargs[future_key] = %q, want x", got)
 	}
 }
+
+func TestExtractSessionIDFromPath(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "jsonl extension", path: "/home/user/.qoder/projects/ws/abc-123.jsonl", want: "abc-123"},
+		{name: "uuid format", path: "/home/user/.claude/projects/ws/550e8400-e29b-41d4-a716-446655440000.jsonl", want: "550e8400-e29b-41d4-a716-446655440000"},
+		{name: "no extension", path: "/path/to/session-id", want: "session-id"},
+		{name: "bare filename", path: "my-session.jsonl", want: "my-session"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := extractSessionIDFromPath(tt.path)
+			if got != tt.want {
+				t.Fatalf("extractSessionIDFromPath(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}

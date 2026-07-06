@@ -53,6 +53,7 @@ var ErrAgentInstallFailed = errors.New("agent installation failed")
 type SessionResult struct {
 	Engine       string                `json:"engine,omitempty"`
 	Model        string                `json:"model,omitempty"`
+	SessionID    string                `json:"session_id,omitempty"`
 	ExitCode     int                   `json:"exit_code"`
 	DurationMs   int64                 `json:"duration_ms"`
 	Turns        int                   `json:"turns"`
@@ -62,6 +63,17 @@ type SessionResult struct {
 	Stderr       string                `json:"stderr,omitempty"`
 	Transcript   transcript.Transcript `json:"transcript,omitempty"`
 	Artifacts    *SessionArtifacts     `json:"artifacts,omitempty"`
+}
+
+// SessionResumer is an optional interface that agents may implement to support
+// multi-turn conversation evaluation. It allows the evaluator to resume an
+// existing session and send additional messages without starting a new session.
+//
+// Agents that implement SessionResumer know how to start/resume their own CLI
+// sessions. The evaluator checks for this interface and passes the SessionID
+// forward between turns.
+type SessionResumer interface {
+	RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, message transcript.Message, sessionID string) (*SessionResult, error)
 }
 
 // SessionArtifacts holds artifacts produced during an agent session.
@@ -137,6 +149,12 @@ type Agent interface {
 	// CheckCredentials checks if the required credentials are set.
 	CheckCredentials(ctx context.Context) error
 }
+
+// Compile-time interface satisfaction checks for SessionResumer.
+var (
+	_ SessionResumer = (*ClaudeCodeAgent)(nil)
+	_ SessionResumer = (*QoderCLIAgent)(nil)
+)
 
 // BaseAgent provides common functionality for agents.
 // Embedded by specific agent implementations.
