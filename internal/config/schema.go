@@ -253,6 +253,13 @@ type CaseConfig struct {
 	// (union, de-duplicated) with cases.defaults.collect_artifacts. See
 	// CaseDefaults.CollectArtifacts for the download layout and semantics.
 	CollectArtifacts []string `yaml:"collect_artifacts,omitempty"`
+
+	// SourceFile is the cases.files entry this case was loaded from (the raw
+	// path as written in eval.yaml). The loader populates it; it is not part
+	// of the YAML document and is excluded from marshalling. Duplicate-case
+	// validation keys off it so the check is correct for any case subset (e.g.
+	// the filtered set `skill-up run` executes), not only the full suite.
+	SourceFile string `json:"-" yaml:"-"`
 }
 
 // Input describes the agent input (prompt or turns).
