@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `skill-up run` now validates only the cases left after
+  `--include-case-name` / `--exclude-case-name` filters (plus the eval-level
+  config), so an invalid case that is filtered out no longer blocks a filtered
+  run — a shared eval can hold a quick `smoke` subset alongside heavier cases.
+  `skill-up validate` is unchanged and still validates the whole suite (every
+  case) regardless of filters.
+
 ### Added
 - Config validation now rejects duplicate case IDs and duplicate `cases.files`
   references. Since reports and artifacts are keyed by case ID and one case runs
