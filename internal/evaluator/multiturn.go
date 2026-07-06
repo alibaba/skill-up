@@ -2,6 +2,7 @@ package evaluator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"regexp"
@@ -254,7 +255,10 @@ func captureVariables(rules []config.CaptureRule, response string) (map[string]s
 		if match == nil {
 			return nil, fmt.Errorf("capture variable %q: pattern %q did not match response", rule.Variable, rule.Pattern)
 		}
-		value := extractCaptureValue(re, match)
+		value, extractErr := extractCaptureValue(re, match)
+		if extractErr != nil {
+			return nil, fmt.Errorf("capture variable %q: %w", rule.Variable, extractErr)
+		}
 		if value == "" {
 			return nil, fmt.Errorf("capture variable %q: pattern %q matched but produced empty value", rule.Variable, rule.Pattern)
 		}
@@ -264,19 +268,42 @@ func captureVariables(rules []config.CaptureRule, response string) (map[string]s
 }
 
 // extractCaptureValue retrieves the captured value from a regex match.
-// It prefers a named group "value"; otherwise uses the first capture group.
-func extractCaptureValue(re *regexp.Regexp, match []string) string {
+// It prefers a named group "value"; if absent, requires exactly one capture
+// group (ambiguity from multiple unnamed groups is an error).
+func extractCaptureValue(re *regexp.Regexp, match []string) (string, error) {
 	// Try named group "value" first.
 	for i, name := range re.SubexpNames() {
 		if name == "value" && i < len(match) {
-			return match[i]
+			return match[i], nil
 		}
 	}
-	// Fall back to first capture group.
-	if len(match) > 1 {
-		return match[1]
+	// Count unnamed capture groups (SubexpNames()[0] is always the full match, skip it).
+	unnamedCount := countUnnamedGroups(re)
+	if unnamedCount == 0 {
+		return "", errors.New("pattern has no capture groups; use (?P<value>...) or a single (...)")
 	}
-	return ""
+	if unnamedCount > 1 {
+		return "", fmt.Errorf("pattern has %d unnamed capture groups; use (?P<value>...) to disambiguate", unnamedCount)
+	}
+	// Exactly one unnamed group — use first non-empty submatch.
+	if len(match) > 1 {
+		return match[1], nil
+	}
+	return "", nil
+}
+
+// countUnnamedGroups counts capture groups that do not have a name.
+func countUnnamedGroups(re *regexp.Regexp) int {
+	count := 0
+	for i, name := range re.SubexpNames() {
+		if i == 0 {
+			continue // skip full match
+		}
+		if name == "" {
+			count++
+		}
+	}
+	return count
 }
 
 // handlePostCondition evaluates a turn's post_condition and handles failure.

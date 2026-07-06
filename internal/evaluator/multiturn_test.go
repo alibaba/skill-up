@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"testing"
 
 	"github.com/alibaba/skill-up/internal/agent"
@@ -177,6 +178,43 @@ func TestEvaluatePostCondition(t *testing.T) {
 	}
 }
 
+func TestEvaluatePostCondition_CaseSensitive(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		pc       *config.PostCondition
+		response string
+		wantFail bool
+	}{
+		{
+			name:     "must_contain_all_case_mismatch",
+			pc:       &config.PostCondition{MustContainAll: []string{"Success"}},
+			response: "success is here", // lowercase doesn't match uppercase
+			wantFail: true,
+		},
+		{
+			name:     "must_not_contain_case_mismatch_passes",
+			pc:       &config.PostCondition{MustNotContain: []string{"error"}},
+			response: "Error occurred", // different case, should pass
+			wantFail: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			reason := evaluatePostCondition(tt.pc, tt.response)
+			if tt.wantFail && reason == "" {
+				t.Fatal("expected failure reason, got empty")
+			}
+			if !tt.wantFail && reason != "" {
+				t.Fatalf("unexpected failure: %s", reason)
+			}
+		})
+	}
+}
+
 func TestCaptureVariables(t *testing.T) {
 	t.Parallel()
 
@@ -222,6 +260,58 @@ func TestCaptureVariables(t *testing.T) {
 			rules:    []config.CaptureRule{{Variable: "x", Pattern: `(?P<`}},
 			response: "anything",
 			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := captureVariables(tt.rules, tt.response)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			for k, v := range tt.want {
+				if got[k] != v {
+					t.Fatalf("variable %q = %q, want %q", k, got[k], v)
+				}
+			}
+		})
+	}
+}
+
+func TestCaptureVariables_EdgeCases(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		rules    []config.CaptureRule
+		response string
+		want     map[string]string
+		wantErr  bool
+	}{
+		{
+			name:     "multiple_unnamed_groups_error",
+			rules:    []config.CaptureRule{{Variable: "x", Pattern: `(\w+)-(\d+)`}},
+			response: "abc-123",
+			wantErr:  true, // ambiguous: multiple unnamed groups without (?P<value>...)
+		},
+		{
+			name:     "no_capture_groups_error",
+			rules:    []config.CaptureRule{{Variable: "x", Pattern: `\d+`}},
+			response: "42",
+			wantErr:  true, // pattern matched but has no capture groups
+		},
+		{
+			name:     "named_group_plus_unnamed_uses_named",
+			rules:    []config.CaptureRule{{Variable: "val", Pattern: `key=(\w+)-(?P<value>\d+)`}},
+			response: "key=abc-789",
+			want:     map[string]string{"val": "789"}, // named group takes precedence
 		},
 	}
 
@@ -639,4 +729,118 @@ func containsCheck(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestExtractCaptureValue(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		pattern string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:    "named_group_value",
+			pattern: `ID: (?P<value>\d+)`,
+			input:   "ID: 42",
+			want:    "42",
+		},
+		{
+			name:    "single_unnamed_group",
+			pattern: `ver=(\d+)`,
+			input:   "ver=7",
+			want:    "7",
+		},
+		{
+			name:    "multiple_unnamed_groups",
+			pattern: `(\w+)-(\d+)`,
+			input:   "abc-123",
+			wantErr: true,
+		},
+		{
+			name:    "no_groups",
+			pattern: `\d+`,
+			input:   "42",
+			wantErr: true,
+		},
+		{
+			name:    "named_plus_unnamed_prefers_named",
+			pattern: `(\w+)-(?P<value>\d+)`,
+			input:   "abc-99",
+			want:    "99",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			re := regexp.MustCompile(tt.pattern)
+			match := re.FindStringSubmatch(tt.input)
+			if match == nil {
+				t.Fatal("pattern did not match input")
+			}
+			got, err := extractCaptureValue(re, match)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCaptureVariableScoping(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	rt := &mockRuntime{workspace: workspace}
+
+	callNum := 0
+	ag := &mockResumerAgent{
+		mockAgent: mockAgent{name: "test-resumer"},
+		runTurnFunc: func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ transcript.Message, _ string) (*agent.SessionResult, error) {
+			callNum++
+			return &agent.SessionResult{FinalMessage: fmt.Sprintf("val=%d", callNum), SessionID: "s", Turns: 1}, nil
+		},
+	}
+
+	caseCfg := &config.CaseConfig{
+		ID: "scope-test",
+		Input: config.Input{
+			Turns: []config.Turn{
+				{Role: "user", Content: "go", Capture: []config.CaptureRule{{Variable: "x", Pattern: `val=(\d+)`}}},
+				{Role: "user", Content: "got {{x}}"},
+			},
+		},
+	}
+
+	e := newTestEvaluator(EvalOptions{Agent: ag, EvalCfg: &config.EvalConfig{}})
+
+	// First execution captures x=1.
+	results1, _, err1 := e.executeMultiTurn(context.Background(), rt, caseCfg, ag, agent.ExecOptions{})
+	if err1 != nil {
+		t.Fatalf("first run error: %v", err1)
+	}
+	if results1[0].CapturedVars["x"] != "1" {
+		t.Fatalf("first run x = %q, want 1", results1[0].CapturedVars["x"])
+	}
+
+	// Second execution starts fresh — x should be captured as a new value (3),
+	// not carry over from first run.
+	results2, _, err2 := e.executeMultiTurn(context.Background(), rt, caseCfg, ag, agent.ExecOptions{})
+	if err2 != nil {
+		t.Fatalf("second run error: %v", err2)
+	}
+	if results2[0].CapturedVars["x"] != "3" {
+		t.Fatalf("second run x = %q, want 3 (fresh scope)", results2[0].CapturedVars["x"])
+	}
 }
