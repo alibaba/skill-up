@@ -19,7 +19,7 @@ status: draft
 - [需求](#需求)
 - [提案](#提案)
   - [用户场景速查](#用户场景速查)
-  - [注意事项/约束/说明](#注意事项约束说明)
+  - [注意事项、约束与说明](#注意事项约束与说明)
   - [风险与缓解措施](#风险与缓解措施)
 - [设计细节](#设计细节)
   - [配置 Schema](#配置-schema)
@@ -254,7 +254,7 @@ benchmark 会分别执行：
 
 这样比较的是被测 Skill 对结果的影响，而不是评审工具是否存在。
 
-### 注意事项/约束/说明
+### 注意事项、约束与说明
 
 1. **继续要求 `criteria`**：本阶段 `judge.criteria` 仍是结构化评分项来源。judge Skill 可以承载长 rubric，但 YAML 中至少保留一条 criteria，用于确定评分结果数量和报告结构。
 2. **复用 `SkillRef`**：`judge.skills` 使用 `source`、`path`、`target`，不新增单数 `judge.skill`，避免两套配置语义并存。
@@ -307,6 +307,7 @@ type JudgeConfig struct {
 3. `source: local_path` 时 `path` 必填，且不能是空白字符串。
 4. `target` 可选；语义与顶层 `skills[*].target` 一致。
 5. `agent_judge` 仍要求 `model` 和至少一条 `criteria`，除非后续另行修改 `AgentJudge` 评分协议。
+6. 依赖继承默认值的校验，尤其是 `agent_judge` 必填的 `model`，必须在 `judge.MergeJudgeConfig(global, caseLevel)` 得到有效 judge 配置后执行。raw case 校验可以继续检查只依赖 case 本身的约束，但不能仅因为 case 级 `agent_judge` 的 `model` 来自全局 judge 配置就拒绝该 case。
 
 ### 配置合并语义
 
@@ -465,7 +466,7 @@ func (e *defaultEvaluator) installJudgeSkills(
     for i, ref := range judgeCfg.Skills {
         skillCfg := resolveSkillConfig(skillDir, ref)
         if err := judgeAgent.InstallSkill(ctx, rt, skillCfg); err != nil {
-            return fmt.Errorf("failed to install judge skill %s: %w", ref.Path, err)
+            return fmt.Errorf("failed to install judge skill judge.skills[%d].path=%q: %w", i, ref.Path, err)
         }
         logging.DebugContextf(ctx, "Evaluator: judge skill installed: %s", filepath.Base(skillCfg.Source))
     }

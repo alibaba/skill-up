@@ -19,7 +19,7 @@ Language: English | [中文](zh/0002-agent-judge-specific-skill.md)
 - [Requirements](#requirements)
 - [Proposal](#proposal)
   - [User Scenario Quick Reference](#user-scenario-quick-reference)
-  - [Notes/Constraints/Caveats](#notesconstraintscaveats)
+  - [Notes, Constraints, and Caveats](#notes-constraints-and-caveats)
   - [Risks and Mitigations](#risks-and-mitigations)
 - [Design Details](#design-details)
   - [Configuration Schema](#configuration-schema)
@@ -247,7 +247,7 @@ Benchmark execution:
 
 This compares the effect of the Skill under test, not whether the grading tool exists.
 
-### Notes/Constraints/Caveats
+### Notes, Constraints, and Caveats
 
 1. **`criteria` remains required**: in this phase, `judge.criteria` still defines structured scoring dimensions. A judge Skill may contain long rubrics, but YAML keeps at least one criterion so result count and report structure remain deterministic.
 2. **Reuse `SkillRef`**: `judge.skills` uses `source`, `path`, and `target`; there is no parallel singular `judge.skill` syntax.
@@ -300,6 +300,7 @@ Validation rules:
 3. For `source: local_path`, `path` is required and must not be blank.
 4. `target` is optional and follows top-level `skills[*].target` semantics.
 5. `agent_judge` still requires `model` and at least one `criteria` entry unless a later proposal changes the `AgentJudge` protocol.
+6. Checks that depend on inherited judge defaults, especially the required `agent_judge` `model`, must run against the effective judge config after `judge.MergeJudgeConfig(global, caseLevel)`. Raw case validation may continue to check case-local constraints, but it must not reject a case-level `agent_judge` only because `model` is inherited from the global judge config.
 
 ### Configuration Merge Semantics
 
@@ -456,7 +457,7 @@ func (e *defaultEvaluator) installJudgeSkills(
     for i, ref := range judgeCfg.Skills {
         skillCfg := resolveSkillConfig(skillDir, ref)
         if err := judgeAgent.InstallSkill(ctx, rt, skillCfg); err != nil {
-            return fmt.Errorf("failed to install judge skill %s: %w", ref.Path, err)
+            return fmt.Errorf("failed to install judge skill judge.skills[%d].path=%q: %w", i, ref.Path, err)
         }
         logging.DebugContextf(ctx, "Evaluator: judge skill installed: %s", filepath.Base(skillCfg.Source))
     }
