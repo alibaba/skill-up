@@ -659,6 +659,9 @@ Let an LLM grade against rubric criteria — useful when semantic understanding 
 judge:
   type: agent_judge
   model: anthropic/claude-sonnet-4-6        # Model used by the judge
+  skills:                                   # Optional: judge-only Skills
+    - source: local_path
+      path: evals/fixtures/judge-rubric
   criteria:                                  # Natural-language rubric
     - "Identifies a real bug with an accurate location"
     - "Does not flag correct code as a bug"
@@ -666,6 +669,14 @@ judge:
   pass_threshold: 0.7                        # Default 0.7
   timeout_seconds: 60                        # Optional: bound a single judge call (0 = no judge-level deadline, parent case timeout still applies)
 ```
+
+`judge.skills` is supported only for `agent_judge`. These Skills are installed
+into the judge agent, not the run agent, and top-level `skills` are not
+automatically installed into the judge. In benchmark mode, judge Skills are
+installed for both `with_skill` and `without_skill` runs because they are
+grading tooling, not the Skill under test. Installation uses each Agent
+adapter's native Skill mechanism; skill-up does not concatenate Skill files
+into the judge prompt.
 
 > **Cost note:** `agent_judge` consumes additional tokens. Prefer `expect` or `rule_based` for deterministic checks and reserve `agent_judge` for assertions that genuinely require semantic understanding.
 

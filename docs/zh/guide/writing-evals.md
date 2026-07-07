@@ -634,6 +634,9 @@ judge:
 judge:
   type: agent_judge
   model: anthropic/claude-sonnet-4-6        # 评审使用的模型
+  skills:                                   # 可选：仅供 judge 使用的 Skills
+    - source: local_path
+      path: evals/fixtures/judge-rubric
   criteria:                                  # 评估标准（自然语言描述）
     - "输出中识别了真实存在的 bug，并给出了准确位置"
     - "没有将正确代码误报为 bug"
@@ -641,6 +644,12 @@ judge:
   pass_threshold: 0.7                        # 通过率阈值，默认 0.7
   timeout_seconds: 60                        # 可选：限制单次 judge 调用时长（0 = 不加 judge 级 deadline，仍受 case timeout 约束）
 ```
+
+`judge.skills` 仅支持 `agent_judge`。这些 Skills 会安装到 judge agent，
+不会安装到主运行 agent；顶层 `skills` 也不会自动安装到 judge。开启
+benchmark 时，`with_skill` 和 `without_skill` 都会安装 judge Skills，因为它们是
+评分工具，不是被测 Skill。安装过程使用各 Agent adapter 原生的 Skill 机制；
+skill-up 不会把 Skill 文件内容拼接进 judge prompt。
 
 > **成本提示**：`agent_judge` 会消耗额外的 token。建议对关键断言先用 `expect` 或 `rule_based` 做确定性检查，只对需要语义理解的部分使用 `agent_judge`。
 
