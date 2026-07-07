@@ -170,7 +170,7 @@ func evalOutputContains(rule *config.OutputContainsRule, finalMessage string) As
 	return AssertionResult{
 		Text:     desc,
 		Passed:   true,
-		Evidence: "all output_contains checks passed",
+		Evidence: fmt.Sprintf("output satisfies all contains checks (%s)", strings.Join(descParts, ", ")),
 	}
 }
 
@@ -349,9 +349,9 @@ func evalTurnResponseContains(rule *config.TurnResponseContainsRule, turns []Inp
 	}
 	if len(missing) > 0 {
 		return AssertionResult{
-			Text:     fmt.Sprintf("turn_response_contains[turn=%d].contains_all", rule.Turn),
+			Text:     fmt.Sprintf("turn_response_contains[turn=%d].contains_all%v", rule.Turn, rule.ContainsAll),
 			Passed:   false,
-			Evidence: fmt.Sprintf("turn %d response missing keywords: %v", rule.Turn, missing),
+			Evidence: fmt.Sprintf("turn %d response missing required keywords: %v (checked: %v)", rule.Turn, missing, rule.ContainsAll),
 		}
 	}
 
@@ -366,17 +366,27 @@ func evalTurnResponseContains(rule *config.TurnResponseContainsRule, turns []Inp
 		}
 		if !found {
 			return AssertionResult{
-				Text:     fmt.Sprintf("turn_response_contains[turn=%d].contains_any", rule.Turn),
+				Text:     fmt.Sprintf("turn_response_contains[turn=%d].contains_any%v", rule.Turn, rule.ContainsAny),
 				Passed:   false,
 				Evidence: fmt.Sprintf("turn %d response does not contain any of %v", rule.Turn, rule.ContainsAny),
 			}
 		}
 	}
 
+	// Build descriptive evidence.
+	var parts []string
+	if len(rule.ContainsAll) > 0 {
+		parts = append(parts, fmt.Sprintf("contains_all:%v", rule.ContainsAll))
+	}
+	if len(rule.ContainsAny) > 0 {
+		parts = append(parts, fmt.Sprintf("contains_any:%v", rule.ContainsAny))
+	}
+	desc := strings.Join(parts, ", ")
+
 	return AssertionResult{
-		Text:     fmt.Sprintf("turn_response_contains[turn=%d]", rule.Turn),
+		Text:     fmt.Sprintf("turn_response_contains[turn=%d]{%s}", rule.Turn, desc),
 		Passed:   true,
-		Evidence: fmt.Sprintf("turn %d response satisfies all contains checks", rule.Turn),
+		Evidence: fmt.Sprintf("turn %d response contains all required keywords (%s)", rule.Turn, desc),
 	}
 }
 
@@ -390,17 +400,17 @@ func evalTurnResponseNotContains(rule *config.TurnResponseNotContainsRule, turns
 	for _, kw := range rule.NotContains {
 		if strings.Contains(tr.Response, kw) {
 			return AssertionResult{
-				Text:     fmt.Sprintf("turn_response_not_contains[turn=%d]", rule.Turn),
+				Text:     fmt.Sprintf("turn_response_not_contains[turn=%d]{not:%v}", rule.Turn, rule.NotContains),
 				Passed:   false,
-				Evidence: fmt.Sprintf("turn %d response contains forbidden keyword %q", rule.Turn, kw),
+				Evidence: fmt.Sprintf("turn %d response contains forbidden keyword %q (checked: %v)", rule.Turn, kw, rule.NotContains),
 			}
 		}
 	}
 
 	return AssertionResult{
-		Text:     fmt.Sprintf("turn_response_not_contains[turn=%d]", rule.Turn),
+		Text:     fmt.Sprintf("turn_response_not_contains[turn=%d]{not:%v}", rule.Turn, rule.NotContains),
 		Passed:   true,
-		Evidence: fmt.Sprintf("turn %d response does not contain any forbidden keywords", rule.Turn),
+		Evidence: fmt.Sprintf("turn %d response does not contain any of the forbidden keywords %v", rule.Turn, rule.NotContains),
 	}
 }
 
