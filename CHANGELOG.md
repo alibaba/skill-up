@@ -21,6 +21,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `TurnResults` field in JSON, HTML, and JUnit reports (`turn_results` in
   `result.json`; turn-scoped failure details in JUnit XML).
 
+### Changed
+- `skill-up run` now validates only the cases left after
+  `--include-case-name` / `--exclude-case-name` filters (plus the eval-level
+  config), so an invalid case that is filtered out no longer blocks a filtered
+  run — a shared eval can hold a quick `smoke` subset alongside heavier cases.
+  `skill-up validate` is unchanged and still validates the whole suite (every
+  case) regardless of filters.
+
+### Added
+- Config validation now rejects duplicate case IDs and duplicate `cases.files`
+  references. Since reports and artifacts are keyed by case ID and one case runs
+  per `cases.files` entry, a collision would silently overwrite results or
+  double-run a case. `skill-up validate` (and the preflight in `skill-up run`)
+  fails with the conflicting ID and the offending source files. Covers both
+  explicit `id:` fields and filename-derived IDs, and collapses
+  differently-spelled paths (e.g. `cases/a.yaml` vs `./cases/a.yaml`).
+
+### Changed
+- The `none` runtime now terminates a canceled or timed-out command's whole
+  process group gracefully before force-killing it. On Unix it sends `SIGTERM`
+  to the group first, giving children ~1s (`noneExecKillGrace`) to run trap
+  handlers, release locks, and exit, then escalates to `SIGKILL` if the group
+  is still alive. The grace fits inside the existing 2s `WaitDelay`, so a
+  timed-out `Exec` still returns within its deadline and keeps the
+  `context.DeadlineExceeded` / exit-code `-1` contract. Previously the group
+  got an immediate `SIGKILL`, so a helper holding a lock could leave stale
+  state and stall a later command. No-op on non-Unix platforms.
+
+### Fixed
+- Skill installation preserves source file permissions, notably the executable
+  bit on scripts. The `none` runtime's per-file upload previously wrote every
+  file with a fixed `0600` mode, so skills shipping runnable helper scripts
+  installed non-executable and failed without a chmod workaround. The
+  file-transfer contract now documents permission preservation, matching the
+  `opensandbox` and `docker` runtimes which already carried the mode across.
+
 ## [0.3.0] - 2026-07-03
 
 ### Added

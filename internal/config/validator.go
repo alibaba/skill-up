@@ -229,14 +229,93 @@ func (v *Validator) ValidateAll(result *EvalResult) error {
 	if err := v.ValidateEvalConfig(result.Eval); err != nil {
 		return err
 	}
+	return v.ValidateCases(result.Cases)
+}
 
-	for _, c := range result.Cases {
+// ValidateCases validates a set of cases: it rejects duplicate effective IDs
+// and duplicate source-file references within the set, then validates each case
+// document.
+//
+// `skill-up run` calls this with only the cases left after include/exclude
+// filters, so an invalid unselected case never blocks a filtered run;
+// `skill-up validate` passes every case (via ValidateAll) for full-suite
+// validation. Duplicate detection keys off each case's ID and loader-populated
+// SourceFile, so it is correct for any subset, not only the full in-order suite.
+func (v *Validator) ValidateCases(cases []*CaseConfig) error {
+	if errs := duplicateCaseErrors(cases); len(errs) > 0 {
+		return fmt.Errorf("validation errors:\n  - %s", strings.Join(errs, "\n  - "))
+	}
+
+	for _, c := range cases {
 		if err := v.ValidateCaseConfig(c); err != nil {
 			return fmt.Errorf("case %s: %w", c.ID, err)
 		}
 	}
 
 	return nil
+}
+
+// duplicateCaseErrors reports duplicate source-file references and duplicate
+// effective case IDs within the given case set. skill-up writes reports and
+// artifacts keyed by case ID and runs one case per cases.files entry, so a
+// collision would silently overwrite results or double-run a case.
+func duplicateCaseErrors(cases []*CaseConfig) []string {
+	var errs []string
+	errs = append(errs, duplicateCaseFileErrors(cases)...)
+	errs = append(errs, duplicateCaseIDErrors(cases)...)
+	return errs
+}
+
+// duplicateCaseFileErrors reports cases loaded from the same source file after
+// path normalization (e.g. "cases/a.yaml" vs "./cases/a.yaml"). Cases with no
+// SourceFile (e.g. loaded from an Anthropic evals.json rather than cases.files)
+// are skipped. Each duplicate is reported once, in first-seen order.
+func duplicateCaseFileErrors(cases []*CaseConfig) []string {
+	counts := make(map[string]int, len(cases))
+	for _, c := range cases {
+		if c.SourceFile == "" {
+			continue
+		}
+		counts[path.Clean(c.SourceFile)]++
+	}
+	var errs []string
+	reported := make(map[string]bool)
+	for _, c := range cases {
+		if c.SourceFile == "" {
+			continue
+		}
+		norm := path.Clean(c.SourceFile)
+		if counts[norm] > 1 && !reported[norm] {
+			errs = append(errs, fmt.Sprintf("cases.files lists %q %d times (after path normalization); each case file must appear once", norm, counts[norm]))
+			reported[norm] = true
+		}
+	}
+	return errs
+}
+
+// duplicateCaseIDErrors reports effective case IDs shared by more than one case,
+// covering both explicit `id:` fields and filename-derived IDs. Each case's
+// SourceFile (when known) names the offending file in the message.
+func duplicateCaseIDErrors(cases []*CaseConfig) []string {
+	idFiles := make(map[string][]string, len(cases))
+	var order []string
+	for _, c := range cases {
+		src := c.SourceFile
+		if src == "" {
+			src = "<unknown source>"
+		}
+		if _, seen := idFiles[c.ID]; !seen {
+			order = append(order, c.ID)
+		}
+		idFiles[c.ID] = append(idFiles[c.ID], src)
+	}
+	var errs []string
+	for _, id := range order {
+		if srcs := idFiles[id]; len(srcs) > 1 {
+			errs = append(errs, fmt.Sprintf("duplicate case id %q used by %d case files: %s", id, len(srcs), strings.Join(srcs, ", ")))
+		}
+	}
+	return errs
 }
 
 // validateEngine checks engine.custom against the Custom Engine contract.

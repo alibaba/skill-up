@@ -928,6 +928,98 @@ func TestValidator_ValidateAll(t *testing.T) {
 	})
 }
 
+// caseIDSrc pairs an effective case ID with the cases.files entry it was
+// loaded from, as the loader populates CaseConfig.ID / CaseConfig.SourceFile.
+type caseIDSrc struct {
+	id  string
+	src string
+}
+
+// TestValidator_ValidateCases_Duplicates covers rejection of duplicate case IDs
+// (explicit and filename-derived) and duplicate cases.files references, keyed
+// off each case's ID and SourceFile so it holds for any subset.
+func TestValidator_ValidateCases_Duplicates(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	buildCases := func(pairs ...caseIDSrc) []*CaseConfig {
+		cases := make([]*CaseConfig, len(pairs))
+		for i, p := range pairs {
+			cases[i] = &CaseConfig{ID: p.id, SourceFile: p.src, Input: Input{Prompt: "x"}}
+		}
+		return cases
+	}
+
+	tests := []struct {
+		name      string
+		cases     []caseIDSrc
+		wantParts []string // non-empty ⇒ expect an error containing every part
+	}{
+		{
+			name:      "duplicate explicit id names both files",
+			cases:     []caseIDSrc{{"dup", "evals/cases/a.yaml"}, {"dup", "evals/cases/b.yaml"}},
+			wantParts: []string{`duplicate case id "dup"`, "evals/cases/a.yaml", "evals/cases/b.yaml"},
+		},
+		{
+			// Files in different dirs with colliding basenames ⇒ same implicit ID.
+			name:      "duplicate filename-derived id",
+			cases:     []caseIDSrc{{"smoke", "evals/cases/smoke.yaml"}, {"smoke", "evals/full/smoke.yaml"}},
+			wantParts: []string{`duplicate case id "smoke"`},
+		},
+		{
+			// Same file, differently spelled; normalization must collapse them.
+			name:      "duplicate file reference after normalization",
+			cases:     []caseIDSrc{{"a", "evals/cases/a.yaml"}, {"a", "./evals/cases/a.yaml"}},
+			wantParts: []string{"cases.files lists"},
+		},
+		{
+			name:      "unique ids and files pass",
+			cases:     []caseIDSrc{{"a", "evals/cases/a.yaml"}, {"b", "evals/cases/b.yaml"}},
+			wantParts: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validator.ValidateCases(buildCases(tt.cases...))
+			if len(tt.wantParts) == 0 {
+				if err != nil {
+					t.Fatalf("ValidateCases() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %v, got nil", tt.wantParts)
+			}
+			for _, part := range tt.wantParts {
+				if !strings.Contains(err.Error(), part) {
+					t.Errorf("error %q missing expected substring %q", err.Error(), part)
+				}
+			}
+		})
+	}
+}
+
+// TestValidator_ValidateCases_OnlyChecksGivenCases confirms ValidateCases
+// validates just the cases passed to it: an invalid case omitted from the slice
+// (e.g. filtered out by `skill-up run`) does not cause a failure, while
+// ValidateAll over the full set still catches it.
+func TestValidator_ValidateCases_OnlyChecksGivenCases(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	valid := &CaseConfig{ID: "smoke", SourceFile: "evals/cases/smoke.yaml", Input: Input{Prompt: "hi"}}
+	invalid := &CaseConfig{ID: "full", SourceFile: "evals/cases/full.yaml"} // missing prompt and turns
+
+	if err := validator.ValidateCases([]*CaseConfig{valid}); err != nil {
+		t.Fatalf("ValidateCases([valid]) = %v, want nil", err)
+	}
+	if err := validator.ValidateCases([]*CaseConfig{valid, invalid}); err == nil {
+		t.Fatal("ValidateCases([valid, invalid]) = nil, want error for the invalid case")
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
 }

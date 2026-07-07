@@ -111,6 +111,43 @@ func TestRunEvalDryRunLoadsFiltersAndSkipsAgentSetup(t *testing.T) {
 	}
 }
 
+func TestRunEvalValidatesOnlySelectedCases(t *testing.T) {
+	root := t.TempDir()
+	writeAutoModeSkill(t, root)
+	writeSmokeAndFullEval(t, root)
+
+	dryRunCmd := func() *cobra.Command {
+		cmd := newRunPhaseTestCommand(t)
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		for name, val := range map[string]string{"dry-run": testFlagBoolTrue, runtimeFlagName: "none"} {
+			if err := cmd.Flags().Set(name, val); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return cmd
+	}
+
+	// Filtering to the valid smoke case must succeed even though the full case
+	// is invalid — run validates only the selected cases.
+	okCmd := dryRunCmd()
+	if err := okCmd.Flags().Set("include-case-name", "smoke"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := captureStdout(t, func() error { return runEval(okCmd, []string{root}) }); err != nil {
+		t.Fatalf("filtered run over the valid smoke case should succeed, got %v", err)
+	}
+
+	// An unfiltered run selects the invalid full case and must fail validation.
+	_, err := captureStdout(t, func() error { return runEval(dryRunCmd(), []string{root}) })
+	if err == nil {
+		t.Fatal("unfiltered run should fail validation on the invalid full case")
+	}
+	if !strings.Contains(err.Error(), "script_path") {
+		t.Fatalf("error = %v, want script_path validation failure", err)
+	}
+}
+
 func TestRunPhaseHelpers(t *testing.T) {
 	var out bytes.Buffer
 	observer := &uiProgressObserver{}
@@ -607,6 +644,42 @@ cases:
 	caseYAML := fmt.Sprintf("id: %s\ninput:\n  prompt: Say hi\n", caseID)
 	if err := os.WriteFile(filepath.Join(casesDir, caseID+".yaml"), []byte(caseYAML), 0o600); err != nil {
 		t.Fatalf("failed to write case yaml: %v", err)
+	}
+}
+
+// writeSmokeAndFullEval writes a skill whose eval lists two cases: a valid
+// `smoke` case and a `full` case that is intentionally invalid (a script judge
+// with no script_path). Used to verify that a filtered run validates only the
+// selected cases while an unfiltered run (and `skill-up validate`) still fails.
+func writeSmokeAndFullEval(t *testing.T, root string) {
+	t.Helper()
+	evalsDir := filepath.Join(root, "evals")
+	casesDir := filepath.Join(evalsDir, "cases")
+	if err := os.MkdirAll(casesDir, 0o755); err != nil {
+		t.Fatalf("failed to create evals/cases: %v", err)
+	}
+	evalYAML := `schema_version: v1alpha1
+environment:
+  type: none
+engine:
+  name: claude_code
+  model:
+    provider: dashscope
+    name: qwen3.6-plus
+cases:
+  files:
+    - evals/cases/smoke.yaml
+    - evals/cases/full.yaml
+`
+	if err := os.WriteFile(filepath.Join(evalsDir, "eval.yaml"), []byte(evalYAML), 0o600); err != nil {
+		t.Fatalf("failed to write eval.yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(casesDir, "smoke.yaml"), []byte("id: smoke\ninput:\n  prompt: Say hi\n"), 0o600); err != nil {
+		t.Fatalf("failed to write smoke.yaml: %v", err)
+	}
+	// script judge without script_path ⇒ ValidateCaseConfig rejects this case.
+	if err := os.WriteFile(filepath.Join(casesDir, "full.yaml"), []byte("id: full\ninput:\n  prompt: Do full\njudge:\n  type: script\n"), 0o600); err != nil {
+		t.Fatalf("failed to write full.yaml: %v", err)
 	}
 }
 
