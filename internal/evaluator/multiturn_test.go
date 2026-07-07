@@ -285,6 +285,58 @@ func TestCaptureVariables(t *testing.T) {
 	}
 }
 
+func TestCaptureVariablesJSONPath(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		rules    []config.CaptureRule
+		response string
+		want     map[string]string
+		wantErr  bool
+	}{
+		{
+			name:     "dot_path",
+			rules:    []config.CaptureRule{{Variable: "name", JSONPath: "$.result.name"}},
+			response: `{"result":{"name":"report.txt"}}`,
+			want:     map[string]string{"name": "report.txt"},
+		},
+		{
+			name:     "array_index",
+			rules:    []config.CaptureRule{{Variable: "id", JSONPath: "$.items[1].id"}},
+			response: `{"items":[{"id":"first"},{"id":42}]}`,
+			want:     map[string]string{"id": "42"},
+		},
+		{
+			name:     "missing_key",
+			rules:    []config.CaptureRule{{Variable: "x", JSONPath: "$.missing"}},
+			response: `{"present":true}`,
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := captureVariables(tt.rules, tt.response)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			for k, v := range tt.want {
+				if got[k] != v {
+					t.Fatalf("variable %q = %q, want %q", k, got[k], v)
+				}
+			}
+		})
+	}
+}
+
 func TestCaptureVariables_EdgeCases(t *testing.T) {
 	t.Parallel()
 
@@ -452,6 +504,84 @@ func TestExecuteMultiTurn_HappyPath(t *testing.T) {
 	}
 }
 
+func TestExecuteMultiTurn_NormalizesCumulativeSessionResults(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	rt := &mockRuntime{workspace: workspace}
+
+	cumulative := []*agent.SessionResult{
+		{
+			FinalMessage: "first response",
+			SessionID:    "session-abc",
+			Turns:        1,
+			InputTokens:  10,
+			OutputTokens: 4,
+			Transcript: transcript.Transcript{
+				{Role: transcript.RoleUser, Content: "first", Turn: 1},
+				{Role: transcript.RoleToolCall, ToolCall: &transcript.ToolCallInfo{Name: "first_tool"}, Turn: 1},
+				{Role: transcript.RoleAssistant, Content: "first response", Turn: 1},
+			},
+		},
+		{
+			FinalMessage: "second response",
+			SessionID:    "session-abc",
+			Turns:        2,
+			InputTokens:  25,
+			OutputTokens: 9,
+			Transcript: transcript.Transcript{
+				{Role: transcript.RoleUser, Content: "first", Turn: 1},
+				{Role: transcript.RoleToolCall, ToolCall: &transcript.ToolCallInfo{Name: "first_tool"}, Turn: 1},
+				{Role: transcript.RoleAssistant, Content: "first response", Turn: 1},
+				{Role: transcript.RoleUser, Content: "second", Turn: 2},
+				{Role: transcript.RoleToolCall, ToolCall: &transcript.ToolCallInfo{Name: "second_tool"}, Turn: 2},
+				{Role: transcript.RoleAssistant, Content: "second response", Turn: 2},
+			},
+		},
+	}
+	call := 0
+	ag := &mockResumerAgent{
+		mockAgent: mockAgent{name: "test-resumer"},
+		runTurnFunc: func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ transcript.Message, _ string) (*agent.SessionResult, error) {
+			result := cumulative[call]
+			call++
+			return result, nil
+		},
+	}
+
+	caseCfg := &config.CaseConfig{
+		ID: "cumulative",
+		Input: config.Input{
+			Turns: []config.Turn{
+				{Role: "user", Content: "first"},
+				{Role: "user", Content: "second"},
+			},
+		},
+	}
+
+	e := newTestEvaluator(EvalOptions{Agent: ag, EvalCfg: &config.EvalConfig{}})
+	turnResults, aggResult, err := e.executeMultiTurn(context.Background(), rt, caseCfg, ag, agent.ExecOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := aggResult.InputTokens; got != 25 {
+		t.Fatalf("aggregate input tokens = %d, want cumulative high-water 25", got)
+	}
+	if got := aggResult.OutputTokens; got != 9 {
+		t.Fatalf("aggregate output tokens = %d, want cumulative high-water 9", got)
+	}
+	if got := len(aggResult.Transcript); got != 6 {
+		t.Fatalf("aggregate transcript length = %d, want 6 without duplicate turn 1", got)
+	}
+	if got := len(turnResults[1].Transcript); got != 3 {
+		t.Fatalf("turn 2 transcript length = %d, want only turn 2 messages", got)
+	}
+	calls := turnResults[1].Transcript.ToolCalls()
+	if len(calls) != 1 || calls[0].ToolCall.Name != "second_tool" {
+		t.Fatalf("turn 2 tool calls = %#v, want only second_tool", calls)
+	}
+}
+
 func TestExecuteMultiTurn_PostConditionFail(t *testing.T) {
 	t.Parallel()
 
@@ -527,7 +657,7 @@ func TestExecuteMultiTurn_PostConditionSkipRemaining(t *testing.T) {
 	}
 
 	e := newTestEvaluator(EvalOptions{Agent: ag, EvalCfg: &config.EvalConfig{}})
-	turnResults, _, err := e.executeMultiTurn(context.Background(), rt, caseCfg, ag, agent.ExecOptions{})
+	turnResults, aggResult, err := e.executeMultiTurn(context.Background(), rt, caseCfg, ag, agent.ExecOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -542,6 +672,9 @@ func TestExecuteMultiTurn_PostConditionSkipRemaining(t *testing.T) {
 	}
 	if turnResults[2].Status != TurnSkipped {
 		t.Fatalf("turn 3 status = %v, want skipped", turnResults[2].Status)
+	}
+	if aggResult == nil || aggResult.Turns != 1 {
+		t.Fatalf("aggregate executed turns = %v, want failed turn counted as executed", aggResult)
 	}
 }
 
@@ -673,11 +806,8 @@ func TestExecuteMultiTurn_NoResumer(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-resumer agent")
 	}
-	if !errors.Is(err, nil) { // just check it's not nil
-		// Verify error message mentions SessionResumer.
-		if got := err.Error(); !contains(got, "SessionResumer") {
-			t.Fatalf("error = %q, want mention of SessionResumer", got)
-		}
+	if got := err.Error(); !contains(got, "SessionResumer") {
+		t.Fatalf("error = %q, want mention of SessionResumer", got)
 	}
 }
 

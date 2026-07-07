@@ -386,10 +386,10 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	judgeCfg := judge.MergeJudgeConfig(e.evalCfg.Judge, caseCfg.Judge)
 
 	// Multi-turn branch: delegate to dedicated engine when the case defines
-	// more than one turn AND the agent supports session resumption. Agents
-	// that do not implement SessionResumer fall through to the existing
-	// single-shot path (all messages in one Run call).
-	if len(caseCfg.Input.Turns) > 1 {
+	// input.turns AND the agent supports session resumption. Agents that do
+	// not implement SessionResumer fall through to the existing single-shot
+	// path (all messages in one Run call), with an explicit warning.
+	if len(caseCfg.Input.Turns) > 0 {
 		if _, ok := runAgent.(agent.SessionResumer); ok {
 			agentExecOpts := agent.ExecOptions{
 				ArtifactDir: e.prepareOutputDir(ctx, configName, caseCfg.ID, "agent/run"),
@@ -402,6 +402,12 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 			}
 			return e.executeMultiTurnCase(ctx, rt, caseCfg, configName, runAgent, agentExecOpts, startTime, judgeCfg, &result)
 		}
+		logging.WarnContextf(
+			ctx,
+			"Evaluator: case %s defines input.turns but agent %s does not support session resumption; falling back to a single batch prompt",
+			caseCfg.ID,
+			runAgent.Name(),
+		)
 	}
 
 	var cleanupArtifacts func()

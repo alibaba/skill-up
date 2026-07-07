@@ -546,6 +546,7 @@ Capture semantics:
 | `claude_code` | Yes | `--resume` flag with session ID |
 | `qodercli` | Yes | `-r <session-id>` flag |
 | `codex` | Yes | `codex resume <thread-id>` command |
+| `qwen_code` | Not yet | Falls back to batch mode |
 | `custom` | Not yet | Falls back to batch mode |
 
 When an agent does not implement session resumption, all turns are concatenated

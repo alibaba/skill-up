@@ -2,10 +2,12 @@ package evaluator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,6 +61,8 @@ type multiTurnState struct {
 	transcript   transcript.Transcript
 	inputTokens  int
 	outputTokens int
+	tokenBaseIn  int
+	tokenBaseOut int
 	durationMs   int64
 }
 
@@ -109,10 +113,18 @@ func (e *defaultEvaluator) executeMultiTurn(
 			state.sessionID = sessionResult.SessionID
 		}
 		lastSessionResult = sessionResult
-		accumulateMetrics(state, sessionResult)
+		sessionResult, cumulativeUsage := normalizeTurnSessionResult(sessionResult, turnNum)
+		if cumulativeUsage {
+			accumulateCumulativeMetrics(state, sessionResult)
+		} else {
+			accumulatePerTurnMetrics(state, sessionResult)
+		}
 
 		// Build turn result.
 		tr := buildTurnResult(turnNum, content, sessionResult)
+		if tr.Transcript != nil {
+			state.transcript = append(state.transcript, tr.Transcript...)
+		}
 
 		// Evaluate post_condition.
 		if failed, earlyReturn := e.handlePostCondition(ctx, caseCfg.ID, turnNum, i, &tr, turn, turns, state); earlyReturn {
@@ -135,9 +147,6 @@ func (e *defaultEvaluator) executeMultiTurn(
 		}
 
 		state.turnResults = append(state.turnResults, tr)
-		if tr.Transcript != nil {
-			state.transcript = append(state.transcript, tr.Transcript...)
-		}
 	}
 
 	return state.turnResults, buildAggregateResult(state, lastSessionResult), nil
@@ -181,6 +190,40 @@ func buildTurnResult(turnNum int, content string, sessionResult *agent.SessionRe
 		tr.Transcript = sessionResult.Transcript
 	}
 	return tr
+}
+
+func normalizeTurnSessionResult(sessionResult *agent.SessionResult, turnNum int) (*agent.SessionResult, bool) {
+	if sessionResult == nil {
+		return nil, false
+	}
+	normalized := *sessionResult
+	turnTranscript, cumulative := transcriptForLogicalTurn(sessionResult.Transcript, turnNum)
+	normalized.Transcript = turnTranscript
+	if len(turnTranscript) > 0 {
+		normalized.Turns = 1
+		if final := turnTranscript.FinalAssistantMessage(); final != "" {
+			normalized.FinalMessage = final
+		}
+	}
+	return &normalized, cumulative || sessionResult.Turns > 1
+}
+
+func transcriptForLogicalTurn(trans transcript.Transcript, turnNum int) (transcript.Transcript, bool) {
+	if len(trans) == 0 {
+		return nil, false
+	}
+
+	matching := trans.MessagesForTurn(turnNum)
+	if len(matching) > 0 {
+		return matching, len(matching) < len(trans)
+	}
+
+	normalized := make(transcript.Transcript, len(trans))
+	copy(normalized, trans)
+	for i := range normalized {
+		normalized[i].Turn = turnNum
+	}
+	return normalized, false
 }
 
 // substituteTemplate replaces {{variable}} placeholders in content with captured values.
@@ -244,27 +287,164 @@ func evaluatePostCondition(pc *config.PostCondition, response string) string {
 func captureVariables(rules []config.CaptureRule, response string) (map[string]string, error) {
 	captured := make(map[string]string, len(rules))
 	for _, rule := range rules {
-		if rule.Pattern == "" {
-			return nil, fmt.Errorf("capture variable %q: empty pattern", rule.Variable)
-		}
-		re, err := regexp.Compile(rule.Pattern)
-		if err != nil {
-			return nil, fmt.Errorf("capture variable %q: invalid regex %q: %w", rule.Variable, rule.Pattern, err)
-		}
-		match := re.FindStringSubmatch(response)
-		if match == nil {
-			return nil, fmt.Errorf("capture variable %q: pattern %q did not match response", rule.Variable, rule.Pattern)
-		}
-		value, extractErr := extractCaptureValue(re, match)
+		value, extractErr := captureVariableValue(rule, response)
 		if extractErr != nil {
 			return nil, fmt.Errorf("capture variable %q: %w", rule.Variable, extractErr)
 		}
 		if value == "" {
-			return nil, fmt.Errorf("capture variable %q: pattern %q matched but produced empty value", rule.Variable, rule.Pattern)
+			return nil, fmt.Errorf("capture variable %q: extractor matched but produced empty value", rule.Variable)
 		}
 		captured[rule.Variable] = value
 	}
 	return captured, nil
+}
+
+func captureVariableValue(rule config.CaptureRule, response string) (string, error) {
+	switch {
+	case rule.Pattern != "":
+		re, err := regexp.Compile(rule.Pattern)
+		if err != nil {
+			return "", fmt.Errorf("invalid regex %q: %w", rule.Pattern, err)
+		}
+		match := re.FindStringSubmatch(response)
+		if match == nil {
+			return "", fmt.Errorf("pattern %q did not match response", rule.Pattern)
+		}
+		return extractCaptureValue(re, match)
+	case rule.JSONPath != "":
+		return extractJSONPathValue(response, rule.JSONPath)
+	default:
+		return "", errors.New("empty extractor")
+	}
+}
+
+type jsonPathSegment struct {
+	key   string
+	index *int
+}
+
+func extractJSONPathValue(response, path string) (string, error) {
+	var doc any
+	decoder := json.NewDecoder(strings.NewReader(response))
+	decoder.UseNumber()
+	if err := decoder.Decode(&doc); err != nil {
+		return "", fmt.Errorf("invalid JSON response for jsonpath %q: %w", path, err)
+	}
+
+	segments, err := parseSimpleJSONPath(path)
+	if err != nil {
+		return "", err
+	}
+	current := doc
+	for _, segment := range segments {
+		if segment.index != nil {
+			arr, ok := current.([]any)
+			if !ok {
+				return "", fmt.Errorf("jsonpath %q expected array before [%d]", path, *segment.index)
+			}
+			if *segment.index < 0 || *segment.index >= len(arr) {
+				return "", fmt.Errorf("jsonpath %q index [%d] out of range", path, *segment.index)
+			}
+			current = arr[*segment.index]
+			continue
+		}
+		obj, ok := current.(map[string]any)
+		if !ok {
+			return "", fmt.Errorf("jsonpath %q expected object before %q", path, segment.key)
+		}
+		next, ok := obj[segment.key]
+		if !ok {
+			return "", fmt.Errorf("jsonpath %q key %q not found", path, segment.key)
+		}
+		current = next
+	}
+
+	return jsonPathValueString(current)
+}
+
+func parseSimpleJSONPath(path string) ([]jsonPathSegment, error) {
+	if path == "$" {
+		return nil, nil
+	}
+	if !strings.HasPrefix(path, "$") {
+		return nil, fmt.Errorf("jsonpath %q must start with $", path)
+	}
+	var segments []jsonPathSegment
+	for i := 1; i < len(path); {
+		switch path[i] {
+		case '.':
+			start := i + 1
+			i = start
+			for i < len(path) && isJSONPathKeyChar(path[i]) {
+				i++
+			}
+			if i == start {
+				return nil, fmt.Errorf("jsonpath %q has empty object key", path)
+			}
+			segments = append(segments, jsonPathSegment{key: path[start:i]})
+		case '[':
+			end := strings.IndexByte(path[i:], ']')
+			if end < 0 {
+				return nil, fmt.Errorf("jsonpath %q has unterminated bracket", path)
+			}
+			end += i
+			raw := path[i+1 : end]
+			if raw == "" {
+				return nil, fmt.Errorf("jsonpath %q has empty bracket", path)
+			}
+			if quoted, ok := unquoteJSONPathKey(raw); ok {
+				segments = append(segments, jsonPathSegment{key: quoted})
+			} else {
+				idx, err := strconv.Atoi(raw)
+				if err != nil {
+					return nil, fmt.Errorf("jsonpath %q supports only numeric indexes or quoted keys in brackets", path)
+				}
+				segments = append(segments, jsonPathSegment{index: &idx})
+			}
+			i = end + 1
+		default:
+			return nil, fmt.Errorf("jsonpath %q has unsupported token at %q", path, path[i:])
+		}
+	}
+	return segments, nil
+}
+
+func isJSONPathKeyChar(ch byte) bool {
+	return ch == '_' || ch == '-' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9'
+}
+
+func unquoteJSONPathKey(raw string) (string, bool) {
+	if len(raw) < 2 {
+		return "", false
+	}
+	quote := raw[0]
+	if quote != '\'' && quote != '"' || raw[len(raw)-1] != quote {
+		return "", false
+	}
+	inner := raw[1 : len(raw)-1]
+	if strings.ContainsAny(inner, `'"[]`) {
+		return "", false
+	}
+	return inner, true
+}
+
+func jsonPathValueString(value any) (string, error) {
+	switch v := value.(type) {
+	case nil:
+		return "", errors.New("jsonpath resolved to null")
+	case string:
+		return v, nil
+	case json.Number:
+		return v.String(), nil
+	case bool:
+		return strconv.FormatBool(v), nil
+	default:
+		data, err := json.Marshal(v)
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+	}
 }
 
 // extractCaptureValue retrieves the captured value from a regex match.
@@ -349,13 +529,27 @@ func (e *defaultEvaluator) handlePostCondition(
 	return true, false
 }
 
-// accumulateMetrics adds per-turn metrics to the running totals.
-func accumulateMetrics(state *multiTurnState, result *agent.SessionResult) {
+// accumulatePerTurnMetrics adds metrics already scoped to the current turn.
+func accumulatePerTurnMetrics(state *multiTurnState, result *agent.SessionResult) {
 	if result == nil {
 		return
 	}
 	state.inputTokens += result.InputTokens
 	state.outputTokens += result.OutputTokens
+	state.tokenBaseIn += result.InputTokens
+	state.tokenBaseOut += result.OutputTokens
+	state.durationMs += result.DurationMs
+}
+
+// accumulateCumulativeMetrics converts cumulative session usage into per-turn deltas.
+func accumulateCumulativeMetrics(state *multiTurnState, result *agent.SessionResult) {
+	if result == nil {
+		return
+	}
+	state.inputTokens += max(result.InputTokens-state.tokenBaseIn, 0)
+	state.outputTokens += max(result.OutputTokens-state.tokenBaseOut, 0)
+	state.tokenBaseIn = max(state.tokenBaseIn, result.InputTokens)
+	state.tokenBaseOut = max(state.tokenBaseOut, result.OutputTokens)
 	state.durationMs += result.DurationMs
 }
 
@@ -383,11 +577,11 @@ func buildAggregateResult(state *multiTurnState, lastResult *agent.SessionResult
 	return &agg
 }
 
-// countCompletedTurns returns the number of turns with TurnCompleted status.
+// countCompletedTurns returns the number of turns that reached an agent response.
 func countCompletedTurns(results []TurnResult) int {
 	n := 0
 	for _, r := range results {
-		if r.Status == TurnCompleted {
+		if r.Status == TurnCompleted || r.Status == TurnFailed {
 			n++
 		}
 	}
