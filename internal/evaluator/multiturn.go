@@ -406,12 +406,26 @@ func lastCompletedResponse(results []TurnResult) string {
 
 // multiTurnStatus determines the overall case status from turn results.
 func multiTurnStatus(results []TurnResult) judge.Status {
-	for _, r := range results {
+	for i, r := range results {
 		switch r.Status {
 		case TurnError:
 			return judge.StatusError
 		case TurnFailed:
-			return judge.StatusFail
+			// Distinguish hard failure (on_fail=fail) from skip_remaining.
+			// on_fail=skip_remaining fills subsequent turns as TurnSkipped;
+			// if skipped entries follow the failure, proceed to judge.
+			hasSkippedAfter := false
+			for j := i + 1; j < len(results); j++ {
+				if results[j].Status == TurnSkipped {
+					hasSkippedAfter = true
+					break
+				}
+			}
+			if !hasSkippedAfter {
+				return judge.StatusFail
+			}
+			// skip_remaining: fall through to judge evaluation.
+			return ""
 		}
 	}
 	// If all remaining are completed/skipped, check if any completed.
