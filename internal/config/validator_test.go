@@ -821,6 +821,66 @@ func TestValidator_ValidateCaseConfig(t *testing.T) {
 			wantErr: true,
 			errMsg:  "judge.timeout_seconds must be non-negative",
 		},
+		{
+			name: "valid case-level mocked MCP override",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				MCP: MCPConfig{Servers: []MCPServer{
+					{Name: "project-mgmt", Mode: "mocked", ConfigRef: "evals/fixtures/mcp/open.yaml"},
+				}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "case-level real MCP rejected",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				MCP: MCPConfig{Servers: []MCPServer{
+					{Name: "project-mgmt", Mode: "real"},
+				}},
+			},
+			wantErr: true,
+			errMsg:  "must use mode: mocked",
+		},
+		{
+			name: "case-level MCP missing name",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				MCP: MCPConfig{Servers: []MCPServer{
+					{Mode: "mocked"},
+				}},
+			},
+			wantErr: true,
+			errMsg:  "mcp.servers[0].name is required",
+		},
+		{
+			name: "case-level MCP duplicate names",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				MCP: MCPConfig{Servers: []MCPServer{
+					{Name: "svc", Mode: "mocked"},
+					{Name: "svc", Mode: "mocked"},
+				}},
+			},
+			wantErr: true,
+			errMsg:  "is duplicated",
+		},
+		{
+			name: "case-level MCP with endpoint rejected",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				MCP: MCPConfig{Servers: []MCPServer{
+					{Name: "svc", Mode: "mocked", Endpoint: "http://localhost:1234"},
+				}},
+			},
+			wantErr: true,
+			errMsg:  "does not support endpoint",
+		},
 	}
 
 	for _, tt := range tests {

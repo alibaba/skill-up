@@ -501,6 +501,87 @@ expect:
 	}
 }
 
+func TestLoader_LoadCaseConfig_MCPOverrides(t *testing.T) {
+	t.Parallel()
+	content := `id: project-open
+input:
+  prompt: Check the project status.
+
+mcp:
+  servers:
+    - name: project-mgmt
+      mode: mocked
+      config_ref: evals/fixtures/mcp/project-open.yaml
+`
+
+	tmpDir := t.TempDir()
+	skillDir := filepath.Join(tmpDir, "my-skill")
+	casesDir := filepath.Join(skillDir, "evals", "cases")
+	if err := os.MkdirAll(casesDir, 0o755); err != nil {
+		t.Fatalf("failed to create cases dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# skill\n"), 0o600); err != nil {
+		t.Fatalf("failed to write SKILL.md: %v", err)
+	}
+	evalPath := filepath.Join(skillDir, "evals", "eval.yaml")
+	if err := os.WriteFile(evalPath, []byte("schema_version: v1alpha1\n"), 0o600); err != nil {
+		t.Fatalf("failed to write eval.yaml: %v", err)
+	}
+	casePath := filepath.Join(casesDir, "project-open.yaml")
+	if err := os.WriteFile(casePath, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write case file: %v", err)
+	}
+
+	loader := NewLoader(evalPath)
+	cfg, err := loader.LoadCaseConfig("evals/cases/project-open.yaml")
+	if err != nil {
+		t.Fatalf("LoadCaseConfig failed: %v", err)
+	}
+
+	if len(cfg.MCP.Servers) != 1 {
+		t.Fatalf("expected 1 mcp server, got %d", len(cfg.MCP.Servers))
+	}
+	srv := cfg.MCP.Servers[0]
+	if srv.Name != "project-mgmt" || srv.Mode != "mocked" || srv.ConfigRef != "evals/fixtures/mcp/project-open.yaml" {
+		t.Errorf("unexpected mcp server: %+v", srv)
+	}
+}
+
+func TestLoader_LoadCaseConfig_NoMCPLeavesServersEmpty(t *testing.T) {
+	t.Parallel()
+	content := `id: plain-case
+input:
+  prompt: Say hello.
+`
+
+	tmpDir := t.TempDir()
+	skillDir := filepath.Join(tmpDir, "my-skill")
+	casesDir := filepath.Join(skillDir, "evals", "cases")
+	if err := os.MkdirAll(casesDir, 0o755); err != nil {
+		t.Fatalf("failed to create cases dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# skill\n"), 0o600); err != nil {
+		t.Fatalf("failed to write SKILL.md: %v", err)
+	}
+	evalPath := filepath.Join(skillDir, "evals", "eval.yaml")
+	if err := os.WriteFile(evalPath, []byte("schema_version: v1alpha1\n"), 0o600); err != nil {
+		t.Fatalf("failed to write eval.yaml: %v", err)
+	}
+	casePath := filepath.Join(casesDir, "plain-case.yaml")
+	if err := os.WriteFile(casePath, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write case file: %v", err)
+	}
+
+	loader := NewLoader(evalPath)
+	cfg, err := loader.LoadCaseConfig("evals/cases/plain-case.yaml")
+	if err != nil {
+		t.Fatalf("LoadCaseConfig failed: %v", err)
+	}
+	if len(cfg.MCP.Servers) != 0 {
+		t.Errorf("expected no mcp servers, got %d", len(cfg.MCP.Servers))
+	}
+}
+
 func TestLoader_LoadAllCases(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
