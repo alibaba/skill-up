@@ -280,6 +280,49 @@ func TestProvisioner_MockedServerFromConfigRefUsesToolResponses(t *testing.T) {
 	}
 }
 
+func TestProvisioner_SameNameMockedServersDifferentFixtures(t *testing.T) {
+	t.Parallel()
+
+	skillDir := t.TempDir()
+	openPath := filepath.Join(skillDir, "project-open.yaml")
+	closedPath := filepath.Join(skillDir, "project-closed.yaml")
+	if err := os.WriteFile(openPath, []byte("tool_responses:\n  get_project:\n    default:\n      status: OPEN\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(closedPath, []byte("tool_responses:\n  get_project:\n    default:\n      status: CLOSED\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	provisioner := Provisioner{SkillDir: skillDir}
+	openCfg, _, err := provisioner.Provision(config.MCPConfig{
+		Servers: []config.MCPServer{{Name: "project-mgmt", Mode: "mocked", ConfigRef: "project-open.yaml"}},
+	})
+	if err != nil {
+		t.Fatalf("Provision(open) failed: %v", err)
+	}
+	closedCfg, _, err := provisioner.Provision(config.MCPConfig{
+		Servers: []config.MCPServer{{Name: "project-mgmt", Mode: "mocked", ConfigRef: "project-closed.yaml"}},
+	})
+	if err != nil {
+		t.Fatalf("Provision(closed) failed: %v", err)
+	}
+
+	openScript := openCfg.Servers[0].Args[1]
+	closedScript := closedCfg.Servers[0].Args[1]
+
+	// Case-level config_ref resolves relative to SkillDir.
+	if openCfg.Servers[0].ConfigRef != openPath {
+		t.Errorf("open ConfigRef = %q, want %q", openCfg.Servers[0].ConfigRef, openPath)
+	}
+	// The same server name must yield distinct embedded fixture JSON.
+	if openScript == closedScript {
+		t.Fatal("expected different generated scripts for different fixtures")
+	}
+	if !strings.Contains(openScript, "OPEN") || !strings.Contains(closedScript, "CLOSED") {
+		t.Errorf("scripts do not embed their respective fixture status values")
+	}
+}
+
 func TestProvisionerValidationAndTransportErrors(t *testing.T) {
 	t.Parallel()
 

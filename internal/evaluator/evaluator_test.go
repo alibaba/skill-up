@@ -249,6 +249,93 @@ func TestProvisionMCPConfigCachesResolvedConfig(t *testing.T) {
 	}
 }
 
+func TestProvisionMCPConfigForCaseAppliesOverrides(t *testing.T) {
+	t.Parallel()
+
+	skillDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(skillDir, "default.yaml"), []byte("tool_responses:\n  get_project:\n    default:\n      status: DEFAULT\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "open.yaml"), []byte("tool_responses:\n  get_project:\n    default:\n      status: OPEN\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "closed.yaml"), []byte("tool_responses:\n  get_project:\n    default:\n      status: CLOSED\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	e := newTestEvaluator(EvalOptions{
+		SkillDir: skillDir,
+		EvalCfg: &config.EvalConfig{
+			MCP: config.MCPConfig{
+				Servers: []config.MCPServer{{Name: "project-mgmt", Mode: "mocked", ConfigRef: "default.yaml"}},
+			},
+		},
+	})
+
+	openCase := &config.CaseConfig{
+		ID: "project-open",
+		MCP: config.MCPConfig{
+			Servers: []config.MCPServer{{Name: "project-mgmt", Mode: "mocked", ConfigRef: "open.yaml"}},
+		},
+	}
+	closedCase := &config.CaseConfig{
+		ID: "project-closed",
+		MCP: config.MCPConfig{
+			Servers: []config.MCPServer{{Name: "project-mgmt", Mode: "mocked", ConfigRef: "closed.yaml"}},
+		},
+	}
+	plainCase := &config.CaseConfig{ID: "plain"}
+
+	openCfg, _, err := e.provisionMCPConfigForCase(openCase)
+	if err != nil {
+		t.Fatalf("provision open case failed: %v", err)
+	}
+	closedCfg, _, err := e.provisionMCPConfigForCase(closedCase)
+	if err != nil {
+		t.Fatalf("provision closed case failed: %v", err)
+	}
+	plainCfg, _, err := e.provisionMCPConfigForCase(plainCase)
+	if err != nil {
+		t.Fatalf("provision plain case failed: %v", err)
+	}
+
+	openScript := openCfg.Servers[0].Args[1]
+	closedScript := closedCfg.Servers[0].Args[1]
+	plainScript := plainCfg.Servers[0].Args[1]
+
+	if !strings.Contains(openScript, "OPEN") {
+		t.Errorf("open case script missing OPEN fixture")
+	}
+	if !strings.Contains(closedScript, "CLOSED") {
+		t.Errorf("closed case script missing CLOSED fixture")
+	}
+	if !strings.Contains(plainScript, "DEFAULT") {
+		t.Errorf("plain case should inherit eval-level DEFAULT fixture")
+	}
+	if openScript == closedScript {
+		t.Error("same server name with different config_ref must yield different runtime MCP config")
+	}
+}
+
+func TestProvisionMCPConfigForCaseRejectsRealOverride(t *testing.T) {
+	t.Parallel()
+
+	e := newTestEvaluator(EvalOptions{
+		SkillDir: t.TempDir(),
+		EvalCfg:  &config.EvalConfig{},
+	})
+	badCase := &config.CaseConfig{
+		ID: "bad-case",
+		MCP: config.MCPConfig{
+			Servers: []config.MCPServer{{Name: "svc", Mode: "real"}},
+		},
+	}
+	_, _, err := e.provisionMCPConfigForCase(badCase)
+	if err == nil || !strings.Contains(err.Error(), "bad-case") {
+		t.Fatalf("expected error mentioning case ID, got %v", err)
+	}
+}
+
 func TestEvaluatorInputHelpers(t *testing.T) {
 	t.Parallel()
 
