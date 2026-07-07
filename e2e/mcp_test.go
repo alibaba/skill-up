@@ -111,6 +111,45 @@ func TestMCP_MockedMarkerAgents(t *testing.T) {
 	}
 }
 
+// TestMCP_CaseMockOverrides drives two cases that share the same mocked MCP
+// server name (project-mgmt) and tool (get_project) but override the fixture
+// per case (SUP-0003). The eval-level default fixture returns UNKNOWN, while
+// the open/closed cases override it to OPEN/CLOSED. This verifies case-level
+// mocked overrides route the correct fixture end-to-end.
+func TestMCP_CaseMockOverrides(t *testing.T) {
+	skipIfNotFullE2E(t)
+
+	evalPath := filepath.Join(getProjectRoot(), "e2e", "testdata", "mcp-case-overrides", "evals", "eval.yaml")
+	for _, tc := range []struct {
+		name   string
+		engine string
+		model  string
+	}{
+		{name: "claude_code", engine: "claude_code", model: "anthropic/qwen3.6-plus"},
+		{name: "qodercli", engine: "qodercli", model: "qoder/auto"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.engine == "claude_code" {
+				skipIfClaudeUnavailable(t)
+				skipClaudeCodeIfIncompatibleEndpoint(t)
+			}
+			if tc.engine == "qodercli" {
+				skipIfQoderCLIUnavailable(t)
+			}
+
+			runEvalWithRetries(t, mcpEvalRun{
+				evalPath:   evalPath,
+				engine:     tc.engine,
+				model:      tc.model,
+				outputRoot: e2eOutputDir(t),
+				outputName: "mcp-case-overrides-" + tc.name,
+				attempts:   2,
+				timeout:    240 * time.Second,
+			})
+		})
+	}
+}
+
 func skipIfSandboxMCPUnavailable(t *testing.T) {
 	t.Helper()
 	var missing []string

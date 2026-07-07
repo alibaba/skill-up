@@ -1,0 +1,18 @@
+id: project-closed
+title: Report the project status when the project is closed
+
+input:
+  prompt: |
+    Call the MCP tool named get_project on the project-mgmt server.
+    Return only the value of the status field from that MCP tool result.
+    Do not guess the answer.
+
+mcp:
+  servers:
+    - name: project-mgmt
+      mode: mocked
+      config_ref: evals/fixtures/mcp/project-closed.yaml
+
+expect:
+  must_contain:
+    - CLOSED

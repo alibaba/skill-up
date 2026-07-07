@@ -1,0 +1,32 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+
+mcp:
+  servers:
+    - name: project-mgmt
+      mode: mocked
+      config_ref: evals/fixtures/mcp/project-default.yaml
+
+skills: []
+
+engine:
+  name: claude_code
+  model:
+    provider: anthropic
+    name: qwen3.6-plus
+
+cases:
+  files:
+    - evals/cases/project-open.yaml
+    - evals/cases/project-closed.yaml
+  defaults:
+    timeout_seconds: 180
+    max_turns: 1
+  parallelism: 1
+
+report:
+  formats: [json]
+  artifacts:
+    - transcript
