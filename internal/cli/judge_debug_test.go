@@ -25,7 +25,7 @@ import (
 // writeJudgeDebugInput serialises a judgeDebugInput to a JSON file and returns the path.
 func writeJudgeDebugInput(t *testing.T, dir string, input judgeDebugInput) string {
 	t.Helper()
-	data, err := json.Marshal(input)
+	data, err := json.Marshal(input) //nolint:musttag // debug input embeds config structs with existing tags.
 	if err != nil {
 		t.Fatalf("marshal judge debug input: %v", err)
 	}

@@ -142,7 +142,7 @@ func runJudgeDebug(cmd *cobra.Command, args []string) error {
 	}
 
 	var input judgeDebugInput
-	if err := json.Unmarshal(data, &input); err != nil {
+	if err := json.Unmarshal(data, &input); err != nil { //nolint:musttag // debug input embeds config structs with existing tags.
 		return fmt.Errorf("parse input JSON: %w", err)
 	}
 
