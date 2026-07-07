@@ -390,9 +390,9 @@ func TestCodexRunTurn_ResumeUsesCorrectCommand(t *testing.T) {
 	if result.SessionID != "thread-xyz-456" {
 		t.Fatalf("expected SessionID = %q, got %q", "thread-xyz-456", result.SessionID)
 	}
-	// Should use "codex resume" with the session ID
-	if !containsCommand(rt.commands, "codex resume") {
-		t.Fatalf("expected codex resume command, got %v", rt.commands)
+	// Should use "codex exec resume" with the session ID
+	if !containsCommand(rt.commands, "codex exec resume") {
+		t.Fatalf("expected codex exec resume command, got %v", rt.commands)
 	}
 	if !containsCommand(rt.commands, "'thread-xyz-456'") {
 		t.Fatalf("expected session ID in command, got %v", rt.commands)
@@ -408,10 +408,13 @@ func TestBuildCodexResumeCmdWithLastMessage(t *testing.T) {
 	cmd := buildCodexResumeCmdWithLastMessage(
 		"sess-123", "do something", "o3",
 		codexProviderConfig{},
-		codexBypassSandbox, "/tmp/last.txt",
+		"/tmp/last.txt",
 	)
-	if !strings.HasPrefix(cmd, "codex resume --json --skip-git-repo-check") {
-		t.Fatalf("expected codex resume prefix, got %q", cmd)
+	if !strings.HasPrefix(cmd, "codex exec resume --json --skip-git-repo-check") {
+		t.Fatalf("expected codex exec resume prefix, got %q", cmd)
+	}
+	if !strings.Contains(cmd, "--dangerously-bypass-approvals-and-sandbox") {
+		t.Fatalf("expected bypass flag, got %q", cmd)
 	}
 	if !strings.Contains(cmd, "'sess-123'") {
 		t.Fatalf("expected session ID, got %q", cmd)

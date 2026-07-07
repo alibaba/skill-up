@@ -248,10 +248,6 @@ func (a *CodexAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, 
 	start := time.Now()
 
 	instruction := message.Content
-	sandboxFlag := codexBypassSandbox
-	if rt.RequiresProcessSandbox() && !EngineKwargBool(a.Cfg.Kwargs, KwargBypassSandbox) {
-		sandboxFlag = codexProcessSandbox
-	}
 	lastMessagePath := filepath.Join(rt.Workspace(), ".skill-up", "codex-last-message.txt")
 
 	envVars := a.credentialEnvVars(credential.EnvOpenAIAPIKey, credential.EnvOpenAIBaseURL)
@@ -270,7 +266,7 @@ func (a *CodexAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, 
 		}, err
 	}
 	cmd := "mkdir -p " + shellQuote(filepath.Dir(lastMessagePath)) + "\n" +
-		buildCodexResumeCmdWithLastMessage(sessionID, instruction, a.effectiveModelName(ctx), a.runProviderConfig(ctx), sandboxFlag, lastMessagePath)
+		buildCodexResumeCmdWithLastMessage(sessionID, instruction, a.effectiveModelName(ctx), a.runProviderConfig(ctx), lastMessagePath)
 
 	result, err := rt.Exec(ctx, cmd, opts)
 	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result, lastMessagePath)
@@ -538,11 +534,11 @@ func buildCodexRunCmdWithLastMessage(instruction, model string, provider codexPr
 
 // buildCodexResumeCmdWithLastMessage constructs a codex CLI command that resumes
 // an existing session identified by sessionID and sends a new user message.
-func buildCodexResumeCmdWithLastMessage(sessionID, instruction, model string, provider codexProviderConfig, sandboxFlag, lastMessagePath string) string {
-	cmd := "codex resume --json --skip-git-repo-check"
-	if sandboxFlag != "" {
-		cmd += " " + sandboxFlag
-	}
+// Note: `codex exec resume` does not support --sandbox; the session inherits
+// sandbox mode from its initial creation. We use --dangerously-bypass-approvals-and-sandbox
+// to ensure non-interactive execution (approvals are skipped).
+func buildCodexResumeCmdWithLastMessage(sessionID, instruction, model string, provider codexProviderConfig, lastMessagePath string) string {
+	cmd := "codex exec resume --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox"
 	cmd += codexProviderFlags(provider)
 	if model != "" {
 		cmd += " -m " + shellQuote(model)
