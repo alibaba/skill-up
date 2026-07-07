@@ -154,6 +154,7 @@ type Agent interface {
 var (
 	_ SessionResumer = (*ClaudeCodeAgent)(nil)
 	_ SessionResumer = (*QoderCLIAgent)(nil)
+	_ SessionResumer = (*CodexAgent)(nil)
 )
 
 // BaseAgent provides common functionality for agents.

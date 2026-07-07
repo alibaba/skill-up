@@ -313,24 +313,28 @@ func argsMatch(expected, actual map[string]any) bool {
 // Returns (turn, ok). If the turn is missing or not completed, it returns a
 // failing AssertionResult describing why.
 func lookupTurn(turnNum int, turns []InputTurnResult, ruleName string) (*InputTurnResult, *AssertionResult) {
-	if turnNum < 1 || turnNum > len(turns) {
-		ar := AssertionResult{
-			Text:     fmt.Sprintf("%s[turn=%d]", ruleName, turnNum),
-			Passed:   false,
-			Evidence: fmt.Sprintf("turn %d does not exist (executed %d turns)", turnNum, len(turns)),
+	if turnNum >= 1 {
+		for i := range turns {
+			if turns[i].TurnNumber == turnNum {
+				tr := &turns[i]
+				if tr.Status != "completed" {
+					ar := AssertionResult{
+						Text:     fmt.Sprintf("%s[turn=%d]", ruleName, turnNum),
+						Passed:   false,
+						Evidence: fmt.Sprintf("turn %d has status %q (reason: %s); assertion requires completed turn", turnNum, tr.Status, tr.Reason),
+					}
+					return nil, &ar
+				}
+				return tr, nil
+			}
 		}
-		return nil, &ar
 	}
-	tr := &turns[turnNum-1]
-	if tr.Status != "completed" {
-		ar := AssertionResult{
-			Text:     fmt.Sprintf("%s[turn=%d]", ruleName, turnNum),
-			Passed:   false,
-			Evidence: fmt.Sprintf("turn %d has status %q (reason: %s); assertion requires completed turn", turnNum, tr.Status, tr.Reason),
-		}
-		return nil, &ar
+	ar := AssertionResult{
+		Text:     fmt.Sprintf("%s[turn=%d]", ruleName, turnNum),
+		Passed:   false,
+		Evidence: fmt.Sprintf("turn %d does not exist (executed %d turns)", turnNum, len(turns)),
 	}
-	return tr, nil
+	return nil, &ar
 }
 
 // evalTurnResponseContains checks a specific turn's response for required keywords.

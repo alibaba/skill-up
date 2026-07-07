@@ -479,7 +479,9 @@
       var failed = turns.filter(function(tr) { return tr.status === "failed" || tr.status === "error"; });
       var passed = turns.filter(function(tr) { return tr.status === "completed"; });
       var total = failed.length + passed.length;
-      var html = '<div class="grades-summary"><span class="grade-badge grade-fail">0%</span>';
+      var rate = total === 0 ? 0 : Math.round((passed.length / total) * 100);
+      var badgeClass = rate === 100 ? "grade-pass" : "grade-fail";
+      var html = '<div class="grades-summary"><span class="grade-badge ' + badgeClass + '">' + rate + '%</span>';
       html += '<span>' + passed.length + ' passed, ' + failed.length + ' failed of ' + total + ' (post-condition checks)</span></div>';
       html += '<ul class="assertion-list">';
       for (var i = 0; i < turns.length; i++) {

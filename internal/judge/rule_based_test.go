@@ -508,6 +508,24 @@ func TestRuleBased_TurnResponseContains_MissingTurn(t *testing.T) {
 	}
 }
 
+func TestRuleBased_TurnResponseContains_UsesTurnNumber(t *testing.T) {
+	turns := []InputTurnResult{
+		{TurnNumber: 2, Response: "target turn response", Status: "completed"},
+		{TurnNumber: 1, Response: "first turn response", Status: "completed"},
+	}
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			TurnResponseContains: &config.TurnResponseContainsRule{
+				Turn:        2,
+				ContainsAll: []string{"target"},
+			},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{TurnResults: turns, TurnsTotal: 2, TurnsExecuted: 2})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusPass)
+}
+
 func TestRuleBased_TurnResponseContains_SkippedTurn(t *testing.T) {
 	turns := []InputTurnResult{
 		{TurnNumber: 1, Response: "hello", Status: "completed"},
