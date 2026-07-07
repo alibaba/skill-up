@@ -143,8 +143,8 @@ mcp:
 
 cases:
   files:
-    - cases/project-open.yaml
-    - cases/project-closed.yaml
+    - evals/cases/project-open.yaml
+    - evals/cases/project-closed.yaml
 ```
 
 The first case overrides the project state to "open":

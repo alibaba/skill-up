@@ -143,8 +143,8 @@ mcp:
 
 cases:
   files:
-    - cases/project-open.yaml
-    - cases/project-closed.yaml
+    - evals/cases/project-open.yaml
+    - evals/cases/project-closed.yaml
 ```
 
 第一个 case 覆盖为“项目打开”：
