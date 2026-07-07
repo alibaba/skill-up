@@ -17,32 +17,15 @@ name: Self-eval (dogfood the action)
 # dashscope's qwen3.6-plus — same as the repo's e2e jobs — so no path ever
 # calls real Claude / real GPT, regardless of engine.
 
-# Triggered only when the action or the evaluated skill changes: on PRs (pre-
-# merge gate) and on main (post-merge regression), same paths filter.
+# Manual only. This workflow runs live agent evals and builds a runner image
+# before the matrix, so it is intentionally kept out of PR/main CI.
 on:
-  pull_request:
-    paths:
-      - 'action.yml'
-      - 'action/**'
-      - 'skills/skill-upper/**'
-      - '.github/workflows/skill-eval-self.yml'
-      - '.github/workflows/build-runner-image.yml'
-  push:
-    branches: [main]
-    # Keep in sync with the pull_request paths above (GitHub workflow YAML
-    # does not support anchors).
-    paths:
-      - 'action.yml'
-      - 'action/**'
-      - 'skills/skill-upper/**'
-      - '.github/workflows/skill-eval-self.yml'
-      - '.github/workflows/build-runner-image.yml'
   workflow_dispatch:
 
 # LLM evals are expensive: a superseding push to the same PR cancels the
 # in-flight round instead of running both to completion.
 concurrency:
-  group: self-eval-${{ github.event.pull_request.number || github.ref }}
+  group: self-eval-${{ github.ref }}
   cancel-in-progress: true
 
 # Least-privilege default for every job (the image job overrides with

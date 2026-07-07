@@ -7,7 +7,7 @@ name: Build & push skill-eval runner image
 # Triggers:
 #   - workflow_call: invoked by skill-eval-self.yml so the dogfood eval always
 #     runs against an image built from the same commit (no pull/push race).
-#   - push to main touching the action/image -> republish.
+#   - push to main touching the action runtime -> republish.
 #   - workflow_dispatch -> manual (re)publish at an explicit tag.
 #
 # Fork PRs lack package-write on GITHUB_TOKEN: they build without pushing.
@@ -26,8 +26,8 @@ on:
   push:
     branches: [main]
     paths:
+      - 'action.yml'
       - 'action/**'
-      - '.github/workflows/build-runner-image.yml'
   workflow_dispatch:
     inputs:
       tag:
@@ -38,6 +38,10 @@ on:
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/skill-up-runner
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
