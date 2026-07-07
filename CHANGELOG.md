@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case) regardless of filters.
 
 ### Added
+- Per-case mocked MCP response overrides (SUP-0003): a case file may now declare
+  its own `mcp.servers` to vary the mocked fixture while keeping the same MCP
+  server and tool names. Servers merge with eval-level `mcp.servers` by `name`
+  (whole-entry replacement; unmatched names are appended), and a case without
+  `mcp` inherits the eval-level config unchanged. Case-level servers must use
+  `mode: mocked` in this MVP, `config_ref` stays relative to the Skill
+  directory, and each case provisions its own mocked server so fixtures remain
+  isolated under `cases.parallelism > 1`.
 - Config validation now rejects duplicate case IDs and duplicate `cases.files`
   references. Since reports and artifacts are keyed by case ID and one case runs
   per `cases.files` entry, a collision would silently overwrite results or
