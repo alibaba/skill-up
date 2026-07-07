@@ -37,6 +37,7 @@ type mockAgent struct {
 	output       string
 	err          error
 	credErr      error
+	skillErr     error
 	runFunc      func(ctx context.Context, rt runtime.Runtime, opts agent.ExecOptions, messages []transcript.Message) (*agent.SessionResult, error)
 	runCall      atomic.Int32
 	credCall     atomic.Int32
@@ -46,6 +47,7 @@ type mockAgent struct {
 	mu           sync.Mutex
 	lastMessages []transcript.Message
 	lastSkill    runtime.SkillConfig
+	skills       []runtime.SkillConfig
 }
 
 func (m *mockAgent) Name() string { return m.name }
@@ -63,8 +65,9 @@ func (m *mockAgent) InstallSkill(_ context.Context, _ runtime.Runtime, cfg runti
 	m.skillCall.Add(1)
 	m.mu.Lock()
 	m.lastSkill = cfg
+	m.skills = append(m.skills, cfg)
 	m.mu.Unlock()
-	return nil
+	return m.skillErr
 }
 func (m *mockAgent) Check(_ context.Context, _ runtime.Runtime) error { return nil }
 func (m *mockAgent) CheckCredentials(_ context.Context) error {
@@ -1028,6 +1031,119 @@ func TestExecuteCase_AgentTimeoutDoesNotInvokeAgentJudge(t *testing.T) {
 	}
 	if got := judgeRuns.Load(); got != 0 {
 		t.Fatalf("agent_judge must not be invoked when the agent run timed out, got %d runs", got)
+	}
+}
+
+func TestExecuteCase_InstallsJudgeSkillsOnJudgeAgentOnly(t *testing.T) {
+	skillDir := t.TempDir()
+	judgeAgent := &mockAgent{
+		name:   "judge",
+		output: `{"results":[{"criterion":"uses rubric","passed":true,"evidence":"rubric applied"}]}`,
+	}
+	runAgent := &mockAgent{name: "run", output: "main response"}
+
+	origDetect := agentDetectWithInitParams
+	agentDetectWithInitParams = func(_ string, _ credential.AgentInitParams, _ map[string]string) (agent.Agent, error) {
+		return judgeAgent, nil
+	}
+	defer func() { agentDetectWithInitParams = origDetect }()
+
+	e := newTestEvaluator(EvalOptions{
+		SkillDir: skillDir,
+		Agent:    runAgent,
+		EvalCfg: &config.EvalConfig{
+			Engine: config.EngineConfig{Name: "mock"},
+			Judge: config.JudgeConfig{
+				Type:     "agent_judge",
+				Model:    "judge-model",
+				Criteria: []string{"uses rubric"},
+				Skills: []config.SkillRef{
+					{Source: "local_path", Path: "evals/fixtures/judge-skill", Target: "~/.claude/skills/judge-skill"},
+					{Source: "local_path", Path: "evals/fixtures/security-judge"},
+				},
+			},
+		},
+	})
+
+	result := e.executeCase(
+		context.Background(),
+		&config.CaseConfig{ID: "case-judge-skills", Input: config.Input{Prompt: "hello"}},
+		"without_skill",
+		&mockRuntime{workspace: t.TempDir()},
+		runAgent,
+	)
+
+	if result.Status != judge.StatusPass {
+		t.Fatalf("status = %s, err=%v", result.Status, result.Error)
+	}
+	if got := runAgent.skillCall.Load(); got != 0 {
+		t.Fatalf("run agent InstallSkill calls = %d, want 0", got)
+	}
+	if got := judgeAgent.skillCall.Load(); got != 2 {
+		t.Fatalf("judge agent InstallSkill calls = %d, want 2", got)
+	}
+	if len(judgeAgent.skills) != 2 {
+		t.Fatalf("judge installed skills = %#v", judgeAgent.skills)
+	}
+	wantFirst := filepath.Join(skillDir, "evals/fixtures/judge-skill")
+	if judgeAgent.skills[0].Source != wantFirst {
+		t.Fatalf("first judge skill source = %q, want %q", judgeAgent.skills[0].Source, wantFirst)
+	}
+	if judgeAgent.skills[0].Target != "~/.claude/skills/judge-skill" {
+		t.Fatalf("first judge skill target = %q", judgeAgent.skills[0].Target)
+	}
+	if len(result.JudgeSkills) != 2 || result.JudgeSkills[0].Path != "evals/fixtures/judge-skill" {
+		t.Fatalf("result JudgeSkills = %#v", result.JudgeSkills)
+	}
+	if len(judgeAgent.lastMessages) != 1 || !strings.Contains(judgeAgent.lastMessages[0].Content, "Mandatory Judge Skill Use") {
+		t.Fatalf("judge prompt missing mandatory skill use: %#v", judgeAgent.lastMessages)
+	}
+}
+
+func TestExecuteCase_JudgeSkillInstallFailureReturnsError(t *testing.T) {
+	judgeAgent := &mockAgent{
+		name:     "judge",
+		skillErr: errors.New("install unsupported"),
+		output:   `{"results":[{"criterion":"uses rubric","passed":true,"evidence":"rubric applied"}]}`,
+	}
+	runAgent := &mockAgent{name: "run", output: "main response"}
+
+	origDetect := agentDetectWithInitParams
+	agentDetectWithInitParams = func(_ string, _ credential.AgentInitParams, _ map[string]string) (agent.Agent, error) {
+		return judgeAgent, nil
+	}
+	defer func() { agentDetectWithInitParams = origDetect }()
+
+	e := newTestEvaluator(EvalOptions{
+		SkillDir: t.TempDir(),
+		Agent:    runAgent,
+		EvalCfg: &config.EvalConfig{
+			Engine: config.EngineConfig{Name: "mock"},
+			Judge: config.JudgeConfig{
+				Type:     "agent_judge",
+				Model:    "judge-model",
+				Criteria: []string{"uses rubric"},
+				Skills:   []config.SkillRef{{Source: "local_path", Path: "evals/fixtures/judge-skill"}},
+			},
+		},
+	})
+
+	result := e.executeCase(
+		context.Background(),
+		&config.CaseConfig{ID: "case-judge-skill-error", Input: config.Input{Prompt: "hello"}},
+		"with_skill",
+		&mockRuntime{workspace: t.TempDir()},
+		runAgent,
+	)
+
+	if result.Status != judge.StatusError {
+		t.Fatalf("status = %s, want ERROR", result.Status)
+	}
+	if result.Error == nil || !strings.Contains(result.Error.Error(), `judge.skills[0].path="evals/fixtures/judge-skill"`) {
+		t.Fatalf("error = %v, want judge skill path context", result.Error)
+	}
+	if got := judgeAgent.runCall.Load(); got != 0 {
+		t.Fatalf("judge Run calls = %d, want 0 after install failure", got)
 	}
 }
 

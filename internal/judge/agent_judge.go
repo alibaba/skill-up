@@ -70,13 +70,20 @@ type AgentJudge struct {
 	// TimeoutSeconds bounds a single Evaluate call. <=0 means no judge-level
 	// deadline; the parent context still applies.
 	TimeoutSeconds int
+
+	// JudgeSkills are installed judge Skills that must guide grading.
+	JudgeSkills []SkillInfo
 }
 
 // NewAgentJudge creates an AgentJudge with sensible defaults.
-func NewAgentJudge(ag agent.Agent, rt runtime.Runtime, model string, criteria []string, passThreshold *float64, timeoutSeconds int) *AgentJudge {
+func NewAgentJudge(ag agent.Agent, rt runtime.Runtime, model string, criteria []string, passThreshold *float64, timeoutSeconds int, judgeSkills ...[]SkillInfo) *AgentJudge {
 	threshold := DefaultPassThreshold
 	if passThreshold != nil {
 		threshold = *passThreshold
+	}
+	var skills []SkillInfo
+	if len(judgeSkills) > 0 {
+		skills = judgeSkills[0]
 	}
 	return &AgentJudge{
 		Agent:          ag,
@@ -85,6 +92,7 @@ func NewAgentJudge(ag agent.Agent, rt runtime.Runtime, model string, criteria []
 		Criteria:       criteria,
 		PassThreshold:  threshold,
 		TimeoutSeconds: timeoutSeconds,
+		JudgeSkills:    skills,
 	}
 }
 
@@ -102,7 +110,7 @@ func (j *AgentJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 	}
 
 	// Build the judge prompt.
-	prompt := buildJudgePrompt(ctx, j.Criteria, in.FinalMessage, in.WorkspaceDiff, in.Transcript)
+	prompt := buildJudgePromptWithSkills(ctx, j.Criteria, in.FinalMessage, in.WorkspaceDiff, in.Transcript, j.JudgeSkills)
 	messages := []transcript.Message{{Role: transcript.RoleUser, Content: prompt, Turn: 1}}
 
 	// Get criterion results via agent.Agent. Snapshot parentCtx.Err() the
@@ -398,6 +406,10 @@ func canRecoverAgentJudgeResult(err error, sessionResult *agent.SessionResult) b
 
 // buildJudgePrompt constructs the system + user prompt for the judge agent.
 func buildJudgePrompt(ctx context.Context, criteria []string, finalMessage, workspaceDiff string, transcriptData transcript.Transcript) string {
+	return buildJudgePromptWithSkills(ctx, criteria, finalMessage, workspaceDiff, transcriptData, nil)
+}
+
+func buildJudgePromptWithSkills(ctx context.Context, criteria []string, finalMessage, workspaceDiff string, transcriptData transcript.Transcript, judgeSkills []SkillInfo) string {
 	var sb strings.Builder
 
 	sb.WriteString("You are an expert evaluator for an AI agent skill evaluation.\n")
@@ -408,6 +420,22 @@ func buildJudgePrompt(ctx context.Context, criteria []string, finalMessage, work
 	sb.WriteString("You MUST NOT pass a criterion without specific evidence.\n\n")
 	sb.WriteString("IMPORTANT: Your response MUST be valid JSON. If any string value contains double quotes, ")
 	sb.WriteString("you MUST escape them with a backslash (e.g. \\\"example\\\"). Do NOT use unescaped double quotes inside string values.\n\n")
+
+	if len(judgeSkills) > 0 {
+		sb.WriteString("## Mandatory Judge Skill Use\n")
+		sb.WriteString("You MUST use the installed judge Skill(s) listed below as the authoritative grading rubric before evaluating the case. ")
+		sb.WriteString("Do not grade this case using only the inline criteria. The inline criteria identify result dimensions, while the judge Skill(s) define detailed rubric, constraints, and evidence rules. ")
+		sb.WriteString("If an inline criterion conflicts with a judge Skill, follow the judge Skill unless the criterion defines a more specific case-level acceptance condition.\n\n")
+		sb.WriteString("Installed judge Skill(s):\n")
+		for _, skill := range judgeSkills {
+			fmt.Fprintf(&sb, "- %s", skillIdentifier(skill))
+			if skill.Target != "" {
+				fmt.Fprintf(&sb, " (target: %s)", skill.Target)
+			}
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n")
+	}
 
 	sb.WriteString("## Criteria\n")
 	for i, c := range criteria {
@@ -454,4 +482,14 @@ func buildJudgePrompt(ctx context.Context, criteria []string, finalMessage, work
 	sb.WriteString("```\n")
 
 	return sb.String()
+}
+
+func skillIdentifier(skill SkillInfo) string {
+	if skill.Path != "" {
+		return skill.Path
+	}
+	if skill.Name != "" {
+		return skill.Name
+	}
+	return skill.Source
 }

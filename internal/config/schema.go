@@ -186,10 +186,11 @@ type RetryPolicy struct {
 
 // JudgeConfig describes the evaluation strategy.
 type JudgeConfig struct {
-	Type       string   `json:"type"                     yaml:"type"` // rule_based, script, agent_judge
-	ScriptPath string   `json:"script_path,omitempty"    yaml:"script_path,omitempty"`
-	Model      string   `json:"model,omitempty"          yaml:"model,omitempty"`
-	Criteria   []string `json:"criteria,omitempty"       yaml:"criteria,omitempty"`
+	Type       string     `json:"type"                     yaml:"type"` // rule_based, script, agent_judge
+	ScriptPath string     `json:"script_path,omitempty"    yaml:"script_path,omitempty"`
+	Model      string     `json:"model,omitempty"          yaml:"model,omitempty"`
+	Criteria   []string   `json:"criteria,omitempty"       yaml:"criteria,omitempty"`
+	Skills     []SkillRef `json:"skills,omitempty"         yaml:"skills,omitempty"`
 	// PassThreshold is the minimum pass rate for agent_judge.
 	// Nil means "not configured", so the judge layer applies its default of 0.7.
 	// When set explicitly, the value must be in the inclusive range [0.0, 1.0].

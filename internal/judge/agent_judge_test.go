@@ -344,6 +344,63 @@ func TestBuildJudgePrompt_ContainsAllParts(t *testing.T) {
 	}
 }
 
+func TestBuildJudgePromptWithSkills_RequiresJudgeSkillUse(t *testing.T) {
+	prompt := buildJudgePromptWithSkills(
+		context.Background(),
+		[]string{"criterion A"},
+		"Agent final message",
+		"",
+		nil,
+		[]SkillInfo{
+			{Source: "local_path", Path: "evals/fixtures/judge-skill", Target: "~/.claude/skills/judge-skill", Name: "judge-skill"},
+			{Source: "local_path", Path: "evals/fixtures/security-judge", Name: "security-judge"},
+		},
+	)
+
+	checks := []string{
+		"## Mandatory Judge Skill Use",
+		"You MUST use the installed judge Skill(s)",
+		"evals/fixtures/judge-skill",
+		"target: ~/.claude/skills/judge-skill",
+		"evals/fixtures/security-judge",
+	}
+	for _, c := range checks {
+		if !strings.Contains(prompt, c) {
+			t.Fatalf("prompt missing %q:\n%s", c, prompt)
+		}
+	}
+	if strings.Contains(prompt, "SKILL.md") || strings.Contains(prompt, "references/") {
+		t.Fatalf("prompt should list identifiers only, got:\n%s", prompt)
+	}
+}
+
+func TestAgentJudge_EvaluatePassesJudgeSkillsInPrompt(t *testing.T) {
+	output := buildMockAgentOutput([]CriterionResult{
+		{Criterion: "criterion A", Passed: true, Evidence: "used rubric"},
+	})
+	ag := &mockJudgeTestAgent{output: output}
+	rt := &mockJudgeTestRuntime{}
+
+	j := NewAgentJudge(
+		ag,
+		rt,
+		"test-model",
+		[]string{"criterion A"},
+		nil,
+		0,
+		[]SkillInfo{{Source: "local_path", Path: "evals/fixtures/judge-skill", Name: "judge-skill"}},
+	)
+	_, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
+	assertNoError(t, err)
+
+	if len(ag.lastMessages) != 1 {
+		t.Fatalf("lastMessages length = %d, want 1", len(ag.lastMessages))
+	}
+	if !strings.Contains(ag.lastMessages[0].Content, "evals/fixtures/judge-skill") {
+		t.Fatalf("judge prompt missing skill path:\n%s", ag.lastMessages[0].Content)
+	}
+}
+
 func TestBuildJudgePrompt_TranscriptMarshalFailure_LogsAndOmitsErrorFromPrompt(t *testing.T) {
 	var prompt string
 	captured := captureLogOutput(t, func() {

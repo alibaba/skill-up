@@ -35,6 +35,8 @@ var (
 	agentDetectWithInitParams = agent.DetectAgentWithInitParams
 )
 
+const judgeTypeAgentJudge = "agent_judge"
+
 // ProgressObserver receives progress notifications during evaluation.
 // Implementations must be safe for concurrent use.
 type ProgressObserver interface {
@@ -88,6 +90,9 @@ type EvalResult struct {
 
 	// Grading is the judge evaluation result (nil if judge was skipped).
 	Grading *judge.Result
+
+	// JudgeSkills records judge Skills configured for agent_judge.
+	JudgeSkills []judge.SkillInfo
 
 	// ExpectResult is the expect pre-check result (nil if no expect block).
 	ExpectResult *judge.ExpectResult
@@ -600,6 +605,9 @@ func (e *defaultEvaluator) runJudgePhaseWithSpan(
 
 	logging.DebugContextf(ctx, "Judge: case %s using %s", caseCfg.ID, judgeLabel(judgeCfg))
 	logging.DebugContextf(ctx, "Judge: case %s generated_files=%d workspace_diff=%t", caseCfg.ID, len(judgeInput.GeneratedFiles), judgeInput.WorkspaceDiff != "")
+	if judgeCfg.Type == judgeTypeAgentJudge {
+		result.JudgeSkills = judge.SkillInfosFromRefs(judgeCfg.Skills)
+	}
 
 	j, err := e.newJudgeForCase(ctx, rt, judgeCfg, runAgent)
 	if err != nil {
@@ -615,7 +623,7 @@ func (e *defaultEvaluator) runJudgePhaseWithSpan(
 		logging.DebugContextf(ctx, "Judge: case %s has no judge configured, default PASS", caseCfg.ID)
 		return *result
 	}
-	if judgeCfg.Type == "agent_judge" {
+	if judgeCfg.Type == judgeTypeAgentJudge {
 		judgeInput.ArtifactDir = e.prepareOutputDir(ctx, configName, caseCfg.ID, "judge/run")
 	}
 
@@ -670,6 +678,9 @@ func (e *defaultEvaluator) newJudgeForCase(
 	if err != nil {
 		return nil, err
 	}
+	if err := e.installJudgeSkills(ctx, rt, judgeCfg, judgeAgent); err != nil {
+		return nil, err
+	}
 
 	j, err := judge.NewJudge(judgeCfg, judgeAgent, rt)
 	if err != nil {
@@ -679,8 +690,33 @@ func (e *defaultEvaluator) newJudgeForCase(
 	return j, nil
 }
 
+func (e *defaultEvaluator) installJudgeSkills(ctx context.Context, rt runtime.Runtime, judgeCfg config.JudgeConfig, judgeAgent agent.Agent) error {
+	if judgeCfg.Type != judgeTypeAgentJudge || len(judgeCfg.Skills) == 0 {
+		return nil
+	}
+	skillDir := e.resolvedSkillDir()
+	if strings.TrimSpace(skillDir) == "" {
+		return errors.New("judge.skills requires a loader or skill directory to resolve local paths")
+	}
+	for i, ref := range judgeCfg.Skills {
+		skillCfg := resolveSkillConfig(skillDir, ref)
+		if err := judgeAgent.InstallSkill(ctx, rt, skillCfg); err != nil {
+			return fmt.Errorf("failed to install judge skill judge.skills[%d].path=%q: %w", i, ref.Path, err)
+		}
+		logging.DebugContextf(ctx, "Evaluator: judge skill installed: %s", filepath.Base(skillCfg.Source))
+	}
+	return nil
+}
+
+func (e *defaultEvaluator) resolvedSkillDir() string {
+	if e.loader != nil {
+		return e.loader.SkillDir()
+	}
+	return e.skillDir
+}
+
 func (e *defaultEvaluator) resolveJudgeAgent(ctx context.Context, judgeCfg config.JudgeConfig, runAgent agent.Agent) (agent.Agent, error) {
-	if judgeCfg.Type != "agent_judge" {
+	if judgeCfg.Type != judgeTypeAgentJudge {
 		return runAgent, nil
 	}
 
@@ -886,16 +922,11 @@ func (e *defaultEvaluator) setupCaseEnvironment(ctx context.Context, rt runtime.
 
 	if configName != "without_skill" && e.loader != nil {
 		for _, skillRef := range e.evalCfg.Skills {
-			skillSourceDir := e.loader.SkillDir()
-			skillSource := filepath.Join(skillSourceDir, skillRef.Path)
-			skillCfg := runtime.SkillConfig{
-				Source: skillSource,
-				Target: skillRef.Target,
-			}
+			skillCfg := resolveSkillConfig(e.loader.SkillDir(), skillRef)
 			if err := ag.InstallSkill(ctx, rt, skillCfg); err != nil {
 				return fmt.Errorf("failed to install skill %s: %w", skillRef.Path, err)
 			}
-			logging.DebugContextf(ctx, "Evaluator: skill installed: %s", filepath.Base(skillSource))
+			logging.DebugContextf(ctx, "Evaluator: skill installed: %s", filepath.Base(skillCfg.Source))
 		}
 	}
 
@@ -907,6 +938,17 @@ func (e *defaultEvaluator) setupCaseEnvironment(ctx context.Context, rt runtime.
 	}
 
 	return nil
+}
+
+func resolveSkillConfig(skillDir string, ref config.SkillRef) runtime.SkillConfig {
+	source := ref.Path
+	if source != "" && !filepath.IsAbs(source) {
+		source = filepath.Join(skillDir, source)
+	}
+	return runtime.SkillConfig{
+		Source: source,
+		Target: ref.Target,
+	}
 }
 
 func (e *defaultEvaluator) provisionMCPConfig() (runtime.MCPConfig, map[string]string, error) {
@@ -963,7 +1005,7 @@ func normalizeSessionResult(sessionResult *agent.SessionResult) *agent.SessionRe
 }
 
 func judgeNeedsWorkspaceDiff(cfg config.JudgeConfig) bool {
-	return cfg.Type == "agent_judge"
+	return cfg.Type == judgeTypeAgentJudge
 }
 
 func judgeLabel(cfg config.JudgeConfig) string {
