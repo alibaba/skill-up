@@ -41,7 +41,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: read
       packages: write
@@ -93,5 +93,5 @@ jobs:
           platforms: linux/amd64
           push: ${{ steps.meta.outputs.push == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Avoid the GitHub Actions Cache backend here: transient GHA cache
+          # outages fail the whole image build after the registry push starts.

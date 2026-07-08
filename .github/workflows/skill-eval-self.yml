@@ -63,7 +63,7 @@ jobs:
   dogfood:
     name: Eval skill-upper (${{ matrix.engine }})
     needs: image
-    runs-on: ubuntu-latest      # Docker container action — Linux only
+    runs-on: self-hosted      # Docker container action — Linux only
     strategy:
       fail-fast: false
       matrix:

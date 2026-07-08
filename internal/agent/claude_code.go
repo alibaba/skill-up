@@ -151,6 +151,9 @@ func (a *ClaudeCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions,
 
 	result, err := rt.Exec(ctx, cmd, opts)
 	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result)
+	if sessionResult != nil {
+		sessionResult.SessionID = sessionID
+	}
 	if authMsg, ok := providerAuthFailureSignal(result, sessionResult); ok {
 		if sessionResult != nil && sessionResult.ExitCode == 0 {
 			sessionResult.ExitCode = 1
@@ -289,6 +292,17 @@ func buildClaudePrintCmd(sessionID, model, instruction string) string {
 	return cmd
 }
 
+// buildClaudeResumeCmd constructs a claude CLI command that resumes an existing
+// session identified by sessionID using --resume and sends a new prompt.
+func buildClaudeResumeCmd(sessionID, model, instruction string) string {
+	cmd := "claude --settings " + shellQuote(`{"disableAllHooks":true}`) + " --resume " + sessionID + " -p --permission-mode=bypassPermissions"
+	if model != "" {
+		cmd += " --model " + shellQuote(model)
+	}
+	cmd += " " + shellQuote(instruction)
+	return cmd
+}
+
 type claudePrintJSONResult struct {
 	Type      string `json:"type"`
 	Subtype   string `json:"subtype"`
@@ -401,6 +415,98 @@ func (a *ClaudeCodeAgent) buildSessionResult(ctx context.Context, rt Runtime, op
 			GeneratedFiles: generatedFiles,
 		},
 	}
+}
+
+// RunTurn resumes an existing Claude Code session and sends a single user
+// message. If sessionID is empty, it starts a new session (first turn).
+// This implements the SessionResumer interface for multi-turn evaluation.
+func (a *ClaudeCodeAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, message transcript.Message, sessionID string) (*SessionResult, error) {
+	if sessionID == "" {
+		// First turn — delegate to Run which creates a new session.
+		return a.Run(ctx, rt, opts, []transcript.Message{message})
+	}
+
+	if err := requireBashOnWindowsHost(rt); err != nil {
+		return nil, fmt.Errorf("%s: %w", a.Name(), err)
+	}
+	start := time.Now()
+
+	envVars := a.claudeRunEnvVars()
+	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(map[string]string{
+		"claude_code.session_id": sessionID,
+	}))
+	ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, opts.Env)
+
+	instruction := message.Content
+	if err := ensureNodeRuntime(ctx, rt, "claude", opts); err != nil {
+		return &SessionResult{
+			Engine:     a.Name(),
+			SessionID:  sessionID,
+			ExitCode:   1,
+			DurationMs: time.Since(start).Milliseconds(),
+			Artifacts:  &SessionArtifacts{},
+		}, err
+	}
+	cmd := buildClaudeResumeCmd(sessionID, a.effectiveModelName(ctx), instruction)
+
+	result, err := rt.Exec(ctx, cmd, opts)
+	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result)
+	if sessionResult != nil {
+		sessionResult.SessionID = sessionID
+	}
+	return a.handleClaudeRunResult(sessionResult, result, err, sessionID, start)
+}
+
+// claudeRunEnvVars builds the environment variable map for Claude Code runs.
+func (a *ClaudeCodeAgent) claudeRunEnvVars() map[string]string {
+	envVars := a.credentialEnvVars(credential.EnvAnthropicAPIKey, credential.EnvAnthropicBaseURL)
+	if a.Cfg.APIKey != "" {
+		envVars[credential.EnvAnthropicAuthToken] = a.Cfg.APIKey
+	}
+	envVars["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+	envVars["IS_SANDBOX"] = "1"
+	if observability.TracingEnabled() {
+		envVars["CLAUDE_CODE_ENABLE_TELEMETRY"] = "1"
+		envVars["CLAUDE_CODE_ENHANCED_TELEMETRY_BETA"] = "1"
+		envVars["ENABLE_ENHANCED_TELEMETRY_BETA"] = "1"
+	}
+	return envVars
+}
+
+// handleClaudeRunResult checks provider auth/rate-limit signals and execution
+// errors, returning the appropriate SessionResult and error.
+func (a *ClaudeCodeAgent) handleClaudeRunResult(sessionResult *SessionResult, result ExecResult, err error, sessionID string, start time.Time) (*SessionResult, error) {
+	if authMsg, ok := providerAuthFailureSignal(result, sessionResult); ok {
+		if sessionResult != nil && sessionResult.ExitCode == 0 {
+			sessionResult.ExitCode = 1
+		}
+		return sessionResult, fmt.Errorf("claude-code authentication failed: %s", authMsg)
+	}
+	if rateLimitMsg, ok := providerRateLimitSignal(result, sessionResult); ok {
+		if sessionResult != nil && sessionResult.ExitCode == 0 {
+			sessionResult.ExitCode = 1
+		}
+		return sessionResult, fmt.Errorf("claude-code provider rate limit: %s", rateLimitMsg)
+	}
+	if err != nil {
+		if sessionResult == nil {
+			sessionResult = &SessionResult{
+				Engine:     a.Name(),
+				SessionID:  sessionID,
+				ExitCode:   1,
+				DurationMs: time.Since(start).Milliseconds(),
+				Stderr:     result.Stderr,
+				Artifacts:  &SessionArtifacts{},
+			}
+		}
+		return sessionResult, fmt.Errorf("claude-code resume failed: %w", err)
+	}
+
+	if result.ExitCode != 0 {
+		return sessionResult, fmt.Errorf("claude-code resume failed (exit %d): %s", result.ExitCode, result.Stderr)
+	}
+
+	return sessionResult, nil
 }
 
 func buildClaudeTextSessionResult(engine, instruction string, start time.Time, result ExecResult) *SessionResult {

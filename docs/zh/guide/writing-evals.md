@@ -447,6 +447,118 @@ context:
 
 ---
 
+## 多轮对话
+
+当评测需要多次顺序交互时（例如迭代优化、阶段门控工作流、澄清循环），使用
+`input.turns` 代替 `input.prompt`。
+
+### 何时使用 `input.prompt` vs `input.turns`
+
+| 场景 | 使用 |
+|------|------|
+| 单条指令，评判最终输出 | `input.prompt` |
+| 多步骤工作流，含轮间门控 | `input.turns` |
+| 迭代优化（如"改善命名"） | `input.turns` |
+| Agent 需在对话中拒绝无效请求 | `input.turns` |
+
+### 基本多轮用例
+
+```yaml
+input:
+  turns:
+    - role: user
+      content: "用 Go 实现一个二分查找函数。"
+      post_condition:
+        must_contain_all: ["func", "binary"]
+        on_fail: fail
+    - role: user
+      content: "为刚才写的函数添加单元测试。"
+      post_condition:
+        must_contain_any: ["Test", "t.Run", "testing"]
+        on_fail: fail
+```
+
+### `post_condition` — 轮间门控
+
+`post_condition` 在每轮结束后检查 Agent 的响应。它是**门控**而非 judge 的替代品，
+用于确保对话在发送下一轮之前保持正轨。
+
+字段说明：
+
+- `must_contain_all`：所有字符串必须出现在响应中。
+- `must_contain_any`：至少一个字符串必须出现。
+- `must_not_contain`：所列字符串均不能出现。
+- `on_fail`：条件失败时的行为：
+  - `fail`（默认）：立即将用例标记为 FAIL。
+  - `skip_remaining`：跳过后续所有轮次；最终结果取决于 judge 评判。
+
+### `capture` — 模板变量
+
+从轮次响应中捕获值，在后续轮次中使用：
+
+```yaml
+input:
+  turns:
+    - role: user
+      content: "生成一个会话令牌。"
+      capture:
+        - variable: token
+          pattern: "token[=: ]+(?P<value>[A-Za-z0-9]+)"
+    - role: user
+      content: "验证令牌 {{token}} 是否有效。"
+```
+
+捕获语义：
+
+- 优先使用命名分组 `(?P<value>...)`；若无命名组，则允许恰好一个匿名捕获组。
+- 提取器类型：`pattern`（正则）或 `jsonpath` — 必须指定且仅指定一个。
+- 未匹配或空值 → 用例进入 ERROR 状态。
+- 变量作用域仅限当前用例执行（不跨用例、重试或基线变体共享）。
+- 引用未知变量会在调用 Agent 之前使轮次失败。
+
+### Agent 支持矩阵
+
+| 引擎 | 多轮支持 | 机制 |
+|------|---------|------|
+| `claude_code` | 是 | `--resume` 标志 + 会话 ID |
+| `qodercli` | 是 | `-r <session-id>` 标志 |
+| `codex` | 是 | `codex resume <thread-id>` 命令 |
+| `qwen_code` | 尚不支持 | 回退为批量模式 |
+| `custom` | 尚不支持 | 回退为批量模式 |
+
+当 Agent 不支持会话恢复时，所有轮次内容会拼接为单条 prompt 发送，并记录警告日志。
+
+### 按轮次 Judge 断言
+
+规则型 judge 支持按轮次断言：
+
+```yaml
+judge:
+  type: rule_based
+  success:
+    - turn_response_contains:
+        turn: 1
+        contains_all: ["binary_search"]
+    - turn_response_not_contains:
+        turn: 2
+        not_contains: ["TODO", "FIXME"]
+    - tool_called_in_turn:
+        turn: 1
+        name: write_file
+        args:
+          path: "search.go"
+    - tool_not_called_in_turn:
+        turn: 2
+        name: delete_file
+```
+
+失败行为：
+
+- 不存在的轮次（未执行） → 断言失败。
+- 被跳过/失败/出错的轮次 → 断言失败（仅 "completed" 状态的轮次可被断言）。
+
+---
+
 ## 评估策略
 
 skill-up 的评估分为两层：**expect**（门槛检查）和 **judge**（质量评估）。

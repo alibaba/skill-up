@@ -82,6 +82,10 @@ type EvalResult struct {
 	// TurnsTotal is the total number of turns defined in the case.
 	TurnsTotal int
 
+	// TurnResults holds per-turn outcomes for multi-turn evaluations.
+	// Nil for single-turn cases.
+	TurnResults []TurnResult
+
 	// Grading is the judge evaluation result (nil if judge was skipped).
 	Grading *judge.Result
 
@@ -381,6 +385,31 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 
 	judgeCfg := judge.MergeJudgeConfig(e.evalCfg.Judge, caseCfg.Judge)
 
+	// Multi-turn branch: delegate to dedicated engine when the case defines
+	// input.turns AND the agent supports session resumption. Agents that do
+	// not implement SessionResumer fall through to the existing single-shot
+	// path (all messages in one Run call), with an explicit warning.
+	if len(caseCfg.Input.Turns) > 0 {
+		if _, ok := runAgent.(agent.SessionResumer); ok {
+			agentExecOpts := agent.ExecOptions{
+				ArtifactDir: e.prepareOutputDir(ctx, configName, caseCfg.ID, "agent/run"),
+				TimeoutSec:  caseTimeoutSeconds(e.evalCfg, caseCfg),
+				AgentMetadata: &runtime.AgentMetadata{
+					CaseID:   caseCfg.ID,
+					Variant:  configName,
+					MaxTurns: caseMaxTurns(e.evalCfg, caseCfg),
+				},
+			}
+			return e.executeMultiTurnCase(ctx, rt, caseCfg, configName, runAgent, agentExecOpts, startTime, judgeCfg, &result)
+		}
+		logging.WarnContextf(
+			ctx,
+			"Evaluator: case %s defines input.turns but agent %s does not support session resumption; falling back to a single batch prompt",
+			caseCfg.ID,
+			runAgent.Name(),
+		)
+	}
+
 	var cleanupArtifacts func()
 	finalizeArtifacts := func(*agent.SessionResult) {}
 	if judgeNeedsWorkspaceDiff(judgeCfg) {
@@ -477,6 +506,7 @@ func (e *defaultEvaluator) evaluateCaseSession(
 		WorkspaceDiff:  sessionWorkspaceDiff(sessionResult),
 		GeneratedFiles: sessionGeneratedFiles(sessionResult),
 		SessionResult:  sessionResult,
+		TurnResults:    toJudgeTurnResults(result.TurnResults),
 	}
 
 	if failed := e.runExpectPreCheck(ctx, caseCfg, configName, judgeInput, turnsTotal, result); failed {
@@ -990,6 +1020,25 @@ func sessionGeneratedFiles(sessionResult *agent.SessionResult) []string {
 		return nil
 	}
 	return sessionResult.Artifacts.GeneratedFiles
+}
+
+// toJudgeTurnResults converts evaluator TurnResults to judge InputTurnResults.
+func toJudgeTurnResults(turns []TurnResult) []judge.InputTurnResult {
+	if len(turns) == 0 {
+		return nil
+	}
+	out := make([]judge.InputTurnResult, len(turns))
+	for i, tr := range turns {
+		out[i] = judge.InputTurnResult{
+			TurnNumber: tr.TurnNumber,
+			Content:    tr.Content,
+			Response:   tr.Response,
+			Transcript: tr.Transcript,
+			Status:     string(tr.Status),
+			Reason:     tr.Reason,
+		}
+	}
+	return out
 }
 
 func prepareWorkspaceDiffState(ctx context.Context, rt runtime.Runtime, gitCtx *config.GitContext) (workspaceDiffState, error) {
