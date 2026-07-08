@@ -2186,6 +2186,8 @@ func TestNormalizeSessionResult_ReturnsCopy(t *testing.T) {
 
 func initGitRepo(t *testing.T, dir string) {
 	t.Helper()
+	requireGit(t)
+
 	commands := [][]string{
 		{"git", "init", "-q"},
 		{"git", "config", "user.name", "skill-up-test"},
