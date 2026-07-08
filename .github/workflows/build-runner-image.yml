@@ -93,9 +93,5 @@ jobs:
           platforms: linux/amd64
           push: ${{ steps.meta.outputs.push == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
-          # Import cache always (a miss is harmless); only *export* cache when
-          # we're pushing — this avoids hitting the GHA cache service on build-
-          # only runs (fork PRs), where a temporary service outage (400 HTML
-          # instead of JSON) would crash buildx.
-          cache-from: type=gha,scope=skill-up-runner
-          cache-to: ${{ steps.meta.outputs.push == 'true' && 'type=gha,scope=skill-up-runner,mode=max' || '' }}
+          # Avoid the GitHub Actions Cache backend here: transient GHA cache
+          # outages fail the whole image build after the registry push starts.
