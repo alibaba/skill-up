@@ -17,9 +17,31 @@ export PATH
 
 set -e
 
+restore_workspace_permissions() {
+  local workspace="${GITHUB_WORKSPACE:-}"
+  [ -n "$workspace" ] || return 0
+
+  local report_dir="$workspace/skill-up-workspace"
+  [ -e "$report_dir" ] || return 0
+
+  # Docker actions run as root and write into the host-mounted workspace.
+  # Hand generated reports back to the runner user so the next checkout can
+  # clean the workspace on self-hosted runners.
+  local owner
+  owner="$(stat -c '%u:%g' "$workspace" 2>/dev/null || true)"
+  if [ -n "$owner" ]; then
+    chown -R "$owner" "$report_dir" 2>/dev/null || true
+  fi
+  chmod -R u+rwX,go+rX "$report_dir" 2>/dev/null || true
+}
+
 for c in python3 python /usr/bin/python3 /usr/local/bin/python3; do
   if command -v "$c" >/dev/null 2>&1 || [ -x "$c" ]; then
-    exec "$c" "$DIR/main.py" "$@"
+    set +e
+    "$c" "$DIR/main.py" "$@"
+    status=$?
+    restore_workspace_permissions
+    exit "$status"
   fi
 done
 

@@ -15,7 +15,7 @@ permissions:
 jobs:
   e2e-windows:
     name: E2E (none runtime, Windows)
-    runs-on: windows-latest
+    runs-on: self-hosted
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -42,7 +42,7 @@ jobs:
 
   e2e:
     name: E2E (none runtime)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -136,7 +136,7 @@ jobs:
 
   e2e-opensandbox:
     name: E2E (opensandbox runtime)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -240,7 +240,7 @@ jobs:
 
   e2e-docker:
     name: E2E (docker runtime)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -263,7 +263,7 @@ jobs:
 
   e2e-docker-full:
     name: E2E (docker runtime, full LLM)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -311,7 +311,7 @@ jobs:
 
   release-dryrun:
     name: GoReleaser Check
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

@@ -46,7 +46,7 @@ jobs:
   dogfood:
     name: Eval skill-upper (${{ matrix.engine }})
     needs: image
-    runs-on: ubuntu-latest      # Docker container action — Linux only
+    runs-on: self-hosted      # Docker container action — Linux only
     strategy:
       fail-fast: false
       matrix:
@@ -133,11 +133,15 @@ jobs:
           # resolves cases (evals/cases/*.yaml) relative to the skill root.
           skill-target: skills/skill-upper
 
-      - name: Make reports readable
-        # The Docker container action runs as root, so report files land
-        # root-owned; relax perms before the runner-user upload step reads them.
+      - name: Restore report ownership
+        # The Docker container action runs as root. The action entrypoint fixes
+        # this on exit; keep a host-side fallback so artifact upload and the
+        # next checkout can read and remove generated reports on self-hosted
+        # runners.
         if: always() && steps.secrets.outputs.available == 'true'
-        run: sudo chmod -R a+rX "$GITHUB_WORKSPACE/skill-up-workspace" || true
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE/skill-up-workspace" || true
+          chmod -R u+rwX,go+rX "$GITHUB_WORKSPACE/skill-up-workspace" || true
 
       - name: Upload eval report
         if: always() && steps.secrets.outputs.available == 'true'
