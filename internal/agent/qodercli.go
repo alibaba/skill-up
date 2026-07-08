@@ -76,7 +76,22 @@ func (a *QoderCLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 	start := time.Now()
 
 	instruction := BuildInstructionFromMessages(messages)
-	cmd := buildQoderRunCmd(instruction, a.effectiveModelName(ctx))
+	cmd, promptDelivery, err := deliverPrompt(ctx, rt, opts, instruction, promptCommandBuilder{
+		Inline: func(prompt string) string {
+			return buildQoderRunCmd(prompt, a.effectiveModelName(ctx))
+		},
+		StdinFile: func(path string) string {
+			return buildQoderRunStdinCmd(path, a.effectiveModelName(ctx))
+		},
+	})
+	if err != nil {
+		return &SessionResult{
+			Engine:     a.Name(),
+			ExitCode:   1,
+			DurationMs: time.Since(start).Milliseconds(),
+			Artifacts:  &SessionArtifacts{},
+		}, err
+	}
 
 	envVars := a.credentialEnvVars("", "")
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))
@@ -84,6 +99,9 @@ func (a *QoderCLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 
 	result, err := rt.Exec(ctx, cmd, opts)
 	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result)
+	if sessionResult != nil {
+		sessionResult.PromptDelivery = promptDelivery
+	}
 	if err != nil {
 		if sessionResult == nil {
 			sessionResult = &SessionResult{
@@ -125,6 +143,16 @@ func buildQoderRunCmd(instruction, model string) string {
 		cmd += " --model " + shellQuote(model)
 	}
 	cmd += " -p " + shellQuote(instruction)
+
+	return cmd
+}
+
+func buildQoderRunStdinCmd(promptPath, model string) string {
+	cmd := "cat " + shellQuote(promptPath) + " | qodercli --permission-mode=bypass_permissions"
+	if model != "" {
+		cmd += " --model " + shellQuote(model)
+	}
+	cmd += " -p -"
 
 	return cmd
 }

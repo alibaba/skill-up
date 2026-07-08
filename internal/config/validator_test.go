@@ -821,6 +821,81 @@ func TestValidator_ValidateCaseConfig(t *testing.T) {
 			wantErr: true,
 			errMsg:  "judge.timeout_seconds must be non-negative",
 		},
+		{
+			name: "case-level agent_judge with valid context",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Prompt: "Say hello",
+				},
+				Judge: JudgeConfig{
+					Type:     "agent_judge",
+					Model:    "test-model",
+					Criteria: []string{"criterion"},
+					Context: &JudgeContextConfig{
+						Profile:        "minimal",
+						FinalMessage:   "truncate",
+						Transcript:     "omit",
+						WorkspaceDiff:  "file_ref",
+						GeneratedFiles: "index",
+						Limits:         &JudgeContextLimits{MaxBytes: 1024},
+						Attachments:    []JudgeContextAttachment{{Path: "fixtures/result.json"}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "case-level agent_judge with invalid context profile",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Prompt: "Say hello",
+				},
+				Judge: JudgeConfig{
+					Type:     "agent_judge",
+					Model:    "test-model",
+					Criteria: []string{"criterion"},
+					Context:  &JudgeContextConfig{Profile: "legacy"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.context.profile must be one of: minimal, standard",
+		},
+		{
+			name: "case-level agent_judge with invalid context mode",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Prompt: "Say hello",
+				},
+				Judge: JudgeConfig{
+					Type:     "agent_judge",
+					Model:    "test-model",
+					Criteria: []string{"criterion"},
+					Context:  &JudgeContextConfig{Transcript: "inline"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.context.transcript must be one of: include, omit, truncate, file_ref",
+		},
+		{
+			name: "case-level agent_judge with empty attachment path",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Prompt: "Say hello",
+				},
+				Judge: JudgeConfig{
+					Type:     "agent_judge",
+					Model:    "test-model",
+					Criteria: []string{"criterion"},
+					Context:  &JudgeContextConfig{Attachments: []JudgeContextAttachment{{}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.context.attachments[0].path must not be empty",
+		},
 	}
 
 	for _, tt := range tests {

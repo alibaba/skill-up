@@ -142,6 +142,26 @@ func TestNewJudge_AgentJudge_PropagatesTimeoutSeconds(t *testing.T) {
 	}
 }
 
+func TestNewJudge_AgentJudge_PropagatesContext(t *testing.T) {
+	cfg := config.JudgeConfig{
+		Type:     "agent_judge",
+		Model:    "test-model",
+		Criteria: []string{"c1"},
+		Context:  &config.JudgeContextConfig{Profile: "minimal"},
+	}
+	j, err := NewJudge(cfg, &mockJudgeTestAgent{}, &mockJudgeTestRuntime{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	aj, ok := j.(*AgentJudge)
+	if !ok {
+		t.Fatalf("expected *AgentJudge, got %T", j)
+	}
+	if aj.Context == nil || aj.Context.Profile != "minimal" {
+		t.Fatalf("expected context profile minimal, got %#v", aj.Context)
+	}
+}
+
 func TestNewJudge_AgentJudge_NilTimeoutSecondsDefaultsToZero(t *testing.T) {
 	cfg := config.JudgeConfig{
 		Type:     "agent_judge",
@@ -230,6 +250,45 @@ func TestMergeJudgeConfig_CaseTimeoutOverridesGlobal(t *testing.T) {
 	merged := MergeJudgeConfig(global, caseLevel)
 	if merged.TimeoutSeconds == nil || *merged.TimeoutSeconds != 120 {
 		t.Errorf("expected case-level timeout 120, got %v", merged.TimeoutSeconds)
+	}
+}
+
+func TestMergeJudgeConfig_CaseContextOverridesGlobalFields(t *testing.T) {
+	global := config.JudgeConfig{
+		Type:     "agent_judge",
+		Model:    "global-model",
+		Criteria: []string{"global"},
+		Context: &config.JudgeContextConfig{
+			Profile:       "standard",
+			Transcript:    "file_ref",
+			WorkspaceDiff: "file_ref",
+			Limits:        &config.JudgeContextLimits{MaxBytes: 100},
+		},
+	}
+	caseLevel := config.JudgeConfig{
+		Type:     "agent_judge",
+		Criteria: []string{"case"},
+		Context: &config.JudgeContextConfig{
+			Profile:      "minimal",
+			FinalMessage: "truncate",
+		},
+	}
+
+	merged := MergeJudgeConfig(global, caseLevel)
+	if merged.Context == nil {
+		t.Fatal("expected merged context")
+	}
+	if merged.Context.Profile != "minimal" {
+		t.Fatalf("profile = %q, want minimal", merged.Context.Profile)
+	}
+	if merged.Context.Transcript != "file_ref" {
+		t.Fatalf("transcript = %q, want inherited file_ref", merged.Context.Transcript)
+	}
+	if merged.Context.FinalMessage != "truncate" {
+		t.Fatalf("final_message = %q, want truncate", merged.Context.FinalMessage)
+	}
+	if merged.Context.Limits == nil || merged.Context.Limits.MaxBytes != 100 {
+		t.Fatalf("limits not inherited: %#v", merged.Context.Limits)
 	}
 }
 

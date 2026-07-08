@@ -147,21 +147,30 @@ func (a *ClaudeCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions,
 			Artifacts:  &SessionArtifacts{},
 		}, err
 	}
-	cmd := buildClaudePrintCmd(sessionID, a.effectiveModelName(ctx), instruction)
+	cmd, promptDelivery, err := deliverPrompt(ctx, rt, opts, instruction, promptCommandBuilder{
+		Inline: func(prompt string) string {
+			return buildClaudePrintCmd(sessionID, a.effectiveModelName(ctx), prompt)
+		},
+		StdinFile: func(path string) string {
+			return buildClaudePrintStdinCmd(sessionID, a.effectiveModelName(ctx), path)
+		},
+	})
+	if err != nil {
+		return &SessionResult{
+			Engine:     a.Name(),
+			ExitCode:   1,
+			DurationMs: time.Since(start).Milliseconds(),
+			Artifacts:  &SessionArtifacts{},
+		}, err
+	}
 
 	result, err := rt.Exec(ctx, cmd, opts)
 	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result)
-	if authMsg, ok := providerAuthFailureSignal(result, sessionResult); ok {
-		if sessionResult != nil && sessionResult.ExitCode == 0 {
-			sessionResult.ExitCode = 1
-		}
-		return sessionResult, fmt.Errorf("claude-code authentication failed: %s", authMsg)
+	if sessionResult != nil {
+		sessionResult.PromptDelivery = promptDelivery
 	}
-	if rateLimitMsg, ok := providerRateLimitSignal(result, sessionResult); ok {
-		if sessionResult != nil && sessionResult.ExitCode == 0 {
-			sessionResult.ExitCode = 1
-		}
-		return sessionResult, fmt.Errorf("claude-code provider rate limit: %s", rateLimitMsg)
+	if providerErr := claudeProviderRunError(result, sessionResult); providerErr != nil {
+		return sessionResult, providerErr
 	}
 	if err != nil {
 		if sessionResult == nil {
@@ -185,6 +194,24 @@ func (a *ClaudeCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions,
 
 func (a *ClaudeCodeAgent) effectiveModelName(_ context.Context) string {
 	return strings.TrimSpace(a.Cfg.ModelName)
+}
+
+func claudeProviderRunError(result ExecResult, sessionResult *SessionResult) error {
+	if authMsg, ok := providerAuthFailureSignal(result, sessionResult); ok {
+		markSessionFailed(sessionResult)
+		return fmt.Errorf("claude-code authentication failed: %s", authMsg)
+	}
+	if rateLimitMsg, ok := providerRateLimitSignal(result, sessionResult); ok {
+		markSessionFailed(sessionResult)
+		return fmt.Errorf("claude-code provider rate limit: %s", rateLimitMsg)
+	}
+	return nil
+}
+
+func markSessionFailed(sessionResult *SessionResult) {
+	if sessionResult != nil && sessionResult.ExitCode == 0 {
+		sessionResult.ExitCode = 1
+	}
 }
 
 func providerRateLimitSignal(result ExecResult, sessionResult *SessionResult) (string, bool) {
@@ -286,6 +313,14 @@ func buildClaudePrintCmd(sessionID, model, instruction string) string {
 		cmd += " --model " + shellQuote(model)
 	}
 	cmd += " " + shellQuote(instruction)
+	return cmd
+}
+
+func buildClaudePrintStdinCmd(sessionID, model, promptPath string) string {
+	cmd := "cat " + shellQuote(promptPath) + " | claude --settings " + shellQuote(`{"disableAllHooks":true}`) + " --session-id " + sessionID + " -p --permission-mode=bypassPermissions"
+	if model != "" {
+		cmd += " --model " + shellQuote(model)
+	}
 	return cmd
 }
 

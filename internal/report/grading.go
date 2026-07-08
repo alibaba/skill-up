@@ -26,6 +26,7 @@ import (
 type AnthropicGrading struct {
 	Expectations []AnthropicExpectation `json:"expectations"`
 	Summary      AnthropicSummary       `json:"summary"`
+	JudgeContext *judge.ContextMetadata `json:"judge_context,omitempty"`
 }
 
 // AnthropicExpectation is a single expectation result in the Anthropic format.
@@ -76,6 +77,7 @@ func ConvertToAnthropicGrading(result *judge.Result) *AnthropicGrading {
 			Total:    result.Summary.Total,
 			PassRate: result.Summary.PassRate,
 		},
+		JudgeContext: result.JudgeContext,
 	}
 }
 

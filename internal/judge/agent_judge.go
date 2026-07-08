@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/alibaba/skill-up/internal/agent"
+	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
@@ -70,10 +71,19 @@ type AgentJudge struct {
 	// TimeoutSeconds bounds a single Evaluate call. <=0 means no judge-level
 	// deadline; the parent context still applies.
 	TimeoutSeconds int
+
+	// Context controls which evaluation materials are written, referenced, or
+	// inlined for this agent_judge invocation.
+	Context *config.JudgeContextConfig
 }
 
 // NewAgentJudge creates an AgentJudge with sensible defaults.
 func NewAgentJudge(ag agent.Agent, rt runtime.Runtime, model string, criteria []string, passThreshold *float64, timeoutSeconds int) *AgentJudge {
+	return NewAgentJudgeWithContext(ag, rt, model, criteria, passThreshold, nil, timeoutSeconds)
+}
+
+// NewAgentJudgeWithContext creates an AgentJudge with explicit context delivery.
+func NewAgentJudgeWithContext(ag agent.Agent, rt runtime.Runtime, model string, criteria []string, passThreshold *float64, contextCfg *config.JudgeContextConfig, timeoutSeconds int) *AgentJudge {
 	threshold := DefaultPassThreshold
 	if passThreshold != nil {
 		threshold = *passThreshold
@@ -85,6 +95,7 @@ func NewAgentJudge(ag agent.Agent, rt runtime.Runtime, model string, criteria []
 		Criteria:       criteria,
 		PassThreshold:  threshold,
 		TimeoutSeconds: timeoutSeconds,
+		Context:        contextCfg,
 	}
 }
 
@@ -101,8 +112,13 @@ func (j *AgentJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 		defer cancel()
 	}
 
+	materialized, err := MaterializeJudgeContext(ctx, j.Runtime, j.Context, in, in.ArtifactDir)
+	if err != nil {
+		return nil, fmt.Errorf("agent_judge materialize context: %w", err)
+	}
+
 	// Build the judge prompt.
-	prompt := buildJudgePrompt(ctx, j.Criteria, in.FinalMessage, in.WorkspaceDiff, in.Transcript)
+	prompt := buildJudgePrompt(ctx, j.Criteria, materialized)
 	messages := []transcript.Message{{Role: transcript.RoleUser, Content: prompt, Turn: 1}}
 
 	// Get criterion results via agent.Agent. Snapshot parentCtx.Err() the
@@ -136,26 +152,17 @@ func (j *AgentJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 	}
 	criterionResults := resp.Results
 
-	// Validate that the agent evaluated every criterion.
-	// A short response inflates pass_rate because NewResult uses the returned
-	// count as the denominator (e.g. 1-of-1 returned = 100% even if 3 were sent).
-	if len(criterionResults) != len(j.Criteria) {
+	if err := validateAgentJudgeResponse(j.Criteria, criterionResults); err != nil {
 		return nil, &SessionResultError{
-			Err:     fmt.Errorf("agent_judge: expected %d criterion results, got %d", len(j.Criteria), len(criterionResults)),
+			Err:     err,
 			Session: sessionResult,
 		}
 	}
-	// Validate evidence is non-empty for every result (required by prompt).
-	for i, cr := range criterionResults {
-		if strings.TrimSpace(cr.Evidence) == "" {
-			return nil, &SessionResultError{
-				Err:     fmt.Errorf("agent_judge: criterion %d %q has empty evidence", i+1, cr.Criterion),
-				Session: sessionResult,
-			}
-		}
-	}
 
-	// Convert to assertion results.
+	return j.buildResult(in, sessionResult, materialized, prompt, criterionResults), nil
+}
+
+func (j *AgentJudge) buildResult(in Input, sessionResult *agent.SessionResult, materialized *MaterializedContext, prompt string, criterionResults []CriterionResult) *Result {
 	assertions := make([]AssertionResult, 0, len(criterionResults))
 	for _, cr := range criterionResults {
 		assertions = append(assertions, AssertionResult{
@@ -165,21 +172,43 @@ func (j *AgentJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 		})
 	}
 
-	// Build result with threshold-based status determination.
 	result := NewResult(assertions, in.TurnsExecuted, in.TurnsTotal)
 	result.JudgeSession = sessionResult
+	result.JudgeContext = buildContextMetadata(sessionResult, materialized, prompt)
+	if len(assertions) > 0 && result.Summary.PassRate >= j.PassThreshold {
+		result.Status = StatusPass
+	} else if len(assertions) > 0 {
+		result.Status = StatusFail
+	}
+	return result
+}
 
-	// Agent judge uses pass_threshold to determine status, overriding
-	// the default all-or-nothing logic in NewResult.
-	if len(assertions) > 0 {
-		if result.Summary.PassRate >= j.PassThreshold {
-			result.Status = StatusPass
-		} else {
-			result.Status = StatusFail
+func buildContextMetadata(sessionResult *agent.SessionResult, materialized *MaterializedContext, prompt string) *ContextMetadata {
+	metadata := &ContextMetadata{
+		Profile:         materialized.Manifest.Profile,
+		MaterializedDir: materialized.Dir,
+		Manifest:        &materialized.Manifest,
+		PromptBytes:     len([]byte(prompt)),
+	}
+	if sessionResult != nil && sessionResult.PromptDelivery != nil {
+		metadata.PromptDelivery = sessionResult.PromptDelivery.Mode
+		metadata.PromptBytes = sessionResult.PromptDelivery.PromptBytes
+	}
+	return metadata
+}
+
+func validateAgentJudgeResponse(criteria []string, results []CriterionResult) error {
+	// A short response inflates pass_rate because NewResult uses the returned
+	// count as the denominator (e.g. 1-of-1 returned = 100% even if 3 were sent).
+	if len(results) != len(criteria) {
+		return fmt.Errorf("agent_judge: expected %d criterion results, got %d", len(criteria), len(results))
+	}
+	for i, cr := range results {
+		if strings.TrimSpace(cr.Evidence) == "" {
+			return fmt.Errorf("agent_judge: criterion %d %q has empty evidence", i+1, cr.Criterion)
 		}
 	}
-
-	return result, nil
+	return nil
 }
 
 // extractJSON finds and parses a JSON object from agent output text.
@@ -397,7 +426,7 @@ func canRecoverAgentJudgeResult(err error, sessionResult *agent.SessionResult) b
 // ---------------------------------------------------------------------------
 
 // buildJudgePrompt constructs the system + user prompt for the judge agent.
-func buildJudgePrompt(ctx context.Context, criteria []string, finalMessage, workspaceDiff string, transcriptData transcript.Transcript) string {
+func buildJudgePrompt(_ context.Context, criteria []string, materialized *MaterializedContext) string {
 	var sb strings.Builder
 
 	sb.WriteString("You are an expert evaluator for an AI agent skill evaluation.\n")
@@ -414,27 +443,29 @@ func buildJudgePrompt(ctx context.Context, criteria []string, finalMessage, work
 		fmt.Fprintf(&sb, "%d. %s\n", i+1, c)
 	}
 
-	sb.WriteString("\n## Agent Final Message\n")
-	sb.WriteString(finalMessage)
-	sb.WriteString("\n")
-
-	if workspaceDiff != "" {
-		sb.WriteString("\n## Workspace Diff\n```\n")
-		sb.WriteString(workspaceDiff)
-		sb.WriteString("\n```\n")
-	}
-
-	if transcriptData != nil {
-		transcriptJSON, err := json.Marshal(transcriptData)
-		if err != nil {
-			logging.WarnContextf(ctx, "agent_judge failed to marshal transcript for judge prompt: %v", err)
-		} else {
-			transcriptStr := string(transcriptJSON)
-			if transcriptStr != "" && transcriptStr != "null" {
-				sb.WriteString("\n## Full Transcript\n")
-				sb.WriteString(transcriptStr)
-				sb.WriteString("\n")
+	if materialized != nil {
+		sb.WriteString("\n## Review Materials\n")
+		sb.WriteString("Read files from this table as needed to evaluate the criteria. Evidence must be traceable to the listed material keys or inline excerpts.\n\n")
+		sb.WriteString("| key | mode | path | bytes | notes |\n")
+		sb.WriteString("| --- | --- | --- | ---: | --- |\n")
+		for _, m := range materialized.Materials {
+			notes := ""
+			if m.Truncated {
+				notes = "inline excerpt truncated; full text is at path"
 			}
+			fmt.Fprintf(&sb, "| %s | %s | %s | %d | %s |\n", materialLabel(m), m.Mode, m.Path, m.OriginalBytes, notes)
+		}
+		for _, m := range materialized.Materials {
+			if strings.TrimSpace(m.InlineContent) == "" {
+				continue
+			}
+			fmt.Fprintf(&sb, "\n### Inline Material: %s\n", materialLabel(m))
+			if m.Truncated {
+				sb.WriteString("The excerpt below is truncated; read the full file at the path above if needed.\n")
+			}
+			sb.WriteString("```\n")
+			sb.WriteString(m.InlineContent)
+			sb.WriteString("\n```\n")
 		}
 	}
 
@@ -454,4 +485,11 @@ func buildJudgePrompt(ctx context.Context, criteria []string, finalMessage, work
 	sb.WriteString("```\n")
 
 	return sb.String()
+}
+
+func materialLabel(m ContextMaterial) string {
+	if m.Label != "" {
+		return m.Key + ":" + m.Label
+	}
+	return m.Key
 }

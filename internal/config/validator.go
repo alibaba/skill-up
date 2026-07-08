@@ -162,6 +162,7 @@ func validateJudgeTypeAndFields(judge JudgeConfig) []string {
 	}
 
 	errs = append(errs, validatePassThreshold(judge.PassThreshold)...)
+	errs = append(errs, validateJudgeContext(judge.Context)...)
 
 	if judge.TimeoutSeconds != nil && *judge.TimeoutSeconds < 0 {
 		errs = append(errs, "judge.timeout_seconds must be non-negative")
@@ -195,6 +196,68 @@ func validatePassThreshold(threshold *float64) []string {
 		return []string{"judge.pass_threshold must be between 0.0 and 1.0"}
 	}
 	return nil
+}
+
+func validateJudgeContext(ctx *JudgeContextConfig) []string {
+	if ctx == nil {
+		return nil
+	}
+
+	var errs []string
+	if ctx.Profile != "" && ctx.Profile != "minimal" && ctx.Profile != "standard" {
+		errs = append(errs, "judge.context.profile must be one of: minimal, standard")
+	}
+	errs = append(errs, validateJudgeContextModes(ctx)...)
+	errs = append(errs, validateJudgeContextLimits(ctx.Limits)...)
+	for i, attachment := range ctx.Attachments {
+		if strings.TrimSpace(attachment.Path) == "" {
+			errs = append(errs, fmt.Sprintf("judge.context.attachments[%d].path must not be empty", i))
+		}
+	}
+	return errs
+}
+
+func validateJudgeContextModes(ctx *JudgeContextConfig) []string {
+	var errs []string
+	for field, mode := range map[string]string{
+		"final_message":  ctx.FinalMessage,
+		"transcript":     ctx.Transcript,
+		"workspace_diff": ctx.WorkspaceDiff,
+	} {
+		if mode != "" && !isValidJudgeContextMode(mode) {
+			errs = append(errs, fmt.Sprintf("judge.context.%s must be one of: include, omit, truncate, file_ref", field))
+		}
+	}
+	if ctx.GeneratedFiles != "" && ctx.GeneratedFiles != "omit" && ctx.GeneratedFiles != "index" && ctx.GeneratedFiles != "include" {
+		errs = append(errs, "judge.context.generated_files must be one of: omit, index, include")
+	}
+	return errs
+}
+
+func validateJudgeContextLimits(limits *JudgeContextLimits) []string {
+	if limits == nil {
+		return nil
+	}
+	var errs []string
+	if limits.MaxBytes < 0 {
+		errs = append(errs, "judge.context.limits.max_bytes must be non-negative")
+	}
+	if limits.TranscriptMaxTurns < 0 {
+		errs = append(errs, "judge.context.limits.transcript_max_turns must be non-negative")
+	}
+	if limits.WorkspaceDiffMaxLines < 0 {
+		errs = append(errs, "judge.context.limits.workspace_diff_max_lines must be non-negative")
+	}
+	return errs
+}
+
+func isValidJudgeContextMode(mode string) bool {
+	switch mode {
+	case "include", "omit", "truncate", "file_ref":
+		return true
+	default:
+		return false
+	}
 }
 
 // ValidateAll validates an eval config and all its cases.

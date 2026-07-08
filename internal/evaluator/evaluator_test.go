@@ -1599,14 +1599,10 @@ func TestExecuteCase_AgentJudgeReceivesTranscriptAndWorkspaceDiff(t *testing.T) 
 		t.Fatalf("expected PASS status, got %s", result.Status)
 	}
 	if !strings.Contains(judgePrompt, "updated notes.txt") {
-		t.Fatalf("judge prompt missing transcript content: %s", judgePrompt)
+		t.Fatalf("judge prompt missing final message inline material: %s", judgePrompt)
 	}
-	if !strings.Contains(judgePrompt, "diff --git a/notes.txt b/notes.txt") {
-		t.Fatalf("judge prompt missing workspace diff header: %s", judgePrompt)
-	}
-	if !strings.Contains(judgePrompt, "-before") || !strings.Contains(judgePrompt, "+after") {
-		t.Fatalf("judge prompt missing workspace diff body: %s", judgePrompt)
-	}
+	assertJudgePromptReferencesMaterial(t, judgePrompt, "workspace_diff", "workspace.diff")
+	assertJudgePromptReferencesMaterial(t, judgePrompt, "transcript", "transcript.json")
 	if strings.Contains(judgePrompt, "stdout.json") || strings.Contains(judgePrompt, `"artifact":true`) {
 		t.Fatalf("judge prompt should filter generated artifact diff: %s", judgePrompt)
 	}
@@ -1661,6 +1657,13 @@ func captureStdout(t *testing.T, fn func()) string {
 
 	restoreOutput()
 	return buf.String()
+}
+
+func assertJudgePromptReferencesMaterial(t *testing.T, prompt, key, pathSuffix string) {
+	t.Helper()
+	if !strings.Contains(prompt, key) || !strings.Contains(prompt, pathSuffix) {
+		t.Fatalf("judge prompt missing material reference %s/%s: %s", key, pathSuffix, prompt)
+	}
 }
 
 func TestExecuteCase_AgentJudgeWithoutGitContextSkipsWorkspaceDiff(t *testing.T) {
@@ -1745,9 +1748,7 @@ func TestExecuteCase_AgentJudgeWithExistingGitRepoReceivesWorkspaceDiff(t *testi
 	if result.Status != judge.StatusPass {
 		t.Fatalf("expected PASS status, got %s", result.Status)
 	}
-	if !strings.Contains(*judgePrompt, "diff --git a/notes.txt b/notes.txt") {
-		t.Fatalf("judge prompt missing workspace diff header: %s", *judgePrompt)
-	}
+	assertJudgePromptReferencesMaterial(t, *judgePrompt, "workspace_diff", "workspace.diff")
 }
 
 func TestExecuteCase_AgentJudgeWithClonedGitRepoReceivesWorkspaceDiff(t *testing.T) {
@@ -1778,9 +1779,7 @@ func TestExecuteCase_AgentJudgeWithClonedGitRepoReceivesWorkspaceDiff(t *testing
 	if result.Status != judge.StatusPass {
 		t.Fatalf("expected PASS status, got %s", result.Status)
 	}
-	if !strings.Contains(*judgePrompt, "diff --git a/notes.txt b/notes.txt") {
-		t.Fatalf("judge prompt missing workspace diff header: %s", *judgePrompt)
-	}
+	assertJudgePromptReferencesMaterial(t, *judgePrompt, "workspace_diff", "workspace.diff")
 }
 
 func TestExecuteCase_AgentJudgeWithClonedGitRepoWithoutGlobalConfigReceivesWorkspaceDiff(t *testing.T) {
@@ -1818,9 +1817,7 @@ func TestExecuteCase_AgentJudgeWithClonedGitRepoWithoutGlobalConfigReceivesWorks
 	if result.Status != judge.StatusPass {
 		t.Fatalf("expected PASS status, got %s", result.Status)
 	}
-	if !strings.Contains(*judgePrompt, "diff --git a/notes.txt b/notes.txt") {
-		t.Fatalf("judge prompt missing workspace diff header: %s", *judgePrompt)
-	}
+	assertJudgePromptReferencesMaterial(t, *judgePrompt, "workspace_diff", "workspace.diff")
 }
 
 func TestExecuteCase_AgentJudgeTracksWorkspaceDiffAfterAgentCommit(t *testing.T) {
@@ -1876,12 +1873,7 @@ func TestExecuteCase_AgentJudgeTracksWorkspaceDiffAfterAgentCommit(t *testing.T)
 	if result.Status != judge.StatusPass {
 		t.Fatalf("expected PASS status, got %s", result.Status)
 	}
-	if !strings.Contains(judgePrompt, "diff --git a/notes.txt b/notes.txt") {
-		t.Fatalf("judge prompt missing workspace diff header: %s", judgePrompt)
-	}
-	if !strings.Contains(judgePrompt, "-before") || !strings.Contains(judgePrompt, "+after") {
-		t.Fatalf("judge prompt missing committed workspace diff body: %s", judgePrompt)
-	}
+	assertJudgePromptReferencesMaterial(t, judgePrompt, "workspace_diff", "workspace.diff")
 }
 
 func TestExecuteCase_AgentJudgeWithGitWorktreeReceivesWorkspaceDiff(t *testing.T) {
@@ -1915,9 +1907,7 @@ func TestExecuteCase_AgentJudgeWithGitWorktreeReceivesWorkspaceDiff(t *testing.T
 	if result.Status != judge.StatusPass {
 		t.Fatalf("expected PASS status, got %s", result.Status)
 	}
-	if !strings.Contains(*judgePrompt, "diff --git a/notes.txt b/notes.txt") {
-		t.Fatalf("judge prompt missing workspace diff header: %s", *judgePrompt)
-	}
+	assertJudgePromptReferencesMaterial(t, *judgePrompt, "workspace_diff", "workspace.diff")
 }
 
 func TestExecuteCase_NonAgentJudgeSkipsWorkspaceSnapshot(t *testing.T) {

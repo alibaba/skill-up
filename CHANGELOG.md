@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- `agent_judge` now defaults to materialized review context (`profile:
+  standard`) instead of inlining full transcript and workspace diff into the
+  judge prompt. The judge receives a materials table with file references for
+  large artifacts, while short final messages remain inline. Evals that require
+  legacy inline transcript can set `judge.context.transcript: include` subject
+  to `judge.context.limits.max_bytes`.
 - `skill-up run` now validates only the cases left after
   `--include-case-name` / `--exclude-case-name` filters (plus the eval-level
   config), so an invalid case that is filtered out no longer blocks a filtered
@@ -16,6 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case) regardless of filters.
 
 ### Added
+- `judge.context` for `agent_judge`, with `minimal` and `standard` profiles,
+  per-field delivery modes, inline-size limits, generated-file indexing, and
+  attachment file references. Reports now include `judge_context` metadata with
+  materialization and prompt-delivery details.
+- Built-in CLI agents now route large prompts through prompt delivery, writing
+  prompt artifacts to disk and feeding runtime-readable prompt files through
+  stdin when the prompt exceeds `SKILL_UP_PROMPT_INLINE_MAX_BYTES` (default
+  32768 bytes).
 - Config validation now rejects duplicate case IDs and duplicate `cases.files`
   references. Since reports and artifacts are keyed by case ID and one case runs
   per `cases.files` entry, a collision would silently overwrite results or
