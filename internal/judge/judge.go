@@ -135,6 +135,20 @@ type Result struct {
 	// session (e.g. agent_judge). It is not part of grading.json; the evaluator
 	// uses it to download judge-run artifacts the same way as the main agent run.
 	JudgeSession *agent.SessionResult `json:"-"`
+
+	// JudgeContext records how agent_judge materialized and delivered review
+	// materials. It is omitted for deterministic judges and older results.
+	JudgeContext *ContextMetadata `json:"judge_context,omitempty"`
+}
+
+// ContextMetadata is report-facing metadata for agent_judge context
+// materialization and prompt delivery.
+type ContextMetadata struct {
+	Profile         string           `json:"profile"`
+	MaterializedDir string           `json:"materialized_dir,omitempty"`
+	Manifest        *ContextManifest `json:"manifest,omitempty"`
+	PromptDelivery  string           `json:"prompt_delivery,omitempty"`
+	PromptBytes     int              `json:"prompt_bytes,omitempty"`
 }
 
 // SessionResultError preserves a judge-side session result when evaluation fails.

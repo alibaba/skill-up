@@ -51,18 +51,19 @@ var ErrAgentInstallFailed = errors.New("agent installation failed")
 
 // SessionResult holds the result of an agent session execution.
 type SessionResult struct {
-	Engine       string                `json:"engine,omitempty"`
-	Model        string                `json:"model,omitempty"`
-	SessionID    string                `json:"session_id,omitempty"`
-	ExitCode     int                   `json:"exit_code"`
-	DurationMs   int64                 `json:"duration_ms"`
-	Turns        int                   `json:"turns"`
-	InputTokens  int                   `json:"input_tokens,omitempty"`
-	OutputTokens int                   `json:"output_tokens,omitempty"`
-	FinalMessage string                `json:"final_message,omitempty"`
-	Stderr       string                `json:"stderr,omitempty"`
-	Transcript   transcript.Transcript `json:"transcript,omitempty"`
-	Artifacts    *SessionArtifacts     `json:"artifacts,omitempty"`
+	Engine         string                  `json:"engine,omitempty"`
+	Model          string                  `json:"model,omitempty"`
+	SessionID      string                  `json:"session_id,omitempty"`
+	ExitCode       int                     `json:"exit_code"`
+	DurationMs     int64                   `json:"duration_ms"`
+	Turns          int                     `json:"turns"`
+	InputTokens    int                     `json:"input_tokens,omitempty"`
+	OutputTokens   int                     `json:"output_tokens,omitempty"`
+	FinalMessage   string                  `json:"final_message,omitempty"`
+	Stderr         string                  `json:"stderr,omitempty"`
+	Transcript     transcript.Transcript   `json:"transcript,omitempty"`
+	Artifacts      *SessionArtifacts       `json:"artifacts,omitempty"`
+	PromptDelivery *PromptDeliveryMetadata `json:"prompt_delivery,omitempty"`
 }
 
 // SessionResumer is an optional interface that agents may implement to support

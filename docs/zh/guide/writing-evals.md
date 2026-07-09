@@ -642,6 +642,42 @@ judge:
   timeout_seconds: 60                        # 可选：限制单次 judge 调用时长（0 = 不加 judge 级 deadline，仍受 case timeout 约束）
 ```
 
+`agent_judge` 会将评审上下文物化为文件，并在 judge prompt 中注入一个很小的
+材料表。未配置 `judge.context` 时，默认使用 `standard` profile：
+`final_message` 内联，`transcript` 和 `workspace_diff` 以文件引用形式提供，
+避免超长 prompt/argv 导致执行失败。
+
+长时间运行的仓库变更类评测通常适合使用 `minimal`，让 judge 依赖显式附件或脚本
+输出，而不是完整对话历史：
+
+```yaml
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  context:
+    profile: minimal                         # 省略 transcript/diff，截断 final_message
+    attachments:
+      - path: evals/fixtures/diff-result.json
+        label: diff_result
+  criteria:
+    - "判断报告中的代码变更是否满足预期规则。"
+```
+
+如需微调 profile，可按字段指定模式：
+
+```yaml
+judge:
+  type: agent_judge
+  context:
+    profile: standard
+    final_message: include                   # include | truncate | file_ref | omit
+    transcript: file_ref                     # include 超过 limits.max_bytes 会自动降级为 file_ref
+    workspace_diff: file_ref
+    generated_files: index                   # index | include | omit
+    limits:
+      max_bytes: 65536
+```
+
 > **成本提示**：`agent_judge` 会消耗额外的 token。建议对关键断言先用 `expect` 或 `rule_based` 做确定性检查，只对需要语义理解的部分使用 `agent_judge`。
 
 ---

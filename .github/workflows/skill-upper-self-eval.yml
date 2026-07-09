@@ -90,14 +90,22 @@ jobs:
         env:
           # Reference each secret by literal name (no dynamic secrets[...]
           # indexing, which CodeQL flags as exposing the whole secrets context).
-          ENGINE_KEY: ${{ matrix.engine == 'qodercli' && secrets.QODER_ACCESS_TOKEN || secrets.DASHSCOPE_API_KEY }}
+          QODER_ACCESS_TOKEN: ${{ secrets.QODER_ACCESS_TOKEN }}
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
         run: |
-          if [ -z "$ENGINE_KEY" ] || [ -z "$DASHSCOPE_API_KEY" ]; then
+          if [ -z "$DASHSCOPE_API_KEY" ]; then
+            echo "::notice::Skipping self-eval (${{ matrix.engine }}): required secret not provisioned (likely a fork PR)."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ matrix.engine }}" = "qodercli" ] && [ -z "$QODER_ACCESS_TOKEN" ]; then
             echo "::notice::Skipping self-eval (${{ matrix.engine }}): required secret not provisioned (likely a fork PR)."
             echo "available=false" >> "$GITHUB_OUTPUT"
           else
             echo "available=true" >> "$GITHUB_OUTPUT"
+            if [ "${{ matrix.engine }}" = "qodercli" ]; then
+              echo "api_key=${QODER_ACCESS_TOKEN}" >> "$GITHUB_OUTPUT"
+            else
+              echo "api_key=${DASHSCOPE_API_KEY}" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: Run skill-upper eval via the action
@@ -124,7 +132,7 @@ jobs:
           engine: ${{ matrix.engine }}
           provider: ${{ matrix.provider }}
           model: ${{ matrix.model }}
-          api-key: ${{ matrix.engine == 'qodercli' && secrets.QODER_ACCESS_TOKEN || secrets.DASHSCOPE_API_KEY }}
+          api-key: ${{ steps.secrets.outputs.api_key }}
           # Run cases concurrently so the larger per-case timeout (600s, needed
           # by the slower codex coder model) doesn't blow up wall-clock — but
           # keep qodercli serial: concurrent qodercli processes race on the fixed
