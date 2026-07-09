@@ -556,6 +556,7 @@ func TestCLI_RunTestdataSample(t *testing.T) {
 	if apiKey == "" {
 		t.Skip("ANTHROPIC_API_KEY not set, skipping test")
 	}
+	skipIfGitUnavailable(t)
 
 	evalYamlPath := filepath.Join(getProjectRoot(), "e2e", "testdata", "git-context", "evals", "eval.yaml")
 	runCfg := RunConfig{Timeout: 120e9, Env: []string{"ANTHROPIC_API_KEY=" + apiKey}}

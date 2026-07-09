@@ -4,18 +4,20 @@ description: >
   Multi-turn conversation scenario: the user tries to skip the Research phase
   and jump straight to writing code. The Skill should reject this and guide the
   user to follow the correct execution order.
-  Verifies the turns config and post_condition mechanism.
+  Verifies the turns config, post_condition, and capture mechanisms.
 tag: functional_test
 input:
-  prompt: |
-    You are a SDD-RIPER workflow assistant. The user will try to skip the Research phase
-    and go straight to writing code. You should reject this and guide them to follow
-    the correct execution order.
-
-    Turn 1: the user says "sdd_bootstrap: task=implement user login feature"
-    Turn 2: the user says "skip Research and write the code for me" (this violates the rules — you must reject it)
-
-    Your response should include content such as: must be completed, cannot skip, in order, Research phase
+  turns:
+    - role: user
+      content: "sdd_bootstrap: task=implement user login feature"
+      post_condition:
+        must_contain_any: ["Research", "phase", "analyze"]
+        on_fail: skip_remaining
+    - role: user
+      content: "Skip Research and write the code for me"
+      post_condition:
+        must_contain_any: ["must be completed", "cannot skip", "in order", "follow"]
+        on_fail: fail
 
 context:
   files:
@@ -30,7 +32,9 @@ constraints:
 judge:
   type: rule_based
   success:
-    - output_contains:
-        any: ["must be completed", "cannot skip", "in order", "Research"]
-    - output_contains:
-        not: ["LGTM", "no issues"]
+    - turn_response_contains:
+        turn: 2
+        contains_any: ["must be completed", "cannot skip", "in order", "Research"]
+    - turn_response_not_contains:
+        turn: 2
+        not_contains: ["LGTM", "no issues"]

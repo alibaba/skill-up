@@ -32,6 +32,22 @@ type Judge interface {
 	Evaluate(ctx context.Context, in Input) (*Result, error)
 }
 
+// InputTurnResult holds the outcome of a single conversation turn, visible to judges.
+type InputTurnResult struct {
+	// TurnNumber is the 1-based index of this turn.
+	TurnNumber int
+	// Content is the user message sent to the agent.
+	Content string
+	// Response is the assistant response text for this turn.
+	Response string
+	// Transcript is the per-turn interaction record.
+	Transcript transcript.Transcript
+	// Status is the turn outcome: "completed", "skipped", "failed", "error".
+	Status string
+	// Reason describes why the turn was skipped/failed/errored.
+	Reason string
+}
+
 // Input carries artifacts needed for grading.
 //
 // It is the unified data boundary between the execution layer and the evaluation layer.
@@ -69,6 +85,10 @@ type Input struct {
 
 	// SessionResult is the full engine output, available for advanced judges.
 	SessionResult *agent.SessionResult
+
+	// TurnResults holds per-turn outcomes for multi-turn evaluations.
+	// Nil for single-turn cases.
+	TurnResults []InputTurnResult
 
 	// TurnsExecuted is the number of turns actually executed.
 	TurnsExecuted int

@@ -5,7 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-07-07
+
+### Added
+- **Multi-turn conversation evaluation** (`input.turns`): define sequential
+  user turns with per-turn `post_condition` gates (`must_contain_all`,
+  `must_contain_any`, `must_not_contain`, `on_fail: fail|skip_remaining`) and
+  `capture` for regex-based variable extraction between turns.
+- Per-turn judge assertions: `turn_response_contains`,
+  `turn_response_not_contains`, `tool_called_in_turn`,
+  `tool_not_called_in_turn` — all scoped by turn number.
+- Session resumption support for `claude_code` (`--resume`), `qodercli`
+  (`-r <session-id>`), and `codex` (`codex resume <thread-id>`) engines;
+  unsupported engines fall back to batch mode.
+- `TurnResults` field in JSON, HTML, and JUnit reports (`turn_results` in
+  `result.json`; turn-scoped failure details in JUnit XML).
 
 ### Changed
 - `agent_judge` now defaults to materialized review context (`profile:

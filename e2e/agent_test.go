@@ -65,6 +65,8 @@ func openSandboxE2EImage() string {
 func TestAgent_Codex_NoneRuntime_WorkspaceDiffGitContexts(t *testing.T) {
 	t.Parallel()
 
+	skipIfGitUnavailable(t)
+
 	fakeCodexDir := writeFakeCodexBinary(t)
 	evalRoot := createWorkspaceDiffEvalDir(t)
 	evalPath := filepath.Join(evalRoot, "evals", "eval.yaml")
