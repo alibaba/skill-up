@@ -138,22 +138,27 @@ if [[ "$instruction" == *"Required Response Format (JSON)"* ]]; then
   passed=true
   evidence="workspace diff captured expected change"
   case_id="unknown"
+  review_text="$instruction"
+  diff_path="$(printf '%s\n' "$instruction" | tr '|' '\n' | awk '{for (i = 1; i <= NF; i++) if ($i ~ /workspace\.diff$/) print $i}' | head -n 1)"
+  if [[ -n "$diff_path" && -f "$diff_path" ]]; then
+    review_text="${review_text}"$'\n'"$(cat "$diff_path")"
+  fi
 
   if [[ "$instruction" == *"git-init-workspace"* ]]; then
     case_id="git-init-workspace"
-    [[ "$instruction" == *"diff --git a/README.md b/README.md"* ]] || passed=false
+    [[ "$review_text" == *"diff --git a/README.md b/README.md"* ]] || passed=false
   elif [[ "$instruction" == *"cloned-git-workspace"* ]]; then
     case_id="cloned-git-workspace"
-    [[ "$instruction" == *"diff --git a/repo.txt b/repo.txt"* ]] || passed=false
+    [[ "$review_text" == *"diff --git a/repo.txt b/repo.txt"* ]] || passed=false
   else
     passed=false
   fi
 
   write_debug_file "judge-${case_id}.txt" "$instruction"
 
-  [[ "$instruction" == *"-before"* ]] || passed=false
-  [[ "$instruction" == *"+after"* ]] || passed=false
-  if [[ "$instruction" == *"stdout.json"* ]]; then
+  [[ "$review_text" == *"-before"* ]] || passed=false
+  [[ "$review_text" == *"+after"* ]] || passed=false
+  if [[ "$review_text" == *"stdout.json"* ]]; then
     passed=false
     evidence="workspace diff leaked generated artifacts"
   fi
