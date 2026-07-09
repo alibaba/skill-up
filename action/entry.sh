@@ -35,13 +35,17 @@ restore_workspace_permissions() {
   chmod -R u+rwX,go+rX "$report_dir" 2>/dev/null || true
 }
 
+cleanup() {
+  local status=$?
+  restore_workspace_permissions
+  exit "$status"
+}
+trap cleanup EXIT
+
 for c in python3 python /usr/bin/python3 /usr/local/bin/python3; do
   if command -v "$c" >/dev/null 2>&1 || [ -x "$c" ]; then
-    set +e
     "$c" "$DIR/main.py" "$@"
-    status=$?
-    restore_workspace_permissions
-    exit "$status"
+    exit 0
   fi
 done
 
