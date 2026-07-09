@@ -5,7 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-07-07
+
+### Added
+- **Multi-turn conversation evaluation** (`input.turns`): define sequential
+  user turns with per-turn `post_condition` gates (`must_contain_all`,
+  `must_contain_any`, `must_not_contain`, `on_fail: fail|skip_remaining`) and
+  `capture` for regex-based variable extraction between turns.
+- Per-turn judge assertions: `turn_response_contains`,
+  `turn_response_not_contains`, `tool_called_in_turn`,
+  `tool_not_called_in_turn` — all scoped by turn number.
+- Session resumption support for `claude_code` (`--resume`), `qodercli`
+  (`-r <session-id>`), and `codex` (`codex resume <thread-id>`) engines;
+  unsupported engines fall back to batch mode.
+- `TurnResults` field in JSON, HTML, and JUnit reports (`turn_results` in
+  `result.json`; turn-scoped failure details in JUnit XML).
 
 ### Changed
 - `skill-up run` now validates only the cases left after
@@ -23,6 +37,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fails with the conflicting ID and the offending source files. Covers both
   explicit `id:` fields and filename-derived IDs, and collapses
   differently-spelled paths (e.g. `cases/a.yaml` vs `./cases/a.yaml`).
+
+### Changed
+- The `none` runtime now terminates a canceled or timed-out command's whole
+  process group gracefully before force-killing it. On Unix it sends `SIGTERM`
+  to the group first, giving children ~1s (`noneExecKillGrace`) to run trap
+  handlers, release locks, and exit, then escalates to `SIGKILL` if the group
+  is still alive. The grace fits inside the existing 2s `WaitDelay`, so a
+  timed-out `Exec` still returns within its deadline and keeps the
+  `context.DeadlineExceeded` / exit-code `-1` contract. Previously the group
+  got an immediate `SIGKILL`, so a helper holding a lock could leave stale
+  state and stall a later command. No-op on non-Unix platforms.
 
 ### Fixed
 - Skill installation preserves source file permissions, notably the executable

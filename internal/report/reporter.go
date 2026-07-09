@@ -55,18 +55,28 @@ func (in Input) OverallPassRate() float64 {
 
 // CaseResult represents the result of a single case execution.
 type CaseResult struct {
-	CaseID        string        `json:"case_id"`
-	Title         string        `json:"title"`
-	Status        judge.Status  `json:"status"`
-	DurationMs    int64         `json:"duration_ms"`
-	Turns         int           `json:"turns"`
-	InputTokens   int           `json:"input_tokens"`
-	OutputTokens  int           `json:"output_tokens"`
-	Error         string        `json:"error,omitempty"`
-	Grading       *judge.Result `json:"grading"`
-	Configuration string        `json:"configuration,omitempty"` // "with_skill" or "without_skill"
-	Prompt        string        `json:"prompt,omitempty"`        // input prompt sent to the agent
-	Response      string        `json:"response,omitempty"`      // agent final message
+	CaseID        string           `json:"case_id"`
+	Title         string           `json:"title"`
+	Status        judge.Status     `json:"status"`
+	DurationMs    int64            `json:"duration_ms"`
+	Turns         int              `json:"turns"`
+	InputTokens   int              `json:"input_tokens"`
+	OutputTokens  int              `json:"output_tokens"`
+	Error         string           `json:"error,omitempty"`
+	Grading       *judge.Result    `json:"grading"`
+	Configuration string           `json:"configuration,omitempty"` // "with_skill" or "without_skill"
+	Prompt        string           `json:"prompt,omitempty"`        // input prompt sent to the agent
+	Response      string           `json:"response,omitempty"`      // agent final message
+	TurnResults   []CaseTurnResult `json:"turn_results,omitempty"`  // per-turn outcomes; nil for single-turn
+}
+
+// CaseTurnResult holds the outcome of a single turn for reporting purposes.
+type CaseTurnResult struct {
+	TurnNumber int    `json:"turn_number"`
+	Content    string `json:"content"`
+	Response   string `json:"response"`
+	Status     string `json:"status"`
+	Reason     string `json:"reason,omitempty"`
 }
 
 // BenchmarkResult is the top-level structure for benchmark.json.

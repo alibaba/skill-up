@@ -63,3 +63,6 @@ e2e/coverage-report.json
 node_modules/
 docs/.vitepress/cache/
 docs/.vitepress/dist/
+
+# Local verification project
+/verify-multi-turn/

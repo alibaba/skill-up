@@ -276,6 +276,34 @@ func TestEvaluatorInputHelpers(t *testing.T) {
 	}
 }
 
+func TestExecuteCaseWarnsWhenTurnsFallbackToSingleBatch(t *testing.T) {
+	ag := &mockAgent{name: "batch-only", output: "batched response"}
+	rt := &mockRuntime{workspace: t.TempDir()}
+	e := newTestEvaluator(EvalOptions{
+		Agent:   ag,
+		EvalCfg: &config.EvalConfig{},
+	})
+	caseCfg := &config.CaseConfig{
+		ID: "turns-fallback",
+		Input: config.Input{
+			Turns: []config.Turn{
+				{Role: "user", Content: "first"},
+				{Role: "user", Content: "second"},
+			},
+		},
+	}
+
+	output := captureStdout(t, func() {
+		_ = e.executeCase(context.Background(), caseCfg, "with_skill", rt, nil)
+	})
+	if !strings.Contains(output, "does not support session resumption") {
+		t.Fatalf("expected fallback warning, got %q", output)
+	}
+	if ag.runCall.Load() != 1 {
+		t.Fatalf("fallback should run the agent once, got %d calls", ag.runCall.Load())
+	}
+}
+
 func TestEvaluatorRetryAndRecoveryHelpers(t *testing.T) {
 	t.Parallel()
 
@@ -2158,6 +2186,8 @@ func TestNormalizeSessionResult_ReturnsCopy(t *testing.T) {
 
 func initGitRepo(t *testing.T, dir string) {
 	t.Helper()
+	requireGit(t)
+
 	commands := [][]string{
 		{"git", "init", "-q"},
 		{"git", "config", "user.name", "skill-up-test"},

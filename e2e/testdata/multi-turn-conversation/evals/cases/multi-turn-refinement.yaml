@@ -2,17 +2,31 @@ id: multi-turn-refinement
 title: Iterative refinement - non-recursive quicksort
 description: >
   Verify that the Agent can generate a non-recursive quicksort implementation
-  using a stack.
+  using a stack, then refine it when asked for better variable naming.
 tag: functional_test
 input:
-  prompt: |
-    Write a quicksort function in Python.
-
-    Requirements:
-    1. Use a stack to implement a non-recursive version
-    2. Do not use recursion
-
-    Provide a direct code implementation.
+  turns:
+    - role: user
+      content: |
+        Write a quicksort function in Python.
+        Requirements:
+        1. Use a stack to implement a non-recursive version
+        2. Do not use recursion
+        Provide a direct code implementation.
+      post_condition:
+        must_contain_all: ["stack"]
+        must_not_contain: ["return quicksort("]
+        on_fail: fail
+      capture:
+        - variable: impl_snippet
+          pattern: "(def \\w+)"
+    - role: user
+      content: |
+        Good. Now refactor the implementation to use more descriptive variable
+        names (e.g. pivot_index, partition_start). Keep the same algorithm.
+      post_condition:
+        must_contain_any: ["pivot", "partition", "index"]
+        on_fail: fail
 
 constraints:
   timeout_seconds: 180
@@ -21,6 +35,12 @@ constraints:
 judge:
   type: rule_based
   success:
-    - output_contains:
-        all: ["stack"]
-        not: ["recursion", "return quicksort("]
+    - turn_response_contains:
+        turn: 1
+        contains_all: ["stack"]
+    - turn_response_not_contains:
+        turn: 1
+        not_contains: ["recursion", "return quicksort("]
+    - turn_response_contains:
+        turn: 2
+        contains_any: ["pivot", "partition", "index"]

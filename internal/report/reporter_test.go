@@ -251,6 +251,40 @@ func TestHTMLReporter_ContainsAssertionDetails(t *testing.T) {
 	}
 }
 
+func TestHTMLReporter_SynthesizedTurnFailurePassRateScript(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "result.html")
+	r := &HTMLReporter{OutputPath: path}
+
+	input := Input{
+		SkillName: "multi-turn",
+		CaseResults: []CaseResult{{
+			CaseID: "turn-failure",
+			Status: judge.StatusFail,
+			Turns:  2,
+			TurnResults: []CaseTurnResult{
+				{TurnNumber: 1, Status: "completed", Response: "ok"},
+				{TurnNumber: 2, Status: "failed", Reason: "missing token"},
+			},
+		}},
+	}
+	if err := r.Write(context.Background(), input); err != nil {
+		t.Fatalf("HTMLReporter.Write failed: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read html file: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "Math.round((passed.length / total) * 100)") {
+		t.Fatal("HTML should compute synthesized turn-failure pass rate from passed/total")
+	}
+	if !strings.Contains(content, "total === 0 ? 0") {
+		t.Fatal("HTML should guard synthesized turn-failure pass rate when total is zero")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Input helpers
 // ---------------------------------------------------------------------------

@@ -763,6 +763,18 @@ func TestValidator_ValidateCaseConfig(t *testing.T) {
 			errMsg:  "input.prompt or input.turns is required",
 		},
 		{
+			name: "prompt and turns are mutually exclusive",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Prompt: "Say hello",
+					Turns:  []Turn{{Role: "user", Content: "Hi"}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "input.prompt and input.turns are mutually exclusive",
+		},
+		{
 			name: "turn with missing role",
 			cfg: &CaseConfig{
 				ID: "test-case",
@@ -776,6 +788,19 @@ func TestValidator_ValidateCaseConfig(t *testing.T) {
 			errMsg:  "input.turns[0].role is required",
 		},
 		{
+			name: "turn with non-user role",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "assistant", Content: "Hello"},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "input.turns[0].role must be \"user\"",
+		},
+		{
 			name: "turn with missing content",
 			cfg: &CaseConfig{
 				ID: "test-case",
@@ -787,6 +812,19 @@ func TestValidator_ValidateCaseConfig(t *testing.T) {
 			},
 			wantErr: true,
 			errMsg:  "input.turns[0].content is required",
+		},
+		{
+			name: "turn with negative timeout_seconds",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hi", TimeoutSeconds: -1},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "input.turns[0].timeout_seconds must be non-negative",
 		},
 		{
 			name: "case-level agent_judge with negative threshold",
@@ -1049,4 +1087,481 @@ func TestValidator_CollectArtifacts(t *testing.T) {
 			t.Fatalf("expected invalid-glob error, got %v", err)
 		}
 	})
+}
+
+//nolint:funlen // table-driven test
+func TestValidator_PostCondition(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	tests := []struct {
+		name    string
+		cfg     *CaseConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid post_condition with must_contain_any",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", PostCondition: &PostCondition{
+							MustContainAny: []string{"hi", "hello"},
+						}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid post_condition with must_contain_all",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", PostCondition: &PostCondition{
+							MustContainAll: []string{"greeting", "response"},
+						}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid post_condition with must_not_contain",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", PostCondition: &PostCondition{
+							MustNotContain: []string{"error"},
+						}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid post_condition with on_fail=fail",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", PostCondition: &PostCondition{
+							MustContainAny: []string{"ok"},
+							OnFail:         "fail",
+						}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid post_condition with on_fail=skip_remaining",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", PostCondition: &PostCondition{
+							MustContainAny: []string{"ok"},
+							OnFail:         "skip_remaining",
+						}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "post_condition with invalid on_fail",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", PostCondition: &PostCondition{
+							MustContainAny: []string{"ok"},
+							OnFail:         "abort",
+						}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "on_fail must be empty",
+		},
+		{
+			name: "post_condition with no check fields",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", PostCondition: &PostCondition{
+							OnFail: "fail",
+						}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "must include at least one of must_contain_any, must_contain_all, or must_not_contain",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validator.ValidateCaseConfig(tt.cfg)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && err != nil && tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+				t.Errorf("error = %v, should contain %q", err, tt.errMsg)
+			}
+		})
+	}
+}
+
+//nolint:funlen // table-driven test
+func TestValidator_CaptureRules(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	tests := []struct {
+		name    string
+		cfg     *CaseConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid capture with pattern",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", Capture: []CaptureRule{
+							{Variable: "session_id", Pattern: `id:\s*(?P<value>[a-f0-9]+)`},
+						}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid capture with jsonpath",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", Capture: []CaptureRule{
+							{Variable: "name", JSONPath: "$.result.name"},
+						}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "capture with empty variable",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", Capture: []CaptureRule{
+							{Variable: "", Pattern: `id:\s+(\w+)`},
+						}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "variable is required",
+		},
+		{
+			name: "capture with invalid variable name",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", Capture: []CaptureRule{
+							{Variable: "123invalid", Pattern: `id:\s+(\w+)`},
+						}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "must match pattern",
+		},
+		{
+			name: "capture with no extractor",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", Capture: []CaptureRule{
+							{Variable: "myvar"},
+						}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "must specify exactly one extractor",
+		},
+		{
+			name: "capture with both extractors",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", Capture: []CaptureRule{
+							{Variable: "myvar", Pattern: `(\w+)`, JSONPath: "$.x"},
+						}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "must specify exactly one extractor: pattern or jsonpath (both set)",
+		},
+		{
+			name: "capture with invalid regex pattern",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", Capture: []CaptureRule{
+							{Variable: "myvar", Pattern: `[invalid`},
+						}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "pattern is invalid regex",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validator.ValidateCaseConfig(tt.cfg)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && err != nil && tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+				t.Errorf("error = %v, should contain %q", err, tt.errMsg)
+			}
+		})
+	}
+}
+
+//nolint:funlen // table-driven test
+func TestValidator_PerTurnJudgeRules(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	tests := []struct {
+		name    string
+		cfg     *CaseConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid turn_response_contains",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+						{Role: "user", Content: "How are you?"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{TurnResponseContains: &TurnResponseContainsRule{Turn: 1, ContainsAll: []string{"hello"}}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "turn_response_contains with turn < 1",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{TurnResponseContains: &TurnResponseContainsRule{Turn: 0, ContainsAll: []string{"x"}}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "turn_response_contains.turn must be >= 1",
+		},
+		{
+			name: "turn_response_contains exceeds total turns",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{TurnResponseContains: &TurnResponseContainsRule{Turn: 5, ContainsAll: []string{"x"}}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "exceeds total turns",
+		},
+		{
+			name: "turn_response_contains without contains_all or contains_any",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{TurnResponseContains: &TurnResponseContainsRule{Turn: 1}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "must specify contains_all or contains_any",
+		},
+		{
+			name: "turn_response_not_contains without not_contains",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{TurnResponseNotContains: &TurnResponseNotContainsRule{Turn: 1}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "turn_response_not_contains.not_contains is required",
+		},
+		{
+			name: "tool_called_in_turn without name",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{ToolCalledInTurn: &ToolCalledInTurnRule{Turn: 1}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "tool_called_in_turn.name is required",
+		},
+		{
+			name: "tool_not_called_in_turn without name",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{ToolNotCalledInTurn: &ToolNotCalledInTurnRule{Turn: 1}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "tool_not_called_in_turn.name is required",
+		},
+		{
+			name: "tool_called_in_turn with turn < 1",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{ToolCalledInTurn: &ToolCalledInTurnRule{Turn: 0, Name: "write_file"}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "tool_called_in_turn.turn must be >= 1",
+		},
+		{
+			name: "valid per-turn rules in failure list",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+						{Role: "user", Content: "Bye"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Failure: []Rule{
+						{TurnResponseContains: &TurnResponseContainsRule{Turn: 2, ContainsAny: []string{"error"}}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "per-turn rules valid when no turns defined (prompt mode)",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Prompt: "Hello",
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{TurnResponseContains: &TurnResponseContainsRule{Turn: 1, ContainsAll: []string{"x"}}},
+					},
+				},
+			},
+			wantErr: false, // no turns defined means turnsTotal=0, skip upper-bound check
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validator.ValidateCaseConfig(tt.cfg)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && err != nil && tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+				t.Errorf("error = %v, should contain %q", err, tt.errMsg)
+			}
+		})
+	}
 }

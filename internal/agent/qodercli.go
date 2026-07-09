@@ -129,10 +129,23 @@ func buildQoderRunCmd(instruction, model string) string {
 	return cmd
 }
 
+// buildQoderResumeCmd constructs a qodercli command that resumes an existing
+// session identified by sessionID and sends a new user prompt.
+func buildQoderResumeCmd(instruction, model, sessionID string) string {
+	cmd := "qodercli --permission-mode=bypass_permissions"
+	if model != "" {
+		cmd += " --model " + shellQuote(model)
+	}
+	cmd += " -r " + shellQuote(sessionID)
+	cmd += " -p " + shellQuote(instruction)
+	return cmd
+}
+
 func (a *QoderCLIAgent) buildSessionResult(ctx context.Context, rt Runtime, opts ExecOptions, instruction string, start time.Time, result ExecResult) *SessionResult {
 	var trans transcript.Transcript
 	var finalMsg string
 	var inputTokens, outputTokens int
+	var sessionID string
 
 	cleanupCtx, cleanupCancel := sessionCleanupContext(ctx)
 	defer cleanupCancel()
@@ -144,9 +157,14 @@ func (a *QoderCLIAgent) buildSessionResult(ctx context.Context, rt Runtime, opts
 		}
 	}
 
+	sessionFilePath := findQoderSessionFile(cleanupCtx, rt)
+	if sessionFilePath != "" {
+		sessionID = extractSessionIDFromPath(sessionFilePath)
+	}
+
 	var cleanupSession func()
 	generatedFiles, cleanupSession = withDownloadedSession(
-		cleanupCtx, rt, opts.ArtifactDir, findQoderSessionFile(cleanupCtx, rt), generatedFiles,
+		cleanupCtx, rt, opts.ArtifactDir, sessionFilePath, generatedFiles,
 		func(artifactPath string) {
 			t, f, inTok, outTok := parseSessionFile(artifactPath)
 			if len(t) > 0 {
@@ -167,6 +185,7 @@ func (a *QoderCLIAgent) buildSessionResult(ctx context.Context, rt Runtime, opts
 	}
 	return &SessionResult{
 		Engine:       a.Name(),
+		SessionID:    sessionID,
 		ExitCode:     result.ExitCode,
 		DurationMs:   time.Since(start).Milliseconds(),
 		Turns:        countTurns(trans),
@@ -179,6 +198,53 @@ func (a *QoderCLIAgent) buildSessionResult(ctx context.Context, rt Runtime, opts
 			GeneratedFiles: generatedFiles,
 		},
 	}
+}
+
+// RunTurn resumes an existing QoderCLI session and sends a single user
+// message. If sessionID is empty, it starts a new session (first turn).
+// This implements the SessionResumer interface for multi-turn evaluation.
+func (a *QoderCLIAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, message transcript.Message, sessionID string) (*SessionResult, error) {
+	if sessionID == "" {
+		// First turn — delegate to Run which creates a new session.
+		return a.Run(ctx, rt, opts, []transcript.Message{message})
+	}
+
+	if err := requireBashOnWindowsHost(rt); err != nil {
+		return nil, fmt.Errorf("%s: %w", a.Name(), err)
+	}
+	start := time.Now()
+
+	instruction := message.Content
+	cmd := buildQoderResumeCmd(instruction, a.effectiveModelName(ctx), sessionID)
+
+	envVars := a.credentialEnvVars("", "")
+	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))
+	ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, opts.Env)
+
+	result, err := rt.Exec(ctx, cmd, opts)
+	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result)
+	if sessionResult != nil {
+		sessionResult.SessionID = sessionID
+	}
+	if err != nil {
+		if sessionResult == nil {
+			sessionResult = &SessionResult{
+				Engine:     a.Name(),
+				SessionID:  sessionID,
+				ExitCode:   1,
+				DurationMs: time.Since(start).Milliseconds(),
+				Stderr:     result.Stderr,
+				Artifacts:  &SessionArtifacts{},
+			}
+		}
+		return sessionResult, fmt.Errorf("qodercli resume failed: %w", err)
+	}
+
+	if result.ExitCode != 0 {
+		return sessionResult, fmt.Errorf("qodercli resume failed (exit %d): %s", result.ExitCode, result.Stderr)
+	}
+
+	return sessionResult, nil
 }
 
 // findQoderSessionFile resolves the newest matching session JSONL under the Qoder
