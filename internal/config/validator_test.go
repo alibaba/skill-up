@@ -356,6 +356,54 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "valid judge context at eval level",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Context: &JudgeContextConfig{
+						Profile:        "standard",
+						Transcript:     "file_ref",
+						GeneratedFiles: "index",
+						Attachments:    []JudgeContextAttachment{{Path: "fixtures/result.json"}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid judge context at eval level",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Context: &JudgeContextConfig{Profile: "legacy"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.context.profile must be one of: minimal, standard",
+		},
+		{
 			name: "script without script_path at eval level is ignored",
 			cfg: &EvalConfig{
 				SchemaVersion: "v1alpha1",

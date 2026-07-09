@@ -96,6 +96,7 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	}
 
 	errs = append(errs, validateCollectArtifacts("cases.defaults.collect_artifacts", cfg.Cases.Defaults.CollectArtifacts)...)
+	errs = append(errs, validateJudgeContext(cfg.Judge.Context)...)
 
 	if len(errs) > 0 {
 		return fmt.Errorf("validation errors:\n  - %s", strings.Join(errs, "\n  - "))

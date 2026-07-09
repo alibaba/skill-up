@@ -186,7 +186,7 @@ func (j *AgentJudge) buildResult(in Input, sessionResult *agent.SessionResult, m
 func buildContextMetadata(sessionResult *agent.SessionResult, materialized *MaterializedContext, prompt string) *ContextMetadata {
 	metadata := &ContextMetadata{
 		Profile:         materialized.Manifest.Profile,
-		MaterializedDir: materialized.Dir,
+		MaterializedDir: materialized.Manifest.MaterializedDir,
 		Manifest:        &materialized.Manifest,
 		PromptBytes:     len([]byte(prompt)),
 	}
@@ -453,7 +453,7 @@ func buildJudgePrompt(_ context.Context, criteria []string, materialized *Materi
 			if m.Truncated {
 				notes = "inline excerpt truncated; full text is at path"
 			}
-			fmt.Fprintf(&sb, "| %s | %s | %s | %d | %s |\n", materialLabel(m), m.Mode, m.Path, m.OriginalBytes, notes)
+			fmt.Fprintf(&sb, "| %s | %s | %s | %d | %s |\n", materialLabel(m), m.Mode, materialPromptPath(m), m.OriginalBytes, notes)
 		}
 		for _, m := range materialized.Materials {
 			if strings.TrimSpace(m.InlineContent) == "" {
@@ -492,4 +492,11 @@ func materialLabel(m ContextMaterial) string {
 		return m.Key + ":" + m.Label
 	}
 	return m.Key
+}
+
+func materialPromptPath(m ContextMaterial) string {
+	if m.RuntimePath != "" {
+		return m.RuntimePath
+	}
+	return m.Path
 }

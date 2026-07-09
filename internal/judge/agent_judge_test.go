@@ -375,6 +375,21 @@ func TestBuildJudgePrompt_ContainsAllParts(t *testing.T) {
 	}
 }
 
+func TestBuildContextMetadata_UsesManifestMaterializedDir(t *testing.T) {
+	materialized := &MaterializedContext{
+		Dir: "/tmp/skill-up/run/context",
+		Manifest: ContextManifest{
+			Profile:         "standard",
+			MaterializedDir: judgeContextArtifactDir,
+		},
+	}
+
+	metadata := buildContextMetadata(nil, materialized, "prompt")
+	if metadata.MaterializedDir != judgeContextArtifactDir {
+		t.Fatalf("materialized_dir = %q, want %q", metadata.MaterializedDir, judgeContextArtifactDir)
+	}
+}
+
 func TestMaterializeJudgeContext_TranscriptMarshalFailure_ReturnsError(t *testing.T) {
 	_, err := MaterializeJudgeContext(context.Background(), &mockJudgeTestRuntime{}, nil, Input{
 		Transcript: transcript.Transcript{

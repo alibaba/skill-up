@@ -74,6 +74,44 @@ func TestDeliverPrompt_FileAboveThreshold(t *testing.T) {
 	}
 }
 
+func TestDeliverPrompt_RequiresInlineBuilder(t *testing.T) {
+	t.Setenv(envPromptInlineMaxBytes, "16")
+	rt := &promptDeliveryTestRuntime{workspace: t.TempDir()}
+
+	_, _, err := deliverPrompt(context.Background(), rt, ExecOptions{}, "short", promptCommandBuilder{})
+	if err == nil {
+		t.Fatal("expected missing inline builder error")
+	}
+	if !strings.Contains(err.Error(), "inline command builder") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDeliverPrompt_RejectsOversizedPromptWithoutStdinFileBuilder(t *testing.T) {
+	t.Setenv(envPromptInlineMaxBytes, "16")
+	rt := &promptDeliveryTestRuntime{workspace: t.TempDir()}
+	instruction := strings.Repeat("x", 64)
+
+	cmd, meta, err := deliverPrompt(context.Background(), rt, ExecOptions{}, instruction, promptCommandBuilder{
+		Inline: func(prompt string) string { return "run " + shellQuote(prompt) },
+	})
+	if err == nil {
+		t.Fatal("expected oversized prompt error")
+	}
+	if cmd != "" {
+		t.Fatalf("unexpected command on error: %q", cmd)
+	}
+	if meta == nil || meta.Mode != "inline" {
+		t.Fatalf("expected inline metadata on error, got %#v", meta)
+	}
+	if !strings.Contains(err.Error(), "stdin file command builder") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rt.uploadedTarget != "" {
+		t.Fatalf("did not expect upload on error, got %q", rt.uploadedTarget)
+	}
+}
+
 type promptDeliveryTestRuntime struct {
 	workspace       string
 	uploadedTarget  string

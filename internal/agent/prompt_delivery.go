@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,13 +32,23 @@ type promptCommandBuilder struct {
 
 func deliverPrompt(ctx context.Context, rt Runtime, opts ExecOptions, instruction string, builder promptCommandBuilder) (string, *PromptDeliveryMetadata, error) {
 	threshold := promptInlineMaxBytes()
+	promptBytes := len([]byte(instruction))
 	meta := &PromptDeliveryMetadata{
 		Mode:           "inline",
-		PromptBytes:    len([]byte(instruction)),
+		PromptBytes:    promptBytes,
 		InlineMaxBytes: threshold,
 	}
-	if len([]byte(instruction)) <= threshold || builder.StdinFile == nil {
+	if builder.Inline == nil {
+		return "", meta, errors.New("prompt delivery requires inline command builder")
+	}
+	if promptBytes <= threshold {
 		return builder.Inline(instruction), meta, nil
+	}
+	if builder.StdinFile == nil {
+		return "", meta, fmt.Errorf("prompt delivery requires stdin file command builder for %d-byte prompt above %d-byte inline threshold", promptBytes, threshold)
+	}
+	if rt == nil {
+		return "", meta, errors.New("prompt delivery requires runtime for file mode")
 	}
 
 	runtimePath := filepath.Join(rt.Workspace(), ".skill-up", "prompts", "prompt.txt")

@@ -115,14 +115,33 @@ func MergeJudgeContextConfig(global, caseLevel *config.JudgeContextConfig) *conf
 	if caseLevel.GeneratedFiles != "" {
 		merged.GeneratedFiles = caseLevel.GeneratedFiles
 	}
-	if caseLevel.Limits != nil {
-		limits := *caseLevel.Limits
-		merged.Limits = &limits
-	}
+	merged.Limits = mergeJudgeContextLimits(global.Limits, caseLevel.Limits)
 	if caseLevel.Attachments != nil {
 		merged.Attachments = append([]config.JudgeContextAttachment(nil), caseLevel.Attachments...)
 	}
 	return merged
+}
+
+func mergeJudgeContextLimits(global, caseLevel *config.JudgeContextLimits) *config.JudgeContextLimits {
+	if global == nil && caseLevel == nil {
+		return nil
+	}
+	var limits config.JudgeContextLimits
+	if global != nil {
+		limits = *global
+	}
+	if caseLevel != nil {
+		if caseLevel.MaxBytes > 0 {
+			limits.MaxBytes = caseLevel.MaxBytes
+		}
+		if caseLevel.TranscriptMaxTurns > 0 {
+			limits.TranscriptMaxTurns = caseLevel.TranscriptMaxTurns
+		}
+		if caseLevel.WorkspaceDiffMaxLines > 0 {
+			limits.WorkspaceDiffMaxLines = caseLevel.WorkspaceDiffMaxLines
+		}
+	}
+	return &limits
 }
 
 func cloneJudgeContextConfig(in *config.JudgeContextConfig) *config.JudgeContextConfig {

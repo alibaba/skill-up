@@ -262,7 +262,10 @@ func TestMergeJudgeConfig_CaseContextOverridesGlobalFields(t *testing.T) {
 			Profile:       "standard",
 			Transcript:    "file_ref",
 			WorkspaceDiff: "file_ref",
-			Limits:        &config.JudgeContextLimits{MaxBytes: 100},
+			Limits: &config.JudgeContextLimits{
+				MaxBytes:              100,
+				WorkspaceDiffMaxLines: 50,
+			},
 		},
 	}
 	caseLevel := config.JudgeConfig{
@@ -271,6 +274,7 @@ func TestMergeJudgeConfig_CaseContextOverridesGlobalFields(t *testing.T) {
 		Context: &config.JudgeContextConfig{
 			Profile:      "minimal",
 			FinalMessage: "truncate",
+			Limits:       &config.JudgeContextLimits{TranscriptMaxTurns: 20},
 		},
 	}
 
@@ -287,8 +291,17 @@ func TestMergeJudgeConfig_CaseContextOverridesGlobalFields(t *testing.T) {
 	if merged.Context.FinalMessage != "truncate" {
 		t.Fatalf("final_message = %q, want truncate", merged.Context.FinalMessage)
 	}
-	if merged.Context.Limits == nil || merged.Context.Limits.MaxBytes != 100 {
+	if merged.Context.Limits == nil {
 		t.Fatalf("limits not inherited: %#v", merged.Context.Limits)
+	}
+	if merged.Context.Limits.MaxBytes != 100 {
+		t.Fatalf("limits.max_bytes = %d, want inherited 100", merged.Context.Limits.MaxBytes)
+	}
+	if merged.Context.Limits.TranscriptMaxTurns != 20 {
+		t.Fatalf("limits.transcript_max_turns = %d, want case override 20", merged.Context.Limits.TranscriptMaxTurns)
+	}
+	if merged.Context.Limits.WorkspaceDiffMaxLines != 50 {
+		t.Fatalf("limits.workspace_diff_max_lines = %d, want inherited 50", merged.Context.Limits.WorkspaceDiffMaxLines)
 	}
 }
 

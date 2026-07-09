@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"strings"
 	"unicode"
@@ -29,6 +31,7 @@ const (
 	judgeContextGeneratedInclude = "include"
 
 	defaultJudgeContextMaxBytes = 64 * 1024
+	judgeContextArtifactDir     = "judge/context"
 )
 
 // MaterializedContext describes the files and inline previews made available
@@ -64,6 +67,7 @@ type ContextMaterial struct {
 	ContextMaterialManifest
 
 	InlineContent string `json:"-"`
+	RuntimePath   string `json:"-"`
 }
 
 type effectiveJudgeContext struct {
@@ -102,23 +106,22 @@ func MaterializeJudgeContext(ctx context.Context, rt runtime.Runtime, cfg *confi
 		RuntimeDir: runtimeDir,
 		Manifest: ContextManifest{
 			Profile:         effective.profile,
-			MaterializedDir: hostDir,
-			RuntimeDir:      runtimeDir,
+			MaterializedDir: judgeContextArtifactDir,
 		},
 	}
 
-	if err := materializeText(ctx, rt, mc, "final_message", "", "final_message.txt", in.FinalMessage, effective.finalMessageMode, effective.maxBytes); err != nil {
+	if err := materializeText(ctx, rt, mc, "final_message", "final_message.txt", in.FinalMessage, effective.finalMessageMode, effective.maxBytes); err != nil {
 		return nil, err
 	}
 	transcriptJSON, err := marshalTranscript(in.Transcript, effective.transcriptMaxTurns)
 	if err != nil {
 		return nil, err
 	}
-	if err := materializeText(ctx, rt, mc, "transcript", "", "transcript.json", transcriptJSON, effective.transcriptMode, effective.maxBytes); err != nil {
+	if err := materializeText(ctx, rt, mc, "transcript", "transcript.json", transcriptJSON, effective.transcriptMode, effective.maxBytes); err != nil {
 		return nil, err
 	}
 	diff := limitLines(in.WorkspaceDiff, effective.workspaceDiffMaxLines)
-	if err := materializeText(ctx, rt, mc, "workspace_diff", "", "workspace.diff", diff, effective.workspaceDiffMode, effective.maxBytes); err != nil {
+	if err := materializeText(ctx, rt, mc, "workspace_diff", "workspace.diff", diff, effective.workspaceDiffMode, effective.maxBytes); err != nil {
 		return nil, err
 	}
 	if err := materializeGeneratedFiles(ctx, rt, mc, in.GeneratedFiles, effective.generatedFilesMode, effective.maxBytes); err != nil {
@@ -200,14 +203,13 @@ func judgeContextHostDir(artifactDir string) (string, error) {
 	return filepath.Join(filepath.Dir(artifactDir), "context"), nil
 }
 
-func materializeText(ctx context.Context, rt runtime.Runtime, mc *MaterializedContext, key, label, fileName, content, mode string, maxBytes int) error {
+func materializeText(ctx context.Context, rt runtime.Runtime, mc *MaterializedContext, key, fileName, content, mode string, maxBytes int) error {
 	if mode == "" {
 		mode = judgeContextModeFileRef
 	}
 	material := ContextMaterial{
 		ContextMaterialManifest: ContextMaterialManifest{
 			Key:           key,
-			Label:         label,
 			Mode:          mode,
 			Bytes:         len([]byte(content)),
 			OriginalBytes: len([]byte(content)),
@@ -228,12 +230,12 @@ func materializeText(ctx context.Context, rt runtime.Runtime, mc *MaterializedCo
 		mode = judgeContextModeFileRef
 		material.Mode = mode
 	}
-	hostPath, runtimePath, err := writeMaterialFile(ctx, rt, mc, fileName, content)
+	runtimePath, manifestPath, err := writeMaterialFile(ctx, rt, mc, fileName, content)
 	if err != nil {
 		return err
 	}
-	_ = hostPath
-	material.Path = runtimePath
+	material.Path = manifestPath
+	material.RuntimePath = runtimePath
 	switch mode {
 	case judgeContextModeInclude:
 		material.InlineContent = content
@@ -250,12 +252,12 @@ func materializeText(ctx context.Context, rt runtime.Runtime, mc *MaterializedCo
 	return nil
 }
 
-func writeMaterialFile(ctx context.Context, rt runtime.Runtime, mc *MaterializedContext, fileName, content string) (hostPath string, runtimePath string, err error) {
+func writeMaterialFile(ctx context.Context, rt runtime.Runtime, mc *MaterializedContext, fileName, content string) (runtimePath string, manifestPath string, err error) {
 	safeName, err := safeMaterialRelPath(fileName)
 	if err != nil {
 		return "", "", err
 	}
-	hostPath, err = safeMaterialHostPath(mc.Dir, safeName)
+	hostPath, err := safeMaterialHostPath(mc.Dir, safeName)
 	if err != nil {
 		return "", "", err
 	}
@@ -266,11 +268,66 @@ func writeMaterialFile(ctx context.Context, rt runtime.Runtime, mc *Materialized
 	if err := os.WriteFile(hostPath, []byte(content), 0o600); err != nil {
 		return "", "", fmt.Errorf("write material %s: %w", fileName, err)
 	}
-	runtimePath = filepath.Join(mc.RuntimeDir, filepath.ToSlash(safeName))
+	runtimePath = materialRuntimePath(mc, safeName)
 	if err := uploadRuntimeFile(ctx, rt, hostPath, runtimePath); err != nil {
 		return "", "", err
 	}
-	return hostPath, runtimePath, nil
+	return runtimePath, materialManifestPath(safeName), nil
+}
+
+func copyMaterialFile(ctx context.Context, rt runtime.Runtime, mc *MaterializedContext, fileName, sourcePath string) (runtimePath string, manifestPath string, bytes int, err error) {
+	safeName, err := safeMaterialRelPath(fileName)
+	if err != nil {
+		return "", "", 0, err
+	}
+	hostPath, err := safeMaterialHostPath(mc.Dir, safeName)
+	if err != nil {
+		return "", "", 0, err
+	}
+	if err := os.MkdirAll(filepath.Dir(hostPath), 0o755); err != nil {
+		return "", "", 0, fmt.Errorf("create material dir: %w", err)
+	}
+	// #nosec G304 -- sourcePath is resolved by resolveAttachmentPath to stay within skill/workspace roots.
+	src, err := os.Open(sourcePath)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("read judge context attachment %q: %w", sourcePath, err)
+	}
+	// #nosec G304 -- hostPath is constrained by safeMaterialRelPath and safeMaterialHostPath to stay under mc.Dir.
+	dst, err := os.OpenFile(hostPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		if closeErr := src.Close(); closeErr != nil {
+			return "", "", 0, fmt.Errorf("close judge context attachment %q: %w", sourcePath, closeErr)
+		}
+		return "", "", 0, fmt.Errorf("write material %s: %w", fileName, err)
+	}
+	copied, copyErr := io.Copy(dst, src)
+	dstCloseErr := dst.Close()
+	srcCloseErr := src.Close()
+	if copyErr != nil {
+		return "", "", 0, fmt.Errorf("copy material %s: %w", fileName, copyErr)
+	}
+	if dstCloseErr != nil {
+		return "", "", 0, fmt.Errorf("close material %s: %w", fileName, dstCloseErr)
+	}
+	if srcCloseErr != nil {
+		return "", "", 0, fmt.Errorf("close judge context attachment %q: %w", sourcePath, srcCloseErr)
+	}
+	if copied > int64(^uint(0)>>1) {
+		return "", "", 0, fmt.Errorf("material %s is too large", fileName)
+	}
+	runtimePath = materialRuntimePath(mc, safeName)
+	if err := uploadRuntimeFile(ctx, rt, hostPath, runtimePath); err != nil {
+		return "", "", 0, err
+	}
+	return runtimePath, materialManifestPath(safeName), int(copied), nil
+}
+
+func materialRuntimePath(mc *MaterializedContext, safeName string) string {
+	return filepath.Join(mc.RuntimeDir, filepath.ToSlash(safeName))
+}
+
+func materialManifestPath(safeName string) string {
+	return pathpkg.Join(judgeContextArtifactDir, filepath.ToSlash(safeName))
 }
 
 func safeMaterialRelPath(fileName string) (string, error) {
@@ -323,7 +380,7 @@ func materializeGeneratedFiles(ctx context.Context, rt runtime.Runtime, mc *Mate
 	if mode == judgeContextGeneratedInclude && len([]byte(content)) <= maxBytes {
 		textMode = judgeContextModeInclude
 	}
-	return materializeText(ctx, rt, mc, "generated_files", "", "generated_files.txt", content, textMode, maxBytes)
+	return materializeText(ctx, rt, mc, "generated_files", "generated_files.txt", content, textMode, maxBytes)
 }
 
 func materializeAttachments(ctx context.Context, rt runtime.Runtime, mc *MaterializedContext, attachments []config.JudgeContextAttachment, in Input) error {
@@ -335,18 +392,28 @@ func materializeAttachments(ctx context.Context, rt runtime.Runtime, mc *Materia
 		if err != nil {
 			return err
 		}
-		data, err := os.ReadFile(src)
-		if err != nil {
-			return fmt.Errorf("read judge context attachment %q: %w", attachment.Path, err)
-		}
 		label := attachment.Label
 		if label == "" {
 			label = strings.TrimSuffix(filepath.Base(src), filepath.Ext(src))
 		}
 		name := fmt.Sprintf("%02d-%s%s", i+1, safeMaterialName(label), filepath.Ext(src))
-		if err := materializeText(ctx, rt, mc, "attachment", label, filepath.Join("attachments", name), string(data), judgeContextModeFileRef, defaultJudgeContextMaxBytes); err != nil {
+		runtimePath, manifestPath, bytes, err := copyMaterialFile(ctx, rt, mc, filepath.Join("attachments", name), src)
+		if err != nil {
 			return err
 		}
+		material := ContextMaterial{
+			ContextMaterialManifest: ContextMaterialManifest{
+				Key:           "attachment",
+				Label:         label,
+				Mode:          judgeContextModeFileRef,
+				Path:          manifestPath,
+				Bytes:         bytes,
+				OriginalBytes: bytes,
+			},
+			RuntimePath: runtimePath,
+		}
+		mc.Manifest.Materials = append(mc.Manifest.Materials, material.ContextMaterialManifest)
+		mc.Materials = append(mc.Materials, material)
 	}
 	return nil
 }
