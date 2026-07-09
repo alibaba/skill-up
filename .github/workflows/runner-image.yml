@@ -1,11 +1,11 @@
-name: Build & push skill-eval runner image
+name: Runner Image
 
 # Builds the runner image used by the Agent Skill Eval action (action.yml):
 # bakes skill-up + claude + codex + qodercli from public registries and pushes
 # to ghcr.io/<this-org>/skill-up-runner via the built-in GITHUB_TOKEN (no PAT).
 #
 # Triggers:
-#   - workflow_call: invoked by skill-eval-self.yml so the dogfood eval always
+#   - workflow_call: invoked by skill-upper-self-eval.yml so the dogfood eval always
 #     runs against an image built from the same commit (no pull/push race).
 #   - push to main touching the action runtime -> republish.
 #   - workflow_dispatch -> manual (re)publish at an explicit tag.

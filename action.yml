@@ -65,7 +65,7 @@ outputs:
 
 # Docker container action: the prebuilt image ships the three engines + skill-up
 # + the action code, so the caller just `uses:` it. The image is published to
-# this repo's own org namespace by .github/workflows/build-runner-image.yml;
+# this repo's own org namespace by .github/workflows/runner-image.yml;
 # bump the tag together with releases (pin by @sha256 digest for reproducibility).
 # NOTE: Docker container actions run on Linux runners only.
 runs:

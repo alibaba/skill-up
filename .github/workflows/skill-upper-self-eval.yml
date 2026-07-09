@@ -1,4 +1,4 @@
-name: Self-eval (dogfood the action)
+name: Skill Upper Self-Eval
 
 # Dogfoods the Agent Skill Eval action (action.yml) against this repo's own
 # skill-upper skill — once per engine (claude_code / codex / qodercli) — so a
@@ -38,7 +38,7 @@ jobs:
   # jobs below always eval with the action code + engines baked at the same ref
   # (otherwise they'd race the parallel image build and pull a stale :v0.1.0).
   image:
-    uses: ./.github/workflows/build-runner-image.yml
+    uses: ./.github/workflows/runner-image.yml
     with:
       tag: self-eval-${{ github.run_id }}
       publish_latest: false
