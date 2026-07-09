@@ -23,6 +23,11 @@ on:
         required: false
         type: string
         default: 'v0.1.0'
+      publish_latest:
+        description: 'Also publish the latest tag'
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -35,6 +40,11 @@ on:
         required: true
         type: string
         default: 'v0.1.0'
+      publish_latest:
+        description: 'Also publish the latest tag'
+        required: true
+        type: boolean
+        default: true
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/skill-up-runner
@@ -57,6 +67,7 @@ jobs:
         env:
           # Fork PRs can't push packages; build-only for them.
           SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+          PUBLISH_LATEST: ${{ github.event_name == 'push' || inputs.publish_latest }}
         run: |
           {
             echo "tags<<__TAGS__"
@@ -67,9 +78,12 @@ jobs:
               # not be able to replace the production runner image.
               echo "${IMAGE}:pr-${{ github.event.pull_request.number }}"
             else
-              # push to main / manual dispatch = release: publish the tag + latest.
+              # push to main / manual dispatch = release; reusable callers can
+              # opt into latest explicitly, but self-eval uses an isolated tag.
               echo "${IMAGE}:${{ inputs.tag || 'v0.1.0' }}"
-              echo "${IMAGE}:latest"
+              if [ "$PUBLISH_LATEST" = "true" ]; then
+                echo "${IMAGE}:latest"
+              fi
             fi
             echo "__TAGS__"
           } >> "$GITHUB_OUTPUT"

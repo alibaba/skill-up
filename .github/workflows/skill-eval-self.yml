@@ -39,6 +39,9 @@ jobs:
   # (otherwise they'd race the parallel image build and pull a stale :v0.1.0).
   image:
     uses: ./.github/workflows/build-runner-image.yml
+    with:
+      tag: self-eval-${{ github.run_id }}
+      publish_latest: false
     permissions:
       contents: read
       packages: write
@@ -68,13 +71,12 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      # Point the (local) action at the image the `image` job just built for THIS
-      # run: a PR-scoped tag on PRs, the release tag on main. This keeps the
-      # dogfood testing the PR's own image while never consuming or clobbering
-      # the mutable v0.1.0 that released users pull via alibaba/skill-up@v0.1.0.
+      # Point the local action at the image the `image` job just built for this
+      # run. The tag is intentionally run-scoped so manual dogfood runs from
+      # feature branches never clobber production runner image tags.
       - name: Pin action to this run's runner image
         run: |
-          tag="${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'v0.1.0' }}"
+          tag="self-eval-${{ github.run_id }}"
           img="ghcr.io/${{ github.repository_owner }}/skill-up-runner:${tag}"
           sed -i "s#image: docker://ghcr.io/[^[:space:]]*/skill-up-runner:.*#image: docker://${img}#" action.yml
           echo "dogfood will use ${img}"
