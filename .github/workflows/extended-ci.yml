@@ -3,8 +3,6 @@ name: Extended CI
 on:
   merge_group:
   workflow_dispatch:
-  schedule:
-    - cron: '23 18 * * 0'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
