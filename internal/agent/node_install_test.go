@@ -140,4 +140,6 @@ func (r *nodeBootstrapTestRuntime) Exec(_ context.Context, command string, _ run
 func (r *nodeBootstrapTestRuntime) Workspace() string            { return "/workspace" }
 func (r *nodeBootstrapTestRuntime) RequiresProcessSandbox() bool { return false }
 func (r *nodeBootstrapTestRuntime) MergeEnv(map[string]string)   {}
-func (r *nodeBootstrapTestRuntime) TargetGOOS() string           { return platform.GOOSLinux }
+func (r *nodeBootstrapTestRuntime) Shell() platform.Shell {
+	return platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
+}

@@ -108,7 +108,7 @@ func (a *ClaudeCodeAgent) CheckCredentials(ctx context.Context) error {
 // Run executes the claude-code agent with the given messages via stream-json.
 // It streams messages to stdin and parses stream-json output to build the transcript.
 func (a *ClaudeCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (*SessionResult, error) {
-	if err := requireBashOnWindowsHost(rt); err != nil {
+	if err := requireBashTargetShell(rt); err != nil {
 		return nil, fmt.Errorf("%s: %w", a.Name(), err)
 	}
 	start := time.Now()
@@ -459,7 +459,7 @@ func (a *ClaudeCodeAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOpti
 		return a.Run(ctx, rt, opts, []transcript.Message{message})
 	}
 
-	if err := requireBashOnWindowsHost(rt); err != nil {
+	if err := requireBashTargetShell(rt); err != nil {
 		return nil, fmt.Errorf("%s: %w", a.Name(), err)
 	}
 	start := time.Now()

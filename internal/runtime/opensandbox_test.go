@@ -16,6 +16,8 @@ import (
 	"time"
 
 	opensandbox "github.com/alibaba/OpenSandbox/sdks/sandbox/go"
+
+	"github.com/alibaba/skill-up/internal/platform"
 )
 
 const testWorkspaceMount = "/work"
@@ -107,6 +109,17 @@ func TestOpenSandboxCreateUsesSDKOptions(t *testing.T) {
 	}
 	if fake.createdDirs[0] != testWorkspaceMount {
 		t.Fatalf("created workspace = %q, want /work", fake.createdDirs[0])
+	}
+}
+
+func TestOpenSandboxRuntimeShellIsLinuxPOSIX(t *testing.T) {
+	rt, err := NewOpenSandboxRuntime(Config{})
+	if err != nil {
+		t.Fatalf("NewOpenSandboxRuntime: %v", err)
+	}
+	want := platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
+	if got := rt.Shell(); got != want {
+		t.Fatalf("Shell() = %+v, want %+v", got, want)
 	}
 }
 

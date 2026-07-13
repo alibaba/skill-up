@@ -24,23 +24,19 @@ import (
 // ErrAgentNotFound is returned when the agent executable is not found.
 var ErrAgentNotFound = errors.New("agent not found in PATH")
 
-// ErrAgentRequiresBash is returned when an agent CLI is invoked on a Windows
-// host where Git Bash (or another bash discoverable by platform.DiscoverBash)
-// is not available. Agent commands are POSIX-quoted and assume a bash
-// interpreter; running them through the cmd.exe fallback would let metachars
-// (`& | " %VAR%`) in the instruction reach the shell unprotected. See
-// docs/guide/windows.md for the documented limitation.
-var ErrAgentRequiresBash = errors.New("agent CLI execution on Windows requires bash; install Git for Windows or set SKILL_UP_BASH")
+// ErrAgentRequiresBash is returned when an agent CLI targets Windows without
+// a bash-compatible target shell. Agent commands use POSIX shell syntax.
+var ErrAgentRequiresBash = errors.New("agent CLI execution on Windows requires a bash target shell")
 
-// requireBashOnWindowsHost rejects agent execution when the runtime's target
-// is Windows but the host shell would be cmd.exe. We only enforce this for
-// runtimes whose target matches the host (NoneRuntime today); sandboxed
-// runtimes target a non-Windows guest and never go through platform.Host().
-func requireBashOnWindowsHost(rt Runtime) error {
-	if rt.TargetGOOS() != platform.GOOSWindows {
+func requireBashTargetShell(rt Runtime) error {
+	shell := rt.Shell()
+	if err := shell.Validate(); err != nil {
+		return fmt.Errorf("invalid runtime shell: %w", err)
+	}
+	if shell.GOOS != platform.GOOSWindows {
 		return nil
 	}
-	if platform.Host().IsBash {
+	if shell.IsBash() {
 		return nil
 	}
 	return ErrAgentRequiresBash

@@ -2,6 +2,7 @@ package judge
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -38,13 +39,16 @@ type scriptPlan struct {
 func identityEnvPath(p string) string { return p }
 
 // planScript determines how to execute scriptPath in a runtime whose commands
-// run on targetGOOS.
+// run with the target shell.
 //
 // POSIX targets keep the original behavior: the script is uploaded verbatim
 // and run via its own shebang. Windows targets dispatch to an interpreter
 // based on the file extension (or shebang when the extension is absent).
-func planScript(scriptPath, targetGOOS string) (scriptPlan, error) {
-	if targetGOOS != platform.GOOSWindows {
+func planScript(scriptPath string, shell platform.Shell) (scriptPlan, error) {
+	if err := shell.Validate(); err != nil {
+		return scriptPlan{}, fmt.Errorf("invalid runtime shell: %w", err)
+	}
+	if shell.GOOS != platform.GOOSWindows {
 		return scriptPlan{
 			uploadName: "script",
 			command: func(remoteScript string) string {
@@ -57,10 +61,15 @@ func planScript(scriptPath, targetGOOS string) (scriptPlan, error) {
 			envPath: identityEnvPath,
 		}, nil
 	}
-	return planWindowsScript(scriptPath, platform.Host())
+	return planWindowsScript(scriptPath, shell)
 }
 
-func planWindowsScript(scriptPath string, shell platform.HostShell) (scriptPlan, error) {
+func planWindowsScript(scriptPath string, shell platform.Shell) (scriptPlan, error) {
+	quote, err := shell.Quoter()
+	if err != nil {
+		return scriptPlan{}, fmt.Errorf("select runtime shell quoter: %w", err)
+	}
+
 	// Read and classify the shebang once: both the .ps1 (pwsh-vs-powershell
 	// selection, option forwarding) and .sh (bash strict-mode flags) plans
 	// consume the result. shebangInterp is "" when no recognized shebang
@@ -72,12 +81,8 @@ func planWindowsScript(scriptPath string, shell platform.HostShell) (scriptPlan,
 		ext = extensionForShebangInterpreter(shebangInterp)
 	}
 
-	// Every command we emit (script run + cleanup) is quoted with the host
-	// shell's own quoter so the same shell semantics applies end to end.
-	// shell.Quote already accounts for bash-vs-cmd selection -- there is no
-	// second discovery here, ruling out the chance of the two decisions
-	// disagreeing.
-	quote := shell.Quote
+	// Every command we emit (script run + cleanup) uses the target shell's
+	// quoter so the same shell semantics applies end to end.
 	// .ps1 / .cmd / .bat all execute through cmd.exe, so cleanup through cmd
 	// keeps quoting / strip semantics inside one shell. The `/d /s /c` flags
 	// match the cmd fallback in platform.Host so the strip rule behaves the
@@ -135,16 +140,14 @@ func planWindowsScript(scriptPath string, shell platform.HostShell) (scriptPlan,
 			envPath:        identityEnvPath,
 		}, nil
 	case ".sh", ".bash":
-		if !shell.IsBash {
-			return scriptPlan{}, fmt.Errorf(
-				"script judge: .sh script requires bash on Windows; install Git Bash or set %s",
-				platform.BashEnvOverride)
+		if !shell.IsBash() {
+			return scriptPlan{}, errors.New("script judge: .sh script requires a bash target shell on Windows")
 		}
 		// Forward shebang-encoded options (`#!/bin/bash -eu`,
 		// `#!/usr/bin/env -S bash -eu`, ...) so strict-mode flags that
 		// POSIX honors via shebang aren't silently dropped when we invoke
 		// bash explicitly on Windows.
-		bashArgs := []string{quote(shell.Bash)}
+		bashArgs := []string{quote(shell.BashPath)}
 		// Forward only when the shebang actually names a POSIX shell, so a
 		// `.sh` file with an unrelated shebang (e.g. `#!/usr/bin/env pwsh`
 		// renamed to .sh) does not feed PowerShell flags to bash.

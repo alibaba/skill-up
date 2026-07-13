@@ -3,11 +3,14 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/alibaba/skill-up/internal/platform"
 )
 
 const (
@@ -143,15 +146,10 @@ type Runtime interface {
 	Workspace() string
 	// RequiresProcessSandbox reports whether agents should enable their own process sandbox.
 	RequiresProcessSandbox() bool
-	// TargetGOOS reports the GOOS value of the environment where Exec
-	// runs commands. NoneRuntime executes on the host so it returns
-	// runtime.GOOS; OpenSandboxRuntime always returns "linux" because
-	// it executes inside a Linux sandbox. Implementations must return a
-	// non-empty value -- callers (most importantly the script-judge
-	// planner) use it to choose between POSIX and Windows command shapes,
-	// and silently defaulting to "linux" would mask configuration
-	// mistakes in any future Windows-targeting runtime.
-	TargetGOOS() string
+	// Shell describes the target command interpreter used by Exec. The target
+	// may differ from the skill-up host (for example, a Linux container on a
+	// Windows host), so callers must not re-derive it from platform.Host.
+	Shell() platform.Shell
 }
 
 // FileReadSeeker combines io.ReadSeeker for file access.
@@ -216,14 +214,25 @@ type SkillConfig struct {
 
 // NewRuntime creates a Runtime based on the config type.
 func NewRuntime(cfg Config) (Runtime, error) {
+	var (
+		rt  Runtime
+		err error
+	)
 	switch cfg.Type {
 	case "none":
-		return &NoneRuntime{cfg: cfg}, nil
+		rt = &NoneRuntime{cfg: cfg}
 	case "opensandbox":
-		return NewOpenSandboxRuntime(cfg)
+		rt, err = NewOpenSandboxRuntime(cfg)
 	case "docker":
-		return NewDockerRuntime(cfg)
+		rt, err = NewDockerRuntime(cfg)
 	default:
 		return nil, errors.New("unknown runtime type: " + cfg.Type)
 	}
+	if err != nil {
+		return nil, err
+	}
+	if err := rt.Shell().Validate(); err != nil {
+		return nil, fmt.Errorf("invalid %s runtime shell: %w", cfg.Type, err)
+	}
+	return rt, nil
 }
