@@ -1142,4 +1142,6 @@ func (r *codexTestRuntime) MergeEnv(env map[string]string) {
 	maps.Copy(r.mergedEnv, env)
 }
 
-func (r *codexTestRuntime) TargetGOOS() string { return platform.GOOSLinux }
+func (r *codexTestRuntime) Shell() platform.Shell {
+	return platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
+}

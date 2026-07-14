@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/alibaba/skill-up/internal/agent"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
@@ -124,7 +125,9 @@ func (m *mockJudgeTestRuntime) Workspace() string              { return "/tmp/te
 func (m *mockJudgeTestRuntime) RequiresProcessSandbox() bool   { return true }
 func (m *mockJudgeTestRuntime) MergeEnv(_ map[string]string)   {}
 
-func (m *mockJudgeTestRuntime) TargetGOOS() string                                { return "linux" }
+func (m *mockJudgeTestRuntime) Shell() platform.Shell {
+	return platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
+}
 func (m *mockJudgeTestRuntime) Start(_ context.Context) error                     { return nil }
 func (m *mockJudgeTestRuntime) Stop(_ context.Context) error                      { return nil }
 func (m *mockJudgeTestRuntime) UploadFile(_ context.Context, _, _ string) error   { return nil }

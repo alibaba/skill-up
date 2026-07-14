@@ -317,4 +317,7 @@ func (r *qwenTestRuntime) MergeEnv(env map[string]string) {
 	}
 	maps.Copy(r.mergedEnv, env)
 }
-func (r *qwenTestRuntime) TargetGOOS() string { return platform.GOOSLinux }
+
+func (r *qwenTestRuntime) Shell() platform.Shell {
+	return platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
+}

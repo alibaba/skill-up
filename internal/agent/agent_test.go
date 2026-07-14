@@ -316,6 +316,7 @@ type probeMergeTestRuntime struct {
 	probeExit   int
 	probeErr    error
 	merged      map[string]string
+	shell       platform.Shell
 }
 
 func (r *probeMergeTestRuntime) Create(context.Context) error                     { return nil }
@@ -341,7 +342,38 @@ func (r *probeMergeTestRuntime) MergeEnv(env map[string]string) {
 	}
 	maps.Copy(r.merged, env)
 }
-func (r *probeMergeTestRuntime) TargetGOOS() string { return platform.GOOSLinux }
+
+func (r *probeMergeTestRuntime) Shell() platform.Shell {
+	if r.shell.GOOS != "" {
+		return r.shell
+	}
+	return platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
+}
+
+func TestRequireBashTargetShell(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		shell   platform.Shell
+		wantErr bool
+	}{
+		{name: "linux posix", shell: platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}},
+		{name: "windows bash", shell: platform.Shell{GOOS: platform.GOOSWindows, Family: platform.ShellPOSIX, BashPath: `C:\\Git\\bin\\bash.exe`}},
+		{name: "windows cmd", shell: platform.Shell{GOOS: platform.GOOSWindows, Family: platform.ShellCmd}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := requireBashTargetShell(&probeMergeTestRuntime{shell: tt.shell})
+			if tt.wantErr && !errors.Is(err, ErrAgentRequiresBash) {
+				t.Fatalf("error = %v, want ErrAgentRequiresBash", err)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
 
 func TestProbeAndMergePATH_HappyPath(t *testing.T) {
 	t.Parallel()

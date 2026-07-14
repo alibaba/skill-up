@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/alibaba/skill-up/internal/logging"
+	"github.com/alibaba/skill-up/internal/platform"
 )
 
 // osWindows is the goruntime.GOOS value for Windows, used by tests that skip
@@ -26,6 +27,13 @@ import (
 const osWindows = "windows"
 
 var logCaptureMu sync.Mutex
+
+func TestNoneRuntimeShellMatchesHostTarget(t *testing.T) {
+	rt := &NoneRuntime{}
+	if got, want := rt.Shell(), platform.Host().Target; got != want {
+		t.Fatalf("Shell() = %+v, want host target %+v", got, want)
+	}
+}
 
 func TestNoneRuntime_CreateAndClose(t *testing.T) {
 	t.Parallel()

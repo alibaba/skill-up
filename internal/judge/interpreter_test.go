@@ -3,15 +3,21 @@ package judge
 import (
 	"os"
 	"path/filepath"
-	goruntime "runtime"
 	"strings"
 	"testing"
 
 	"github.com/alibaba/skill-up/internal/platform"
 )
 
+var (
+	testLinuxShell       = platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
+	testDarwinShell      = platform.Shell{GOOS: platform.GOOSDarwin, Family: platform.ShellPOSIX}
+	testWindowsCmdShell  = platform.Shell{GOOS: platform.GOOSWindows, Family: platform.ShellCmd}
+	testWindowsBashShell = platform.Shell{GOOS: platform.GOOSWindows, Family: platform.ShellPOSIX, BashPath: `C:\Program Files\Git\bin\bash.exe`}
+)
+
 func TestPlanScript_POSIXTarget(t *testing.T) {
-	plan, err := planScript("/skill/evals/check.sh", "linux")
+	plan, err := planScript("/skill/evals/check.sh", testLinuxShell)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -34,16 +40,20 @@ func TestPlanScript_POSIXTarget(t *testing.T) {
 // $ / backtick doubled so bash decodes them back to the original byte) and
 // plain QuoteWindows otherwise.
 func TestHostShellQuote(t *testing.T) {
-	shell := platform.Host()
-	got := shell.Quote(`C:\tmp\$VAR\script.cmd`)
-	if goruntime.GOOS != "windows" {
+	target := platform.Host().Target
+	quote, err := target.Quoter()
+	if err != nil {
+		t.Fatalf("host target Quoter: %v", err)
+	}
+	got := quote(`C:\tmp\$VAR\script.cmd`)
+	if target.GOOS != platform.GOOSWindows {
 		want := `'C:\tmp\$VAR\script.cmd'`
 		if got != want {
 			t.Fatalf("posix shell.Quote = %q, want %q", got, want)
 		}
 		return
 	}
-	if shell.IsBash {
+	if target.IsBash() {
 		want := `"C:\\tmp\\\$VAR\\script.cmd"`
 		if got != want {
 			t.Fatalf("windows+bash shell.Quote = %q, want %q", got, want)
@@ -126,7 +136,7 @@ func TestParseShebang(t *testing.T) {
 // POSIX targets preserve the original behavior: the file extension is ignored
 // and the script runs via its own shebang.
 func TestPlanScript_POSIXTarget_IgnoresExtension(t *testing.T) {
-	plan, err := planScript("/skill/evals/check.ps1", "darwin")
+	plan, err := planScript("/skill/evals/check.ps1", testDarwinShell)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -148,7 +158,7 @@ func TestPlanWindowsScript(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plan, err := planWindowsScript(tt.scriptPath, platform.Host())
+			plan, err := planWindowsScript(tt.scriptPath, testWindowsCmdShell)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -168,7 +178,7 @@ func TestPlanWindowsScript_UnknownInterpreter(t *testing.T) {
 	if err := os.WriteFile(scriptPath, []byte("echo hi\n"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	_, err := planWindowsScript(scriptPath, platform.Host())
+	_, err := planWindowsScript(scriptPath, testWindowsCmdShell)
 	if err == nil || !strings.Contains(err.Error(), "cannot determine interpreter") {
 		t.Fatalf("expected cannot-determine-interpreter error, got: %v", err)
 	}
@@ -182,7 +192,7 @@ func TestPlanWindowsScript_PS1ShebangPwsh(t *testing.T) {
 	if err := os.WriteFile(scriptPath, []byte("#!/usr/bin/env pwsh\nWrite-Host hi\n"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	plan, err := planWindowsScript(scriptPath, platform.Host())
+	plan, err := planWindowsScript(scriptPath, testWindowsCmdShell)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -203,7 +213,7 @@ func TestPlanWindowsScript_PS1ShebangForwardsOpts(t *testing.T) {
 	if err := os.WriteFile(scriptPath, []byte("#!/usr/bin/env -S pwsh -NoLogo\nWrite-Host hi\n"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	plan, err := planWindowsScript(scriptPath, platform.Host())
+	plan, err := planWindowsScript(scriptPath, testWindowsCmdShell)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -227,7 +237,7 @@ func TestPlanWindowsScript_PS1NoShebangUsesLegacyDefault(t *testing.T) {
 	if err := os.WriteFile(scriptPath, []byte("Write-Host hi\n"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	plan, err := planWindowsScript(scriptPath, platform.Host())
+	plan, err := planWindowsScript(scriptPath, testWindowsCmdShell)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -237,21 +247,22 @@ func TestPlanWindowsScript_PS1NoShebangUsesLegacyDefault(t *testing.T) {
 	}
 }
 
-// TestPlanWindowsScript_ShellScript covers the .sh branch, whose outcome
-// depends on whether bash is discoverable on the host running the test.
+// TestPlanWindowsScript_ShellScript proves the planner consumes the injected
+// target shell instead of re-discovering the shell on the test host.
 func TestPlanWindowsScript_ShellScript(t *testing.T) {
-	plan, err := planWindowsScript(`C:\skill\check.sh`, platform.Host())
-	if _, ok := platform.DiscoverBash(); ok {
-		if err != nil {
-			t.Fatalf("bash is available but planning failed: %v", err)
-		}
-		if plan.uploadName != "script.sh" {
-			t.Fatalf("uploadName = %q, want \"script.sh\"", plan.uploadName)
-		}
-		return
+	plan, err := planScript(`C:\skill\check.sh`, testWindowsBashShell)
+	if err != nil {
+		t.Fatalf("planScript: %v", err)
 	}
-	if err == nil || !strings.Contains(err.Error(), "requires bash on Windows") {
-		t.Fatalf("expected bash-required error, got: %v", err)
+	if plan.uploadName != "script.sh" {
+		t.Fatalf("uploadName = %q, want \"script.sh\"", plan.uploadName)
+	}
+}
+
+func TestPlanWindowsScript_ShellScriptRejectsCmdTarget(t *testing.T) {
+	_, err := planScript(`C:\skill\check.sh`, testWindowsCmdShell)
+	if err == nil || !strings.Contains(err.Error(), "requires a bash target shell") {
+		t.Fatalf("error = %v, want bash target shell requirement", err)
 	}
 }
 
@@ -296,7 +307,7 @@ func TestShebangExtension(t *testing.T) {
 }
 
 func TestCleanupCommand_POSIX(t *testing.T) {
-	plan, err := planScript("/skill/check.sh", "linux")
+	plan, err := planScript("/skill/check.sh", testLinuxShell)
 	if err != nil {
 		t.Fatalf("planScript: %v", err)
 	}
@@ -306,7 +317,7 @@ func TestCleanupCommand_POSIX(t *testing.T) {
 }
 
 func TestCleanupCommand_Windows(t *testing.T) {
-	plan, err := planWindowsScript(`C:\skill\check.ps1`, platform.Host())
+	plan, err := planWindowsScript(`C:\skill\check.ps1`, testWindowsCmdShell)
 	if err != nil {
 		t.Fatalf("planWindowsScript: %v", err)
 	}
@@ -319,10 +330,7 @@ func TestCleanupCommand_Windows(t *testing.T) {
 // .sh on Windows cleans up via bash `rm -rf` rather than dispatching to cmd,
 // avoiding the bash -> cmd hop that the .ps1/.cmd/.bat paths necessarily take.
 func TestCleanupCommand_Windows_ShellScriptUsesBashRm(t *testing.T) {
-	if _, ok := platform.DiscoverBash(); !ok {
-		t.Skip("requires bash to plan a .sh Windows script")
-	}
-	plan, err := planWindowsScript(`C:\skill\check.sh`, platform.Host())
+	plan, err := planWindowsScript(`C:\skill\check.sh`, testWindowsBashShell)
 	if err != nil {
 		t.Fatalf("planWindowsScript: %v", err)
 	}

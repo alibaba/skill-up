@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 )
 
@@ -142,4 +143,6 @@ func (r *promptDeliveryTestRuntime) Exec(context.Context, string, runtime.ExecOp
 func (r *promptDeliveryTestRuntime) MergeEnv(map[string]string)   {}
 func (r *promptDeliveryTestRuntime) Workspace() string            { return r.workspace }
 func (r *promptDeliveryTestRuntime) RequiresProcessSandbox() bool { return false }
-func (r *promptDeliveryTestRuntime) TargetGOOS() string           { return "linux" }
+func (r *promptDeliveryTestRuntime) Shell() platform.Shell {
+	return platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
+}
