@@ -472,12 +472,13 @@ func appendJudgeSkillInstructions(sb *strings.Builder, skills []SkillInfo) {
 		return
 	}
 	sb.WriteString("## Mandatory Judge Skill Use\n")
-	sb.WriteString("You MUST use the installed judge Skill(s) listed below as the authoritative grading rubric before evaluating the case. ")
+	sb.WriteString("Before evaluating the case, you MUST invoke the Skill tool for EACH installed judge Skill below using its callable skill name and read the full Skill body. ")
+	sb.WriteString("Do not grade the case until you have loaded every listed judge Skill. ")
 	sb.WriteString("Do not grade this case using only the inline criteria. The inline criteria identify result dimensions, while the judge Skill(s) define detailed rubric, constraints, and evidence rules. ")
 	sb.WriteString("If an inline criterion conflicts with a judge Skill, follow the judge Skill unless the criterion defines a more specific case-level acceptance condition.\n\n")
 	sb.WriteString("Installed judge Skill(s):\n")
 	for _, skill := range skills {
-		fmt.Fprintf(sb, "- %s", skillIdentifier(skill))
+		fmt.Fprintf(sb, "- invoke Skill tool with name %q", skillIdentifier(skill))
 		if skill.Target != "" {
 			fmt.Fprintf(sb, " (target: %s)", skill.Target)
 		}
@@ -533,11 +534,11 @@ func appendRequiredResponseFormat(sb *strings.Builder, criteria []string) {
 }
 
 func skillIdentifier(skill SkillInfo) string {
-	if skill.Path != "" {
-		return skill.Path
-	}
 	if skill.Name != "" {
 		return skill.Name
+	}
+	if skill.Path != "" {
+		return skill.Path
 	}
 	return skill.Source
 }
