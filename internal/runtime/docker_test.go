@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/alibaba/skill-up/internal/platform"
 )
 
 // fakeDockerCall is one captured invocation of the docker CLI.
@@ -83,6 +85,17 @@ func newDockerRuntimeForTest(t *testing.T, cfg Config, fd *fakeDocker) *DockerRu
 	}
 	r.run = fd.runner()
 	return r
+}
+
+func TestDockerRuntimeShellIsLinuxPOSIX(t *testing.T) {
+	rt, err := NewDockerRuntime(Config{Image: "alpine:3.20"})
+	if err != nil {
+		t.Fatalf("NewDockerRuntime: %v", err)
+	}
+	want := platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
+	if got := rt.Shell(); got != want {
+		t.Fatalf("Shell() = %+v, want %+v", got, want)
+	}
 }
 
 // createScript returns the canonical scripted-call sequence that Create

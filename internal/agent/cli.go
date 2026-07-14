@@ -124,7 +124,7 @@ func (a *CLIAgent) InstallSkill(ctx context.Context, rt Runtime, skillCfg runtim
 
 // Run executes the agent with the given messages and returns the session result.
 func (a *CLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (*SessionResult, error) {
-	if err := requireBashOnWindowsHost(rt); err != nil {
+	if err := requireBashTargetShell(rt); err != nil {
 		return nil, fmt.Errorf("%s: %w", a.Name(), err)
 	}
 	start := time.Now()
@@ -185,14 +185,14 @@ func checkCommandForOS(checkCmd, goos string) string {
 
 // Check verifies the agent executable is available.
 func (a *CLIAgent) Check(ctx context.Context, rt Runtime) error {
-	if err := requireBashOnWindowsHost(rt); err != nil {
+	if err := requireBashTargetShell(rt); err != nil {
 		return fmt.Errorf("%s: %w", a.Name(), err)
 	}
 	checkCmd := a.Cfg.CheckCmd
 	if checkCmd == "" {
 		return fmt.Errorf("CheckCmd not configured for agent %s", a.Name())
 	}
-	checkCmd = checkCommandForOS(checkCmd, rt.TargetGOOS())
+	checkCmd = checkCommandForOS(checkCmd, rt.Shell().GOOS)
 
 	result, err := rt.Exec(ctx, checkCmd, a.mergeExecOptionsEnv(ctx, ExecOptions{}, nil, nil))
 	if err != nil {

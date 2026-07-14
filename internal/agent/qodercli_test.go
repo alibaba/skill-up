@@ -546,4 +546,6 @@ func (r *qoderTestRuntime) MergeEnv(env map[string]string) {
 	maps.Copy(r.mergedEnv, env)
 }
 
-func (r *qoderTestRuntime) TargetGOOS() string { return platform.GOOSLinux }
+func (r *qoderTestRuntime) Shell() platform.Shell {
+	return platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
+}
