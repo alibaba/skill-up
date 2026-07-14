@@ -1099,6 +1099,16 @@ func TestValidator_JudgeSkills(t *testing.T) {
 			},
 			errMsg: "judge.skills[0].path is required",
 		},
+		{
+			name: "non local source requires path",
+			judge: JudgeConfig{
+				Type:     "agent_judge",
+				Model:    "test-model",
+				Criteria: []string{"criterion"},
+				Skills:   []SkillRef{{Source: "registry"}},
+			},
+			errMsg: "judge.skills[0].path is required",
+		},
 	}
 
 	for _, tt := range tests {

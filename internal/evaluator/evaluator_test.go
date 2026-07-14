@@ -44,6 +44,7 @@ type mockAgent struct {
 	installCall  atomic.Int32
 	mcpCall      atomic.Int32
 	skillCall    atomic.Int32
+	skillPath    string
 	mu           sync.Mutex
 	lastMessages []transcript.Message
 	lastSkill    runtime.SkillConfig
@@ -51,6 +52,10 @@ type mockAgent struct {
 }
 
 func (m *mockAgent) Name() string { return m.name }
+func (m *mockAgent) SkillPath() string {
+	return m.skillPath
+}
+
 func (m *mockAgent) Install(_ context.Context, _ runtime.Runtime) error {
 	m.installCall.Add(1)
 	return nil
@@ -1144,6 +1149,57 @@ func TestExecuteCase_JudgeSkillInstallFailureReturnsError(t *testing.T) {
 	}
 	if got := judgeAgent.runCall.Load(); got != 0 {
 		t.Fatalf("judge Run calls = %d, want 0 after install failure", got)
+	}
+}
+
+func TestInstallJudgeSkills_AllowsAbsolutePathWithoutSkillDir(t *testing.T) {
+	absSkill := filepath.Join(t.TempDir(), "judge-skill")
+	judgeAgent := &mockAgent{name: "judge"}
+	e := newTestEvaluator(EvalOptions{EvalCfg: &config.EvalConfig{}})
+
+	err := e.installJudgeSkills(context.Background(), &mockRuntime{workspace: t.TempDir()}, config.JudgeConfig{
+		Type:     "agent_judge",
+		Model:    "judge-model",
+		Criteria: []string{"uses rubric"},
+		Skills:   []config.SkillRef{{Source: "local_path", Path: absSkill}},
+	}, judgeAgent)
+	if err != nil {
+		t.Fatalf("installJudgeSkills() error = %v, want nil", err)
+	}
+	if len(judgeAgent.skills) != 1 || judgeAgent.skills[0].Source != absSkill {
+		t.Fatalf("judge installed skills = %#v", judgeAgent.skills)
+	}
+}
+
+func TestRemoveDefaultRunSkillsBeforeJudge_RemovesOnlyDefaultTargets(t *testing.T) {
+	var commands []string
+	rt := &mockRuntime{
+		workspace: t.TempDir(),
+		execFunc: func(_ context.Context, command string, _ runtime.ExecOptions) (runtime.ExecResult, error) {
+			commands = append(commands, command)
+			return runtime.ExecResult{ExitCode: 0}, nil
+		},
+	}
+	runAgent := &mockAgent{name: "run", skillPath: ".codex/skills"}
+	e := newTestEvaluator(EvalOptions{
+		SkillDir: t.TempDir(),
+		EvalCfg: &config.EvalConfig{
+			Skills: []config.SkillRef{
+				{Source: "local_path", Path: "skill-under-test"},
+				{Source: "local_path", Path: "custom-target-skill", Target: ".codex/skills/custom"},
+			},
+		},
+	})
+
+	err := e.removeDefaultRunSkillsBeforeJudge(context.Background(), rt, "with_skill", config.JudgeConfig{Type: "agent_judge"}, runAgent)
+	if err != nil {
+		t.Fatalf("removeDefaultRunSkillsBeforeJudge() error = %v", err)
+	}
+	if len(commands) != 1 {
+		t.Fatalf("cleanup commands = %#v, want one default-target cleanup", commands)
+	}
+	if !strings.Contains(commands[0], "rm -rf -- '.codex/skills/skill-under-test'") {
+		t.Fatalf("cleanup command = %q", commands[0])
 	}
 }
 

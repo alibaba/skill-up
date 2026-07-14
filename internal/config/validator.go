@@ -206,8 +206,8 @@ func validateSkillRefs(field string, refs []SkillRef) []string {
 		if strings.TrimSpace(ref.Source) == "" {
 			errs = append(errs, fmt.Sprintf("%s[%d].source is required", field, i))
 		}
-		if ref.Source == "local_path" && strings.TrimSpace(ref.Path) == "" {
-			errs = append(errs, fmt.Sprintf("%s[%d].path is required when source is local_path", field, i))
+		if strings.TrimSpace(ref.Path) == "" {
+			errs = append(errs, fmt.Sprintf("%s[%d].path is required", field, i))
 		}
 	}
 	return errs

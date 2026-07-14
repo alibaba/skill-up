@@ -194,6 +194,11 @@ func (a *BaseAgent) Name() string {
 	return a.Cfg.Name
 }
 
+// SkillPath returns the agent's default skill installation path.
+func (a *BaseAgent) SkillPath() string {
+	return a.Cfg.SkillPath
+}
+
 // CheckCredentials checks if the required credentials are set.
 func (a *BaseAgent) CheckCredentials(ctx context.Context) error {
 	switch a.Cfg.ModelProvider {

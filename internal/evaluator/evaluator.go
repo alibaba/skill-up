@@ -26,7 +26,9 @@ import (
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/mcp"
 	"github.com/alibaba/skill-up/internal/observability"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
+	"github.com/alibaba/skill-up/internal/shellquote"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
 
@@ -609,7 +611,7 @@ func (e *defaultEvaluator) runJudgePhaseWithSpan(
 		result.JudgeSkills = judge.SkillInfosFromRefs(judgeCfg.Skills)
 	}
 
-	j, err := e.newJudgeForCase(ctx, rt, judgeCfg, runAgent)
+	j, err := e.newJudgeForCase(ctx, rt, configName, judgeCfg, runAgent)
 	if err != nil {
 		result.Status = judge.StatusError
 		result.Error = err
@@ -669,6 +671,7 @@ func (e *defaultEvaluator) runJudgePhaseWithSpan(
 func (e *defaultEvaluator) newJudgeForCase(
 	ctx context.Context,
 	rt runtime.Runtime,
+	configName string,
 	judgeCfg config.JudgeConfig,
 	runAgent agent.Agent,
 ) (judge.Judge, error) {
@@ -676,6 +679,9 @@ func (e *defaultEvaluator) newJudgeForCase(
 
 	judgeAgent, err := e.resolveJudgeAgent(ctx, judgeCfg, runAgent)
 	if err != nil {
+		return nil, err
+	}
+	if err := e.removeDefaultRunSkillsBeforeJudge(ctx, rt, configName, judgeCfg, runAgent); err != nil {
 		return nil, err
 	}
 	if err := e.installJudgeSkills(ctx, rt, judgeCfg, judgeAgent); err != nil {
@@ -695,15 +701,92 @@ func (e *defaultEvaluator) installJudgeSkills(ctx context.Context, rt runtime.Ru
 		return nil
 	}
 	skillDir := e.resolvedSkillDir()
-	if strings.TrimSpace(skillDir) == "" {
-		return errors.New("judge.skills requires a loader or skill directory to resolve local paths")
-	}
 	for i, ref := range judgeCfg.Skills {
+		if strings.TrimSpace(ref.Path) == "" {
+			return fmt.Errorf("judge.skills[%d].path is required", i)
+		}
+		if !filepath.IsAbs(ref.Path) && strings.TrimSpace(skillDir) == "" {
+			return errors.New("judge.skills requires a loader or skill directory to resolve relative local paths")
+		}
 		skillCfg := resolveSkillConfig(skillDir, ref)
 		if err := judgeAgent.InstallSkill(ctx, rt, skillCfg); err != nil {
 			return fmt.Errorf("failed to install judge skill judge.skills[%d].path=%q: %w", i, ref.Path, err)
 		}
 		logging.DebugContextf(ctx, "Evaluator: judge skill installed: %s", filepath.Base(skillCfg.Source))
+	}
+	return nil
+}
+
+func (e *defaultEvaluator) removeDefaultRunSkillsBeforeJudge(
+	ctx context.Context,
+	rt runtime.Runtime,
+	configName string,
+	judgeCfg config.JudgeConfig,
+	runAgent agent.Agent,
+) error {
+	if configName == "without_skill" || judgeCfg.Type != judgeTypeAgentJudge || len(e.evalCfg.Skills) == 0 {
+		return nil
+	}
+	skillPath := agentDefaultSkillPath(runAgent)
+	if strings.TrimSpace(skillPath) == "" {
+		return nil
+	}
+	skillDir := e.resolvedSkillDir()
+	for _, ref := range e.evalCfg.Skills {
+		// Only remove skill-up's default install target. Explicit targets are
+		// user-controlled and may intentionally be shared with other setup.
+		if strings.TrimSpace(ref.Target) != "" {
+			continue
+		}
+		skillCfg := resolveSkillConfig(skillDir, ref)
+		if strings.TrimSpace(skillCfg.Source) == "" {
+			continue
+		}
+		target := filepath.Join(skillPath, filepath.Base(skillCfg.Source))
+		if !isDefaultAgentSkillTarget(skillPath, target) {
+			continue
+		}
+		if err := removeRuntimePath(ctx, rt, target); err != nil {
+			return fmt.Errorf("failed to isolate judge from run skill %q: %w", ref.Path, err)
+		}
+		logging.DebugContextf(ctx, "Evaluator: removed run skill before judge: %s", target)
+	}
+	return nil
+}
+
+type skillPathProvider interface {
+	SkillPath() string
+}
+
+func agentDefaultSkillPath(ag agent.Agent) string {
+	provider, ok := ag.(skillPathProvider)
+	if !ok {
+		return ""
+	}
+	return provider.SkillPath()
+}
+
+func isDefaultAgentSkillTarget(skillPath, target string) bool {
+	cleanSkillPath := filepath.Clean(skillPath)
+	cleanTarget := filepath.Clean(target)
+	rel, err := filepath.Rel(cleanSkillPath, cleanTarget)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return false
+	}
+	return true
+}
+
+func removeRuntimePath(ctx context.Context, rt runtime.Runtime, target string) error {
+	if strings.TrimSpace(target) == "" || rt.TargetGOOS() == platform.GOOSWindows {
+		return nil
+	}
+	cmd := "rm -rf -- " + shellquote.QuotePOSIX(target)
+	result, err := rt.Exec(ctx, cmd, runtime.ExecOptions{})
+	if err != nil {
+		return err
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("remove %s exited with code %d: %s", target, result.ExitCode, result.Stderr)
 	}
 	return nil
 }
