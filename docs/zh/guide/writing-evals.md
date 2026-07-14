@@ -651,6 +651,9 @@ benchmark 时，`with_skill` 和 `without_skill` 都会安装 judge Skills，因
 评分工具，不是被测 Skill。安装过程使用各 Agent adapter 原生的 Skill 机制；
 skill-up 不会把 Skill 文件内容拼接进 judge prompt。
 
+更完整的配置、目录结构、报告字段和排错方式见
+[Judge Agent with Skill 功能说明](./judge-agent-with-skill.md)。
+
 `agent_judge` 会将评审上下文物化为文件，并在 judge prompt 中注入一个很小的
 材料表。未配置 `judge.context` 时，默认使用 `standard` profile：
 `final_message` 内联，`transcript` 和 `workspace_diff` 以文件引用形式提供，
