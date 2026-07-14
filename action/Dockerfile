@@ -2,7 +2,7 @@
 #
 # Bakes the agent engines + skill-up + a python3 interpreter + the action
 # code, so the action itself is a thin Docker container action that just runs.
-# Built and pushed to ghcr.io by .github/workflows/build-runner-image.yml.
+# Built and pushed to ghcr.io by .github/workflows/runner-image.yml.
 #
 # Everything installed here is from PUBLIC registries (npm / GitHub Releases) —
 # no internal Alibaba network is required, so this builds on github.com hosted

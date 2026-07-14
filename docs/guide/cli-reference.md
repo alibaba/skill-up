@@ -34,6 +34,13 @@ skill-up run [path] [flags]
 | `--api-key`            | —                             | Pass an API key (higher precedence than env vars)                                                                                                          |
 | `-v, --verbose`        | `0`                           | Increase log verbosity. Default `info`; `-v` / `--verbose` / `--verbose=true` → `debug`; `-vv` / `--verbose=2` → `trace`; `--verbose=false` disables extra detail |
 
+> **Validation scope.** `run` validates the eval-level config plus **only the
+> cases selected** after `--include-case-name` / `--exclude-case-name` filters.
+> An invalid case that is filtered out does not block the run — so a shared
+> eval can hold both a quick `smoke` subset and heavier cases without the latter
+> blocking a filtered smoke run. Use [`skill-up validate`](#skill-up-validate)
+> to validate the **whole** suite (every case) regardless of filters.
+
 ### Examples
 
 ```bash
@@ -94,6 +101,9 @@ You can also use trace-specific overrides like `OTEL_EXPORTER_OTLP_TRACES_ENDPOI
 ## skill-up validate
 
 Validate the eval config files. Run this before `run` to catch issues early.
+Unlike `run` (which validates only the selected cases), `validate` always
+checks the **whole** suite — the eval config and every referenced case file —
+ignoring any case-name filters.
 
 ```bash
 skill-up validate [path to eval.yaml]

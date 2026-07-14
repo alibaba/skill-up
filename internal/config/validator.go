@@ -143,7 +143,7 @@ func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 
 	// validate per-turn judge rules reference valid turn numbers
 	turnsTotal := len(cfg.Input.Turns)
-	if cfg.Judge.Type != "" || len(cfg.Judge.Skills) > 0 {
+	if judgeNeedsLocalValidation(cfg.Judge) {
 		errs = append(errs, validateJudgeTypeAndLocalFields(cfg.Judge)...)
 	}
 	var allRules []Rule
@@ -160,6 +160,10 @@ func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 	return nil
 }
 
+func judgeNeedsLocalValidation(judge JudgeConfig) bool {
+	return judge.Type != "" || len(judge.Skills) > 0 || judge.Context != nil
+}
+
 // validateJudgeTypeAndLocalFields validates judge fields that do not depend on inheritance.
 func validateJudgeTypeAndLocalFields(judge JudgeConfig) []string {
 	var errs []string
@@ -173,6 +177,7 @@ func validateJudgeTypeAndLocalFields(judge JudgeConfig) []string {
 	errs = append(errs, validateSkillRefs("judge.skills", judge.Skills)...)
 
 	errs = append(errs, validatePassThreshold(judge.PassThreshold)...)
+	errs = append(errs, validateJudgeContext(judge.Context)...)
 
 	if judge.TimeoutSeconds != nil && *judge.TimeoutSeconds < 0 {
 		errs = append(errs, "judge.timeout_seconds must be non-negative")
@@ -235,6 +240,68 @@ func validatePassThreshold(threshold *float64) []string {
 	return nil
 }
 
+func validateJudgeContext(ctx *JudgeContextConfig) []string {
+	if ctx == nil {
+		return nil
+	}
+
+	var errs []string
+	if ctx.Profile != "" && ctx.Profile != "minimal" && ctx.Profile != "standard" {
+		errs = append(errs, "judge.context.profile must be one of: minimal, standard")
+	}
+	errs = append(errs, validateJudgeContextModes(ctx)...)
+	errs = append(errs, validateJudgeContextLimits(ctx.Limits)...)
+	for i, attachment := range ctx.Attachments {
+		if strings.TrimSpace(attachment.Path) == "" {
+			errs = append(errs, fmt.Sprintf("judge.context.attachments[%d].path must not be empty", i))
+		}
+	}
+	return errs
+}
+
+func validateJudgeContextModes(ctx *JudgeContextConfig) []string {
+	var errs []string
+	for field, mode := range map[string]string{
+		"final_message":  ctx.FinalMessage,
+		"transcript":     ctx.Transcript,
+		"workspace_diff": ctx.WorkspaceDiff,
+	} {
+		if mode != "" && !isValidJudgeContextMode(mode) {
+			errs = append(errs, fmt.Sprintf("judge.context.%s must be one of: include, omit, truncate, file_ref", field))
+		}
+	}
+	if ctx.GeneratedFiles != "" && ctx.GeneratedFiles != "omit" && ctx.GeneratedFiles != "index" && ctx.GeneratedFiles != "include" {
+		errs = append(errs, "judge.context.generated_files must be one of: omit, index, include")
+	}
+	return errs
+}
+
+func validateJudgeContextLimits(limits *JudgeContextLimits) []string {
+	if limits == nil {
+		return nil
+	}
+	var errs []string
+	if limits.MaxBytes < 0 {
+		errs = append(errs, "judge.context.limits.max_bytes must be non-negative")
+	}
+	if limits.TranscriptMaxTurns < 0 {
+		errs = append(errs, "judge.context.limits.transcript_max_turns must be non-negative")
+	}
+	if limits.WorkspaceDiffMaxLines < 0 {
+		errs = append(errs, "judge.context.limits.workspace_diff_max_lines must be non-negative")
+	}
+	return errs
+}
+
+func isValidJudgeContextMode(mode string) bool {
+	switch mode {
+	case "include", "omit", "truncate", "file_ref":
+		return true
+	default:
+		return false
+	}
+}
+
 // ValidateAll validates an eval config and all its cases.
 //
 // NOTE: this does NOT validate the engine.custom block. That validation is
@@ -247,17 +314,46 @@ func (v *Validator) ValidateAll(result *EvalResult) error {
 	if err := v.ValidateEvalConfig(result.Eval); err != nil {
 		return err
 	}
+	return v.ValidateCasesWithEvalDefaults(result.Eval, result.Cases)
+}
 
-	for _, c := range result.Cases {
+// ValidateCases validates a set of cases: it rejects duplicate effective IDs
+// and duplicate source-file references within the set, then validates each case
+// document.
+//
+// `skill-up run` calls this with only the cases left after include/exclude
+// filters, so an invalid unselected case never blocks a filtered run;
+// `skill-up validate` passes every case (via ValidateAll) for full-suite
+// validation. Duplicate detection keys off each case's ID and loader-populated
+// SourceFile, so it is correct for any subset, not only the full in-order suite.
+func (v *Validator) ValidateCases(cases []*CaseConfig) error {
+	if errs := duplicateCaseErrors(cases); len(errs) > 0 {
+		return fmt.Errorf("validation errors:\n  - %s", strings.Join(errs, "\n  - "))
+	}
+
+	for _, c := range cases {
 		if err := v.ValidateCaseConfig(c); err != nil {
 			return fmt.Errorf("case %s: %w", c.ID, err)
 		}
-		effectiveJudge := mergeJudgeConfigForValidation(result.Eval.Judge, c.Judge)
+	}
+
+	return nil
+}
+
+// ValidateCasesWithEvalDefaults validates already-loaded cases and effective
+// judge settings after applying eval-level defaults. Unlike ValidateAll, it
+// does not require eval.cases.files and is therefore suitable for filtered
+// runs and Anthropic evals.json auto mode where cases are loaded directly.
+func (v *Validator) ValidateCasesWithEvalDefaults(eval *EvalConfig, cases []*CaseConfig) error {
+	if err := v.ValidateCases(cases); err != nil {
+		return err
+	}
+	for _, c := range cases {
+		effectiveJudge := mergeJudgeConfigForValidation(eval.Judge, c.Judge)
 		if errs := validateJudgeTypeAndRequiredFields(effectiveJudge); len(errs) > 0 {
 			return fmt.Errorf("case %s: validation errors:\n  - %s", c.ID, strings.Join(errs, "\n  - "))
 		}
 	}
-
 	return nil
 }
 
@@ -276,6 +372,69 @@ func mergeJudgeConfigForValidation(global, caseLevel JudgeConfig) JudgeConfig {
 		return merged
 	}
 	return global
+}
+
+// duplicateCaseErrors reports duplicate source-file references and duplicate
+// effective case IDs within the given case set. skill-up writes reports and
+// artifacts keyed by case ID and runs one case per cases.files entry, so a
+// collision would silently overwrite results or double-run a case.
+func duplicateCaseErrors(cases []*CaseConfig) []string {
+	var errs []string
+	errs = append(errs, duplicateCaseFileErrors(cases)...)
+	errs = append(errs, duplicateCaseIDErrors(cases)...)
+	return errs
+}
+
+// duplicateCaseFileErrors reports cases loaded from the same source file after
+// path normalization (e.g. "cases/a.yaml" vs "./cases/a.yaml"). Cases with no
+// SourceFile (e.g. loaded from an Anthropic evals.json rather than cases.files)
+// are skipped. Each duplicate is reported once, in first-seen order.
+func duplicateCaseFileErrors(cases []*CaseConfig) []string {
+	counts := make(map[string]int, len(cases))
+	for _, c := range cases {
+		if c.SourceFile == "" {
+			continue
+		}
+		counts[path.Clean(c.SourceFile)]++
+	}
+	var errs []string
+	reported := make(map[string]bool)
+	for _, c := range cases {
+		if c.SourceFile == "" {
+			continue
+		}
+		norm := path.Clean(c.SourceFile)
+		if counts[norm] > 1 && !reported[norm] {
+			errs = append(errs, fmt.Sprintf("cases.files lists %q %d times (after path normalization); each case file must appear once", norm, counts[norm]))
+			reported[norm] = true
+		}
+	}
+	return errs
+}
+
+// duplicateCaseIDErrors reports effective case IDs shared by more than one case,
+// covering both explicit `id:` fields and filename-derived IDs. Each case's
+// SourceFile (when known) names the offending file in the message.
+func duplicateCaseIDErrors(cases []*CaseConfig) []string {
+	idFiles := make(map[string][]string, len(cases))
+	var order []string
+	for _, c := range cases {
+		src := c.SourceFile
+		if src == "" {
+			src = "<unknown source>"
+		}
+		if _, seen := idFiles[c.ID]; !seen {
+			order = append(order, c.ID)
+		}
+		idFiles[c.ID] = append(idFiles[c.ID], src)
+	}
+	var errs []string
+	for _, id := range order {
+		if srcs := idFiles[id]; len(srcs) > 1 {
+			errs = append(errs, fmt.Sprintf("duplicate case id %q used by %d case files: %s", id, len(srcs), strings.Join(srcs, ", ")))
+		}
+	}
+	return errs
 }
 
 // validateEngine checks engine.custom against the Custom Engine contract.

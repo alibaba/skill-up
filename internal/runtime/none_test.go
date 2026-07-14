@@ -20,6 +20,11 @@ import (
 	"github.com/alibaba/skill-up/internal/logging"
 )
 
+// osWindows is the goruntime.GOOS value for Windows, used by tests that skip
+// POSIX-only behavior. Named to satisfy goconst (the literal recurs across
+// several skip guards).
+const osWindows = "windows"
+
 var logCaptureMu sync.Mutex
 
 func TestNoneRuntime_CreateAndClose(t *testing.T) {
@@ -119,6 +124,39 @@ func TestNoneRuntime_UploadDownloadFile(t *testing.T) {
 	}
 	if string(dlData) != content {
 		t.Errorf("downloaded content mismatch: got %q, want %q", string(dlData), content)
+	}
+}
+
+func TestNoneRuntime_UploadFile_PreservesExecutableBit(t *testing.T) {
+	t.Parallel()
+	if goruntime.GOOS == osWindows {
+		t.Skip("Unix file modes are not meaningful on Windows")
+	}
+
+	rt := &NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	// A skill helper script shipped with the executable bit set.
+	srcDir := t.TempDir()
+	srcFile := filepath.Join(srcDir, "run.sh")
+	//nolint:gosec // fixture must be executable to verify permission preservation
+	if err := os.WriteFile(srcFile, []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := rt.UploadFile(context.Background(), srcFile, "scripts/run.sh"); err != nil {
+		t.Fatalf("UploadFile failed: %v", err)
+	}
+
+	info, err := os.Stat(filepath.Join(rt.Workspace(), "scripts", "run.sh"))
+	if err != nil {
+		t.Fatalf("uploaded script should exist: %v", err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Errorf("installed script lost its executable bit: mode = %o, want executable", info.Mode().Perm())
 	}
 }
 
@@ -228,7 +266,7 @@ func TestNoneRuntime_ExecReturnsContextErrorOnTimeout(t *testing.T) {
 	// `sleep 1` is POSIX; on Windows cmd.exe falls back to a long ping
 	// so the process actually outlives the deadline and gets killed.
 	sleepCmd := "sleep 1"
-	if goruntime.GOOS == "windows" {
+	if goruntime.GOOS == osWindows {
 		sleepCmd = "ping -n 3 127.0.0.1 > nul"
 	}
 	result, err := rt.Exec(ctx, sleepCmd, ExecOptions{})
@@ -288,7 +326,7 @@ func TestNoneRuntime_ExecOmitsDeadlineDelta_OnManualCancel(t *testing.T) {
 }
 
 func TestNoneRuntime_ExecKillsDescendantsOnTimeout(t *testing.T) {
-	if goruntime.GOOS == "windows" {
+	if goruntime.GOOS == osWindows {
 		// Windows has no POSIX process-group equivalent: a backgrounded
 		// grandchild spawned by `&` keeps running after its parent shell is
 		// killed by ctx-cancel. configureProcessGroup is a no-op on Windows,
@@ -318,6 +356,87 @@ func TestNoneRuntime_ExecKillsDescendantsOnTimeout(t *testing.T) {
 	time.Sleep(4 * time.Second)
 	if _, statErr := os.Stat(filepath.Join(rt.Workspace(), "leaked.txt")); statErr == nil {
 		t.Fatal("descendant process survived the timeout and wrote leaked.txt")
+	}
+}
+
+// TestNoneRuntime_ExecTerminatesGracefullyThenEscalates verifies the
+// SIGTERM-first escalation path: a command that installs a SIGTERM trap gets a
+// chance to run it (writing a marker) before the group is force-killed. This
+// exercises the graceful half of the contract — children can release locks and
+// clean up rather than being torn down by an immediate SIGKILL.
+func TestNoneRuntime_ExecTerminatesGracefullyThenEscalates(t *testing.T) {
+	if goruntime.GOOS == osWindows {
+		t.Skip("POSIX signal-trap semantics; no Windows equivalent")
+	}
+	t.Parallel()
+
+	rt := &NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	// The shell traps SIGTERM, writes a marker, and exits. If cancellation used
+	// an immediate SIGKILL the trap would never run and the marker would be
+	// absent; with SIGTERM-first it is written before the process exits.
+	_, err := rt.Exec(ctx, "trap 'touch cleaned.txt; exit 0' TERM; sleep 10", ExecOptions{})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context deadline exceeded, got %v", err)
+	}
+
+	if _, statErr := os.Stat(filepath.Join(rt.Workspace(), "cleaned.txt")); statErr != nil {
+		t.Fatalf("SIGTERM trap did not run before termination: %v", statErr)
+	}
+}
+
+// TestNoneRuntime_ExecStaleLockDoesNotHangNextCommand is the issue's lock-file
+// regression: a first command times out while a background child holds a lock
+// (a live process whose PID is recorded in a lock file). After the timeout the
+// child's process group must be gone, so a second command that checks the lock
+// sees a dead PID and does not block on the stale child.
+func TestNoneRuntime_ExecStaleLockDoesNotHangNextCommand(t *testing.T) {
+	if goruntime.GOOS == osWindows {
+		t.Skip("POSIX process-group kill semantics; no Windows equivalent")
+	}
+	t.Parallel()
+
+	rt := &NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	// First command: spawn a long-lived background child, record its PID as a
+	// lock, then block past the deadline. On timeout the whole group (including
+	// the child) must be terminated.
+	ctx1, cancel1 := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel1()
+	_, err := rt.Exec(ctx1, "sleep 60 & echo $! > lock.pid; sleep 30", ExecOptions{})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("first command: expected context deadline exceeded, got %v", err)
+	}
+
+	// Give the group a moment to be reaped after the SIGTERM→SIGKILL path.
+	time.Sleep(noneExecKillGrace + 500*time.Millisecond)
+
+	// Second command: read the recorded PID and check whether that process is
+	// still alive (kill -0). A stale-but-dead lock must not hold anything up;
+	// the command completes promptly and reports the child as gone.
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel2()
+	start := time.Now()
+	result, err := rt.Exec(ctx2, `pid=$(cat lock.pid); if kill -0 "$pid" 2>/dev/null; then echo ALIVE; else echo DEAD; fi`, ExecOptions{})
+	if err != nil {
+		t.Fatalf("second command errored: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("second command hung on stale child for %s", elapsed)
+	}
+	if !strings.Contains(result.Stdout, "DEAD") {
+		t.Fatalf("stale lock child survived timeout; second command saw %q", result.Stdout)
 	}
 }
 
@@ -453,7 +572,7 @@ func TestNoneRuntime_ExecWithEnv(t *testing.T) {
 // shell. If the runtime pre-expanded $CUSTOM_BIN / $PATH the child would
 // see "/agent/bin:..." instead of the literal "$CUSTOM_BIN:$PATH".
 func TestNoneRuntime_ForwardsEnvLiterally(t *testing.T) {
-	if goruntime.GOOS == "windows" {
+	if goruntime.GOOS == osWindows {
 		// printf '%s' "$VAR" is POSIX-shell syntax; cmd.exe (Windows host
 		// shell when no bash is discovered) has no printf and no $VAR
 		// expansion. The behavioural contract (env values forwarded

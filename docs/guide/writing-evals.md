@@ -678,6 +678,43 @@ grading tooling, not the Skill under test. Installation uses each Agent
 adapter's native Skill mechanism; skill-up does not concatenate Skill files
 into the judge prompt.
 
+`agent_judge` materializes review context into files and injects a small
+materials table into the judge prompt. When `judge.context` is omitted, the
+default profile is `standard`: `final_message` is included inline, while
+`transcript` and `workspace_diff` are provided as file references to avoid
+large prompt/argv failures.
+
+Use `minimal` for long repository-change benchmarks where the judge should rely
+on explicit attachments or script outputs instead of the full conversation:
+
+```yaml
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  context:
+    profile: minimal                         # transcript/diff omitted, final_message truncated
+    attachments:
+      - path: evals/fixtures/diff-result.json
+        label: diff_result
+  criteria:
+    - "Determine whether the reported changes satisfy the expected rules."
+```
+
+Per-field modes are available when you need to tune the profile:
+
+```yaml
+judge:
+  type: agent_judge
+  context:
+    profile: standard
+    final_message: include                   # include | truncate | file_ref | omit
+    transcript: file_ref                     # include auto-downgrades to file_ref above limits.max_bytes
+    workspace_diff: file_ref
+    generated_files: index                   # index | include | omit
+    limits:
+      max_bytes: 65536
+```
+
 > **Cost note:** `agent_judge` consumes additional tokens. Prefer `expect` or `rule_based` for deterministic checks and reserve `agent_judge` for assertions that genuinely require semantic understanding.
 
 ---

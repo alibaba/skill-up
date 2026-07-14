@@ -80,6 +80,11 @@ The command loads eval.yaml and all case files, validates the configuration,
 executes each case against the configured engine, evaluates outputs using
 the judge module, and generates reports in the specified formats.
 
+Validation scope: run validates the eval-level config plus only the cases
+selected after --include-case-name / --exclude-case-name filters, so an invalid
+case that is filtered out does not block the run. Use 'skill-up validate' to
+validate the whole suite (every case) regardless of filters.
+
 If no path is given, the current directory and its parents are searched for
 SKILL.md together with evals/eval.yaml (skill layout); the first match wins.
 
@@ -179,6 +184,14 @@ func loadAndPrepareConfig(ctx context.Context, cmd *cobra.Command, args []string
 	}
 	if len(cases) == 0 {
 		return nil, nil, nil, errors.New("no cases matched the filter")
+	}
+
+	// Validate only the selected cases (after filters), while still applying
+	// eval-level judge defaults to case-level overrides. Full-suite per-case
+	// validation is the job of `skill-up validate`; here an invalid case that was
+	// filtered out must not block the run.
+	if err := config.NewValidator().ValidateCasesWithEvalDefaults(evalCfg, cases); err != nil {
+		return nil, nil, nil, fmt.Errorf("validation failed: %w", err)
 	}
 
 	engineName, _ := cmd.Flags().GetString("engine")
@@ -856,8 +869,13 @@ func loadFromEvalYAML(evalPath string) (string, []*config.CaseConfig, *config.Ev
 	}
 	applyImplicitSkills(result.Eval, loader)
 
+	// Validate eval-level (suite-wide) config now, but defer per-case
+	// validation to loadAndPrepareConfig, which runs it only over the cases
+	// left after include/exclude filters — so an invalid unselected case never
+	// blocks a filtered run. `skill-up validate` still validates the whole
+	// suite (eval + every case) via ValidateAll.
 	validator := config.NewValidator()
-	if err := validator.ValidateAll(result); err != nil {
+	if err := validator.ValidateEvalConfig(result.Eval); err != nil {
 		return "", nil, nil, nil, fmt.Errorf("validation failed: %w", err)
 	}
 

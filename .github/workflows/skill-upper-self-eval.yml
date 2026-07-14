@@ -1,4 +1,4 @@
-name: Self-eval (dogfood the action)
+name: Skill Upper Self-Eval
 
 # Dogfoods the Agent Skill Eval action (action.yml) against this repo's own
 # skill-upper skill — once per engine (claude_code / codex / qodercli) — so a
@@ -17,32 +17,15 @@ name: Self-eval (dogfood the action)
 # dashscope's qwen3.6-plus — same as the repo's e2e jobs — so no path ever
 # calls real Claude / real GPT, regardless of engine.
 
-# Triggered only when the action or the evaluated skill changes: on PRs (pre-
-# merge gate) and on main (post-merge regression), same paths filter.
+# Manual only. This workflow runs live agent evals and builds a runner image
+# before the matrix, so it is intentionally kept out of PR/main CI.
 on:
-  pull_request:
-    paths:
-      - 'action.yml'
-      - 'action/**'
-      - 'skills/skill-upper/**'
-      - '.github/workflows/skill-eval-self.yml'
-      - '.github/workflows/build-runner-image.yml'
-  push:
-    branches: [main]
-    # Keep in sync with the pull_request paths above (GitHub workflow YAML
-    # does not support anchors).
-    paths:
-      - 'action.yml'
-      - 'action/**'
-      - 'skills/skill-upper/**'
-      - '.github/workflows/skill-eval-self.yml'
-      - '.github/workflows/build-runner-image.yml'
   workflow_dispatch:
 
 # LLM evals are expensive: a superseding push to the same PR cancels the
 # in-flight round instead of running both to completion.
 concurrency:
-  group: self-eval-${{ github.event.pull_request.number || github.ref }}
+  group: self-eval-${{ github.ref }}
   cancel-in-progress: true
 
 # Least-privilege default for every job (the image job overrides with
@@ -55,7 +38,10 @@ jobs:
   # jobs below always eval with the action code + engines baked at the same ref
   # (otherwise they'd race the parallel image build and pull a stale :v0.1.0).
   image:
-    uses: ./.github/workflows/build-runner-image.yml
+    uses: ./.github/workflows/runner-image.yml
+    with:
+      tag: self-eval-${{ github.run_id }}
+      publish_latest: false
     permissions:
       contents: read
       packages: write
@@ -63,7 +49,7 @@ jobs:
   dogfood:
     name: Eval skill-upper (${{ matrix.engine }})
     needs: image
-    runs-on: ubuntu-latest      # Docker container action — Linux only
+    runs-on: self-hosted      # Docker container action — Linux only
     strategy:
       fail-fast: false
       matrix:
@@ -85,13 +71,12 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      # Point the (local) action at the image the `image` job just built for THIS
-      # run: a PR-scoped tag on PRs, the release tag on main. This keeps the
-      # dogfood testing the PR's own image while never consuming or clobbering
-      # the mutable v0.1.0 that released users pull via alibaba/skill-up@v0.1.0.
+      # Point the local action at the image the `image` job just built for this
+      # run. The tag is intentionally run-scoped so manual dogfood runs from
+      # feature branches never clobber production runner image tags.
       - name: Pin action to this run's runner image
         run: |
-          tag="${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'v0.1.0' }}"
+          tag="self-eval-${{ github.run_id }}"
           img="ghcr.io/${{ github.repository_owner }}/skill-up-runner:${tag}"
           sed -i "s#image: docker://ghcr.io/[^[:space:]]*/skill-up-runner:.*#image: docker://${img}#" action.yml
           echo "dogfood will use ${img}"
@@ -105,14 +90,22 @@ jobs:
         env:
           # Reference each secret by literal name (no dynamic secrets[...]
           # indexing, which CodeQL flags as exposing the whole secrets context).
-          ENGINE_KEY: ${{ matrix.engine == 'qodercli' && secrets.QODER_ACCESS_TOKEN || secrets.DASHSCOPE_API_KEY }}
+          QODER_ACCESS_TOKEN: ${{ secrets.QODER_ACCESS_TOKEN }}
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
         run: |
-          if [ -z "$ENGINE_KEY" ] || [ -z "$DASHSCOPE_API_KEY" ]; then
+          if [ -z "$DASHSCOPE_API_KEY" ]; then
+            echo "::notice::Skipping self-eval (${{ matrix.engine }}): required secret not provisioned (likely a fork PR)."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ matrix.engine }}" = "qodercli" ] && [ -z "$QODER_ACCESS_TOKEN" ]; then
             echo "::notice::Skipping self-eval (${{ matrix.engine }}): required secret not provisioned (likely a fork PR)."
             echo "available=false" >> "$GITHUB_OUTPUT"
           else
             echo "available=true" >> "$GITHUB_OUTPUT"
+            if [ "${{ matrix.engine }}" = "qodercli" ]; then
+              echo "api_key=${QODER_ACCESS_TOKEN}" >> "$GITHUB_OUTPUT"
+            else
+              echo "api_key=${DASHSCOPE_API_KEY}" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: Run skill-upper eval via the action
@@ -139,7 +132,7 @@ jobs:
           engine: ${{ matrix.engine }}
           provider: ${{ matrix.provider }}
           model: ${{ matrix.model }}
-          api-key: ${{ matrix.engine == 'qodercli' && secrets.QODER_ACCESS_TOKEN || secrets.DASHSCOPE_API_KEY }}
+          api-key: ${{ steps.secrets.outputs.api_key }}
           # Run cases concurrently so the larger per-case timeout (600s, needed
           # by the slower codex coder model) doesn't blow up wall-clock — but
           # keep qodercli serial: concurrent qodercli processes race on the fixed
@@ -150,11 +143,15 @@ jobs:
           # resolves cases (evals/cases/*.yaml) relative to the skill root.
           skill-target: skills/skill-upper
 
-      - name: Make reports readable
-        # The Docker container action runs as root, so report files land
-        # root-owned; relax perms before the runner-user upload step reads them.
+      - name: Restore report ownership
+        # The Docker container action runs as root. The action entrypoint fixes
+        # this on exit; keep a host-side fallback so artifact upload and the
+        # next checkout can read and remove generated reports on self-hosted
+        # runners.
         if: always() && steps.secrets.outputs.available == 'true'
-        run: sudo chmod -R a+rX "$GITHUB_WORKSPACE/skill-up-workspace" || true
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE/skill-up-workspace" || true
+          chmod -R u+rwX,go+rX "$GITHUB_WORKSPACE/skill-up-workspace" || true
 
       - name: Upload eval report
         if: always() && steps.secrets.outputs.available == 'true'

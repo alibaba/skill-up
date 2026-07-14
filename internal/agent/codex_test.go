@@ -353,6 +353,7 @@ func TestCodexRunTurn_FirstTurnDelegatesToRun(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("expected non-nil result")
+		return
 	}
 	// First turn should use "codex exec", not "codex resume"
 	if containsCommand(rt.commands, "codex resume") {
@@ -745,6 +746,7 @@ func TestCodexRun_PreservesArtifactsOnNonZeroExit(t *testing.T) {
 	}
 	if sessionResult == nil {
 		t.Fatal("expected session result")
+		return
 	}
 	if sessionResult.ExitCode != 1 {
 		t.Fatalf("expected exit code 1, got %d", sessionResult.ExitCode)

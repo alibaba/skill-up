@@ -125,6 +125,10 @@ func (l *Loader) LoadCaseConfig(casePath string) (*CaseConfig, error) {
 		cfg.ID = stripExt(filepath.Base(casePath))
 	}
 
+	// Record the source path (as listed in cases.files) so duplicate-case
+	// validation can name the offending file even for a filtered subset.
+	cfg.SourceFile = casePath
+
 	return &cfg, nil
 }
 

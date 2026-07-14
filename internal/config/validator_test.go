@@ -357,6 +357,54 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			errMsg:  "judge.type must be one of",
 		},
 		{
+			name: "valid judge context at eval level",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Context: &JudgeContextConfig{
+						Profile:        "standard",
+						Transcript:     "file_ref",
+						GeneratedFiles: "index",
+						Attachments:    []JudgeContextAttachment{{Path: "fixtures/result.json"}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid judge context at eval level",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Context: &JudgeContextConfig{Profile: "legacy"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.context.profile must be one of: minimal, standard",
+		},
+		{
 			name: "script without script_path at eval level is checked by ValidateAll",
 			cfg: &EvalConfig{
 				SchemaVersion: "v1alpha1",
@@ -861,6 +909,81 @@ func TestValidator_ValidateCaseConfig(t *testing.T) {
 			wantErr: true,
 			errMsg:  "judge.timeout_seconds must be non-negative",
 		},
+		{
+			name: "case-level agent_judge with valid context",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Prompt: "Say hello",
+				},
+				Judge: JudgeConfig{
+					Type:     "agent_judge",
+					Model:    "test-model",
+					Criteria: []string{"criterion"},
+					Context: &JudgeContextConfig{
+						Profile:        "minimal",
+						FinalMessage:   "truncate",
+						Transcript:     "omit",
+						WorkspaceDiff:  "file_ref",
+						GeneratedFiles: "index",
+						Limits:         &JudgeContextLimits{MaxBytes: 1024},
+						Attachments:    []JudgeContextAttachment{{Path: "fixtures/result.json"}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "case-level agent_judge with invalid context profile",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Prompt: "Say hello",
+				},
+				Judge: JudgeConfig{
+					Type:     "agent_judge",
+					Model:    "test-model",
+					Criteria: []string{"criterion"},
+					Context:  &JudgeContextConfig{Profile: "legacy"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.context.profile must be one of: minimal, standard",
+		},
+		{
+			name: "case-level agent_judge with invalid context mode",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Prompt: "Say hello",
+				},
+				Judge: JudgeConfig{
+					Type:     "agent_judge",
+					Model:    "test-model",
+					Criteria: []string{"criterion"},
+					Context:  &JudgeContextConfig{Transcript: "inline"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.context.transcript must be one of: include, omit, truncate, file_ref",
+		},
+		{
+			name: "case-level agent_judge with empty attachment path",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Prompt: "Say hello",
+				},
+				Judge: JudgeConfig{
+					Type:     "agent_judge",
+					Model:    "test-model",
+					Criteria: []string{"criterion"},
+					Context:  &JudgeContextConfig{Attachments: []JudgeContextAttachment{{}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.context.attachments[0].path must not be empty",
+		},
 	}
 
 	for _, tt := range tests {
@@ -995,6 +1118,77 @@ func TestValidator_JudgeSkills(t *testing.T) {
 	}
 }
 
+// caseIDSrc pairs an effective case ID with the cases.files entry it was
+// loaded from, as the loader populates CaseConfig.ID / CaseConfig.SourceFile.
+type caseIDSrc struct {
+	id  string
+	src string
+}
+
+// TestValidator_ValidateCases_Duplicates covers rejection of duplicate case IDs
+// (explicit and filename-derived) and duplicate cases.files references, keyed
+// off each case's ID and SourceFile so it holds for any subset.
+func TestValidator_ValidateCases_Duplicates(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	buildCases := func(pairs ...caseIDSrc) []*CaseConfig {
+		cases := make([]*CaseConfig, len(pairs))
+		for i, p := range pairs {
+			cases[i] = &CaseConfig{ID: p.id, SourceFile: p.src, Input: Input{Prompt: "x"}}
+		}
+		return cases
+	}
+
+	tests := []struct {
+		name      string
+		cases     []caseIDSrc
+		wantParts []string // non-empty means expect an error containing every part
+	}{
+		{
+			name:      "duplicate explicit id names both files",
+			cases:     []caseIDSrc{{"dup", "evals/cases/a.yaml"}, {"dup", "evals/cases/b.yaml"}},
+			wantParts: []string{`duplicate case id "dup"`, "evals/cases/a.yaml", "evals/cases/b.yaml"},
+		},
+		{
+			name:      "duplicate filename-derived id",
+			cases:     []caseIDSrc{{"smoke", "evals/cases/smoke.yaml"}, {"smoke", "evals/full/smoke.yaml"}},
+			wantParts: []string{`duplicate case id "smoke"`},
+		},
+		{
+			name:      "duplicate file reference after normalization",
+			cases:     []caseIDSrc{{"a", "evals/cases/a.yaml"}, {"a", "./evals/cases/a.yaml"}},
+			wantParts: []string{"cases.files lists"},
+		},
+		{
+			name:      "unique ids and files pass",
+			cases:     []caseIDSrc{{"a", "evals/cases/a.yaml"}, {"b", "evals/cases/b.yaml"}},
+			wantParts: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validator.ValidateCases(buildCases(tt.cases...))
+			if len(tt.wantParts) == 0 {
+				if err != nil {
+					t.Fatalf("ValidateCases() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %v, got nil", tt.wantParts)
+			}
+			for _, part := range tt.wantParts {
+				if !strings.Contains(err.Error(), part) {
+					t.Errorf("error %q missing expected substring %q", err.Error(), part)
+				}
+			}
+		})
+	}
+}
+
 func TestValidator_ValidateAll_CaseAgentJudgeInheritsGlobalModel(t *testing.T) {
 	t.Parallel()
 	validator := NewValidator()
@@ -1052,6 +1246,39 @@ func TestValidator_ValidateAll_EffectiveAgentJudgeRequiresCriteria(t *testing.T)
 	err := validator.ValidateAll(result)
 	if err == nil || !strings.Contains(err.Error(), "judge.criteria is required") {
 		t.Fatalf("ValidateAll() error = %v, want missing criteria", err)
+	}
+}
+
+// TestValidator_ValidateCases_OnlyChecksGivenCases confirms ValidateCases
+// validates just the cases passed to it: an invalid case omitted from the slice
+// does not cause a failure, while passing the invalid case still catches it.
+func TestValidator_ValidateCases_OnlyChecksGivenCases(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	valid := &CaseConfig{ID: "smoke", SourceFile: "evals/cases/smoke.yaml", Input: Input{Prompt: "hi"}}
+	invalid := &CaseConfig{ID: "full", SourceFile: "evals/cases/full.yaml"} // missing prompt and turns
+
+	if err := validator.ValidateCases([]*CaseConfig{valid}); err != nil {
+		t.Fatalf("ValidateCases([valid]) = %v, want nil", err)
+	}
+	if err := validator.ValidateCases([]*CaseConfig{valid, invalid}); err == nil {
+		t.Fatal("ValidateCases([valid, invalid]) = nil, want error for the invalid case")
+	}
+}
+
+func TestValidator_ValidateCasesWithEvalDefaults_AllowsLoadedCasesWithoutCaseFiles(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+	eval := DefaultEvalConfig()
+	eval.Cases.Files = nil
+
+	valid := &CaseConfig{ID: "anthropic-case", Input: Input{Prompt: "hi"}}
+	if err := validator.ValidateCasesWithEvalDefaults(eval, []*CaseConfig{valid}); err != nil {
+		t.Fatalf("ValidateCasesWithEvalDefaults() error = %v, want nil", err)
+	}
+	if err := validator.ValidateAll(&EvalResult{Eval: eval, Cases: []*CaseConfig{valid}}); err == nil {
+		t.Fatal("ValidateAll() error = nil, want missing cases.files error")
 	}
 }
 

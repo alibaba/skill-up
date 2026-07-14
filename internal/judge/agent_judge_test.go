@@ -46,6 +46,12 @@ func TestAgentJudge_AllPass(t *testing.T) {
 	if r.Summary.Total != 3 {
 		t.Fatalf("expected 3 assertions, got %d", r.Summary.Total)
 	}
+	if r.JudgeContext == nil || r.JudgeContext.Manifest == nil {
+		t.Fatal("expected judge context metadata")
+	}
+	if r.JudgeContext.Profile != "standard" {
+		t.Fatalf("expected standard judge context profile, got %q", r.JudgeContext.Profile)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -318,22 +324,47 @@ func TestAgentJudge_CustomThreshold(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestBuildJudgePrompt_ContainsAllParts(t *testing.T) {
+	materialized := &MaterializedContext{
+		Materials: []ContextMaterial{
+			{
+				ContextMaterialManifest: ContextMaterialManifest{
+					Key:           "final_message",
+					Mode:          "include",
+					Path:          "/tmp/final_message.txt",
+					OriginalBytes: len("Agent found a bug at line 42"),
+				},
+				InlineContent: "Agent found a bug at line 42",
+			},
+			{
+				ContextMaterialManifest: ContextMaterialManifest{
+					Key:           "workspace_diff",
+					Mode:          "file_ref",
+					Path:          "/tmp/workspace.diff",
+					OriginalBytes: len("diff --git a/main.go"),
+				},
+			},
+			{
+				ContextMaterialManifest: ContextMaterialManifest{
+					Key:           "transcript",
+					Mode:          "file_ref",
+					Path:          "/tmp/transcript.json",
+					OriginalBytes: len("review"),
+				},
+			},
+		},
+	}
 	prompt := buildJudgePrompt(
 		context.Background(),
 		[]string{"criterion A", "criterion B"},
-		"Agent found a bug at line 42",
-		"diff --git a/main.go",
-		transcript.Transcript{
-			{Role: transcript.RoleUser, Content: "review"},
-		},
+		materialized,
 	)
 
 	checks := []string{
 		"criterion A",
 		"criterion B",
 		"Agent found a bug at line 42",
-		"diff --git a/main.go",
-		"review",
+		"/tmp/workspace.diff",
+		"/tmp/transcript.json",
 		"\"passed\"",
 		"\"evidence\"",
 	}
@@ -345,12 +376,22 @@ func TestBuildJudgePrompt_ContainsAllParts(t *testing.T) {
 }
 
 func TestBuildJudgePromptWithSkills_RequiresJudgeSkillUse(t *testing.T) {
-	prompt := buildJudgePromptWithSkills(
+	materialized := &MaterializedContext{
+		Materials: []ContextMaterial{
+			{
+				ContextMaterialManifest: ContextMaterialManifest{
+					Key:           "final_message",
+					Mode:          "include",
+					OriginalBytes: len("Agent final message"),
+				},
+				InlineContent: "Agent final message",
+			},
+		},
+	}
+	prompt := buildJudgePrompt(
 		context.Background(),
 		[]string{"criterion A"},
-		"Agent final message",
-		"",
-		nil,
+		materialized,
 		[]SkillInfo{
 			{Source: "local_path", Path: "evals/fixtures/judge-skill", Target: "~/.claude/skills/judge-skill", Name: "judge-skill"},
 			{Source: "local_path", Path: "evals/fixtures/security-judge", Name: "security-judge"},
@@ -401,34 +442,38 @@ func TestAgentJudge_EvaluatePassesJudgeSkillsInPrompt(t *testing.T) {
 	}
 }
 
-func TestBuildJudgePrompt_TranscriptMarshalFailure_LogsAndOmitsErrorFromPrompt(t *testing.T) {
-	var prompt string
-	captured := captureLogOutput(t, func() {
-		prompt = buildJudgePrompt(
-			context.Background(),
-			[]string{"criterion A"},
-			"Agent final message",
-			"",
-			transcript.Transcript{
-				{
-					Role: transcript.RoleToolResult,
-					ToolResult: &transcript.ToolResultInfo{
-						Status:  "success",
-						Content: func() {},
-					},
+func TestBuildContextMetadata_UsesManifestMaterializedDir(t *testing.T) {
+	materialized := &MaterializedContext{
+		Dir: "/tmp/skill-up/run/context",
+		Manifest: ContextManifest{
+			Profile:         "standard",
+			MaterializedDir: judgeContextArtifactDir,
+		},
+	}
+
+	metadata := buildContextMetadata(nil, materialized, "prompt")
+	if metadata.MaterializedDir != judgeContextArtifactDir {
+		t.Fatalf("materialized_dir = %q, want %q", metadata.MaterializedDir, judgeContextArtifactDir)
+	}
+}
+
+func TestMaterializeJudgeContext_TranscriptMarshalFailure_ReturnsError(t *testing.T) {
+	_, err := MaterializeJudgeContext(context.Background(), &mockJudgeTestRuntime{}, nil, Input{
+		Transcript: transcript.Transcript{
+			{
+				Role: transcript.RoleToolResult,
+				ToolResult: &transcript.ToolResultInfo{
+					Status:  "success",
+					Content: func() {},
 				},
 			},
-		)
-	})
-
-	if strings.Contains(prompt, "marshal error") {
-		t.Fatalf("prompt should not expose marshal error details: %q", prompt)
+		},
+	}, t.TempDir())
+	if err == nil {
+		t.Fatal("expected marshal error")
 	}
-	if strings.Contains(prompt, "## Full Transcript") {
-		t.Fatalf("prompt should omit transcript section on marshal failure: %q", prompt)
-	}
-	if !strings.Contains(captured, "failed to marshal transcript for judge prompt") {
-		t.Fatalf("expected warning log, got %q", captured)
+	if !strings.Contains(err.Error(), "marshal transcript") {
+		t.Fatalf("expected transcript marshal error, got %v", err)
 	}
 }
 

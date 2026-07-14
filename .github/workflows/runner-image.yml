@@ -1,13 +1,13 @@
-name: Build & push skill-eval runner image
+name: Runner Image
 
 # Builds the runner image used by the Agent Skill Eval action (action.yml):
 # bakes skill-up + claude + codex + qodercli from public registries and pushes
 # to ghcr.io/<this-org>/skill-up-runner via the built-in GITHUB_TOKEN (no PAT).
 #
 # Triggers:
-#   - workflow_call: invoked by skill-eval-self.yml so the dogfood eval always
+#   - workflow_call: invoked by skill-upper-self-eval.yml so the dogfood eval always
 #     runs against an image built from the same commit (no pull/push race).
-#   - push to main touching the action/image -> republish.
+#   - push to main touching the action runtime -> republish.
 #   - workflow_dispatch -> manual (re)publish at an explicit tag.
 #
 # Fork PRs lack package-write on GITHUB_TOKEN: they build without pushing.
@@ -23,11 +23,16 @@ on:
         required: false
         type: string
         default: 'v0.1.0'
+      publish_latest:
+        description: 'Also publish the latest tag'
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
+      - 'action.yml'
       - 'action/**'
-      - '.github/workflows/build-runner-image.yml'
   workflow_dispatch:
     inputs:
       tag:
@@ -35,13 +40,22 @@ on:
         required: true
         type: string
         default: 'v0.1.0'
+      publish_latest:
+        description: 'Also publish the latest tag'
+        required: true
+        type: boolean
+        default: true
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/skill-up-runner
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: read
       packages: write
@@ -53,6 +67,7 @@ jobs:
         env:
           # Fork PRs can't push packages; build-only for them.
           SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+          PUBLISH_LATEST: ${{ github.event_name == 'push' || inputs.publish_latest }}
         run: |
           {
             echo "tags<<__TAGS__"
@@ -63,26 +78,29 @@ jobs:
               # not be able to replace the production runner image.
               echo "${IMAGE}:pr-${{ github.event.pull_request.number }}"
             else
-              # push to main / manual dispatch = release: publish the tag + latest.
+              # push to main / manual dispatch = release; reusable callers can
+              # opt into latest explicitly, but self-eval uses an isolated tag.
               echo "${IMAGE}:${{ inputs.tag || 'v0.1.0' }}"
-              echo "${IMAGE}:latest"
+              if [ "$PUBLISH_LATEST" = "true" ]; then
+                echo "${IMAGE}:latest"
+              fi
             fi
             echo "__TAGS__"
           } >> "$GITHUB_OUTPUT"
           echo "push=${SAME_REPO}" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Log in to ghcr.io
         if: steps.meta.outputs.push == 'true'
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ./action
           file: ./action/Dockerfile
@@ -93,5 +111,5 @@ jobs:
           platforms: linux/amd64
           push: ${{ steps.meta.outputs.push == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Avoid the GitHub Actions Cache backend here: transient GHA cache
+          # outages fail the whole image build after the registry push starts.

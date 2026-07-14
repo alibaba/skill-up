@@ -370,6 +370,7 @@ func TestCustomAgent_RunLocal_NonZeroProcessExitFails(t *testing.T) {
 	}
 	if res == nil {
 		t.Fatal("expected session result to be preserved")
+		return
 	}
 	// The real process exit code must surface in the result, not the JSON's 0.
 	if res.ExitCode != 7 {

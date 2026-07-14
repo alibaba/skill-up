@@ -20,6 +20,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unsupported engines fall back to batch mode.
 - `TurnResults` field in JSON, HTML, and JUnit reports (`turn_results` in
   `result.json`; turn-scoped failure details in JUnit XML).
+- `judge.skills` for `agent_judge`, allowing judge-only Skills to be installed
+  into the judge agent as reusable grading rubrics without leaking into the run
+  agent or benchmark baseline.
+
+### Changed
+- `agent_judge` now defaults to materialized review context (`profile:
+  standard`) instead of inlining full transcript and workspace diff into the
+  judge prompt. The judge receives a materials table with file references for
+  large artifacts, while short final messages remain inline. Evals that require
+  legacy inline transcript can set `judge.context.transcript: include` subject
+  to `judge.context.limits.max_bytes`.
+- `skill-up run` now validates only the cases left after
+  `--include-case-name` / `--exclude-case-name` filters (plus the eval-level
+  config), so an invalid case that is filtered out no longer blocks a filtered
+  run — a shared eval can hold a quick `smoke` subset alongside heavier cases.
+  `skill-up validate` is unchanged and still validates the whole suite (every
+  case) regardless of filters.
+
+### Added
+- `judge.context` for `agent_judge`, with `minimal` and `standard` profiles,
+  per-field delivery modes, inline-size limits, generated-file indexing, and
+  attachment file references. Reports now include `judge_context` metadata with
+  materialization and prompt-delivery details.
+- Built-in CLI agents now route large prompts through prompt delivery, writing
+  prompt artifacts to disk and feeding runtime-readable prompt files through
+  stdin when the prompt exceeds `SKILL_UP_PROMPT_INLINE_MAX_BYTES` (default
+  32768 bytes).
+- Config validation now rejects duplicate case IDs and duplicate `cases.files`
+  references. Since reports and artifacts are keyed by case ID and one case runs
+  per `cases.files` entry, a collision would silently overwrite results or
+  double-run a case. `skill-up validate` (and the preflight in `skill-up run`)
+  fails with the conflicting ID and the offending source files. Covers both
+  explicit `id:` fields and filename-derived IDs, and collapses
+  differently-spelled paths (e.g. `cases/a.yaml` vs `./cases/a.yaml`).
+
+### Changed
+- The `none` runtime now terminates a canceled or timed-out command's whole
+  process group gracefully before force-killing it. On Unix it sends `SIGTERM`
+  to the group first, giving children ~1s (`noneExecKillGrace`) to run trap
+  handlers, release locks, and exit, then escalates to `SIGKILL` if the group
+  is still alive. The grace fits inside the existing 2s `WaitDelay`, so a
+  timed-out `Exec` still returns within its deadline and keeps the
+  `context.DeadlineExceeded` / exit-code `-1` contract. Previously the group
+  got an immediate `SIGKILL`, so a helper holding a lock could leave stale
+  state and stall a later command. No-op on non-Unix platforms.
+
+### Fixed
+- Skill installation preserves source file permissions, notably the executable
+  bit on scripts. The `none` runtime's per-file upload previously wrote every
+  file with a fixed `0600` mode, so skills shipping runnable helper scripts
+  installed non-executable and failed without a chmod workaround. The
+  file-transfer contract now documents permission preservation, matching the
+  `opensandbox` and `docker` runtimes which already carried the mode across.
 
 ## [0.3.0] - 2026-07-03
 

@@ -238,6 +238,7 @@ func TestMockJudgeAgent_Run(t *testing.T) {
 	}
 	if sr == nil {
 		t.Fatal("Run: nil SessionResult")
+		return
 	}
 
 	var parsed struct {
