@@ -28,7 +28,6 @@ import (
 	"github.com/alibaba/skill-up/internal/observability"
 	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
-	"github.com/alibaba/skill-up/internal/shellquote"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
 
@@ -777,10 +776,18 @@ func isDefaultAgentSkillTarget(skillPath, target string) bool {
 }
 
 func removeRuntimePath(ctx context.Context, rt runtime.Runtime, target string) error {
-	if strings.TrimSpace(target) == "" || rt.TargetGOOS() == platform.GOOSWindows {
+	if strings.TrimSpace(target) == "" {
 		return nil
 	}
-	cmd := "rm -rf -- " + shellquote.QuotePOSIX(target)
+	targetShell := rt.Shell()
+	if targetShell.Family != platform.ShellPOSIX {
+		return nil
+	}
+	quote, err := targetShell.Quoter()
+	if err != nil {
+		return err
+	}
+	cmd := "rm -rf -- " + quote(target)
 	result, err := rt.Exec(ctx, cmd, runtime.ExecOptions{})
 	if err != nil {
 		return err
