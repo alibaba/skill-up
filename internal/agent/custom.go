@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alibaba/skill-up/internal/config"
+	"github.com/alibaba/skill-up/internal/customengine"
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
@@ -64,8 +64,8 @@ var maxArtifactDownloadBytes int64 = 256 * 1024 * 1024
 
 // CustomAgent implements Agent for user-defined engines configured via
 // engine.custom. The local transport is fully supported; the http transport
-// supports JSON request/response, with multipart file upload still pending.
-// Result artifacts declared via a `url` are downloaded for any transport. See
+// supports JSON request/response and multipart file upload. Result artifacts
+// declared via a `url` are downloaded for any transport. See
 // docs/design/custom-engine.md.
 //
 // CustomAgent embeds BaseAgent directly (not CLIAgent) so it inherits only
@@ -134,7 +134,7 @@ type customTransport interface {
 // session input and template variable set. start is captured at preparation
 // time so the reported duration spans preparation through result assembly.
 type customRunPrep struct {
-	custom     *config.CustomEngineConfig
+	custom     *customengine.Config
 	vars       map[string]string
 	sessJSON   []byte
 	timeoutSec int
@@ -185,7 +185,7 @@ func (a *CustomAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mes
 // local transport runs a command in the runtime, the http transport calls a
 // remote agent service. Both produce a transportOutcome that CustomAgent.Run
 // hands to the shared assembleResult.
-func (a *CustomAgent) selectTransport(custom *config.CustomEngineConfig) (customTransport, error) {
+func (a *CustomAgent) selectTransport(custom *customengine.Config) (customTransport, error) {
 	switch custom.Transport {
 	case customTransportLocal:
 		return &localTransport{a: a}, nil
@@ -200,7 +200,7 @@ func (a *CustomAgent) selectTransport(custom *config.CustomEngineConfig) (custom
 // full template variable set, and the marshaled SessionInput. start is captured
 // here so the reported duration spans preparation through result assembly,
 // matching the pre-refactor behavior.
-func (a *CustomAgent) prepareRun(rt Runtime, opts ExecOptions, messages []transcript.Message, custom *config.CustomEngineConfig) (*customRunPrep, error) {
+func (a *CustomAgent) prepareRun(rt Runtime, opts ExecOptions, messages []transcript.Message, custom *customengine.Config) (*customRunPrep, error) {
 	start := time.Now()
 	// engine.custom.timeout_seconds is the per-engine deadline; opts.TimeoutSec
 	// is the outer case deadline (the evaluator already wraps ctx with it).
@@ -279,7 +279,7 @@ func (a *CustomAgent) clearStaleOutputFile(ctx context.Context, rt Runtime, outp
 }
 
 // buildLocalExec renders the command, args and exec options for the local run.
-func (a *CustomAgent) buildLocalExec(ctx context.Context, rt Runtime, opts ExecOptions, custom *config.CustomEngineConfig, vars map[string]string, timeoutSec int) (string, ExecOptions, error) {
+func (a *CustomAgent) buildLocalExec(ctx context.Context, rt Runtime, opts ExecOptions, custom *customengine.Config, vars map[string]string, timeoutSec int) (string, ExecOptions, error) {
 	local := custom.Local
 	command, err := renderTemplate(local.Command, vars)
 	if err != nil {
@@ -391,7 +391,7 @@ func (a *CustomAgent) assembleResult(ctx context.Context, rt Runtime, opts ExecO
 // configured response_format. The text format never errors and always grades
 // stdout (never the output file); session_result returns a parse error when
 // the payload is missing or malformed.
-func (a *CustomAgent) buildResult(ctx context.Context, rt Runtime, opts ExecOptions, custom *config.CustomEngineConfig, raw, stdout string, exitCode int, stderr string, durationMs int64, messages []transcript.Message) (*SessionResult, error) {
+func (a *CustomAgent) buildResult(ctx context.Context, rt Runtime, opts ExecOptions, custom *customengine.Config, raw, stdout string, exitCode int, stderr string, durationMs int64, messages []transcript.Message) (*SessionResult, error) {
 	if customResponseFormat(custom) == customResponseText {
 		// Per the contract, text responses come from stdout; an output file
 		// produced for bookkeeping must not be graded as the final answer.
@@ -430,7 +430,7 @@ func (a *CustomAgent) appendFrameworkFiles(res *SessionResult, files []string) {
 // input). The boolean reports whether the configured output file was produced
 // (exists in the runtime) — independent of whether it supplied the payload —
 // so an empty produced file is still excluded from workspace diffs.
-func (a *CustomAgent) readRawResult(ctx context.Context, rt Runtime, custom *config.CustomEngineConfig, result ExecResult, outputFile string) (raw string, produced bool) {
+func (a *CustomAgent) readRawResult(ctx context.Context, rt Runtime, custom *customengine.Config, result ExecResult, outputFile string) (raw string, produced bool) {
 	// Re-resolve symlinks now that the engine has run. workspacePath was
 	// called pre-run, but the engine could have created a not-yet-existing
 	// parent (e.g. outputs/newdir) as a symlink pointing outside the
@@ -1076,7 +1076,7 @@ func (a *CustomAgent) completeTemplateVars(baseVars, renderedKwargs map[string]s
 // A non-absolute configured path is resolved against the runtime workspace so
 // it is consistent regardless of local.cwd (the command sees the same path the
 // runtime upload/download APIs key on).
-func resolveCustomIOFiles(rt Runtime, custom *config.CustomEngineConfig, vars map[string]string) (inputFile, outputFile string, err error) {
+func resolveCustomIOFiles(rt Runtime, custom *customengine.Config, vars map[string]string) (inputFile, outputFile string, err error) {
 	inputFile = filepath.Join(rt.Workspace(), customDefaultInputFile)
 	if custom.Local.InputFile != "" {
 		rendered, rErr := renderTemplate(custom.Local.InputFile, vars)
@@ -1172,7 +1172,7 @@ func resolveExistingPrefix(abs string) string {
 	}
 }
 
-func customResponseFormat(custom *config.CustomEngineConfig) string {
+func customResponseFormat(custom *customengine.Config) string {
 	if custom.ResponseFormat == customResponseText {
 		return customResponseText
 	}
@@ -1252,9 +1252,9 @@ func renderTemplate(s string, vars map[string]string) (string, error) {
 }
 
 func resolveTemplateToken(inner string, vars map[string]string) (string, error) {
-	// Share the ${X} / ${X:-default} / ${X?msg} grammar with the config-load-time
-	// resolver (config.resolveEnvToken) so the two cannot drift apart.
-	tok := config.ParseTemplateToken(inner)
+	// Share the ${X} / ${X:-default} / ${X?msg} grammar with the config resolver
+	// so the two cannot drift apart.
+	tok := customengine.ParseTemplateToken(inner)
 
 	if v, ok := vars[tok.Name]; ok {
 		// A present-but-empty built-in value (e.g. an unconfigured api_key)

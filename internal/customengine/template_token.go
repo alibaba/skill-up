@@ -1,4 +1,4 @@
-package config
+package customengine
 
 import (
 	"errors"
@@ -6,12 +6,8 @@ import (
 )
 
 // TemplateToken is the parsed body of a ${...} reference. It is shared by the
-// config-load-time resolver (resolveEnvToken) and the agent-runtime resolver
-// (agent.resolveTemplateToken) so the ${X} / ${X:-default} / ${X?msg} grammar
-// has a single source of truth and the two resolvers cannot drift apart.
-//
-// Interim home: when the deferred internal/customengine leaf package of #50
-// lands, this type moves there alongside the custom-engine config types.
+// config-load-time resolver and the agent-runtime resolver so the
+// ${X} / ${X:-default} / ${X?msg} grammar has a single source of truth.
 type TemplateToken struct {
 	// Name is the variable name (the part before any :- or ? clause).
 	Name string
@@ -27,8 +23,7 @@ type TemplateToken struct {
 
 // ParseTemplateToken splits a reference body into its variable name plus an
 // optional default-value or error-message clause. `:-` is matched before `?`,
-// so ${X:-a?b} keeps "a?b" as the default — preserving the precedence both
-// resolvers already relied on.
+// so ${X:-a?b} keeps "a?b" as the default.
 func ParseTemplateToken(inner string) TemplateToken {
 	t := TemplateToken{Name: inner}
 	if before, after, found := strings.Cut(inner, ":-"); found {
