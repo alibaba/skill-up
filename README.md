@@ -44,9 +44,6 @@
 
 **skill-up** is a CLI evaluation framework for Agent Skill developers. Declare your eval environment, dependencies, test cases, and grading strategy in `evals/eval.yaml` and `evals/cases/*.yaml`, then run evaluations locally or in CI to generate structured reports.
 
-> [!WARNING]
-> This project is still in an **early evolution** stage: the code is not yet fully stable, and some CLI commands, configuration fields, and public APIs may still change in future releases. Please review the [CHANGELOG](CHANGELOG.md) and verify compatibility before using it in production.
-
 ## Features
 
 - **Declarative Eval Config**: Define evaluation environment, engine, model, and cases through YAML (`eval.yaml` + `cases/*.yaml`).
