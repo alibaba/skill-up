@@ -79,18 +79,29 @@ type embeddedSummary struct {
 }
 
 type embeddedCase struct {
-	ID            string           `json:"id"`
-	Title         string           `json:"title,omitempty"`
-	Status        string           `json:"status"`
-	DurationMs    int64            `json:"duration_ms"`
-	Duration      string           `json:"duration"`
-	Turns         int              `json:"turns"`
-	Error         string           `json:"error,omitempty"`
-	Grading       *embeddedGrading `json:"grading,omitempty"`
-	Configuration string           `json:"configuration,omitempty"`
-	Prompt        string           `json:"prompt,omitempty"`
-	Response      string           `json:"response,omitempty"`
-	Baseline      *embeddedCase    `json:"baseline,omitempty"`
+	ID            string            `json:"id"`
+	Title         string            `json:"title,omitempty"`
+	Status        string            `json:"status"`
+	DurationMs    int64             `json:"duration_ms"`
+	Duration      string            `json:"duration"`
+	Turns         int               `json:"turns"`
+	Error         string            `json:"error,omitempty"`
+	Grading       *embeddedGrading  `json:"grading,omitempty"`
+	Configuration string            `json:"configuration,omitempty"`
+	Prompt        string            `json:"prompt,omitempty"`
+	Response      string            `json:"response,omitempty"`
+	Baseline      *embeddedCase     `json:"baseline,omitempty"`
+	TurnResults   []embeddedTurn    `json:"turn_results,omitempty"`
+	JudgeSkills   []judge.SkillInfo `json:"judge_skills,omitempty"`
+}
+
+// embeddedTurn holds per-turn data for the HTML report JavaScript.
+type embeddedTurn struct {
+	TurnNumber int    `json:"turn_number"`
+	Content    string `json:"content"`
+	Response   string `json:"response"`
+	Status     string `json:"status"`
+	Reason     string `json:"reason,omitempty"`
 }
 
 type embeddedGrading struct {
@@ -135,6 +146,8 @@ func caseResultToEmbeddedCase(cr CaseResult) embeddedCase {
 		Configuration: cr.Configuration,
 		Prompt:        cr.Prompt,
 		Response:      cr.Response,
+		TurnResults:   caseTurnResultsToEmbedded(cr.TurnResults),
+		JudgeSkills:   cr.JudgeSkills,
 	}
 	if cr.Grading != nil {
 		eg := &embeddedGrading{
@@ -156,6 +169,17 @@ func caseResultToEmbeddedCase(cr CaseResult) embeddedCase {
 		ec.Grading = eg
 	}
 	return ec
+}
+
+func caseTurnResultsToEmbedded(turns []CaseTurnResult) []embeddedTurn {
+	if len(turns) == 0 {
+		return nil
+	}
+	out := make([]embeddedTurn, len(turns))
+	for i, tr := range turns {
+		out[i] = embeddedTurn(tr)
+	}
+	return out
 }
 
 func groupCaseResults(results []CaseResult) (map[string]*caseGroup, []string) {

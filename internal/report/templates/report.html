@@ -107,6 +107,22 @@
     .prompt-box { background: #f8fafc; border: 1px solid var(--border); border-radius: 4px; padding: 0.75rem 1rem; font-size: 0.875rem; color: #555; margin-bottom: 0.5rem; }
     .prompt-box strong { color: var(--text); }
     .response-box { background: #f8f8f8; border: 1px solid #e8e8e8; border-radius: 6px; padding: 0.75rem 1rem; font-size: 0.85rem; white-space: pre-wrap; word-wrap: break-word; max-height: 300px; overflow-y: auto; }
+    .turn-card { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 1rem; overflow: hidden; }
+    .turn-card:last-child { margin-bottom: 0; }
+    .turn-header { background: var(--bg); padding: 0.5rem 1rem; font-size: 0.75rem; font-weight: 600; color: var(--text-muted); display: flex; align-items: center; gap: 0.5rem; border-bottom: 1px solid var(--border); }
+    .turn-header .turn-badge { background: var(--accent); color: white; padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.65rem; }
+    .turn-header .turn-status { margin-left: auto; font-size: 0.7rem; font-weight: 500; }
+    .turn-header .turn-status.ts-completed { color: var(--green); }
+    .turn-header .turn-status.ts-skipped { color: var(--skip); }
+    .turn-header .turn-status.ts-failed { color: var(--red); }
+    .turn-header .turn-status.ts-error { color: var(--error-color); }
+    .turn-prompt { padding: 0.75rem 1rem; background: #f0f4ff; border-bottom: 1px solid var(--border); }
+    .turn-prompt-label { font-size: 0.7rem; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.25rem; }
+    .turn-prompt-content { font-size: 0.85rem; color: var(--text); white-space: pre-wrap; word-wrap: break-word; }
+    .turn-response { padding: 0.75rem 1rem; background: var(--surface); }
+    .turn-response-label { font-size: 0.7rem; font-weight: 600; color: var(--green); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.25rem; }
+    .turn-response-content { font-size: 0.85rem; color: var(--text); white-space: pre-wrap; word-wrap: break-word; max-height: 250px; overflow-y: auto; }
+    .turn-skipped-msg { padding: 0.75rem 1rem; background: var(--skip-bg); color: var(--skip); font-size: 0.8rem; font-style: italic; }
     .comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
     .config-col { padding: 1rem; }
     .config-col:first-child { border-right: 1px solid var(--border); }
@@ -345,8 +361,14 @@
       document.getElementById("case-info").innerHTML = info;
 
       var promptSec = document.getElementById("prompt-section");
-      if (c.prompt) { promptSec.style.display = "block"; document.getElementById("prompt-text").textContent = c.prompt; }
-      else { promptSec.style.display = "none"; }
+      if (c.turn_results && c.turn_results.length > 0) {
+        promptSec.style.display = "none";
+      } else if (c.prompt) {
+        promptSec.style.display = "block";
+        document.getElementById("prompt-text").textContent = c.prompt;
+      } else {
+        promptSec.style.display = "none";
+      }
 
       var errSec = document.getElementById("error-section");
       if (c.error) { errSec.style.display = "block"; document.getElementById("error-text").textContent = c.error; }
@@ -372,8 +394,38 @@
     function renderResponse(c) {
       var section = document.getElementById("response-section");
       var body = document.getElementById("response-body");
+      var header = section.querySelector(".section-header");
+
+      // Multi-turn: render full conversation with per-turn prompt and response.
+      if (c.turn_results && c.turn_results.length > 0) {
+        section.style.display = "block";
+        header.textContent = "Conversation (" + c.turn_results.length + " turns)";
+        var html = '<div style="padding: 1rem;">';
+        for (var i = 0; i < c.turn_results.length; i++) {
+          var tr = c.turn_results[i];
+          var statusCls = "ts-" + (tr.status || "completed");
+          html += '<div class="turn-card">';
+          html += '<div class="turn-header"><span class="turn-badge">Turn ' + tr.turn_number + '</span>';
+          html += '<span class="turn-status ' + statusCls + '">' + esc(tr.status || "completed") + '</span></div>';
+          html += '<div class="turn-prompt"><div class="turn-prompt-label">Prompt</div>';
+          html += '<div class="turn-prompt-content">' + esc(tr.content || "") + '</div></div>';
+          if (tr.status === "skipped") {
+            html += '<div class="turn-skipped-msg">This turn was skipped' + (tr.reason ? ': ' + esc(tr.reason) : '') + '</div>';
+          } else if (tr.response) {
+            html += '<div class="turn-response"><div class="turn-response-label">Response</div>';
+            html += '<div class="turn-response-content">' + esc(tr.response) + '</div></div>';
+          }
+          html += '</div>';
+        }
+        html += '</div>';
+        body.innerHTML = html;
+        return;
+      }
+
+      // Single-turn fallback.
       if (!c.response && !(c.baseline && c.baseline.response)) { section.style.display = "none"; return; }
       section.style.display = "block";
+      header.textContent = "Response";
       if (c.baseline) {
         var html = '<div class="comparison">';
         html += '<div class="config-col"><h3>With Skill';
@@ -395,22 +447,58 @@
     function renderGrades(c) {
       var section = document.getElementById("grades-section");
       var content = document.getElementById("grades-content");
-      if (!c.grading && !(c.baseline && c.baseline.grading)) { section.style.display = "none"; return; }
+
+      // Check if we have grading data or can synthesize from turn failures.
+      var hasGrading = c.grading || (c.baseline && c.baseline.grading);
+      var hasTurnFailures = !hasGrading && c.turn_results && c.turn_results.some(function(tr) { return tr.status === "failed" || tr.status === "error"; });
+
+      if (!hasGrading && !hasTurnFailures) { section.style.display = "none"; return; }
       section.style.display = "block";
       content.classList.remove("open");
       document.getElementById("grades-arrow").classList.remove("open");
 
       var html = '<div style="padding: 1rem;">';
-      if (c.baseline) {
-        html += '<div class="comparison">';
-        html += '<div class="config-col"><h3>With Skill</h3>' + renderGradingBlock(c.grading) + '</div>';
-        html += '<div class="config-col"><h3>Without Skill</h3>' + renderGradingBlock(c.baseline.grading) + '</div>';
-        html += '</div>';
+      if (hasGrading) {
+        if (c.baseline) {
+          html += '<div class="comparison">';
+          html += '<div class="config-col"><h3>With Skill</h3>' + renderGradingBlock(c.grading) + '</div>';
+          html += '<div class="config-col"><h3>Without Skill</h3>' + renderGradingBlock(c.baseline.grading) + '</div>';
+          html += '</div>';
+        } else {
+          html += renderGradingBlock(c.grading);
+        }
       } else {
-        html += renderGradingBlock(c.grading);
+        // Synthesize grading display from turn post-condition failures.
+        html += renderTurnFailuresAsGrades(c.turn_results);
       }
       html += '</div>';
       content.innerHTML = html;
+    }
+
+    function renderTurnFailuresAsGrades(turns) {
+      var failed = turns.filter(function(tr) { return tr.status === "failed" || tr.status === "error"; });
+      var passed = turns.filter(function(tr) { return tr.status === "completed"; });
+      var total = failed.length + passed.length;
+      var rate = total === 0 ? 0 : Math.round((passed.length / total) * 100);
+      var badgeClass = rate === 100 ? "grade-pass" : "grade-fail";
+      var html = '<div class="grades-summary"><span class="grade-badge ' + badgeClass + '">' + rate + '%</span>';
+      html += '<span>' + passed.length + ' passed, ' + failed.length + ' failed of ' + total + ' (post-condition checks)</span></div>';
+      html += '<ul class="assertion-list">';
+      for (var i = 0; i < turns.length; i++) {
+        var tr = turns[i];
+        if (tr.status === "failed" || tr.status === "error") {
+          html += '<li class="assertion-item"><span class="assertion-status a-fail">\u2717</span>';
+          html += '<span>Turn ' + tr.turn_number + ' post-condition</span>';
+          if (tr.reason) html += '<div class="assertion-evidence">' + esc(tr.reason) + '</div>';
+          html += '</li>';
+        } else if (tr.status === "completed") {
+          html += '<li class="assertion-item"><span class="assertion-status a-pass">\u2713</span>';
+          html += '<span>Turn ' + tr.turn_number + ' post-condition</span>';
+          html += '</li>';
+        }
+      }
+      html += '</ul>';
+      return html;
     }
 
     function renderGradingBlock(g) {

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"path"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -95,6 +96,7 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	}
 
 	errs = append(errs, validateCollectArtifacts("cases.defaults.collect_artifacts", cfg.Cases.Defaults.CollectArtifacts)...)
+	errs = append(errs, validateJudgeTypeAndLocalFields(cfg.Judge)...)
 
 	if len(errs) > 0 {
 		return fmt.Errorf("validation errors:\n  - %s", strings.Join(errs, "\n  - "))
@@ -110,25 +112,44 @@ func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 	// id is optional - Loader auto-generates from filename if not specified
 	// See loader.go:LoadCaseConfig for the fallback logic
 
-	// input.prompt or input.turns is required
+	// input.prompt or input.turns is required, but not both
 	if cfg.Input.Prompt == "" && len(cfg.Input.Turns) == 0 {
 		errs = append(errs, "input.prompt or input.turns is required")
 	}
+	if cfg.Input.Prompt != "" && len(cfg.Input.Turns) > 0 {
+		errs = append(errs, "input.prompt and input.turns are mutually exclusive")
+	}
 
-	// if turns is specified, each turn must have role and content
+	// if turns is specified, each turn must have role=user and content
 	for i, turn := range cfg.Input.Turns {
 		if turn.Role == "" {
 			errs = append(errs, fmt.Sprintf("input.turns[%d].role is required", i))
+		} else if turn.Role != "user" {
+			errs = append(errs, fmt.Sprintf("input.turns[%d].role must be \"user\", got %q", i, turn.Role))
 		}
 		if turn.Content == "" {
 			errs = append(errs, fmt.Sprintf("input.turns[%d].content is required", i))
 		}
+		if turn.TimeoutSeconds < 0 {
+			errs = append(errs, fmt.Sprintf("input.turns[%d].timeout_seconds must be non-negative", i))
+		}
+		if turn.PostCondition != nil {
+			errs = append(errs, validatePostCondition(i, turn.PostCondition)...)
+		}
+		for j, cr := range turn.Capture {
+			errs = append(errs, validateCaptureRule(i, j, cr)...)
+		}
 	}
 
-	// validate judge config if specified at case level
-	if cfg.Judge.Type != "" {
-		errs = append(errs, validateJudgeTypeAndFields(cfg.Judge)...)
+	// validate per-turn judge rules reference valid turn numbers
+	turnsTotal := len(cfg.Input.Turns)
+	if judgeNeedsLocalValidation(cfg.Judge) {
+		errs = append(errs, validateJudgeTypeAndLocalFields(cfg.Judge)...)
 	}
+	var allRules []Rule
+	allRules = append(allRules, cfg.Judge.Success...)
+	allRules = append(allRules, cfg.Judge.Failure...)
+	errs = append(errs, validatePerTurnRules(allRules, turnsTotal)...)
 
 	errs = append(errs, validateCollectArtifacts("collect_artifacts", cfg.CollectArtifacts)...)
 
@@ -175,34 +196,56 @@ func validateCaseMCP(mcpCfg MCPConfig) []string {
 	return errs
 }
 
-// validateJudgeTypeAndFields validates judge type and its conditional fields.
-func validateJudgeTypeAndFields(judge JudgeConfig) []string {
+func judgeNeedsLocalValidation(judge JudgeConfig) bool {
+	return judge.Type != "" || len(judge.Skills) > 0 || judge.Context != nil
+}
+
+// validateJudgeTypeAndLocalFields validates judge fields that do not depend on inheritance.
+func validateJudgeTypeAndLocalFields(judge JudgeConfig) []string {
 	var errs []string
 
 	if judge.Type != "" && !isValidJudgeType(judge.Type) {
 		errs = append(errs, "judge.type must be one of: rule_based, script, agent_judge")
 	}
-
-	// script type requires script_path
-	if judge.Type == judgeTypeScript && judge.ScriptPath == "" {
-		errs = append(errs, "judge.script_path is required when judge.type is script")
+	if len(judge.Skills) > 0 && judge.Type != judgeTypeAgentJudge {
+		errs = append(errs, "judge.skills is only supported when judge.type is agent_judge")
 	}
-
-	// agent_judge type requires model and criteria
-	if judge.Type == judgeTypeAgentJudge && judge.Model == "" {
-		errs = append(errs, "judge.model is required when judge.type is agent_judge")
-	}
-
-	if judge.Type == judgeTypeAgentJudge && len(judge.Criteria) == 0 {
-		errs = append(errs, "judge.criteria is required when judge.type is agent_judge")
-	}
+	errs = append(errs, validateSkillRefs("judge.skills", judge.Skills)...)
 
 	errs = append(errs, validatePassThreshold(judge.PassThreshold)...)
+	errs = append(errs, validateJudgeContext(judge.Context)...)
 
 	if judge.TimeoutSeconds != nil && *judge.TimeoutSeconds < 0 {
 		errs = append(errs, "judge.timeout_seconds must be non-negative")
 	}
 
+	return errs
+}
+
+func validateJudgeTypeAndRequiredFields(judge JudgeConfig) []string {
+	errs := validateJudgeTypeAndLocalFields(judge)
+	if judge.Type == judgeTypeScript && judge.ScriptPath == "" {
+		errs = append(errs, "judge.script_path is required when judge.type is script")
+	}
+	if judge.Type == judgeTypeAgentJudge && judge.Model == "" {
+		errs = append(errs, "judge.model is required when judge.type is agent_judge")
+	}
+	if judge.Type == judgeTypeAgentJudge && len(judge.Criteria) == 0 {
+		errs = append(errs, "judge.criteria is required when judge.type is agent_judge")
+	}
+	return errs
+}
+
+func validateSkillRefs(field string, refs []SkillRef) []string {
+	var errs []string
+	for i, ref := range refs {
+		if strings.TrimSpace(ref.Source) == "" {
+			errs = append(errs, fmt.Sprintf("%s[%d].source is required", field, i))
+		}
+		if strings.TrimSpace(ref.Path) == "" {
+			errs = append(errs, fmt.Sprintf("%s[%d].path is required", field, i))
+		}
+	}
 	return errs
 }
 
@@ -233,6 +276,68 @@ func validatePassThreshold(threshold *float64) []string {
 	return nil
 }
 
+func validateJudgeContext(ctx *JudgeContextConfig) []string {
+	if ctx == nil {
+		return nil
+	}
+
+	var errs []string
+	if ctx.Profile != "" && ctx.Profile != "minimal" && ctx.Profile != "standard" {
+		errs = append(errs, "judge.context.profile must be one of: minimal, standard")
+	}
+	errs = append(errs, validateJudgeContextModes(ctx)...)
+	errs = append(errs, validateJudgeContextLimits(ctx.Limits)...)
+	for i, attachment := range ctx.Attachments {
+		if strings.TrimSpace(attachment.Path) == "" {
+			errs = append(errs, fmt.Sprintf("judge.context.attachments[%d].path must not be empty", i))
+		}
+	}
+	return errs
+}
+
+func validateJudgeContextModes(ctx *JudgeContextConfig) []string {
+	var errs []string
+	for field, mode := range map[string]string{
+		"final_message":  ctx.FinalMessage,
+		"transcript":     ctx.Transcript,
+		"workspace_diff": ctx.WorkspaceDiff,
+	} {
+		if mode != "" && !isValidJudgeContextMode(mode) {
+			errs = append(errs, fmt.Sprintf("judge.context.%s must be one of: include, omit, truncate, file_ref", field))
+		}
+	}
+	if ctx.GeneratedFiles != "" && ctx.GeneratedFiles != "omit" && ctx.GeneratedFiles != "index" && ctx.GeneratedFiles != "include" {
+		errs = append(errs, "judge.context.generated_files must be one of: omit, index, include")
+	}
+	return errs
+}
+
+func validateJudgeContextLimits(limits *JudgeContextLimits) []string {
+	if limits == nil {
+		return nil
+	}
+	var errs []string
+	if limits.MaxBytes < 0 {
+		errs = append(errs, "judge.context.limits.max_bytes must be non-negative")
+	}
+	if limits.TranscriptMaxTurns < 0 {
+		errs = append(errs, "judge.context.limits.transcript_max_turns must be non-negative")
+	}
+	if limits.WorkspaceDiffMaxLines < 0 {
+		errs = append(errs, "judge.context.limits.workspace_diff_max_lines must be non-negative")
+	}
+	return errs
+}
+
+func isValidJudgeContextMode(mode string) bool {
+	switch mode {
+	case "include", "omit", "truncate", "file_ref":
+		return true
+	default:
+		return false
+	}
+}
+
 // ValidateAll validates an eval config and all its cases.
 //
 // NOTE: this does NOT validate the engine.custom block. That validation is
@@ -245,7 +350,7 @@ func (v *Validator) ValidateAll(result *EvalResult) error {
 	if err := v.ValidateEvalConfig(result.Eval); err != nil {
 		return err
 	}
-	return v.ValidateCases(result.Cases)
+	return v.ValidateCasesWithEvalDefaults(result.Eval, result.Cases)
 }
 
 // ValidateCases validates a set of cases: it rejects duplicate effective IDs
@@ -269,6 +374,40 @@ func (v *Validator) ValidateCases(cases []*CaseConfig) error {
 	}
 
 	return nil
+}
+
+// ValidateCasesWithEvalDefaults validates already-loaded cases and effective
+// judge settings after applying eval-level defaults. Unlike ValidateAll, it
+// does not require eval.cases.files and is therefore suitable for filtered
+// runs and Anthropic evals.json auto mode where cases are loaded directly.
+func (v *Validator) ValidateCasesWithEvalDefaults(eval *EvalConfig, cases []*CaseConfig) error {
+	if err := v.ValidateCases(cases); err != nil {
+		return err
+	}
+	for _, c := range cases {
+		effectiveJudge := mergeJudgeConfigForValidation(eval.Judge, c.Judge)
+		if errs := validateJudgeTypeAndRequiredFields(effectiveJudge); len(errs) > 0 {
+			return fmt.Errorf("case %s: validation errors:\n  - %s", c.ID, strings.Join(errs, "\n  - "))
+		}
+	}
+	return nil
+}
+
+func mergeJudgeConfigForValidation(global, caseLevel JudgeConfig) JudgeConfig {
+	if caseLevel.Type != "" {
+		merged := caseLevel
+		if merged.Model == "" {
+			merged.Model = global.Model
+		}
+		if merged.PassThreshold == nil {
+			merged.PassThreshold = global.PassThreshold
+		}
+		if merged.TimeoutSeconds == nil {
+			merged.TimeoutSeconds = global.TimeoutSeconds
+		}
+		return merged
+	}
+	return global
 }
 
 // duplicateCaseErrors reports duplicate source-file references and duplicate
@@ -454,6 +593,130 @@ func validateDockerEnvironment(env Environment) []string {
 
 func isValidJudgeType(t string) bool {
 	return t == judgeTypeRuleBased || t == judgeTypeScript || t == judgeTypeAgentJudge
+}
+
+// captureVariablePattern is the allowed pattern for capture variable names.
+var captureVariablePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// validatePostCondition validates a turn's post_condition block.
+func validatePostCondition(turnIdx int, pc *PostCondition) []string {
+	var errs []string
+	prefix := fmt.Sprintf("input.turns[%d].post_condition", turnIdx)
+
+	// on_fail must be empty, "fail", or "skip_remaining"
+	if pc.OnFail != "" && pc.OnFail != "fail" && pc.OnFail != "skip_remaining" {
+		errs = append(errs, fmt.Sprintf("%s.on_fail must be empty, \"fail\", or \"skip_remaining\", got %q", prefix, pc.OnFail))
+	}
+
+	// Must include at least one check field
+	if len(pc.MustContainAny) == 0 && len(pc.MustContainAll) == 0 && len(pc.MustNotContain) == 0 {
+		errs = append(errs, prefix+" must include at least one of must_contain_any, must_contain_all, or must_not_contain")
+	}
+
+	return errs
+}
+
+// validateCaptureRule validates a single capture rule.
+func validateCaptureRule(turnIdx, capIdx int, cr CaptureRule) []string {
+	var errs []string
+	prefix := fmt.Sprintf("input.turns[%d].capture[%d]", turnIdx, capIdx)
+
+	// variable must match identifier pattern
+	if cr.Variable == "" {
+		errs = append(errs, prefix+".variable is required")
+	} else if !captureVariablePattern.MatchString(cr.Variable) {
+		errs = append(errs, fmt.Sprintf("%s.variable %q must match pattern [A-Za-z_][A-Za-z0-9_]*", prefix, cr.Variable))
+	}
+
+	// Exactly one extractor must be specified
+	hasPattern := cr.Pattern != ""
+	hasJSONPath := cr.JSONPath != ""
+	if !hasPattern && !hasJSONPath {
+		errs = append(errs, prefix+" must specify exactly one extractor: pattern or jsonpath")
+	} else if hasPattern && hasJSONPath {
+		errs = append(errs, prefix+" must specify exactly one extractor: pattern or jsonpath (both set)")
+	}
+
+	// Regex pattern must compile
+	if hasPattern {
+		if _, err := regexp.Compile(cr.Pattern); err != nil {
+			errs = append(errs, fmt.Sprintf("%s.pattern is invalid regex: %v", prefix, err))
+		}
+	}
+
+	return errs
+}
+
+// validatePerTurnRules validates per-turn judge rules reference valid turn numbers.
+func validatePerTurnRules(rules []Rule, turnsTotal int) []string {
+	var errs []string
+	for _, rule := range rules {
+		if rule.TurnResponseContains != nil {
+			errs = append(errs, validateTurnResponseContainsRule(rule.TurnResponseContains, turnsTotal)...)
+		}
+		if rule.TurnResponseNotContains != nil {
+			errs = append(errs, validateTurnResponseNotContainsRule(rule.TurnResponseNotContains, turnsTotal)...)
+		}
+		if rule.ToolCalledInTurn != nil {
+			errs = append(errs, validateToolCalledInTurnRule(rule.ToolCalledInTurn, turnsTotal)...)
+		}
+		if rule.ToolNotCalledInTurn != nil {
+			errs = append(errs, validateToolNotCalledInTurnRule(rule.ToolNotCalledInTurn, turnsTotal)...)
+		}
+	}
+	return errs
+}
+
+func validateTurnResponseContainsRule(r *TurnResponseContainsRule, turnsTotal int) []string {
+	var errs []string
+	if r.Turn < 1 {
+		errs = append(errs, "turn_response_contains.turn must be >= 1")
+	} else if turnsTotal > 0 && r.Turn > turnsTotal {
+		errs = append(errs, fmt.Sprintf("turn_response_contains.turn %d exceeds total turns %d", r.Turn, turnsTotal))
+	}
+	if len(r.ContainsAll) == 0 && len(r.ContainsAny) == 0 {
+		errs = append(errs, "turn_response_contains must specify contains_all or contains_any")
+	}
+	return errs
+}
+
+func validateTurnResponseNotContainsRule(r *TurnResponseNotContainsRule, turnsTotal int) []string {
+	var errs []string
+	if r.Turn < 1 {
+		errs = append(errs, "turn_response_not_contains.turn must be >= 1")
+	} else if turnsTotal > 0 && r.Turn > turnsTotal {
+		errs = append(errs, fmt.Sprintf("turn_response_not_contains.turn %d exceeds total turns %d", r.Turn, turnsTotal))
+	}
+	if len(r.NotContains) == 0 {
+		errs = append(errs, "turn_response_not_contains.not_contains is required")
+	}
+	return errs
+}
+
+func validateToolCalledInTurnRule(r *ToolCalledInTurnRule, turnsTotal int) []string {
+	var errs []string
+	if r.Turn < 1 {
+		errs = append(errs, "tool_called_in_turn.turn must be >= 1")
+	} else if turnsTotal > 0 && r.Turn > turnsTotal {
+		errs = append(errs, fmt.Sprintf("tool_called_in_turn.turn %d exceeds total turns %d", r.Turn, turnsTotal))
+	}
+	if r.Name == "" {
+		errs = append(errs, "tool_called_in_turn.name is required")
+	}
+	return errs
+}
+
+func validateToolNotCalledInTurnRule(r *ToolNotCalledInTurnRule, turnsTotal int) []string {
+	var errs []string
+	if r.Turn < 1 {
+		errs = append(errs, "tool_not_called_in_turn.turn must be >= 1")
+	} else if turnsTotal > 0 && r.Turn > turnsTotal {
+		errs = append(errs, fmt.Sprintf("tool_not_called_in_turn.turn %d exceeds total turns %d", r.Turn, turnsTotal))
+	}
+	if r.Name == "" {
+		errs = append(errs, "tool_not_called_in_turn.name is required")
+	}
+	return errs
 }
 
 func validateNetworkPolicy(env Environment) []string {

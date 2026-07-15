@@ -38,7 +38,7 @@ func NewJudge(cfg config.JudgeConfig, ag agent.Agent, rt runtime.Runtime) (Judge
 		if ag == nil {
 			return nil, errors.New("agent_judge requires an Agent")
 		}
-		return NewAgentJudge(ag, rt, cfg.Model, cfg.Criteria, cfg.PassThreshold, derefInt(cfg.TimeoutSeconds)), nil
+		return NewAgentJudgeWithContextAndSkills(ag, rt, cfg.Model, cfg.Criteria, cfg.PassThreshold, cfg.Context, derefInt(cfg.TimeoutSeconds), SkillInfosFromRefs(cfg.Skills)), nil
 
 	case "":
 		// No judge configured — return nil, caller should handle
@@ -79,8 +79,80 @@ func MergeJudgeConfig(global, caseLevel config.JudgeConfig) config.JudgeConfig {
 		if merged.TimeoutSeconds == nil {
 			merged.TimeoutSeconds = global.TimeoutSeconds
 		}
+		merged.Context = MergeJudgeContextConfig(global.Context, caseLevel.Context)
 		return merged
 	}
 	// No case-level judge, use global
 	return global
+}
+
+// MergeJudgeContextConfig merges case-level judge.context over eval-level
+// judge.context. Unset fields inherit from the global context.
+func MergeJudgeContextConfig(global, caseLevel *config.JudgeContextConfig) *config.JudgeContextConfig {
+	if global == nil && caseLevel == nil {
+		return nil
+	}
+	if global == nil {
+		return cloneJudgeContextConfig(caseLevel)
+	}
+	if caseLevel == nil {
+		return cloneJudgeContextConfig(global)
+	}
+
+	merged := cloneJudgeContextConfig(global)
+	if caseLevel.Profile != "" {
+		merged.Profile = caseLevel.Profile
+	}
+	if caseLevel.FinalMessage != "" {
+		merged.FinalMessage = caseLevel.FinalMessage
+	}
+	if caseLevel.Transcript != "" {
+		merged.Transcript = caseLevel.Transcript
+	}
+	if caseLevel.WorkspaceDiff != "" {
+		merged.WorkspaceDiff = caseLevel.WorkspaceDiff
+	}
+	if caseLevel.GeneratedFiles != "" {
+		merged.GeneratedFiles = caseLevel.GeneratedFiles
+	}
+	merged.Limits = mergeJudgeContextLimits(global.Limits, caseLevel.Limits)
+	if caseLevel.Attachments != nil {
+		merged.Attachments = append([]config.JudgeContextAttachment(nil), caseLevel.Attachments...)
+	}
+	return merged
+}
+
+func mergeJudgeContextLimits(global, caseLevel *config.JudgeContextLimits) *config.JudgeContextLimits {
+	if global == nil && caseLevel == nil {
+		return nil
+	}
+	var limits config.JudgeContextLimits
+	if global != nil {
+		limits = *global
+	}
+	if caseLevel != nil {
+		if caseLevel.MaxBytes > 0 {
+			limits.MaxBytes = caseLevel.MaxBytes
+		}
+		if caseLevel.TranscriptMaxTurns > 0 {
+			limits.TranscriptMaxTurns = caseLevel.TranscriptMaxTurns
+		}
+		if caseLevel.WorkspaceDiffMaxLines > 0 {
+			limits.WorkspaceDiffMaxLines = caseLevel.WorkspaceDiffMaxLines
+		}
+	}
+	return &limits
+}
+
+func cloneJudgeContextConfig(in *config.JudgeContextConfig) *config.JudgeContextConfig {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	if in.Limits != nil {
+		limits := *in.Limits
+		out.Limits = &limits
+	}
+	out.Attachments = append([]config.JudgeContextAttachment(nil), in.Attachments...)
+	return &out
 }

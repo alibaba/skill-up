@@ -5,7 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] - 2026-07-14
+
+### Added
+- Judge-specific Skills for `agent_judge` via `judge.skills`. These Skills are
+  installed only into the judge agent and can provide reusable grading rubrics,
+  evidence rules, and domain-specific constraints without leaking into the run
+  agent or benchmark baseline.
+- Judge Skill metadata in JSON, JUnit, and HTML reports, including the source,
+  path, target, and callable Skill name used for the evaluation.
+
+### Fixed
+- Judge prompts now identify installed Skills by their callable names and
+  explicitly require invoking each Skill tool and reading its body before
+  grading. Source paths remain only as an internal fallback when no name is
+  available.
+
+## [0.5.0] - 2026-07-09
+
+### Added
+- Configurable prompt delivery for `agent_judge` through `judge.context`.
+  Supports `minimal` and `standard` context profiles, per-field delivery
+  modes, inline-size limits, generated-file indexing, and attachment file
+  references. Reports include `judge_context` metadata describing how review
+  materials and prompts were delivered.
+- Built-in CLI agents now route large prompts through runtime-readable files
+  and stdin when they exceed `SKILL_UP_PROMPT_INLINE_MAX_BYTES` (default
+  `32768` bytes), while shorter prompts remain inline.
+
+### Changed
+- `agent_judge` now defaults to materialized review context (`profile:
+  standard`) instead of inlining the full transcript and workspace diff into
+  the judge prompt. Large artifacts are delivered through runtime-readable
+  files, while short final messages remain inline. Evals that require legacy
+  inline transcript delivery can set `judge.context.transcript: include`.
+
+The `v0.5.0` release tag is available at
+[GitHub](https://github.com/alibaba/skill-up/releases/tag/v0.5.0).
+
+## [0.4.0] - 2026-07-07
+
+### Added
+- **Multi-turn conversation evaluation** (`input.turns`): define sequential
+  user turns with per-turn `post_condition` gates (`must_contain_all`,
+  `must_contain_any`, `must_not_contain`, `on_fail: fail|skip_remaining`) and
+  `capture` for regex-based variable extraction between turns.
+- Per-turn judge assertions: `turn_response_contains`,
+  `turn_response_not_contains`, `tool_called_in_turn`,
+  `tool_not_called_in_turn` — all scoped by turn number.
+- Session resumption support for `claude_code` (`--resume`), `qodercli`
+  (`-r <session-id>`), and `codex` (`codex resume <thread-id>`) engines;
+  unsupported engines fall back to batch mode.
+- `TurnResults` field in JSON, HTML, and JUnit reports (`turn_results` in
+  `result.json`; turn-scoped failure details in JUnit XML).
 
 ### Changed
 - `skill-up run` now validates only the cases left after
@@ -357,6 +409,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project and delivers the end-to-end capability to declare eval environments,
   run cases and emit structured reports as described in [README.md](README.md).
 
+[0.6.0]: https://github.com/alibaba/skill-up/releases/tag/v0.6.0
+[0.5.0]: https://github.com/alibaba/skill-up/releases/tag/v0.5.0
+[0.4.0]: https://github.com/alibaba/skill-up/releases/tag/v0.4.0
 [0.3.0]: https://github.com/alibaba/skill-up/releases/tag/v0.3.0
 [0.2.4]: https://github.com/alibaba/skill-up/releases/tag/v0.2.4
 [0.2.3]: https://github.com/alibaba/skill-up/releases/tag/v0.2.3

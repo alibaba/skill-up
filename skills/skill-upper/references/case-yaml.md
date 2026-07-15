@@ -47,11 +47,42 @@ input:
       post_condition:
         must_contain_any: ["Research", "分析"]
         on_fail: skip_remaining      # 或 fail
+      capture:
+        - variable: phase
+          pattern: "(?P<value>Research|Implementation)"
     - role: user
       content: "跳过 Research，直接帮我写代码"
 ```
 
 `post_condition`：每轮结束后检查输出。`on_fail: skip_remaining` 标为 SKIP，`fail` 直接 FAIL 整个用例。
+
+`capture`：从响应中捕获值，用于后续轮次的 `{{variable}}` 模板替换。
+  • 提取器：`pattern`（正则）或 `jsonpath`，必须且仅指定一个
+  • 优先使用 `(?P<value>...)` 命名组
+  • 未匹配/空值 → 用例进入 ERROR 状态
+  • 作用域仅限当前用例执行
+
+### 按轮次 Judge 断言
+
+```yaml
+judge:
+  type: rule_based
+  success:
+    - turn_response_contains:
+        turn: 2
+        contains_any: ["必须完成", "不能跳过", "Research"]
+    - turn_response_not_contains:
+        turn: 2
+        not_contains: ["LGTM"]
+    - tool_called_in_turn:
+        turn: 1
+        name: write_file
+    - tool_not_called_in_turn:
+        turn: 2
+        name: delete_file
+```
+
+仅 `status=completed` 的轮次可被断言；引用不存在或未完成的轮次会导致断言失败。
 
 ## context — 初始化工作区
 

@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	goruntime "runtime"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -382,8 +381,5 @@ func (r *NoneRuntime) RequiresProcessSandbox() bool {
 	return true
 }
 
-// TargetGOOS reports the host OS, since NoneRuntime executes commands directly
-// on the host.
-func (r *NoneRuntime) TargetGOOS() string {
-	return goruntime.GOOS
-}
+// Shell reports the host shell selected by NoneRuntime.Exec.
+func (r *NoneRuntime) Shell() platform.Shell { return platform.Host().Target }

@@ -119,6 +119,147 @@ func TestBuildClaudeRunCmd_WithModel(t *testing.T) {
 	}
 }
 
+func TestBuildClaudeResumeCmd(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		sessionID   string
+		model       string
+		instruction string
+		wantParts   []string
+		wantAbsent  []string
+	}{
+		{
+			name:        "with model",
+			sessionID:   "abc-123",
+			model:       "claude-sonnet-4-6",
+			instruction: "continue",
+			wantParts:   []string{"--resume abc-123", "-p", "--model 'claude-sonnet-4-6'", "'continue'"},
+			wantAbsent:  []string{"--session-id"},
+		},
+		{
+			name:        "without model",
+			sessionID:   "def-456",
+			model:       "",
+			instruction: "next step",
+			wantParts:   []string{"--resume def-456", "-p", "'next step'"},
+			wantAbsent:  []string{"--model", "--session-id"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cmd := buildClaudeResumeCmd(tt.sessionID, tt.model, tt.instruction)
+			for _, part := range tt.wantParts {
+				if !strings.Contains(cmd, part) {
+					t.Fatalf("expected command to contain %q, got %q", part, cmd)
+				}
+			}
+			for _, absent := range tt.wantAbsent {
+				if strings.Contains(cmd, absent) {
+					t.Fatalf("expected command to NOT contain %q, got %q", absent, cmd)
+				}
+			}
+		})
+	}
+}
+
+func TestClaudeCodeRun_PopulatesSessionID(t *testing.T) {
+	t.Parallel()
+
+	rt := &claudeCodeTestRuntime{
+		workspace: t.TempDir(),
+		execResult: runtime.ExecResult{
+			Stdout:   "OK\n",
+			ExitCode: 0,
+		},
+	}
+	ag := NewClaudeCodeAgent(Config{})
+
+	result, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{
+		Role:    transcript.RoleUser,
+		Content: "Reply OK.",
+		Turn:    1,
+	}})
+	if err != nil {
+		t.Fatalf("run claude-code: %v", err)
+	}
+	if result.SessionID == "" {
+		t.Fatal("expected SessionID to be populated after Run")
+	}
+	// Verify the session ID is a valid UUID-like format (contains hyphens)
+	if !strings.Contains(result.SessionID, "-") {
+		t.Fatalf("expected SessionID to look like a UUID, got %q", result.SessionID)
+	}
+}
+
+func TestClaudeCodeRunTurn_FirstTurnDelegatesToRun(t *testing.T) {
+	t.Parallel()
+
+	rt := &claudeCodeTestRuntime{
+		workspace: t.TempDir(),
+		execResult: runtime.ExecResult{
+			Stdout:   "OK\n",
+			ExitCode: 0,
+		},
+	}
+	ag := NewClaudeCodeAgent(Config{})
+
+	result, err := ag.RunTurn(context.Background(), rt, ExecOptions{}, transcript.Message{
+		Role:    transcript.RoleUser,
+		Content: "start conversation",
+		Turn:    1,
+	}, "")
+	if err != nil {
+		t.Fatalf("RunTurn (first turn): %v", err)
+	}
+	if result.SessionID == "" {
+		t.Fatal("expected SessionID after first turn")
+	}
+	// First turn uses --session-id (not --resume)
+	if strings.Contains(rt.agentCommand, "--resume") {
+		t.Fatalf("first turn should use --session-id, not --resume: %q", rt.agentCommand)
+	}
+}
+
+func TestClaudeCodeRunTurn_ResumeUsesCorrectFlag(t *testing.T) {
+	t.Parallel()
+
+	rt := &claudeCodeTestRuntime{
+		workspace: t.TempDir(),
+		execResult: runtime.ExecResult{
+			Stdout:   "Resumed answer\n",
+			ExitCode: 0,
+		},
+	}
+	ag := NewClaudeCodeAgent(Config{ModelName: "claude-sonnet-4-6"})
+
+	result, err := ag.RunTurn(context.Background(), rt, ExecOptions{}, transcript.Message{
+		Role:    transcript.RoleUser,
+		Content: "follow up",
+		Turn:    2,
+	}, "existing-session-id")
+	if err != nil {
+		t.Fatalf("RunTurn (resume): %v", err)
+	}
+	if result.SessionID != "existing-session-id" {
+		t.Fatalf("expected SessionID = %q, got %q", "existing-session-id", result.SessionID)
+	}
+	if !strings.Contains(rt.agentCommand, "--resume existing-session-id") {
+		t.Fatalf("expected --resume flag, got %q", rt.agentCommand)
+	}
+	if strings.Contains(rt.agentCommand, "--session-id") {
+		t.Fatalf("resume should not use --session-id: %q", rt.agentCommand)
+	}
+	if !strings.Contains(rt.agentCommand, "--model 'claude-sonnet-4-6'") {
+		t.Fatalf("expected model flag in resume command: %q", rt.agentCommand)
+	}
+	if !strings.Contains(rt.agentCommand, "'follow up'") {
+		t.Fatalf("expected instruction in resume command: %q", rt.agentCommand)
+	}
+}
+
 func TestBuildStreamJSON_EncodesStringAsTextBlocks(t *testing.T) {
 	t.Parallel()
 
@@ -708,6 +849,7 @@ type claudeCodeTestRuntime struct {
 	workspace           string
 	execResult          runtime.ExecResult
 	lastCommand         string
+	agentCommand        string // first non-probe, non-intercepted command
 	lastExecEnv         map[string]string
 	execCount           int
 	probeResponseStdout string            // canned stdout for PATH probe; defaults to a fake bin
@@ -753,9 +895,15 @@ func (r *claudeCodeTestRuntime) Exec(_ context.Context, command string, opts run
 	if strings.Contains(command, "if command -v 'claude' >/dev/null 2>&1; then exit 0; fi") {
 		return runtime.ExecResult{ExitCode: 0}, nil
 	}
+	// Session file lookup scripts start with printenv HOME; treat them as
+	// background operations that do not overwrite the agent command.
+	if strings.HasPrefix(command, "home=$(printenv HOME)") {
+		return runtime.ExecResult{}, errors.New("no session file")
+	}
 	r.lastCommand = command
 	r.execCount++
 	if r.execCount == 1 {
+		r.agentCommand = command
 		r.lastExecEnv = mapsClone(opts.Env)
 		return r.execResult, nil
 	}
@@ -774,4 +922,6 @@ func (r *claudeCodeTestRuntime) MergeEnv(env map[string]string) {
 	maps.Copy(r.mergedEnv, env)
 }
 
-func (r *claudeCodeTestRuntime) TargetGOOS() string { return platform.GOOSLinux }
+func (r *claudeCodeTestRuntime) Shell() platform.Shell {
+	return platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
+}

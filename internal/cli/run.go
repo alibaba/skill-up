@@ -186,10 +186,11 @@ func loadAndPrepareConfig(ctx context.Context, cmd *cobra.Command, args []string
 		return nil, nil, nil, errors.New("no cases matched the filter")
 	}
 
-	// Validate only the selected cases (after filters). Full-suite per-case
-	// validation is the job of `skill-up validate`; here an invalid case that
-	// was filtered out must not block the run.
-	if err := config.NewValidator().ValidateCases(cases); err != nil {
+	// Validate only the selected cases (after filters), while still applying
+	// eval-level judge defaults to case-level overrides. Full-suite per-case
+	// validation is the job of `skill-up validate`; here an invalid case that was
+	// filtered out must not block the run.
+	if err := config.NewValidator().ValidateCasesWithEvalDefaults(evalCfg, cases); err != nil {
 		return nil, nil, nil, fmt.Errorf("validation failed: %w", err)
 	}
 

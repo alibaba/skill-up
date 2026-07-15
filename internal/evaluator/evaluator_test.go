@@ -37,18 +37,25 @@ type mockAgent struct {
 	output       string
 	err          error
 	credErr      error
+	skillErr     error
 	runFunc      func(ctx context.Context, rt runtime.Runtime, opts agent.ExecOptions, messages []transcript.Message) (*agent.SessionResult, error)
 	runCall      atomic.Int32
 	credCall     atomic.Int32
 	installCall  atomic.Int32
 	mcpCall      atomic.Int32
 	skillCall    atomic.Int32
+	skillPath    string
 	mu           sync.Mutex
 	lastMessages []transcript.Message
 	lastSkill    runtime.SkillConfig
+	skills       []runtime.SkillConfig
 }
 
 func (m *mockAgent) Name() string { return m.name }
+func (m *mockAgent) SkillPath() string {
+	return m.skillPath
+}
+
 func (m *mockAgent) Install(_ context.Context, _ runtime.Runtime) error {
 	m.installCall.Add(1)
 	return nil
@@ -63,8 +70,9 @@ func (m *mockAgent) InstallSkill(_ context.Context, _ runtime.Runtime, cfg runti
 	m.skillCall.Add(1)
 	m.mu.Lock()
 	m.lastSkill = cfg
+	m.skills = append(m.skills, cfg)
 	m.mu.Unlock()
-	return nil
+	return m.skillErr
 }
 func (m *mockAgent) Check(_ context.Context, _ runtime.Runtime) error { return nil }
 func (m *mockAgent) CheckCredentials(_ context.Context) error {
@@ -100,7 +108,9 @@ func (m *mockRuntime) Workspace() string              { return m.workspace }
 func (m *mockRuntime) RequiresProcessSandbox() bool   { return true }
 func (m *mockRuntime) MergeEnv(_ map[string]string)   {}
 
-func (m *mockRuntime) TargetGOOS() string                              { return platform.GOOSLinux }
+func (m *mockRuntime) Shell() platform.Shell {
+	return platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
+}
 func (m *mockRuntime) Start(_ context.Context) error                   { return nil }
 func (m *mockRuntime) Stop(_ context.Context) error                    { return nil }
 func (m *mockRuntime) UploadFile(_ context.Context, _, _ string) error { return nil }
@@ -360,6 +370,34 @@ func TestEvaluatorInputHelpers(t *testing.T) {
 	messages := buildCaseMessages(turnCfg)
 	if len(messages) != 3 || messages[1].Role != transcript.RoleAssistant || messages[2].Role != transcript.RoleUser || messages[2].Turn != 3 {
 		t.Fatalf("turn messages = %#v, want preserved roles and turn numbers", messages)
+	}
+}
+
+func TestExecuteCaseWarnsWhenTurnsFallbackToSingleBatch(t *testing.T) {
+	ag := &mockAgent{name: "batch-only", output: "batched response"}
+	rt := &mockRuntime{workspace: t.TempDir()}
+	e := newTestEvaluator(EvalOptions{
+		Agent:   ag,
+		EvalCfg: &config.EvalConfig{},
+	})
+	caseCfg := &config.CaseConfig{
+		ID: "turns-fallback",
+		Input: config.Input{
+			Turns: []config.Turn{
+				{Role: "user", Content: "first"},
+				{Role: "user", Content: "second"},
+			},
+		},
+	}
+
+	output := captureStdout(t, func() {
+		_ = e.executeCase(context.Background(), caseCfg, "with_skill", rt, nil)
+	})
+	if !strings.Contains(output, "does not support session resumption") {
+		t.Fatalf("expected fallback warning, got %q", output)
+	}
+	if ag.runCall.Load() != 1 {
+		t.Fatalf("fallback should run the agent once, got %d calls", ag.runCall.Load())
 	}
 }
 
@@ -1090,6 +1128,170 @@ func TestExecuteCase_AgentTimeoutDoesNotInvokeAgentJudge(t *testing.T) {
 	}
 }
 
+func TestExecuteCase_InstallsJudgeSkillsOnJudgeAgentOnly(t *testing.T) {
+	skillDir := t.TempDir()
+	judgeAgent := &mockAgent{
+		name:   "judge",
+		output: `{"results":[{"criterion":"uses rubric","passed":true,"evidence":"rubric applied"}]}`,
+	}
+	runAgent := &mockAgent{name: "run", output: "main response"}
+
+	origDetect := agentDetectWithInitParams
+	agentDetectWithInitParams = func(_ string, _ credential.AgentInitParams, _ map[string]string) (agent.Agent, error) {
+		return judgeAgent, nil
+	}
+	defer func() { agentDetectWithInitParams = origDetect }()
+
+	e := newTestEvaluator(EvalOptions{
+		SkillDir: skillDir,
+		Agent:    runAgent,
+		EvalCfg: &config.EvalConfig{
+			Engine: config.EngineConfig{Name: "mock"},
+			Judge: config.JudgeConfig{
+				Type:     "agent_judge",
+				Model:    "judge-model",
+				Criteria: []string{"uses rubric"},
+				Skills: []config.SkillRef{
+					{Source: "local_path", Path: "evals/fixtures/judge-skill", Target: "~/.claude/skills/judge-skill"},
+					{Source: "local_path", Path: "evals/fixtures/security-judge"},
+				},
+			},
+		},
+	})
+
+	result := e.executeCase(
+		context.Background(),
+		&config.CaseConfig{ID: "case-judge-skills", Input: config.Input{Prompt: "hello"}},
+		"without_skill",
+		&mockRuntime{workspace: t.TempDir()},
+		runAgent,
+	)
+
+	if result.Status != judge.StatusPass {
+		t.Fatalf("status = %s, err=%v", result.Status, result.Error)
+	}
+	if got := runAgent.skillCall.Load(); got != 0 {
+		t.Fatalf("run agent InstallSkill calls = %d, want 0", got)
+	}
+	if got := judgeAgent.skillCall.Load(); got != 2 {
+		t.Fatalf("judge agent InstallSkill calls = %d, want 2", got)
+	}
+	if len(judgeAgent.skills) != 2 {
+		t.Fatalf("judge installed skills = %#v", judgeAgent.skills)
+	}
+	wantFirst := filepath.Join(skillDir, "evals/fixtures/judge-skill")
+	if judgeAgent.skills[0].Source != wantFirst {
+		t.Fatalf("first judge skill source = %q, want %q", judgeAgent.skills[0].Source, wantFirst)
+	}
+	if judgeAgent.skills[0].Target != "~/.claude/skills/judge-skill" {
+		t.Fatalf("first judge skill target = %q", judgeAgent.skills[0].Target)
+	}
+	if len(result.JudgeSkills) != 2 || result.JudgeSkills[0].Path != "evals/fixtures/judge-skill" {
+		t.Fatalf("result JudgeSkills = %#v", result.JudgeSkills)
+	}
+	if len(judgeAgent.lastMessages) != 1 || !strings.Contains(judgeAgent.lastMessages[0].Content, "Mandatory Judge Skill Use") {
+		t.Fatalf("judge prompt missing mandatory skill use: %#v", judgeAgent.lastMessages)
+	}
+}
+
+func TestExecuteCase_JudgeSkillInstallFailureReturnsError(t *testing.T) {
+	judgeAgent := &mockAgent{
+		name:     "judge",
+		skillErr: errors.New("install unsupported"),
+		output:   `{"results":[{"criterion":"uses rubric","passed":true,"evidence":"rubric applied"}]}`,
+	}
+	runAgent := &mockAgent{name: "run", output: "main response"}
+
+	origDetect := agentDetectWithInitParams
+	agentDetectWithInitParams = func(_ string, _ credential.AgentInitParams, _ map[string]string) (agent.Agent, error) {
+		return judgeAgent, nil
+	}
+	defer func() { agentDetectWithInitParams = origDetect }()
+
+	e := newTestEvaluator(EvalOptions{
+		SkillDir: t.TempDir(),
+		Agent:    runAgent,
+		EvalCfg: &config.EvalConfig{
+			Engine: config.EngineConfig{Name: "mock"},
+			Judge: config.JudgeConfig{
+				Type:     "agent_judge",
+				Model:    "judge-model",
+				Criteria: []string{"uses rubric"},
+				Skills:   []config.SkillRef{{Source: "local_path", Path: "evals/fixtures/judge-skill"}},
+			},
+		},
+	})
+
+	result := e.executeCase(
+		context.Background(),
+		&config.CaseConfig{ID: "case-judge-skill-error", Input: config.Input{Prompt: "hello"}},
+		"with_skill",
+		&mockRuntime{workspace: t.TempDir()},
+		runAgent,
+	)
+
+	if result.Status != judge.StatusError {
+		t.Fatalf("status = %s, want ERROR", result.Status)
+	}
+	if result.Error == nil || !strings.Contains(result.Error.Error(), `judge.skills[0].path="evals/fixtures/judge-skill"`) {
+		t.Fatalf("error = %v, want judge skill path context", result.Error)
+	}
+	if got := judgeAgent.runCall.Load(); got != 0 {
+		t.Fatalf("judge Run calls = %d, want 0 after install failure", got)
+	}
+}
+
+func TestInstallJudgeSkills_AllowsAbsolutePathWithoutSkillDir(t *testing.T) {
+	absSkill := filepath.Join(t.TempDir(), "judge-skill")
+	judgeAgent := &mockAgent{name: "judge"}
+	e := newTestEvaluator(EvalOptions{EvalCfg: &config.EvalConfig{}})
+
+	err := e.installJudgeSkills(context.Background(), &mockRuntime{workspace: t.TempDir()}, config.JudgeConfig{
+		Type:     "agent_judge",
+		Model:    "judge-model",
+		Criteria: []string{"uses rubric"},
+		Skills:   []config.SkillRef{{Source: "local_path", Path: absSkill}},
+	}, judgeAgent)
+	if err != nil {
+		t.Fatalf("installJudgeSkills() error = %v, want nil", err)
+	}
+	if len(judgeAgent.skills) != 1 || judgeAgent.skills[0].Source != absSkill {
+		t.Fatalf("judge installed skills = %#v", judgeAgent.skills)
+	}
+}
+
+func TestRemoveDefaultRunSkillsBeforeJudge_RemovesOnlyDefaultTargets(t *testing.T) {
+	var commands []string
+	rt := &mockRuntime{
+		workspace: t.TempDir(),
+		execFunc: func(_ context.Context, command string, _ runtime.ExecOptions) (runtime.ExecResult, error) {
+			commands = append(commands, command)
+			return runtime.ExecResult{ExitCode: 0}, nil
+		},
+	}
+	runAgent := &mockAgent{name: "run", skillPath: ".codex/skills"}
+	e := newTestEvaluator(EvalOptions{
+		SkillDir: t.TempDir(),
+		EvalCfg: &config.EvalConfig{
+			Skills: []config.SkillRef{
+				{Source: "local_path", Path: "skill-under-test"},
+				{Source: "local_path", Path: "custom-target-skill", Target: ".codex/skills/custom"},
+			},
+		},
+	})
+
+	err := e.removeDefaultRunSkillsBeforeJudge(context.Background(), rt, "with_skill", config.JudgeConfig{Type: "agent_judge"}, runAgent)
+	if err != nil {
+		t.Fatalf("removeDefaultRunSkillsBeforeJudge() error = %v", err)
+	}
+	if len(commands) != 1 {
+		t.Fatalf("cleanup commands = %#v, want one default-target cleanup", commands)
+	}
+	if !strings.Contains(commands[0], "rm -rf -- '.codex/skills/skill-under-test'") {
+		t.Fatalf("cleanup command = %q", commands[0])
+	}
+}
+
 func TestExecuteCase_NoJudge_DefaultPass(t *testing.T) {
 	e := newTestEvaluator(EvalOptions{
 		Agent: &mockAgent{name: "test", output: "hello world"},
@@ -1686,14 +1888,10 @@ func TestExecuteCase_AgentJudgeReceivesTranscriptAndWorkspaceDiff(t *testing.T) 
 		t.Fatalf("expected PASS status, got %s", result.Status)
 	}
 	if !strings.Contains(judgePrompt, "updated notes.txt") {
-		t.Fatalf("judge prompt missing transcript content: %s", judgePrompt)
+		t.Fatalf("judge prompt missing final message inline material: %s", judgePrompt)
 	}
-	if !strings.Contains(judgePrompt, "diff --git a/notes.txt b/notes.txt") {
-		t.Fatalf("judge prompt missing workspace diff header: %s", judgePrompt)
-	}
-	if !strings.Contains(judgePrompt, "-before") || !strings.Contains(judgePrompt, "+after") {
-		t.Fatalf("judge prompt missing workspace diff body: %s", judgePrompt)
-	}
+	assertJudgePromptReferencesMaterial(t, judgePrompt, "workspace_diff", "workspace.diff")
+	assertJudgePromptReferencesMaterial(t, judgePrompt, "transcript", "transcript.json")
 	if strings.Contains(judgePrompt, "stdout.json") || strings.Contains(judgePrompt, `"artifact":true`) {
 		t.Fatalf("judge prompt should filter generated artifact diff: %s", judgePrompt)
 	}
@@ -1748,6 +1946,13 @@ func captureStdout(t *testing.T, fn func()) string {
 
 	restoreOutput()
 	return buf.String()
+}
+
+func assertJudgePromptReferencesMaterial(t *testing.T, prompt, key, pathSuffix string) {
+	t.Helper()
+	if !strings.Contains(prompt, key) || !strings.Contains(prompt, pathSuffix) {
+		t.Fatalf("judge prompt missing material reference %s/%s: %s", key, pathSuffix, prompt)
+	}
 }
 
 func TestExecuteCase_AgentJudgeWithoutGitContextSkipsWorkspaceDiff(t *testing.T) {
@@ -1832,9 +2037,7 @@ func TestExecuteCase_AgentJudgeWithExistingGitRepoReceivesWorkspaceDiff(t *testi
 	if result.Status != judge.StatusPass {
 		t.Fatalf("expected PASS status, got %s", result.Status)
 	}
-	if !strings.Contains(*judgePrompt, "diff --git a/notes.txt b/notes.txt") {
-		t.Fatalf("judge prompt missing workspace diff header: %s", *judgePrompt)
-	}
+	assertJudgePromptReferencesMaterial(t, *judgePrompt, "workspace_diff", "workspace.diff")
 }
 
 func TestExecuteCase_AgentJudgeWithClonedGitRepoReceivesWorkspaceDiff(t *testing.T) {
@@ -1865,9 +2068,7 @@ func TestExecuteCase_AgentJudgeWithClonedGitRepoReceivesWorkspaceDiff(t *testing
 	if result.Status != judge.StatusPass {
 		t.Fatalf("expected PASS status, got %s", result.Status)
 	}
-	if !strings.Contains(*judgePrompt, "diff --git a/notes.txt b/notes.txt") {
-		t.Fatalf("judge prompt missing workspace diff header: %s", *judgePrompt)
-	}
+	assertJudgePromptReferencesMaterial(t, *judgePrompt, "workspace_diff", "workspace.diff")
 }
 
 func TestExecuteCase_AgentJudgeWithClonedGitRepoWithoutGlobalConfigReceivesWorkspaceDiff(t *testing.T) {
@@ -1905,9 +2106,7 @@ func TestExecuteCase_AgentJudgeWithClonedGitRepoWithoutGlobalConfigReceivesWorks
 	if result.Status != judge.StatusPass {
 		t.Fatalf("expected PASS status, got %s", result.Status)
 	}
-	if !strings.Contains(*judgePrompt, "diff --git a/notes.txt b/notes.txt") {
-		t.Fatalf("judge prompt missing workspace diff header: %s", *judgePrompt)
-	}
+	assertJudgePromptReferencesMaterial(t, *judgePrompt, "workspace_diff", "workspace.diff")
 }
 
 func TestExecuteCase_AgentJudgeTracksWorkspaceDiffAfterAgentCommit(t *testing.T) {
@@ -1963,12 +2162,7 @@ func TestExecuteCase_AgentJudgeTracksWorkspaceDiffAfterAgentCommit(t *testing.T)
 	if result.Status != judge.StatusPass {
 		t.Fatalf("expected PASS status, got %s", result.Status)
 	}
-	if !strings.Contains(judgePrompt, "diff --git a/notes.txt b/notes.txt") {
-		t.Fatalf("judge prompt missing workspace diff header: %s", judgePrompt)
-	}
-	if !strings.Contains(judgePrompt, "-before") || !strings.Contains(judgePrompt, "+after") {
-		t.Fatalf("judge prompt missing committed workspace diff body: %s", judgePrompt)
-	}
+	assertJudgePromptReferencesMaterial(t, judgePrompt, "workspace_diff", "workspace.diff")
 }
 
 func TestExecuteCase_AgentJudgeWithGitWorktreeReceivesWorkspaceDiff(t *testing.T) {
@@ -2002,9 +2196,7 @@ func TestExecuteCase_AgentJudgeWithGitWorktreeReceivesWorkspaceDiff(t *testing.T
 	if result.Status != judge.StatusPass {
 		t.Fatalf("expected PASS status, got %s", result.Status)
 	}
-	if !strings.Contains(*judgePrompt, "diff --git a/notes.txt b/notes.txt") {
-		t.Fatalf("judge prompt missing workspace diff header: %s", *judgePrompt)
-	}
+	assertJudgePromptReferencesMaterial(t, *judgePrompt, "workspace_diff", "workspace.diff")
 }
 
 func TestExecuteCase_NonAgentJudgeSkipsWorkspaceSnapshot(t *testing.T) {
@@ -2245,6 +2437,8 @@ func TestNormalizeSessionResult_ReturnsCopy(t *testing.T) {
 
 func initGitRepo(t *testing.T, dir string) {
 	t.Helper()
+	requireGit(t)
+
 	commands := [][]string{
 		{"git", "init", "-q"},
 		{"git", "config", "user.name", "skill-up-test"},

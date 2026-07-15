@@ -26,6 +26,7 @@ import (
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/mcp"
 	"github.com/alibaba/skill-up/internal/observability"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
@@ -34,6 +35,8 @@ var (
 	sleepWithContext          = sleepContext
 	agentDetectWithInitParams = agent.DetectAgentWithInitParams
 )
+
+const judgeTypeAgentJudge = "agent_judge"
 
 // ProgressObserver receives progress notifications during evaluation.
 // Implementations must be safe for concurrent use.
@@ -82,8 +85,15 @@ type EvalResult struct {
 	// TurnsTotal is the total number of turns defined in the case.
 	TurnsTotal int
 
+	// TurnResults holds per-turn outcomes for multi-turn evaluations.
+	// Nil for single-turn cases.
+	TurnResults []TurnResult
+
 	// Grading is the judge evaluation result (nil if judge was skipped).
 	Grading *judge.Result
+
+	// JudgeSkills records judge Skills configured for agent_judge.
+	JudgeSkills []judge.SkillInfo
 
 	// ExpectResult is the expect pre-check result (nil if no expect block).
 	ExpectResult *judge.ExpectResult
@@ -381,6 +391,31 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 
 	judgeCfg := judge.MergeJudgeConfig(e.evalCfg.Judge, caseCfg.Judge)
 
+	// Multi-turn branch: delegate to dedicated engine when the case defines
+	// input.turns AND the agent supports session resumption. Agents that do
+	// not implement SessionResumer fall through to the existing single-shot
+	// path (all messages in one Run call), with an explicit warning.
+	if len(caseCfg.Input.Turns) > 0 {
+		if _, ok := runAgent.(agent.SessionResumer); ok {
+			agentExecOpts := agent.ExecOptions{
+				ArtifactDir: e.prepareOutputDir(ctx, configName, caseCfg.ID, "agent/run"),
+				TimeoutSec:  caseTimeoutSeconds(e.evalCfg, caseCfg),
+				AgentMetadata: &runtime.AgentMetadata{
+					CaseID:   caseCfg.ID,
+					Variant:  configName,
+					MaxTurns: caseMaxTurns(e.evalCfg, caseCfg),
+				},
+			}
+			return e.executeMultiTurnCase(ctx, rt, caseCfg, configName, runAgent, agentExecOpts, startTime, judgeCfg, &result)
+		}
+		logging.WarnContextf(
+			ctx,
+			"Evaluator: case %s defines input.turns but agent %s does not support session resumption; falling back to a single batch prompt",
+			caseCfg.ID,
+			runAgent.Name(),
+		)
+	}
+
 	var cleanupArtifacts func()
 	finalizeArtifacts := func(*agent.SessionResult) {}
 	if judgeNeedsWorkspaceDiff(judgeCfg) {
@@ -477,6 +512,7 @@ func (e *defaultEvaluator) evaluateCaseSession(
 		WorkspaceDiff:  sessionWorkspaceDiff(sessionResult),
 		GeneratedFiles: sessionGeneratedFiles(sessionResult),
 		SessionResult:  sessionResult,
+		TurnResults:    toJudgeTurnResults(result.TurnResults),
 	}
 
 	if failed := e.runExpectPreCheck(ctx, caseCfg, configName, judgeInput, turnsTotal, result); failed {
@@ -570,8 +606,11 @@ func (e *defaultEvaluator) runJudgePhaseWithSpan(
 
 	logging.DebugContextf(ctx, "Judge: case %s using %s", caseCfg.ID, judgeLabel(judgeCfg))
 	logging.DebugContextf(ctx, "Judge: case %s generated_files=%d workspace_diff=%t", caseCfg.ID, len(judgeInput.GeneratedFiles), judgeInput.WorkspaceDiff != "")
+	if judgeCfg.Type == judgeTypeAgentJudge {
+		result.JudgeSkills = judge.SkillInfosFromRefs(judgeCfg.Skills)
+	}
 
-	j, err := e.newJudgeForCase(ctx, rt, judgeCfg, runAgent)
+	j, err := e.newJudgeForCase(ctx, rt, configName, judgeCfg, runAgent)
 	if err != nil {
 		result.Status = judge.StatusError
 		result.Error = err
@@ -585,7 +624,7 @@ func (e *defaultEvaluator) runJudgePhaseWithSpan(
 		logging.DebugContextf(ctx, "Judge: case %s has no judge configured, default PASS", caseCfg.ID)
 		return *result
 	}
-	if judgeCfg.Type == "agent_judge" {
+	if judgeCfg.Type == judgeTypeAgentJudge {
 		judgeInput.ArtifactDir = e.prepareOutputDir(ctx, configName, caseCfg.ID, "judge/run")
 	}
 
@@ -631,6 +670,7 @@ func (e *defaultEvaluator) runJudgePhaseWithSpan(
 func (e *defaultEvaluator) newJudgeForCase(
 	ctx context.Context,
 	rt runtime.Runtime,
+	configName string,
 	judgeCfg config.JudgeConfig,
 	runAgent agent.Agent,
 ) (judge.Judge, error) {
@@ -638,6 +678,12 @@ func (e *defaultEvaluator) newJudgeForCase(
 
 	judgeAgent, err := e.resolveJudgeAgent(ctx, judgeCfg, runAgent)
 	if err != nil {
+		return nil, err
+	}
+	if err := e.removeDefaultRunSkillsBeforeJudge(ctx, rt, configName, judgeCfg, runAgent); err != nil {
+		return nil, err
+	}
+	if err := e.installJudgeSkills(ctx, rt, judgeCfg, judgeAgent); err != nil {
 		return nil, err
 	}
 
@@ -649,8 +695,118 @@ func (e *defaultEvaluator) newJudgeForCase(
 	return j, nil
 }
 
+func (e *defaultEvaluator) installJudgeSkills(ctx context.Context, rt runtime.Runtime, judgeCfg config.JudgeConfig, judgeAgent agent.Agent) error {
+	if judgeCfg.Type != judgeTypeAgentJudge || len(judgeCfg.Skills) == 0 {
+		return nil
+	}
+	skillDir := e.resolvedSkillDir()
+	for i, ref := range judgeCfg.Skills {
+		if strings.TrimSpace(ref.Path) == "" {
+			return fmt.Errorf("judge.skills[%d].path is required", i)
+		}
+		if !filepath.IsAbs(ref.Path) && strings.TrimSpace(skillDir) == "" {
+			return errors.New("judge.skills requires a loader or skill directory to resolve relative local paths")
+		}
+		skillCfg := resolveSkillConfig(skillDir, ref)
+		if err := judgeAgent.InstallSkill(ctx, rt, skillCfg); err != nil {
+			return fmt.Errorf("failed to install judge skill judge.skills[%d].path=%q: %w", i, ref.Path, err)
+		}
+		logging.DebugContextf(ctx, "Evaluator: judge skill installed: %s", filepath.Base(skillCfg.Source))
+	}
+	return nil
+}
+
+func (e *defaultEvaluator) removeDefaultRunSkillsBeforeJudge(
+	ctx context.Context,
+	rt runtime.Runtime,
+	configName string,
+	judgeCfg config.JudgeConfig,
+	runAgent agent.Agent,
+) error {
+	if configName == "without_skill" || judgeCfg.Type != judgeTypeAgentJudge || len(e.evalCfg.Skills) == 0 {
+		return nil
+	}
+	skillPath := agentDefaultSkillPath(runAgent)
+	if strings.TrimSpace(skillPath) == "" {
+		return nil
+	}
+	skillDir := e.resolvedSkillDir()
+	for _, ref := range e.evalCfg.Skills {
+		// Only remove skill-up's default install target. Explicit targets are
+		// user-controlled and may intentionally be shared with other setup.
+		if strings.TrimSpace(ref.Target) != "" {
+			continue
+		}
+		skillCfg := resolveSkillConfig(skillDir, ref)
+		if strings.TrimSpace(skillCfg.Source) == "" {
+			continue
+		}
+		target := filepath.Join(skillPath, filepath.Base(skillCfg.Source))
+		if !isDefaultAgentSkillTarget(skillPath, target) {
+			continue
+		}
+		if err := removeRuntimePath(ctx, rt, target); err != nil {
+			return fmt.Errorf("failed to isolate judge from run skill %q: %w", ref.Path, err)
+		}
+		logging.DebugContextf(ctx, "Evaluator: removed run skill before judge: %s", target)
+	}
+	return nil
+}
+
+type skillPathProvider interface {
+	SkillPath() string
+}
+
+func agentDefaultSkillPath(ag agent.Agent) string {
+	provider, ok := ag.(skillPathProvider)
+	if !ok {
+		return ""
+	}
+	return provider.SkillPath()
+}
+
+func isDefaultAgentSkillTarget(skillPath, target string) bool {
+	cleanSkillPath := filepath.Clean(skillPath)
+	cleanTarget := filepath.Clean(target)
+	rel, err := filepath.Rel(cleanSkillPath, cleanTarget)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return false
+	}
+	return true
+}
+
+func removeRuntimePath(ctx context.Context, rt runtime.Runtime, target string) error {
+	if strings.TrimSpace(target) == "" {
+		return nil
+	}
+	targetShell := rt.Shell()
+	if targetShell.Family != platform.ShellPOSIX {
+		return nil
+	}
+	quote, err := targetShell.Quoter()
+	if err != nil {
+		return err
+	}
+	cmd := "rm -rf -- " + quote(target)
+	result, err := rt.Exec(ctx, cmd, runtime.ExecOptions{})
+	if err != nil {
+		return err
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("remove %s exited with code %d: %s", target, result.ExitCode, result.Stderr)
+	}
+	return nil
+}
+
+func (e *defaultEvaluator) resolvedSkillDir() string {
+	if e.loader != nil {
+		return e.loader.SkillDir()
+	}
+	return e.skillDir
+}
+
 func (e *defaultEvaluator) resolveJudgeAgent(ctx context.Context, judgeCfg config.JudgeConfig, runAgent agent.Agent) (agent.Agent, error) {
-	if judgeCfg.Type != "agent_judge" {
+	if judgeCfg.Type != judgeTypeAgentJudge {
 		return runAgent, nil
 	}
 
@@ -856,16 +1012,11 @@ func (e *defaultEvaluator) setupCaseEnvironment(ctx context.Context, rt runtime.
 
 	if configName != "without_skill" && e.loader != nil {
 		for _, skillRef := range e.evalCfg.Skills {
-			skillSourceDir := e.loader.SkillDir()
-			skillSource := filepath.Join(skillSourceDir, skillRef.Path)
-			skillCfg := runtime.SkillConfig{
-				Source: skillSource,
-				Target: skillRef.Target,
-			}
+			skillCfg := resolveSkillConfig(e.loader.SkillDir(), skillRef)
 			if err := ag.InstallSkill(ctx, rt, skillCfg); err != nil {
 				return fmt.Errorf("failed to install skill %s: %w", skillRef.Path, err)
 			}
-			logging.DebugContextf(ctx, "Evaluator: skill installed: %s", filepath.Base(skillSource))
+			logging.DebugContextf(ctx, "Evaluator: skill installed: %s", filepath.Base(skillCfg.Source))
 		}
 	}
 
@@ -877,6 +1028,17 @@ func (e *defaultEvaluator) setupCaseEnvironment(ctx context.Context, rt runtime.
 	}
 
 	return nil
+}
+
+func resolveSkillConfig(skillDir string, ref config.SkillRef) runtime.SkillConfig {
+	source := ref.Path
+	if source != "" && !filepath.IsAbs(source) {
+		source = filepath.Join(skillDir, source)
+	}
+	return runtime.SkillConfig{
+		Source: source,
+		Target: ref.Target,
+	}
 }
 
 func (e *defaultEvaluator) provisionMCPConfig() (runtime.MCPConfig, map[string]string, error) {
@@ -959,7 +1121,7 @@ func normalizeSessionResult(sessionResult *agent.SessionResult) *agent.SessionRe
 }
 
 func judgeNeedsWorkspaceDiff(cfg config.JudgeConfig) bool {
-	return cfg.Type == "agent_judge"
+	return cfg.Type == judgeTypeAgentJudge
 }
 
 func judgeLabel(cfg config.JudgeConfig) string {
@@ -1016,6 +1178,25 @@ func sessionGeneratedFiles(sessionResult *agent.SessionResult) []string {
 		return nil
 	}
 	return sessionResult.Artifacts.GeneratedFiles
+}
+
+// toJudgeTurnResults converts evaluator TurnResults to judge InputTurnResults.
+func toJudgeTurnResults(turns []TurnResult) []judge.InputTurnResult {
+	if len(turns) == 0 {
+		return nil
+	}
+	out := make([]judge.InputTurnResult, len(turns))
+	for i, tr := range turns {
+		out[i] = judge.InputTurnResult{
+			TurnNumber: tr.TurnNumber,
+			Content:    tr.Content,
+			Response:   tr.Response,
+			Transcript: tr.Transcript,
+			Status:     string(tr.Status),
+			Reason:     tr.Reason,
+		}
+	}
+	return out
 }
 
 func prepareWorkspaceDiffState(ctx context.Context, rt runtime.Runtime, gitCtx *config.GitContext) (workspaceDiffState, error) {

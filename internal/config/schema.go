@@ -186,10 +186,12 @@ type RetryPolicy struct {
 
 // JudgeConfig describes the evaluation strategy.
 type JudgeConfig struct {
-	Type       string   `json:"type"                     yaml:"type"` // rule_based, script, agent_judge
-	ScriptPath string   `json:"script_path,omitempty"    yaml:"script_path,omitempty"`
-	Model      string   `json:"model,omitempty"          yaml:"model,omitempty"`
-	Criteria   []string `json:"criteria,omitempty"       yaml:"criteria,omitempty"`
+	Type       string              `json:"type"                     yaml:"type"` // rule_based, script, agent_judge
+	ScriptPath string              `json:"script_path,omitempty"    yaml:"script_path,omitempty"`
+	Model      string              `json:"model,omitempty"          yaml:"model,omitempty"`
+	Criteria   []string            `json:"criteria,omitempty"       yaml:"criteria,omitempty"`
+	Skills     []SkillRef          `json:"skills,omitempty"         yaml:"skills,omitempty"`
+	Context    *JudgeContextConfig `json:"context,omitempty" yaml:"context,omitempty"`
 	// PassThreshold is the minimum pass rate for agent_judge.
 	// Nil means "not configured", so the judge layer applies its default of 0.7.
 	// When set explicitly, the value must be in the inclusive range [0.0, 1.0].
@@ -204,13 +206,67 @@ type JudgeConfig struct {
 	Failure        []Rule `json:"failure,omitempty"        yaml:"failure,omitempty"`
 }
 
+// JudgeContextConfig controls how agent_judge receives evaluation materials.
+type JudgeContextConfig struct {
+	Profile        string                   `json:"profile,omitempty"         yaml:"profile,omitempty"`
+	FinalMessage   string                   `json:"final_message,omitempty"   yaml:"final_message,omitempty"`
+	Transcript     string                   `json:"transcript,omitempty"      yaml:"transcript,omitempty"`
+	WorkspaceDiff  string                   `json:"workspace_diff,omitempty"  yaml:"workspace_diff,omitempty"`
+	GeneratedFiles string                   `json:"generated_files,omitempty" yaml:"generated_files,omitempty"`
+	Limits         *JudgeContextLimits      `json:"limits,omitempty"          yaml:"limits,omitempty"`
+	Attachments    []JudgeContextAttachment `json:"attachments,omitempty"     yaml:"attachments,omitempty"`
+}
+
+// JudgeContextLimits bounds inline material size for agent_judge prompts.
+type JudgeContextLimits struct {
+	MaxBytes              int `json:"max_bytes,omitempty"                yaml:"max_bytes,omitempty"`
+	TranscriptMaxTurns    int `json:"transcript_max_turns,omitempty"     yaml:"transcript_max_turns,omitempty"`
+	WorkspaceDiffMaxLines int `json:"workspace_diff_max_lines,omitempty" yaml:"workspace_diff_max_lines,omitempty"`
+}
+
+// JudgeContextAttachment declares an additional file for agent_judge review.
+type JudgeContextAttachment struct {
+	Path  string `json:"path"            yaml:"path"`
+	Label string `json:"label,omitempty" yaml:"label,omitempty"`
+}
+
 // Rule is a single assertion rule for rule_based evaluation.
 type Rule struct {
-	OutputContains *OutputContainsRule `json:"output_contains,omitempty" yaml:"output_contains,omitempty"`
-	ExitCode       *int                `json:"exit_code,omitempty"       yaml:"exit_code,omitempty"`
-	ToolCalled     *ToolCalledRule     `json:"tool_called,omitempty"     yaml:"tool_called,omitempty"`
-	FilesExist     []string            `json:"files_exist,omitempty"     yaml:"files_exist,omitempty"`
-	FilesNotExist  []string            `json:"files_not_exist,omitempty" yaml:"files_not_exist,omitempty"`
+	OutputContains          *OutputContainsRule          `json:"output_contains,omitempty"            yaml:"output_contains,omitempty"`
+	ExitCode                *int                         `json:"exit_code,omitempty"                  yaml:"exit_code,omitempty"`
+	ToolCalled              *ToolCalledRule              `json:"tool_called,omitempty"                yaml:"tool_called,omitempty"`
+	FilesExist              []string                     `json:"files_exist,omitempty"                yaml:"files_exist,omitempty"`
+	FilesNotExist           []string                     `json:"files_not_exist,omitempty"            yaml:"files_not_exist,omitempty"`
+	TurnResponseContains    *TurnResponseContainsRule    `json:"turn_response_contains,omitempty"     yaml:"turn_response_contains,omitempty"`
+	TurnResponseNotContains *TurnResponseNotContainsRule `json:"turn_response_not_contains,omitempty" yaml:"turn_response_not_contains,omitempty"`
+	ToolCalledInTurn        *ToolCalledInTurnRule        `json:"tool_called_in_turn,omitempty"        yaml:"tool_called_in_turn,omitempty"`
+	ToolNotCalledInTurn     *ToolNotCalledInTurnRule     `json:"tool_not_called_in_turn,omitempty"    yaml:"tool_not_called_in_turn,omitempty"`
+}
+
+// TurnResponseContainsRule checks that a specific turn response contains required text.
+type TurnResponseContainsRule struct {
+	Turn        int      `json:"turn"                   yaml:"turn"`
+	ContainsAll []string `json:"contains_all,omitempty" yaml:"contains_all,omitempty"`
+	ContainsAny []string `json:"contains_any,omitempty" yaml:"contains_any,omitempty"`
+}
+
+// TurnResponseNotContainsRule checks that a specific turn response does not contain forbidden text.
+type TurnResponseNotContainsRule struct {
+	Turn        int      `json:"turn"          yaml:"turn"`
+	NotContains []string `json:"not_contains"  yaml:"not_contains"`
+}
+
+// ToolCalledInTurnRule checks that a tool was called during a specific turn.
+type ToolCalledInTurnRule struct {
+	Turn int            `json:"turn"           yaml:"turn"`
+	Name string         `json:"name"           yaml:"name"`
+	Args map[string]any `json:"args,omitempty" yaml:"args,omitempty"`
+}
+
+// ToolNotCalledInTurnRule checks that a tool was NOT called during a specific turn.
+type ToolNotCalledInTurnRule struct {
+	Turn int    `json:"turn" yaml:"turn"`
+	Name string `json:"name" yaml:"name"`
 }
 
 // OutputContainsRule checks if output contains specific text.
@@ -276,15 +332,26 @@ type Input struct {
 
 // Turn is a single conversation turn.
 type Turn struct {
-	Role          string         `yaml:"role"` // user
-	Content       string         `yaml:"content"`
-	PostCondition *PostCondition `yaml:"post_condition,omitempty"`
+	Role           string         `yaml:"role"` // user
+	Content        string         `yaml:"content"`
+	PostCondition  *PostCondition `yaml:"post_condition,omitempty"`
+	Capture        []CaptureRule  `yaml:"capture,omitempty"`
+	TimeoutSeconds int            `yaml:"timeout_seconds,omitempty"`
 }
 
 // PostCondition checks output after a turn.
 type PostCondition struct {
 	MustContainAny []string `yaml:"must_contain_any,omitempty"`
+	MustContainAll []string `yaml:"must_contain_all,omitempty"`
+	MustNotContain []string `yaml:"must_not_contain,omitempty"`
 	OnFail         string   `yaml:"on_fail,omitempty"` // skip_remaining, fail
+}
+
+// CaptureRule defines how to extract a value from a turn response.
+type CaptureRule struct {
+	Variable string `yaml:"variable"`
+	Pattern  string `yaml:"pattern,omitempty"`
+	JSONPath string `yaml:"jsonpath,omitempty"`
 }
 
 // Context describes test case setup.

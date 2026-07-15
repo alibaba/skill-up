@@ -32,6 +32,22 @@ type Judge interface {
 	Evaluate(ctx context.Context, in Input) (*Result, error)
 }
 
+// InputTurnResult holds the outcome of a single conversation turn, visible to judges.
+type InputTurnResult struct {
+	// TurnNumber is the 1-based index of this turn.
+	TurnNumber int
+	// Content is the user message sent to the agent.
+	Content string
+	// Response is the assistant response text for this turn.
+	Response string
+	// Transcript is the per-turn interaction record.
+	Transcript transcript.Transcript
+	// Status is the turn outcome: "completed", "skipped", "failed", "error".
+	Status string
+	// Reason describes why the turn was skipped/failed/errored.
+	Reason string
+}
+
 // Input carries artifacts needed for grading.
 //
 // It is the unified data boundary between the execution layer and the evaluation layer.
@@ -69,6 +85,10 @@ type Input struct {
 
 	// SessionResult is the full engine output, available for advanced judges.
 	SessionResult *agent.SessionResult
+
+	// TurnResults holds per-turn outcomes for multi-turn evaluations.
+	// Nil for single-turn cases.
+	TurnResults []InputTurnResult
 
 	// TurnsExecuted is the number of turns actually executed.
 	TurnsExecuted int
@@ -115,6 +135,20 @@ type Result struct {
 	// session (e.g. agent_judge). It is not part of grading.json; the evaluator
 	// uses it to download judge-run artifacts the same way as the main agent run.
 	JudgeSession *agent.SessionResult `json:"-"`
+
+	// JudgeContext records how agent_judge materialized and delivered review
+	// materials. It is omitted for deterministic judges and older results.
+	JudgeContext *ContextMetadata `json:"judge_context,omitempty"`
+}
+
+// ContextMetadata is report-facing metadata for agent_judge context
+// materialization and prompt delivery.
+type ContextMetadata struct {
+	Profile         string           `json:"profile"`
+	MaterializedDir string           `json:"materialized_dir,omitempty"`
+	Manifest        *ContextManifest `json:"manifest,omitempty"`
+	PromptDelivery  string           `json:"prompt_delivery,omitempty"`
+	PromptBytes     int              `json:"prompt_bytes,omitempty"`
 }
 
 // SessionResultError preserves a judge-side session result when evaluation fails.

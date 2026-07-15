@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,13 +64,23 @@ type junitTestSuite struct {
 
 // junitTestCase is a <testcase> element.
 type junitTestCase struct {
-	XMLName   xml.Name      `xml:"testcase"`
-	Name      string        `xml:"name,attr"`
-	ClassName string        `xml:"classname,attr"`
-	Time      string        `xml:"time,attr"`
-	Failure   *junitFailure `xml:"failure,omitempty"`
-	Error     *junitError   `xml:"error,omitempty"`
-	Skipped   *junitSkipped `xml:"skipped,omitempty"`
+	XMLName    xml.Name         `xml:"testcase"`
+	Name       string           `xml:"name,attr"`
+	ClassName  string           `xml:"classname,attr"`
+	Time       string           `xml:"time,attr"`
+	Properties *junitProperties `xml:"properties,omitempty"`
+	Failure    *junitFailure    `xml:"failure,omitempty"`
+	Error      *junitError      `xml:"error,omitempty"`
+	Skipped    *junitSkipped    `xml:"skipped,omitempty"`
+}
+
+type junitProperties struct {
+	Properties []junitProperty `xml:"property"`
+}
+
+type junitProperty struct {
+	Name  string `xml:"name,attr"`
+	Value string `xml:"value,attr"`
 }
 
 // junitFailure is a <failure> element.
@@ -109,6 +120,7 @@ func (r *JUnitReporter) buildTestSuite(in Input) junitTestSuites {
 			ClassName: in.SkillName,
 			Time:      fmt.Sprintf("%.3f", float64(cr.DurationMs)/1000.0),
 		}
+		tc.Properties = buildJudgeSkillProperties(cr)
 
 		switch cr.Status {
 		case judge.StatusFail:
@@ -157,7 +169,25 @@ func (r *JUnitReporter) buildTestSuite(in Input) junitTestSuites {
 	return junitTestSuites{Suites: []junitTestSuite{suite}}
 }
 
+func buildJudgeSkillProperties(cr CaseResult) *junitProperties {
+	props := []junitProperty{
+		{Name: "judge.skills.count", Value: strconv.Itoa(len(cr.JudgeSkills))},
+	}
+	for i, skill := range cr.JudgeSkills {
+		prefix := fmt.Sprintf("judge.skills.%d.", i)
+		props = append(props,
+			junitProperty{Name: prefix + "source", Value: skill.Source},
+			junitProperty{Name: prefix + "path", Value: skill.Path},
+			junitProperty{Name: prefix + "target", Value: skill.Target},
+			junitProperty{Name: prefix + "name", Value: skill.Name},
+		)
+	}
+	return &junitProperties{Properties: props}
+}
+
 // buildFailureBody extracts failed assertion details for the <failure> body.
+// Turn-scoped assertions already include turn numbers in their text field,
+// making CI failure output directly actionable.
 func buildFailureBody(cr CaseResult) string {
 	if cr.Grading == nil {
 		return ""
@@ -166,6 +196,14 @@ func buildFailureBody(cr CaseResult) string {
 	for _, ar := range cr.Grading.AssertionResults {
 		if !ar.Passed {
 			lines = append(lines, fmt.Sprintf("- %s: %s", ar.Text, ar.Evidence))
+		}
+	}
+	// Append turn summary when multi-turn results are present.
+	if len(cr.TurnResults) > 0 {
+		for _, tr := range cr.TurnResults {
+			if tr.Status != "completed" {
+				lines = append(lines, fmt.Sprintf("- turn %d: status=%s reason=%s", tr.TurnNumber, tr.Status, tr.Reason))
+			}
 		}
 	}
 	return strings.Join(lines, "\n")

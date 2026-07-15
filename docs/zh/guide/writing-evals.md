@@ -480,6 +480,118 @@ context:
 
 ---
 
+## 多轮对话
+
+当评测需要多次顺序交互时（例如迭代优化、阶段门控工作流、澄清循环），使用
+`input.turns` 代替 `input.prompt`。
+
+### 何时使用 `input.prompt` vs `input.turns`
+
+| 场景 | 使用 |
+|------|------|
+| 单条指令，评判最终输出 | `input.prompt` |
+| 多步骤工作流，含轮间门控 | `input.turns` |
+| 迭代优化（如"改善命名"） | `input.turns` |
+| Agent 需在对话中拒绝无效请求 | `input.turns` |
+
+### 基本多轮用例
+
+```yaml
+input:
+  turns:
+    - role: user
+      content: "用 Go 实现一个二分查找函数。"
+      post_condition:
+        must_contain_all: ["func", "binary"]
+        on_fail: fail
+    - role: user
+      content: "为刚才写的函数添加单元测试。"
+      post_condition:
+        must_contain_any: ["Test", "t.Run", "testing"]
+        on_fail: fail
+```
+
+### `post_condition` — 轮间门控
+
+`post_condition` 在每轮结束后检查 Agent 的响应。它是**门控**而非 judge 的替代品，
+用于确保对话在发送下一轮之前保持正轨。
+
+字段说明：
+
+- `must_contain_all`：所有字符串必须出现在响应中。
+- `must_contain_any`：至少一个字符串必须出现。
+- `must_not_contain`：所列字符串均不能出现。
+- `on_fail`：条件失败时的行为：
+  - `fail`（默认）：立即将用例标记为 FAIL。
+  - `skip_remaining`：跳过后续所有轮次；最终结果取决于 judge 评判。
+
+### `capture` — 模板变量
+
+从轮次响应中捕获值，在后续轮次中使用：
+
+```yaml
+input:
+  turns:
+    - role: user
+      content: "生成一个会话令牌。"
+      capture:
+        - variable: token
+          pattern: "token[=: ]+(?P<value>[A-Za-z0-9]+)"
+    - role: user
+      content: "验证令牌 {{token}} 是否有效。"
+```
+
+捕获语义：
+
+- 优先使用命名分组 `(?P<value>...)`；若无命名组，则允许恰好一个匿名捕获组。
+- 提取器类型：`pattern`（正则）或 `jsonpath` — 必须指定且仅指定一个。
+- 未匹配或空值 → 用例进入 ERROR 状态。
+- 变量作用域仅限当前用例执行（不跨用例、重试或基线变体共享）。
+- 引用未知变量会在调用 Agent 之前使轮次失败。
+
+### Agent 支持矩阵
+
+| 引擎 | 多轮支持 | 机制 |
+|------|---------|------|
+| `claude_code` | 是 | `--resume` 标志 + 会话 ID |
+| `qodercli` | 是 | `-r <session-id>` 标志 |
+| `codex` | 是 | `codex resume <thread-id>` 命令 |
+| `qwen_code` | 尚不支持 | 回退为批量模式 |
+| `custom` | 尚不支持 | 回退为批量模式 |
+
+当 Agent 不支持会话恢复时，所有轮次内容会拼接为单条 prompt 发送，并记录警告日志。
+
+### 按轮次 Judge 断言
+
+规则型 judge 支持按轮次断言：
+
+```yaml
+judge:
+  type: rule_based
+  success:
+    - turn_response_contains:
+        turn: 1
+        contains_all: ["binary_search"]
+    - turn_response_not_contains:
+        turn: 2
+        not_contains: ["TODO", "FIXME"]
+    - tool_called_in_turn:
+        turn: 1
+        name: write_file
+        args:
+          path: "search.go"
+    - tool_not_called_in_turn:
+        turn: 2
+        name: delete_file
+```
+
+失败行为：
+
+- 不存在的轮次（未执行） → 断言失败。
+- 被跳过/失败/出错的轮次 → 断言失败（仅 "completed" 状态的轮次可被断言）。
+
+---
+
 ## 评估策略
 
 skill-up 的评估分为两层：**expect**（门槛检查）和 **judge**（质量评估）。
@@ -555,12 +667,57 @@ judge:
 judge:
   type: agent_judge
   model: anthropic/claude-sonnet-4-6        # 评审使用的模型
+  skills:                                   # 可选：仅供 judge 使用的 Skills
+    - source: local_path
+      path: evals/fixtures/judge-rubric
   criteria:                                  # 评估标准（自然语言描述）
     - "输出中识别了真实存在的 bug，并给出了准确位置"
     - "没有将正确代码误报为 bug"
     - "建议具有可操作性，不是泛泛而谈"
   pass_threshold: 0.7                        # 通过率阈值，默认 0.7
   timeout_seconds: 60                        # 可选：限制单次 judge 调用时长（0 = 不加 judge 级 deadline，仍受 case timeout 约束）
+```
+
+`judge.skills` 仅支持 `agent_judge`。这些 Skills 会安装到 judge agent，
+不会安装到主运行 agent；顶层 `skills` 也不会自动安装到 judge。开启
+benchmark 时，`with_skill` 和 `without_skill` 都会安装 judge Skills，因为它们是
+评分工具，不是被测 Skill。安装过程使用各 Agent adapter 原生的 Skill 机制；
+skill-up 不会把 Skill 文件内容拼接进 judge prompt。
+
+`agent_judge` 会将评审上下文物化为文件，并在 judge prompt 中注入一个很小的
+材料表。未配置 `judge.context` 时，默认使用 `standard` profile：
+`final_message` 内联，`transcript` 和 `workspace_diff` 以文件引用形式提供，
+避免超长 prompt/argv 导致执行失败。
+
+长时间运行的仓库变更类评测通常适合使用 `minimal`，让 judge 依赖显式附件或脚本
+输出，而不是完整对话历史：
+
+```yaml
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  context:
+    profile: minimal                         # 省略 transcript/diff，截断 final_message
+    attachments:
+      - path: evals/fixtures/diff-result.json
+        label: diff_result
+  criteria:
+    - "判断报告中的代码变更是否满足预期规则。"
+```
+
+如需微调 profile，可按字段指定模式：
+
+```yaml
+judge:
+  type: agent_judge
+  context:
+    profile: standard
+    final_message: include                   # include | truncate | file_ref | omit
+    transcript: file_ref                     # include 超过 limits.max_bytes 会自动降级为 file_ref
+    workspace_diff: file_ref
+    generated_files: index                   # index | include | omit
+    limits:
+      max_bytes: 65536
 ```
 
 > **成本提示**：`agent_judge` 会消耗额外的 token。建议对关键断言先用 `expect` 或 `rule_based` 做确定性检查，只对需要语义理解的部分使用 `agent_judge`。

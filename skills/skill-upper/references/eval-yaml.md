@@ -42,6 +42,15 @@ cases:
     max_retries: 1
     retry_on: [timeout, error]
 
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  skills:                         # 可选：仅安装给 judge agent 的评分 Skill
+    - source: local_path
+      path: evals/fixtures/judge-rubric
+  criteria:
+    - "按 judge-rubric 中的细则判断输出是否满足要求"
+
 benchmark:
   enabled: false
 
@@ -53,6 +62,8 @@ report:
 `cases.parallelism` 可被 `skill-up run --parallelism N`（1–256）临时覆盖。
 
 `collect_artifacts`（`cases.defaults` 级，或单个 `case.yaml` 内追加）用 [doublestar](https://github.com/bmatcuk/doublestar) glob（`*` 单层、`**` 跨目录）声明要采集的 workspace 文件。无论 Agent 成功/失败/超时，命中文件都会保留相对路径下载到 `<output-dir>/<case>/<config>/outputs/workspace/`。两层按并集去重合并。它与 `report.artifacts`（产物*类型*）、`agent_judge` 的 git diff（字符串）正交。
+
+`judge.skills` 仅支持 `judge.type: agent_judge`，用于给 judge agent 安装可复用的评分 Rubric Skill。它不会安装到主运行 agent；顶层 `skills` 也不会自动安装到 judge。benchmark 下 `with_skill` / `without_skill` 都会安装 judge Skills，因为它们属于评分工具。路径相对 Skill 根目录解析，安装依赖具体 Agent adapter 的原生 Skill 支持；不要把 Skill 文件内容复制进 `criteria`。
 
 ## 运行环境
 

@@ -5,11 +5,8 @@ package platform
 import (
 	"context"
 	"os/exec"
-	"strings"
 	"sync"
 	"syscall"
-
-	"github.com/alibaba/skill-up/internal/shellquote"
 )
 
 // Host returns the descriptor of the shell NoneRuntime.Exec will use on the
@@ -44,48 +41,26 @@ func buildHostShell() HostShell {
 	bash, hasBash := DiscoverBash()
 	if hasBash {
 		return HostShell{
+			Target: Shell{
+				GOOS:     GOOSWindows,
+				Family:   ShellPOSIX,
+				BashPath: bash,
+			},
 			Cmd: func(ctx context.Context, command string) *exec.Cmd {
 				return exec.CommandContext(ctx, bash, "-c", command)
 			},
-			Quote: quoteForBashDoubleQuote,
 			Env: []string{
 				"MSYS_NO_PATHCONV=1",
 				"MSYS2_ARG_CONV_EXCL=*",
 			},
-			IsBash: true,
-			Bash:   bash,
 		}
 	}
 	return HostShell{
+		Target: Shell{GOOS: GOOSWindows, Family: ShellCmd},
 		Cmd: func(ctx context.Context, command string) *exec.Cmd {
 			cmd := exec.CommandContext(ctx, "cmd")
 			cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: `cmd /d /s /c "` + command + `"`}
 			return cmd
 		},
-		Quote:  shellquote.QuoteWindows,
-		IsBash: false,
 	}
-}
-
-// quoteForBashDoubleQuote returns s wrapped in double quotes with every
-// character that bash treats as active inside double quotes escaped with a
-// backslash. The four actives are \, ", $, `. After bash decodes the
-// resulting string each of those bytes is delivered intact to the program
-// bash spawns (cmd / powershell / a second bash), so a path like
-// `C:\tmp\$foo\script.ps1` survives the bash -c hop without losing the
-// backslash before `$`. cmd.exe never sees this encoding because we only
-// pick it when bash is the chosen shell.
-func quoteForBashDoubleQuote(s string) string {
-	var b strings.Builder
-	b.Grow(len(s) + 2)
-	b.WriteByte('"')
-	for i := range len(s) {
-		c := s[i]
-		if c == '\\' || c == '"' || c == '$' || c == '`' {
-			b.WriteByte('\\')
-		}
-		b.WriteByte(c)
-	}
-	b.WriteByte('"')
-	return b.String()
 }

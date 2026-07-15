@@ -267,6 +267,54 @@ cases:
 	}
 }
 
+func TestLoader_LoadEvalConfig_JudgeSkills(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	evalPath := filepath.Join(tmp, "eval.yaml")
+	content := `schema_version: v1alpha1
+
+environment:
+  type: none
+
+engine:
+  name: claude_code
+
+cases:
+  files:
+    - evals/cases/basic.yaml
+
+judge:
+  type: agent_judge
+  model: test-model
+  skills:
+    - source: local_path
+      path: evals/fixtures/default-judge
+    - source: local_path
+      path: evals/fixtures/security-judge
+      target: ~/.claude/skills/security-judge
+  criteria:
+    - criterion one
+`
+	if err := os.WriteFile(evalPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write temp eval.yaml: %v", err)
+	}
+
+	cfg, err := NewLoader(evalPath).LoadEvalConfig()
+	if err != nil {
+		t.Fatalf("LoadEvalConfig failed: %v", err)
+	}
+	if len(cfg.Judge.Skills) != 2 {
+		t.Fatalf("Judge.Skills length = %d, want 2", len(cfg.Judge.Skills))
+	}
+	if got := cfg.Judge.Skills[0].Path; got != "evals/fixtures/default-judge" {
+		t.Fatalf("Judge.Skills[0].Path = %q", got)
+	}
+	if got := cfg.Judge.Skills[1].Target; got != "~/.claude/skills/security-judge" {
+		t.Fatalf("Judge.Skills[1].Target = %q", got)
+	}
+}
+
 // nolint:funlen // table-driven matrix over the documented defaults; keeping
 // each case inline beats spreading them across helpers.
 func TestLoader_LoadEvalConfig_AppliesDefaults(t *testing.T) {

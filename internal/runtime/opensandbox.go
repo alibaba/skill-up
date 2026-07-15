@@ -19,6 +19,7 @@ import (
 
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/observability"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/shellquote"
 )
 
@@ -557,10 +558,10 @@ func (r *OpenSandboxRuntime) MergeEnv(env map[string]string) {
 	mergeIntoEnvBaseline(&r.cfg.Env, env)
 }
 
-// TargetGOOS reports "linux": OpenSandbox always executes commands inside a
-// Linux sandbox regardless of the host OS.
-func (r *OpenSandboxRuntime) TargetGOOS() string {
-	return "linux"
+// Shell reports the POSIX command language used by the current Linux
+// OpenSandbox profile. A future Windows profile must return its target shell.
+func (r *OpenSandboxRuntime) Shell() platform.Shell {
+	return platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
 }
 
 func (r *OpenSandboxRuntime) connectionConfig() opensandbox.ConnectionConfig {

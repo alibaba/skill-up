@@ -247,10 +247,10 @@ func (r *DockerRuntime) Close() error {
 	return nil
 }
 
-// TargetGOOS reports the GOOS of the container's guest OS. skill-up's
-// docker runtime currently provisions a Linux image, so commands executed
-// via `docker exec` run on a Linux guest regardless of the host platform.
-func (r *DockerRuntime) TargetGOOS() string { return platform.GOOSLinux }
+// Shell reports the POSIX command language used by DockerRuntime.Exec.
+func (r *DockerRuntime) Shell() platform.Shell {
+	return platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
+}
 
 // Start starts the container if it is not already running.
 func (r *DockerRuntime) Start(ctx context.Context) error {
