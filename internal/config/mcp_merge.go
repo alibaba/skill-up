@@ -3,6 +3,12 @@ package config
 import (
 	"errors"
 	"fmt"
+	"strings"
+)
+
+const (
+	mcpModeMocked              = "mocked"
+	builtinFilesystemMCPServer = "filesystem"
 )
 
 // MergeCaseMCP computes the effective MCP configuration for a case by merging
@@ -29,6 +35,9 @@ func MergeCaseMCP(evalMCP MCPConfig, caseMCP MCPConfig) (MCPConfig, error) {
 
 	indexByName := make(map[string]int, len(merged.Servers))
 	for i, server := range merged.Servers {
+		if strings.TrimSpace(server.Name) == "" {
+			return MCPConfig{}, errors.New("eval-level mcp server name is required")
+		}
 		if _, exists := indexByName[server.Name]; exists {
 			return MCPConfig{}, fmt.Errorf("duplicate eval-level mcp server name %q", server.Name)
 		}
@@ -45,8 +54,11 @@ func MergeCaseMCP(evalMCP MCPConfig, caseMCP MCPConfig) (MCPConfig, error) {
 		}
 		seenCaseNames[server.Name] = struct{}{}
 
-		if server.Mode != "mocked" {
+		if server.Mode != mcpModeMocked {
 			return MCPConfig{}, fmt.Errorf("case-level mcp server %q must use mode: mocked", server.Name)
+		}
+		if server.Name != builtinFilesystemMCPServer && strings.TrimSpace(server.ConfigRef) == "" {
+			return MCPConfig{}, fmt.Errorf("case-level mcp server %q mocked mode requires config_ref", server.Name)
 		}
 
 		cloned := cloneMCPServer(server)

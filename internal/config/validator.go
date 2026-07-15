@@ -180,8 +180,11 @@ func validateCaseMCP(mcpCfg MCPConfig) []string {
 		}
 		seen[server.Name] = struct{}{}
 
-		if server.Mode != "mocked" {
+		if server.Mode != mcpModeMocked {
 			errs = append(errs, fmt.Sprintf("mcp.servers[%d] (%q) must use mode: mocked at case level", i, server.Name))
+		}
+		if server.Mode == mcpModeMocked && server.Name != builtinFilesystemMCPServer && strings.TrimSpace(server.ConfigRef) == "" {
+			errs = append(errs, fmt.Sprintf("mcp.servers[%d] (%q) mocked mode requires config_ref", i, server.Name))
 		}
 		if server.Transport != "" && server.Transport != "stdio" {
 			errs = append(errs, fmt.Sprintf("mcp.servers[%d] (%q) mocked mode only supports stdio transport", i, server.Name))

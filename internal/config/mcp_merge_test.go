@@ -110,8 +110,8 @@ func TestMergeCaseMCP_Errors(t *testing.T) {
 			name:    "duplicate case server names",
 			evalMCP: MCPConfig{},
 			caseMCP: MCPConfig{Servers: []MCPServer{
-				{Name: "svc", Mode: "mocked"},
-				{Name: "svc", Mode: "mocked"},
+				{Name: "svc", Mode: "mocked", ConfigRef: "evals/fixtures/mcp/open.yaml"},
+				{Name: "svc", Mode: "mocked", ConfigRef: "evals/fixtures/mcp/closed.yaml"},
 			}},
 			errMsg: "duplicate case-level mcp server name",
 		},
@@ -122,12 +122,26 @@ func TestMergeCaseMCP_Errors(t *testing.T) {
 			errMsg:  "must use mode: mocked",
 		},
 		{
+			name:    "case server missing config ref",
+			evalMCP: MCPConfig{},
+			caseMCP: MCPConfig{Servers: []MCPServer{{Name: "svc", Mode: "mocked"}}},
+			errMsg:  "mocked mode requires config_ref",
+		},
+		{
+			name: "empty eval server name",
+			evalMCP: MCPConfig{Servers: []MCPServer{
+				{Mode: "mocked", ConfigRef: "evals/fixtures/mcp/default.yaml"},
+			}},
+			caseMCP: MCPConfig{Servers: []MCPServer{{Name: "svc", Mode: "mocked", ConfigRef: "evals/fixtures/mcp/open.yaml"}}},
+			errMsg:  "eval-level mcp server name is required",
+		},
+		{
 			name: "duplicate eval server names",
 			evalMCP: MCPConfig{Servers: []MCPServer{
 				{Name: "svc", Mode: "mocked"},
 				{Name: "svc", Mode: "mocked"},
 			}},
-			caseMCP: MCPConfig{Servers: []MCPServer{{Name: "svc", Mode: "mocked"}}},
+			caseMCP: MCPConfig{Servers: []MCPServer{{Name: "svc", Mode: "mocked", ConfigRef: "evals/fixtures/mcp/open.yaml"}}},
 			errMsg:  "duplicate eval-level mcp server name",
 		},
 	}

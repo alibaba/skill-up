@@ -921,6 +921,17 @@ func TestValidator_ValidateCaseConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "valid case-level filesystem mocked MCP override without config_ref",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				MCP: MCPConfig{Servers: []MCPServer{
+					{Name: "filesystem", Mode: "mocked"},
+				}},
+			},
+			wantErr: false,
+		},
+		{
 			name: "case-level agent_judge with valid context",
 			cfg: &CaseConfig{
 				ID: "test-case",
@@ -969,13 +980,25 @@ func TestValidator_ValidateCaseConfig(t *testing.T) {
 			errMsg:  "mcp.servers[0].name is required",
 		},
 		{
-			name: "case-level MCP duplicate names",
+			name: "case-level MCP missing config_ref",
 			cfg: &CaseConfig{
 				ID:    "test-case",
 				Input: Input{Prompt: "Say hello"},
 				MCP: MCPConfig{Servers: []MCPServer{
 					{Name: "svc", Mode: "mocked"},
-					{Name: "svc", Mode: "mocked"},
+				}},
+			},
+			wantErr: true,
+			errMsg:  "mocked mode requires config_ref",
+		},
+		{
+			name: "case-level MCP duplicate names",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				MCP: MCPConfig{Servers: []MCPServer{
+					{Name: "svc", Mode: "mocked", ConfigRef: "evals/fixtures/mcp/open.yaml"},
+					{Name: "svc", Mode: "mocked", ConfigRef: "evals/fixtures/mcp/closed.yaml"},
 				}},
 			},
 			wantErr: true,
