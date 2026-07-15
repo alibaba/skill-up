@@ -44,9 +44,6 @@
 
 **skill-up** 是面向 Agent Skill 开发者的 CLI 评测框架。在 Skill 包内通过 `evals/eval.yaml` 与 `evals/cases/*.yaml` 声明评测环境、依赖、用例与评估方式，在本地或 CI 中运行评测并生成结构化报告。
 
-> [!WARNING]
-> 本项目仍处于 **早期演进阶段**：代码尚未完全稳定，部分 CLI 命令、配置字段以及公共 API 在后续版本中仍有可能调整。请在生产环境使用前关注 [CHANGELOG](CHANGELOG.md) 并做好兼容性验证。
-
 ## 特性
 
 - **声明式评测配置**：通过 YAML（`eval.yaml` + `cases/*.yaml`）定义评测环境、引擎、模型和用例。
