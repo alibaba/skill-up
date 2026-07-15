@@ -17,6 +17,7 @@ func TestHost(t *testing.T) {
 	cmd := shell.Cmd(context.Background(), "echo hi")
 	if cmd == nil {
 		t.Fatal("HostShell.Cmd returned nil")
+		return
 	}
 	if cmd.Path == "" {
 		t.Fatal("HostShell.Cmd produced a command with no executable path")

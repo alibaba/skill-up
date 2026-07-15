@@ -79,19 +79,20 @@ type embeddedSummary struct {
 }
 
 type embeddedCase struct {
-	ID            string           `json:"id"`
-	Title         string           `json:"title,omitempty"`
-	Status        string           `json:"status"`
-	DurationMs    int64            `json:"duration_ms"`
-	Duration      string           `json:"duration"`
-	Turns         int              `json:"turns"`
-	Error         string           `json:"error,omitempty"`
-	Grading       *embeddedGrading `json:"grading,omitempty"`
-	Configuration string           `json:"configuration,omitempty"`
-	Prompt        string           `json:"prompt,omitempty"`
-	Response      string           `json:"response,omitempty"`
-	Baseline      *embeddedCase    `json:"baseline,omitempty"`
-	TurnResults   []embeddedTurn   `json:"turn_results,omitempty"`
+	ID            string            `json:"id"`
+	Title         string            `json:"title,omitempty"`
+	Status        string            `json:"status"`
+	DurationMs    int64             `json:"duration_ms"`
+	Duration      string            `json:"duration"`
+	Turns         int               `json:"turns"`
+	Error         string            `json:"error,omitempty"`
+	Grading       *embeddedGrading  `json:"grading,omitempty"`
+	Configuration string            `json:"configuration,omitempty"`
+	Prompt        string            `json:"prompt,omitempty"`
+	Response      string            `json:"response,omitempty"`
+	Baseline      *embeddedCase     `json:"baseline,omitempty"`
+	TurnResults   []embeddedTurn    `json:"turn_results,omitempty"`
+	JudgeSkills   []judge.SkillInfo `json:"judge_skills,omitempty"`
 }
 
 // embeddedTurn holds per-turn data for the HTML report JavaScript.
@@ -146,6 +147,7 @@ func caseResultToEmbeddedCase(cr CaseResult) embeddedCase {
 		Prompt:        cr.Prompt,
 		Response:      cr.Response,
 		TurnResults:   caseTurnResultsToEmbedded(cr.TurnResults),
+		JudgeSkills:   cr.JudgeSkills,
 	}
 	if cr.Grading != nil {
 		eg := &embeddedGrading{

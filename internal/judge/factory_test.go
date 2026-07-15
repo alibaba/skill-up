@@ -98,6 +98,26 @@ func TestNewJudge_AgentJudge(t *testing.T) {
 	}
 }
 
+func TestNewJudge_AgentJudge_PropagatesJudgeSkills(t *testing.T) {
+	cfg := config.JudgeConfig{
+		Type:     "agent_judge",
+		Model:    "test-model",
+		Criteria: []string{"c1"},
+		Skills:   []config.SkillRef{{Source: "local_path", Path: "evals/fixtures/judge-skill", Target: "~/.claude/skills/judge-skill"}},
+	}
+	j, err := NewJudge(cfg, &mockJudgeTestAgent{}, &mockJudgeTestRuntime{})
+	if err != nil {
+		t.Fatalf("NewJudge() error = %v", err)
+	}
+	aj, ok := j.(*AgentJudge)
+	if !ok {
+		t.Fatalf("expected *AgentJudge, got %T", j)
+	}
+	if len(aj.JudgeSkills) != 1 || aj.JudgeSkills[0].Path != "evals/fixtures/judge-skill" {
+		t.Fatalf("JudgeSkills = %#v", aj.JudgeSkills)
+	}
+}
+
 func TestNewJudge_AgentJudge_CustomThreshold(t *testing.T) {
 	threshold := 0.9
 	cfg := config.JudgeConfig{
@@ -215,6 +235,7 @@ func TestMergeJudgeConfig_CaseOverridesGlobal(t *testing.T) {
 		Model:          "global-model",
 		PassThreshold:  &globalThreshold,
 		Criteria:       []string{"global-c"},
+		Skills:         []config.SkillRef{{Source: "local_path", Path: "evals/fixtures/global-judge"}},
 		TimeoutSeconds: intPtr(60),
 	}
 	caseLevel := config.JudgeConfig{
@@ -233,6 +254,31 @@ func TestMergeJudgeConfig_CaseOverridesGlobal(t *testing.T) {
 	}
 	if merged.TimeoutSeconds == nil || *merged.TimeoutSeconds != 60 {
 		t.Errorf("expected timeout 60 from global, got %v", merged.TimeoutSeconds)
+	}
+	if len(merged.Skills) != 0 {
+		t.Errorf("expected case override to drop global skills, got %#v", merged.Skills)
+	}
+}
+
+func TestMergeJudgeConfig_CaseAgentJudgeOverridesSkills(t *testing.T) {
+	global := config.JudgeConfig{
+		Type:     "agent_judge",
+		Model:    "global-model",
+		Criteria: []string{"global-c"},
+		Skills:   []config.SkillRef{{Source: "local_path", Path: "evals/fixtures/global-judge"}},
+	}
+	caseLevel := config.JudgeConfig{
+		Type:     "agent_judge",
+		Criteria: []string{"case-c"},
+		Skills:   []config.SkillRef{{Source: "local_path", Path: "evals/fixtures/case-judge"}},
+	}
+
+	merged := MergeJudgeConfig(global, caseLevel)
+	if merged.Model != "global-model" {
+		t.Fatalf("expected inherited model, got %q", merged.Model)
+	}
+	if len(merged.Skills) != 1 || merged.Skills[0].Path != "evals/fixtures/case-judge" {
+		t.Fatalf("expected case skills only, got %#v", merged.Skills)
 	}
 }
 

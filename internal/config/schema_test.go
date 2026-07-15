@@ -11,6 +11,7 @@ func TestDefaultEvalConfig(t *testing.T) { //nolint:cyclop,gocyclo // exhaustive
 	cfg := DefaultEvalConfig()
 	if cfg == nil {
 		t.Fatal("DefaultEvalConfig() returned nil")
+		return
 	}
 
 	// Verify schema version

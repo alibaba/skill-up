@@ -446,6 +446,7 @@ func evalResultToCaseResult(res *evaluator.EvalResult) report.CaseResult {
 		InputTokens:   res.InputTokens,
 		OutputTokens:  res.OutputTokens,
 		Grading:       res.Grading,
+		JudgeSkills:   res.JudgeSkills,
 		Configuration: res.Configuration,
 		Prompt:        res.Prompt,
 		Response:      responseContent(res),

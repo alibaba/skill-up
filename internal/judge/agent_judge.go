@@ -72,21 +72,33 @@ type AgentJudge struct {
 	// deadline; the parent context still applies.
 	TimeoutSeconds int
 
+	// JudgeSkills are installed judge Skills that must guide grading.
+	JudgeSkills []SkillInfo
+
 	// Context controls which evaluation materials are written, referenced, or
 	// inlined for this agent_judge invocation.
 	Context *config.JudgeContextConfig
 }
 
 // NewAgentJudge creates an AgentJudge with sensible defaults.
-func NewAgentJudge(ag agent.Agent, rt runtime.Runtime, model string, criteria []string, passThreshold *float64, timeoutSeconds int) *AgentJudge {
-	return NewAgentJudgeWithContext(ag, rt, model, criteria, passThreshold, nil, timeoutSeconds)
+func NewAgentJudge(ag agent.Agent, rt runtime.Runtime, model string, criteria []string, passThreshold *float64, timeoutSeconds int, judgeSkills ...[]SkillInfo) *AgentJudge {
+	return NewAgentJudgeWithContextAndSkills(ag, rt, model, criteria, passThreshold, nil, timeoutSeconds, judgeSkills...)
 }
 
 // NewAgentJudgeWithContext creates an AgentJudge with explicit context delivery.
 func NewAgentJudgeWithContext(ag agent.Agent, rt runtime.Runtime, model string, criteria []string, passThreshold *float64, contextCfg *config.JudgeContextConfig, timeoutSeconds int) *AgentJudge {
+	return NewAgentJudgeWithContextAndSkills(ag, rt, model, criteria, passThreshold, contextCfg, timeoutSeconds)
+}
+
+// NewAgentJudgeWithContextAndSkills creates an AgentJudge with context delivery and judge Skills.
+func NewAgentJudgeWithContextAndSkills(ag agent.Agent, rt runtime.Runtime, model string, criteria []string, passThreshold *float64, contextCfg *config.JudgeContextConfig, timeoutSeconds int, judgeSkills ...[]SkillInfo) *AgentJudge {
 	threshold := DefaultPassThreshold
 	if passThreshold != nil {
 		threshold = *passThreshold
+	}
+	var skills []SkillInfo
+	if len(judgeSkills) > 0 {
+		skills = judgeSkills[0]
 	}
 	return &AgentJudge{
 		Agent:          ag,
@@ -95,6 +107,7 @@ func NewAgentJudgeWithContext(ag agent.Agent, rt runtime.Runtime, model string, 
 		Criteria:       criteria,
 		PassThreshold:  threshold,
 		TimeoutSeconds: timeoutSeconds,
+		JudgeSkills:    skills,
 		Context:        contextCfg,
 	}
 }
@@ -118,7 +131,7 @@ func (j *AgentJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 	}
 
 	// Build the judge prompt.
-	prompt := buildJudgePrompt(ctx, j.Criteria, materialized)
+	prompt := buildJudgePrompt(ctx, j.Criteria, materialized, j.JudgeSkills)
 	messages := []transcript.Message{{Role: transcript.RoleUser, Content: prompt, Turn: 1}}
 
 	// Get criterion results via agent.Agent. Snapshot parentCtx.Err() the
@@ -426,8 +439,12 @@ func canRecoverAgentJudgeResult(err error, sessionResult *agent.SessionResult) b
 // ---------------------------------------------------------------------------
 
 // buildJudgePrompt constructs the system + user prompt for the judge agent.
-func buildJudgePrompt(_ context.Context, criteria []string, materialized *MaterializedContext) string {
+func buildJudgePrompt(_ context.Context, criteria []string, materialized *MaterializedContext, judgeSkills ...[]SkillInfo) string {
 	var sb strings.Builder
+	var skills []SkillInfo
+	if len(judgeSkills) > 0 {
+		skills = judgeSkills[0]
+	}
 
 	sb.WriteString("You are an expert evaluator for an AI agent skill evaluation.\n")
 	sb.WriteString("You must assess the agent's output against the following criteria.\n")
@@ -438,43 +455,74 @@ func buildJudgePrompt(_ context.Context, criteria []string, materialized *Materi
 	sb.WriteString("IMPORTANT: Your response MUST be valid JSON. If any string value contains double quotes, ")
 	sb.WriteString("you MUST escape them with a backslash (e.g. \\\"example\\\"). Do NOT use unescaped double quotes inside string values.\n\n")
 
+	appendJudgeSkillInstructions(&sb, skills)
+
 	sb.WriteString("## Criteria\n")
 	for i, c := range criteria {
 		fmt.Fprintf(&sb, "%d. %s\n", i+1, c)
 	}
 
-	if materialized != nil {
-		sb.WriteString("\n## Review Materials\n")
-		sb.WriteString("Read files from this table as needed to evaluate the criteria. Evidence must be traceable to the listed material keys or inline excerpts.\n\n")
-		sb.WriteString("| key | mode | path | bytes | notes |\n")
-		sb.WriteString("| --- | --- | --- | ---: | --- |\n")
-		for _, m := range materialized.Materials {
-			notes := ""
-			if m.Truncated {
-				notes = "inline excerpt truncated; full text is at path"
-			}
-			fmt.Fprintf(&sb, "| %s | %s | %s | %d | %s |\n", materialLabel(m), m.Mode, materialPromptPath(m), m.OriginalBytes, notes)
-		}
-		for _, m := range materialized.Materials {
-			if strings.TrimSpace(m.InlineContent) == "" {
-				continue
-			}
-			fmt.Fprintf(&sb, "\n### Inline Material: %s\n", materialLabel(m))
-			if m.Truncated {
-				sb.WriteString("The excerpt below is truncated; read the full file at the path above if needed.\n")
-			}
-			sb.WriteString("```\n")
-			sb.WriteString(m.InlineContent)
-			sb.WriteString("\n```\n")
-		}
-	}
+	appendReviewMaterials(&sb, materialized)
+	appendRequiredResponseFormat(&sb, criteria)
+	return sb.String()
+}
 
+func appendJudgeSkillInstructions(sb *strings.Builder, skills []SkillInfo) {
+	if len(skills) == 0 {
+		return
+	}
+	sb.WriteString("## Mandatory Judge Skill Use\n")
+	sb.WriteString("Before evaluating the case, you MUST invoke the Skill tool for EACH installed judge Skill below using its callable skill name and read the full Skill body. ")
+	sb.WriteString("Do not grade the case until you have loaded every listed judge Skill. ")
+	sb.WriteString("Do not grade this case using only the inline criteria. The inline criteria identify result dimensions, while the judge Skill(s) define detailed rubric, constraints, and evidence rules. ")
+	sb.WriteString("If an inline criterion conflicts with a judge Skill, follow the judge Skill unless the criterion defines a more specific case-level acceptance condition.\n\n")
+	sb.WriteString("Installed judge Skill(s):\n")
+	for _, skill := range skills {
+		fmt.Fprintf(sb, "- invoke Skill tool with name %q", skillIdentifier(skill))
+		if skill.Target != "" {
+			fmt.Fprintf(sb, " (target: %s)", skill.Target)
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\n")
+}
+
+func appendReviewMaterials(sb *strings.Builder, materialized *MaterializedContext) {
+	if materialized == nil {
+		return
+	}
+	sb.WriteString("\n## Review Materials\n")
+	sb.WriteString("Read files from this table as needed to evaluate the criteria. Evidence must be traceable to the listed material keys or inline excerpts.\n\n")
+	sb.WriteString("| key | mode | path | bytes | notes |\n")
+	sb.WriteString("| --- | --- | --- | ---: | --- |\n")
+	for _, m := range materialized.Materials {
+		notes := ""
+		if m.Truncated {
+			notes = "inline excerpt truncated; full text is at path"
+		}
+		fmt.Fprintf(sb, "| %s | %s | %s | %d | %s |\n", materialLabel(m), m.Mode, materialPromptPath(m), m.OriginalBytes, notes)
+	}
+	for _, m := range materialized.Materials {
+		if strings.TrimSpace(m.InlineContent) == "" {
+			continue
+		}
+		fmt.Fprintf(sb, "\n### Inline Material: %s\n", materialLabel(m))
+		if m.Truncated {
+			sb.WriteString("The excerpt below is truncated; read the full file at the path above if needed.\n")
+		}
+		sb.WriteString("```\n")
+		sb.WriteString(m.InlineContent)
+		sb.WriteString("\n```\n")
+	}
+}
+
+func appendRequiredResponseFormat(sb *strings.Builder, criteria []string) {
 	sb.WriteString("\n## Required Response Format (JSON)\n")
 	sb.WriteString("```json\n")
 	sb.WriteString("{\n")
 	sb.WriteString("  \"results\": [\n")
 	for i, c := range criteria {
-		fmt.Fprintf(&sb, "    {\"criterion\": %q, \"passed\": true|false, \"evidence\": \"...\"}", c)
+		fmt.Fprintf(sb, "    {\"criterion\": %q, \"passed\": true|false, \"evidence\": \"...\"}", c)
 		if i < len(criteria)-1 {
 			sb.WriteString(",")
 		}
@@ -483,8 +531,16 @@ func buildJudgePrompt(_ context.Context, criteria []string, materialized *Materi
 	sb.WriteString("  ]\n")
 	sb.WriteString("}\n")
 	sb.WriteString("```\n")
+}
 
-	return sb.String()
+func skillIdentifier(skill SkillInfo) string {
+	if skill.Name != "" {
+		return skill.Name
+	}
+	if skill.Path != "" {
+		return skill.Path
+	}
+	return skill.Source
 }
 
 func materialLabel(m ContextMaterial) string {

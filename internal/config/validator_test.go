@@ -335,7 +335,7 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			errMsg:  "cases.retry_policy.max_retries must be <=",
 		},
 		{
-			name: "invalid judge.type at eval level is ignored",
+			name: "invalid judge.type at eval level is rejected",
 			cfg: &EvalConfig{
 				SchemaVersion: "v1alpha1",
 				Environment:   Environment{Type: "none"},
@@ -353,7 +353,8 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 					Type: "invalid",
 				},
 			},
-			wantErr: false,
+			wantErr: true,
+			errMsg:  "judge.type must be one of",
 		},
 		{
 			name: "valid judge context at eval level",
@@ -404,7 +405,7 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			errMsg:  "judge.context.profile must be one of: minimal, standard",
 		},
 		{
-			name: "script without script_path at eval level is ignored",
+			name: "script without script_path at eval level is checked by ValidateAll",
 			cfg: &EvalConfig{
 				SchemaVersion: "v1alpha1",
 				Environment:   Environment{Type: "none"},
@@ -425,7 +426,7 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "agent_judge without model at eval level is ignored",
+			name: "agent_judge without model at eval level is checked by ValidateAll",
 			cfg: &EvalConfig{
 				SchemaVersion: "v1alpha1",
 				Environment:   Environment{Type: "none"},
@@ -470,7 +471,7 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "agent_judge with threshold above one at eval level is ignored",
+			name: "agent_judge with threshold above one at eval level is rejected",
 			cfg: &EvalConfig{
 				SchemaVersion: "v1alpha1",
 				Environment:   Environment{Type: "none"},
@@ -491,7 +492,8 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 					PassThreshold: float64Ptr(1.1),
 				},
 			},
-			wantErr: false,
+			wantErr: true,
+			errMsg:  "judge.pass_threshold must be between",
 		},
 		{
 			name: "valid network_policy deny_all with opensandbox",
@@ -1051,6 +1053,81 @@ func TestValidator_ValidateAll(t *testing.T) {
 	})
 }
 
+func TestValidator_JudgeSkills(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	base := func(judge JudgeConfig) *EvalConfig {
+		return &EvalConfig{
+			SchemaVersion: "v1alpha1",
+			Environment:   Environment{Type: "none"},
+			Engine:        EngineConfig{Name: "claude_code"},
+			Cases:         CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			Judge:         judge,
+		}
+	}
+
+	tests := []struct {
+		name   string
+		judge  JudgeConfig
+		errMsg string
+	}{
+		{
+			name: "agent_judge accepts skills",
+			judge: JudgeConfig{
+				Type:     "agent_judge",
+				Model:    "test-model",
+				Criteria: []string{"criterion"},
+				Skills:   []SkillRef{{Source: "local_path", Path: "evals/fixtures/judge-skill"}},
+			},
+		},
+		{
+			name: "rule_based rejects skills",
+			judge: JudgeConfig{
+				Type:   "rule_based",
+				Skills: []SkillRef{{Source: "local_path", Path: "evals/fixtures/judge-skill"}},
+			},
+			errMsg: "judge.skills is only supported",
+		},
+		{
+			name: "local_path requires path",
+			judge: JudgeConfig{
+				Type:     "agent_judge",
+				Model:    "test-model",
+				Criteria: []string{"criterion"},
+				Skills:   []SkillRef{{Source: "local_path"}},
+			},
+			errMsg: "judge.skills[0].path is required",
+		},
+		{
+			name: "non local source requires path",
+			judge: JudgeConfig{
+				Type:     "agent_judge",
+				Model:    "test-model",
+				Criteria: []string{"criterion"},
+				Skills:   []SkillRef{{Source: "registry"}},
+			},
+			errMsg: "judge.skills[0].path is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validator.ValidateEvalConfig(base(tt.judge))
+			if tt.errMsg == "" {
+				if err != nil {
+					t.Fatalf("ValidateEvalConfig() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.errMsg) {
+				t.Fatalf("ValidateEvalConfig() error = %v, want containing %q", err, tt.errMsg)
+			}
+		})
+	}
+}
+
 // caseIDSrc pairs an effective case ID with the cases.files entry it was
 // loaded from, as the loader populates CaseConfig.ID / CaseConfig.SourceFile.
 type caseIDSrc struct {
@@ -1076,7 +1153,7 @@ func TestValidator_ValidateCases_Duplicates(t *testing.T) {
 	tests := []struct {
 		name      string
 		cases     []caseIDSrc
-		wantParts []string // non-empty ⇒ expect an error containing every part
+		wantParts []string // non-empty means expect an error containing every part
 	}{
 		{
 			name:      "duplicate explicit id names both files",
@@ -1084,13 +1161,11 @@ func TestValidator_ValidateCases_Duplicates(t *testing.T) {
 			wantParts: []string{`duplicate case id "dup"`, "evals/cases/a.yaml", "evals/cases/b.yaml"},
 		},
 		{
-			// Files in different dirs with colliding basenames ⇒ same implicit ID.
 			name:      "duplicate filename-derived id",
 			cases:     []caseIDSrc{{"smoke", "evals/cases/smoke.yaml"}, {"smoke", "evals/full/smoke.yaml"}},
 			wantParts: []string{`duplicate case id "smoke"`},
 		},
 		{
-			// Same file, differently spelled; normalization must collapse them.
 			name:      "duplicate file reference after normalization",
 			cases:     []caseIDSrc{{"a", "evals/cases/a.yaml"}, {"a", "./evals/cases/a.yaml"}},
 			wantParts: []string{"cases.files lists"},
@@ -1124,10 +1199,69 @@ func TestValidator_ValidateCases_Duplicates(t *testing.T) {
 	}
 }
 
+func TestValidator_ValidateAll_CaseAgentJudgeInheritsGlobalModel(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	result := &EvalResult{
+		Eval: &EvalConfig{
+			SchemaVersion: "v1alpha1",
+			Environment:   Environment{Type: "none"},
+			Engine:        EngineConfig{Name: "claude_code"},
+			Cases:         CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			Judge: JudgeConfig{
+				Type:     "agent_judge",
+				Model:    "global-model",
+				Criteria: []string{"global criterion"},
+			},
+		},
+		Cases: []*CaseConfig{
+			{
+				ID:    "case-agent-judge",
+				Input: Input{Prompt: "test"},
+				Judge: JudgeConfig{
+					Type:     "agent_judge",
+					Criteria: []string{"case criterion"},
+					Skills:   []SkillRef{{Source: "local_path", Path: "evals/fixtures/case-judge"}},
+				},
+			},
+		},
+	}
+
+	if err := validator.ValidateAll(result); err != nil {
+		t.Fatalf("ValidateAll() error = %v, want nil", err)
+	}
+}
+
+func TestValidator_ValidateAll_EffectiveAgentJudgeRequiresCriteria(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	result := &EvalResult{
+		Eval: &EvalConfig{
+			SchemaVersion: "v1alpha1",
+			Environment:   Environment{Type: "none"},
+			Engine:        EngineConfig{Name: "claude_code"},
+			Cases:         CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			Judge: JudgeConfig{
+				Type:  "agent_judge",
+				Model: "global-model",
+			},
+		},
+		Cases: []*CaseConfig{
+			{ID: "case-agent-judge", Input: Input{Prompt: "test"}},
+		},
+	}
+
+	err := validator.ValidateAll(result)
+	if err == nil || !strings.Contains(err.Error(), "judge.criteria is required") {
+		t.Fatalf("ValidateAll() error = %v, want missing criteria", err)
+	}
+}
+
 // TestValidator_ValidateCases_OnlyChecksGivenCases confirms ValidateCases
 // validates just the cases passed to it: an invalid case omitted from the slice
-// (e.g. filtered out by `skill-up run`) does not cause a failure, while
-// ValidateAll over the full set still catches it.
+// does not cause a failure, while passing the invalid case still catches it.
 func TestValidator_ValidateCases_OnlyChecksGivenCases(t *testing.T) {
 	t.Parallel()
 	validator := NewValidator()
@@ -1140,6 +1274,21 @@ func TestValidator_ValidateCases_OnlyChecksGivenCases(t *testing.T) {
 	}
 	if err := validator.ValidateCases([]*CaseConfig{valid, invalid}); err == nil {
 		t.Fatal("ValidateCases([valid, invalid]) = nil, want error for the invalid case")
+	}
+}
+
+func TestValidator_ValidateCasesWithEvalDefaults_AllowsLoadedCasesWithoutCaseFiles(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+	eval := DefaultEvalConfig()
+	eval.Cases.Files = nil
+
+	valid := &CaseConfig{ID: "anthropic-case", Input: Input{Prompt: "hi"}}
+	if err := validator.ValidateCasesWithEvalDefaults(eval, []*CaseConfig{valid}); err != nil {
+		t.Fatalf("ValidateCasesWithEvalDefaults() error = %v, want nil", err)
+	}
+	if err := validator.ValidateAll(&EvalResult{Eval: eval, Cases: []*CaseConfig{valid}}); err == nil {
+		t.Fatal("ValidateAll() error = nil, want missing cases.files error")
 	}
 }
 

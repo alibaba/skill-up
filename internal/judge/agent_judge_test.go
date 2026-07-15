@@ -375,6 +375,97 @@ func TestBuildJudgePrompt_ContainsAllParts(t *testing.T) {
 	}
 }
 
+func TestBuildJudgePromptWithSkills_RequiresJudgeSkillUse(t *testing.T) {
+	materialized := &MaterializedContext{
+		Materials: []ContextMaterial{
+			{
+				ContextMaterialManifest: ContextMaterialManifest{
+					Key:           "final_message",
+					Mode:          "include",
+					OriginalBytes: len("Agent final message"),
+				},
+				InlineContent: "Agent final message",
+			},
+		},
+	}
+	prompt := buildJudgePrompt(
+		context.Background(),
+		[]string{"criterion A"},
+		materialized,
+		[]SkillInfo{
+			{Source: "local_path", Path: "evals/fixtures/judge-skill", Target: "~/.claude/skills/judge-skill", Name: "judge-skill"},
+			{Source: "local_path", Path: "evals/fixtures/security-judge", Name: "security-judge"},
+		},
+	)
+
+	checks := []string{
+		"## Mandatory Judge Skill Use",
+		"MUST invoke the Skill tool for EACH installed judge Skill",
+		`invoke Skill tool with name "judge-skill"`,
+		`invoke Skill tool with name "security-judge"`,
+		"read the full Skill body",
+		"target: ~/.claude/skills/judge-skill",
+	}
+	for _, c := range checks {
+		if !strings.Contains(prompt, c) {
+			t.Fatalf("prompt missing %q:\n%s", c, prompt)
+		}
+	}
+	if strings.Contains(prompt, "evals/fixtures/judge-skill") || strings.Contains(prompt, "evals/fixtures/security-judge") {
+		t.Fatalf("prompt should use callable skill names instead of source paths, got:\n%s", prompt)
+	}
+}
+
+func TestSkillIdentifier_PrefersCallableName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		skill SkillInfo
+		want  string
+	}{
+		{name: "callable name", skill: SkillInfo{Name: "judge-skill", Path: "evals/fixtures/judge-skill", Source: "source"}, want: "judge-skill"},
+		{name: "path fallback", skill: SkillInfo{Path: "evals/fixtures/judge-skill", Source: "source"}, want: "evals/fixtures/judge-skill"},
+		{name: "source fallback", skill: SkillInfo{Source: "source"}, want: "source"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := skillIdentifier(tt.skill); got != tt.want {
+				t.Fatalf("skillIdentifier() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAgentJudge_EvaluatePassesJudgeSkillsInPrompt(t *testing.T) {
+	output := buildMockAgentOutput([]CriterionResult{
+		{Criterion: "criterion A", Passed: true, Evidence: "used rubric"},
+	})
+	ag := &mockJudgeTestAgent{output: output}
+	rt := &mockJudgeTestRuntime{}
+
+	j := NewAgentJudge(
+		ag,
+		rt,
+		"test-model",
+		[]string{"criterion A"},
+		nil,
+		0,
+		[]SkillInfo{{Source: "local_path", Path: "evals/fixtures/judge-skill", Name: "judge-skill"}},
+	)
+	_, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
+	assertNoError(t, err)
+
+	if len(ag.lastMessages) != 1 {
+		t.Fatalf("lastMessages length = %d, want 1", len(ag.lastMessages))
+	}
+	if !strings.Contains(ag.lastMessages[0].Content, `invoke Skill tool with name "judge-skill"`) {
+		t.Fatalf("judge prompt missing callable skill name:\n%s", ag.lastMessages[0].Content)
+	}
+}
+
 func TestBuildContextMetadata_UsesManifestMaterializedDir(t *testing.T) {
 	materialized := &MaterializedContext{
 		Dir: "/tmp/skill-up/run/context",

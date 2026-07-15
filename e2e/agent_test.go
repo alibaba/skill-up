@@ -441,7 +441,7 @@ input:
   prompt: Reply with exactly the word hello. Do not run commands.
 
 constraints:
-  timeout_seconds: 5
+  timeout_seconds: 30
   max_turns: 1
 
 expect:

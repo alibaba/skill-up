@@ -79,6 +79,7 @@ type mockJudgeTestAgent struct {
 	// TimeoutSeconds correctly. ok mirrors ctx.Deadline()'s second return.
 	observedDeadline   time.Time
 	observedDeadlineOK bool
+	lastMessages       []transcript.Message
 }
 
 func (m *mockJudgeTestAgent) Name() string { return "mock-judge-agent" }
@@ -99,8 +100,9 @@ func (m *mockJudgeTestAgent) Check(_ context.Context, _ runtime.Runtime) error {
 
 func (m *mockJudgeTestAgent) CheckCredentials(_ context.Context) error { return nil }
 
-func (m *mockJudgeTestAgent) Run(ctx context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ []transcript.Message) (*agent.SessionResult, error) {
+func (m *mockJudgeTestAgent) Run(ctx context.Context, _ runtime.Runtime, _ agent.ExecOptions, messages []transcript.Message) (*agent.SessionResult, error) {
 	m.observedDeadline, m.observedDeadlineOK = ctx.Deadline()
+	m.lastMessages = messages
 	if m.runDelay > 0 {
 		select {
 		case <-ctx.Done():

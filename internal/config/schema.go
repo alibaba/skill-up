@@ -190,6 +190,7 @@ type JudgeConfig struct {
 	ScriptPath string              `json:"script_path,omitempty"    yaml:"script_path,omitempty"`
 	Model      string              `json:"model,omitempty"          yaml:"model,omitempty"`
 	Criteria   []string            `json:"criteria,omitempty"       yaml:"criteria,omitempty"`
+	Skills     []SkillRef          `json:"skills,omitempty"         yaml:"skills,omitempty"`
 	Context    *JudgeContextConfig `json:"context,omitempty" yaml:"context,omitempty"`
 	// PassThreshold is the minimum pass rate for agent_judge.
 	// Nil means "not configured", so the judge layer applies its default of 0.7.

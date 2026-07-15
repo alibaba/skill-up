@@ -96,7 +96,7 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	}
 
 	errs = append(errs, validateCollectArtifacts("cases.defaults.collect_artifacts", cfg.Cases.Defaults.CollectArtifacts)...)
-	errs = append(errs, validateJudgeContext(cfg.Judge.Context)...)
+	errs = append(errs, validateJudgeTypeAndLocalFields(cfg.Judge)...)
 
 	if len(errs) > 0 {
 		return fmt.Errorf("validation errors:\n  - %s", strings.Join(errs, "\n  - "))
@@ -143,8 +143,8 @@ func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 
 	// validate per-turn judge rules reference valid turn numbers
 	turnsTotal := len(cfg.Input.Turns)
-	if cfg.Judge.Type != "" {
-		errs = append(errs, validateJudgeTypeAndFields(cfg.Judge)...)
+	if judgeNeedsLocalValidation(cfg.Judge) {
+		errs = append(errs, validateJudgeTypeAndLocalFields(cfg.Judge)...)
 	}
 	var allRules []Rule
 	allRules = append(allRules, cfg.Judge.Success...)
@@ -160,27 +160,21 @@ func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 	return nil
 }
 
-// validateJudgeTypeAndFields validates judge type and its conditional fields.
-func validateJudgeTypeAndFields(judge JudgeConfig) []string {
+func judgeNeedsLocalValidation(judge JudgeConfig) bool {
+	return judge.Type != "" || len(judge.Skills) > 0 || judge.Context != nil
+}
+
+// validateJudgeTypeAndLocalFields validates judge fields that do not depend on inheritance.
+func validateJudgeTypeAndLocalFields(judge JudgeConfig) []string {
 	var errs []string
 
 	if judge.Type != "" && !isValidJudgeType(judge.Type) {
 		errs = append(errs, "judge.type must be one of: rule_based, script, agent_judge")
 	}
-
-	// script type requires script_path
-	if judge.Type == judgeTypeScript && judge.ScriptPath == "" {
-		errs = append(errs, "judge.script_path is required when judge.type is script")
+	if len(judge.Skills) > 0 && judge.Type != judgeTypeAgentJudge {
+		errs = append(errs, "judge.skills is only supported when judge.type is agent_judge")
 	}
-
-	// agent_judge type requires model and criteria
-	if judge.Type == judgeTypeAgentJudge && judge.Model == "" {
-		errs = append(errs, "judge.model is required when judge.type is agent_judge")
-	}
-
-	if judge.Type == judgeTypeAgentJudge && len(judge.Criteria) == 0 {
-		errs = append(errs, "judge.criteria is required when judge.type is agent_judge")
-	}
+	errs = append(errs, validateSkillRefs("judge.skills", judge.Skills)...)
 
 	errs = append(errs, validatePassThreshold(judge.PassThreshold)...)
 	errs = append(errs, validateJudgeContext(judge.Context)...)
@@ -189,6 +183,33 @@ func validateJudgeTypeAndFields(judge JudgeConfig) []string {
 		errs = append(errs, "judge.timeout_seconds must be non-negative")
 	}
 
+	return errs
+}
+
+func validateJudgeTypeAndRequiredFields(judge JudgeConfig) []string {
+	errs := validateJudgeTypeAndLocalFields(judge)
+	if judge.Type == judgeTypeScript && judge.ScriptPath == "" {
+		errs = append(errs, "judge.script_path is required when judge.type is script")
+	}
+	if judge.Type == judgeTypeAgentJudge && judge.Model == "" {
+		errs = append(errs, "judge.model is required when judge.type is agent_judge")
+	}
+	if judge.Type == judgeTypeAgentJudge && len(judge.Criteria) == 0 {
+		errs = append(errs, "judge.criteria is required when judge.type is agent_judge")
+	}
+	return errs
+}
+
+func validateSkillRefs(field string, refs []SkillRef) []string {
+	var errs []string
+	for i, ref := range refs {
+		if strings.TrimSpace(ref.Source) == "" {
+			errs = append(errs, fmt.Sprintf("%s[%d].source is required", field, i))
+		}
+		if strings.TrimSpace(ref.Path) == "" {
+			errs = append(errs, fmt.Sprintf("%s[%d].path is required", field, i))
+		}
+	}
 	return errs
 }
 
@@ -293,7 +314,7 @@ func (v *Validator) ValidateAll(result *EvalResult) error {
 	if err := v.ValidateEvalConfig(result.Eval); err != nil {
 		return err
 	}
-	return v.ValidateCases(result.Cases)
+	return v.ValidateCasesWithEvalDefaults(result.Eval, result.Cases)
 }
 
 // ValidateCases validates a set of cases: it rejects duplicate effective IDs
@@ -317,6 +338,40 @@ func (v *Validator) ValidateCases(cases []*CaseConfig) error {
 	}
 
 	return nil
+}
+
+// ValidateCasesWithEvalDefaults validates already-loaded cases and effective
+// judge settings after applying eval-level defaults. Unlike ValidateAll, it
+// does not require eval.cases.files and is therefore suitable for filtered
+// runs and Anthropic evals.json auto mode where cases are loaded directly.
+func (v *Validator) ValidateCasesWithEvalDefaults(eval *EvalConfig, cases []*CaseConfig) error {
+	if err := v.ValidateCases(cases); err != nil {
+		return err
+	}
+	for _, c := range cases {
+		effectiveJudge := mergeJudgeConfigForValidation(eval.Judge, c.Judge)
+		if errs := validateJudgeTypeAndRequiredFields(effectiveJudge); len(errs) > 0 {
+			return fmt.Errorf("case %s: validation errors:\n  - %s", c.ID, strings.Join(errs, "\n  - "))
+		}
+	}
+	return nil
+}
+
+func mergeJudgeConfigForValidation(global, caseLevel JudgeConfig) JudgeConfig {
+	if caseLevel.Type != "" {
+		merged := caseLevel
+		if merged.Model == "" {
+			merged.Model = global.Model
+		}
+		if merged.PassThreshold == nil {
+			merged.PassThreshold = global.PassThreshold
+		}
+		if merged.TimeoutSeconds == nil {
+			merged.TimeoutSeconds = global.TimeoutSeconds
+		}
+		return merged
+	}
+	return global
 }
 
 // duplicateCaseErrors reports duplicate source-file references and duplicate
