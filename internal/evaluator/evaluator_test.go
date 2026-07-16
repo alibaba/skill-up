@@ -1175,6 +1175,125 @@ func TestExecuteCase_ExpectPass_ThenJudge(t *testing.T) {
 	}
 }
 
+func TestExecuteCase_DefaultExpect_AppliedToCase(t *testing.T) {
+	// Test that default expect checks from CaseDefaults are applied
+	e := newTestEvaluator(EvalOptions{
+		Agent: &mockAgent{name: "test", output: "no default keyword"},
+		EvalCfg: &config.EvalConfig{
+			Cases: config.CasesConfig{
+				Defaults: config.CaseDefaults{
+					Expect: config.Expect{
+						MustContain: []string{"default-keyword"},
+					},
+				},
+			},
+		},
+	})
+
+	caseCfg := &config.CaseConfig{
+		ID:    "case-default-expect",
+		Title: "Default Expect Test",
+		Input: config.Input{Prompt: "test"},
+	}
+
+	result := e.executeCase(context.Background(), caseCfg, "with_skill", &mockRuntime{workspace: "/tmp/test"}, nil)
+
+	if result.Status != judge.StatusFail {
+		t.Errorf("expected FAIL status, got %s", result.Status)
+	}
+	if result.ExpectResult == nil {
+		t.Fatal("expected non-nil ExpectResult")
+	}
+	if result.ExpectResult.Passed {
+		t.Error("expected expect check to fail due to default expect")
+	}
+}
+
+func TestExecuteCase_DefaultExpect_MergedWithCaseExpect(t *testing.T) {
+	// Test that default and case-level expects are merged
+	e := newTestEvaluator(EvalOptions{
+		Agent: &mockAgent{name: "test", output: "has default-keyword and case-keyword"},
+		EvalCfg: &config.EvalConfig{
+			Cases: config.CasesConfig{
+				Defaults: config.CaseDefaults{
+					Expect: config.Expect{
+						MustContain: []string{"default-keyword"},
+					},
+				},
+			},
+		},
+	})
+
+	caseCfg := &config.CaseConfig{
+		ID:    "case-merged-expect",
+		Title: "Merged Expect Test",
+		Input: config.Input{Prompt: "test"},
+		Expect: config.Expect{
+			MustContain: []string{"case-keyword"},
+		},
+	}
+
+	result := e.executeCase(context.Background(), caseCfg, "with_skill", &mockRuntime{workspace: "/tmp/test"}, nil)
+
+	if result.Status != judge.StatusPass {
+		t.Errorf("expected PASS status, got %s", result.Status)
+	}
+	if result.ExpectResult == nil {
+		t.Fatal("expected non-nil ExpectResult")
+	}
+	if !result.ExpectResult.Passed {
+		t.Error("expected both default and case expect checks to pass")
+	}
+}
+
+func TestExecuteCase_DefaultExpect_CaseOverridesExitCode(t *testing.T) {
+	// Test that case-level exit_code overrides default
+	exitCode0 := 0
+	exitCode1 := 1
+	
+	e := newTestEvaluator(EvalOptions{
+		Agent: &mockAgent{
+			name: "test",
+			runFunc: func(ctx context.Context, rt runtime.Runtime, opts agent.ExecOptions, messages []transcript.Message) (*agent.SessionResult, error) {
+				return &agent.SessionResult{
+					FinalMessage: "result",
+					ExitCode:     1,
+				}, nil
+			},
+		},
+		EvalCfg: &config.EvalConfig{
+			Cases: config.CasesConfig{
+				Defaults: config.CaseDefaults{
+					Expect: config.Expect{
+						ExitCode: &exitCode0,
+					},
+				},
+			},
+		},
+	})
+
+	caseCfg := &config.CaseConfig{
+		ID:    "case-override-exitcode",
+		Title: "Override Exit Code Test",
+		Input: config.Input{Prompt: "test"},
+		Expect: config.Expect{
+			ExitCode: &exitCode1, // Case expects exit 1, should pass
+		},
+	}
+
+	result := e.executeCase(context.Background(), caseCfg, "with_skill", &mockRuntime{workspace: "/tmp/test"}, nil)
+
+	if result.Status != judge.StatusPass {
+		t.Errorf("expected PASS status (case exit_code overrides default), got %s", result.Status)
+	}
+	if result.ExpectResult == nil {
+		t.Fatal("expected non-nil ExpectResult")
+	}
+	if !result.ExpectResult.Passed {
+		t.Error("expected expect check to pass with case-level exit_code override")
+	}
+}
+
 func TestExecuteCase_RetryPolicyRetriesErrors(t *testing.T) {
 	t.Parallel()
 
