@@ -2569,9 +2569,6 @@ func stringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	if len(a) == 0 && len(b) == 0 {
-		return true
-	}
 	for i := range a {
 		if a[i] != b[i] {
 			return false
@@ -2583,9 +2580,6 @@ func stringSlicesEqual(a, b []string) bool {
 func fileContainsSlicesEqual(a, b []config.FileContainsCheck) bool {
 	if len(a) != len(b) {
 		return false
-	}
-	if len(a) == 0 && len(b) == 0 {
-		return true
 	}
 	for i := range a {
 		if a[i].Path != b[i].Path || a[i].Content != b[i].Content {

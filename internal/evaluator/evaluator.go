@@ -818,8 +818,14 @@ func resolveExpectConfig(expectCfg *config.Expect) *config.Expect {
 // file_contains) are appended and de-duplicated. Scalar fields (exit_code,
 // golden_file) are overridden by the case when set.
 func mergeExpectConfig(defaults, caseExpect *config.Expect) config.Expect {
+	if defaults == nil && caseExpect == nil {
+		return config.Expect{}
+	}
 	if defaults == nil {
 		return *caseExpect
+	}
+	if caseExpect == nil {
+		return *defaults
 	}
 
 	merged := config.Expect{}
