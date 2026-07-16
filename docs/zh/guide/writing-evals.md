@@ -97,6 +97,11 @@ cases:
     collect_artifacts:            # 用 glob 指定要下载的 workspace 产物文件（见下文）
       - "**/*.json"
       - "report/**"
+    expect:                       # 默认 expect 检查，应用于所有用例（见 Expect 章节）
+      exit_code: 0
+      must_not_contain:
+        - "TODO"
+        - "I cannot"
   parallelism: 2                  # 用例并行数，默认 1
   retry_policy:                   # 重试策略
     max_retries: 1
@@ -469,7 +474,45 @@ expect:
     - "output.json"
   files_not_exist:              # 期望这些文件不存在
     - "temp.log"
+  file_contains:                # 文件必须包含特定文本
+    - path: "review.md"
+      content: "security"
+  golden_file: "expected.txt"   # 与黄金文件比对输出
 ```
+
+#### 默认 expect 检查
+
+在 `cases.defaults.expect` 中一次性定义通用的 expect 检查，而不是在每个用例中重复：
+
+```yaml
+# 在 eval.yaml 中
+cases:
+  defaults:
+    expect:
+      exit_code: 0
+      must_not_contain:
+        - "TODO"
+        - "I cannot"
+      files_exist:
+        - "result.json"
+```
+
+每个用例可以添加或覆盖这些默认值：
+
+```yaml
+# 在 case.yaml 中
+expect:
+  must_contain:
+    - "SPECIAL_OK"              # 添加到默认检查
+  exit_code: 1                  # 覆盖默认的 exit_code
+```
+
+**合并语义：**
+
+- **切片字段**（`must_contain`、`must_not_contain`、`files_exist`、`files_not_exist`、`file_contains`）会被**追加**并去重（默认值在前）。
+- **标量字段**（`exit_code`、`golden_file`）在用例层面设置时会**覆盖**默认值。
+- 如果用例未定义 `expect`，则直接使用默认值。
+- 合并后的 expect 在 judge 之前运行；如果合并后的 expect 失败，会跳过 judge 执行。
 
 ### judge: rule_based — 确定性规则评估
 
