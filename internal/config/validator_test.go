@@ -769,7 +769,7 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 	}
 }
 
-// nolint:funlen // table-driven test cases drive the line count; splitting hurts readability.
+// nolint:funlen,maintidx // table-driven test cases drive the line count; splitting hurts readability.
 func TestValidator_ValidateCaseConfig(t *testing.T) {
 	t.Parallel()
 	validator := NewValidator()
@@ -910,6 +910,28 @@ func TestValidator_ValidateCaseConfig(t *testing.T) {
 			errMsg:  "judge.timeout_seconds must be non-negative",
 		},
 		{
+			name: "valid case-level mocked MCP override",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				MCP: MCPConfig{Servers: []MCPServer{
+					{Name: "project-mgmt", Mode: "mocked", ConfigRef: "evals/fixtures/mcp/open.yaml"},
+				}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid case-level filesystem mocked MCP override without config_ref",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				MCP: MCPConfig{Servers: []MCPServer{
+					{Name: "filesystem", Mode: "mocked"},
+				}},
+			},
+			wantErr: false,
+		},
+		{
 			name: "case-level agent_judge with valid context",
 			cfg: &CaseConfig{
 				ID: "test-case",
@@ -932,6 +954,67 @@ func TestValidator_ValidateCaseConfig(t *testing.T) {
 				},
 			},
 			wantErr: false,
+		},
+		{
+			name: "case-level real MCP rejected",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				MCP: MCPConfig{Servers: []MCPServer{
+					{Name: "project-mgmt", Mode: "real"},
+				}},
+			},
+			wantErr: true,
+			errMsg:  "must use mode: mocked",
+		},
+		{
+			name: "case-level MCP missing name",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				MCP: MCPConfig{Servers: []MCPServer{
+					{Mode: "mocked"},
+				}},
+			},
+			wantErr: true,
+			errMsg:  "mcp.servers[0].name is required",
+		},
+		{
+			name: "case-level MCP missing config_ref",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				MCP: MCPConfig{Servers: []MCPServer{
+					{Name: "svc", Mode: "mocked"},
+				}},
+			},
+			wantErr: true,
+			errMsg:  "mocked mode requires config_ref",
+		},
+		{
+			name: "case-level MCP duplicate names",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				MCP: MCPConfig{Servers: []MCPServer{
+					{Name: "svc", Mode: "mocked", ConfigRef: "evals/fixtures/mcp/open.yaml"},
+					{Name: "svc", Mode: "mocked", ConfigRef: "evals/fixtures/mcp/closed.yaml"},
+				}},
+			},
+			wantErr: true,
+			errMsg:  "is duplicated",
+		},
+		{
+			name: "case-level MCP with endpoint rejected",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				MCP: MCPConfig{Servers: []MCPServer{
+					{Name: "svc", Mode: "mocked", Endpoint: "http://localhost:1234"},
+				}},
+			},
+			wantErr: true,
+			errMsg:  "does not support endpoint",
 		},
 		{
 			name: "case-level agent_judge with invalid context profile",

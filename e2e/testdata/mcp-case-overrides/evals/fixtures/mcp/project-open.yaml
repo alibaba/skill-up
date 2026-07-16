@@ -1,0 +1,5 @@
+tool_responses:
+  get_project:
+    default:
+      id: p-001
+      status: OPEN

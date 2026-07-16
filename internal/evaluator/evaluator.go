@@ -968,7 +968,7 @@ func resolveExpectConfig(expectCfg *config.Expect) *config.Expect {
 func (e *defaultEvaluator) prepareRuntimeForCase(ctx context.Context, caseCfg *config.CaseConfig, configName string, ag agent.Agent) (runtime.Runtime, error) {
 	rtCfg := e.evalCfg.Environment.ToRuntimeConfig()
 	rtCfg.Delete = e.deleteWorkspace
-	mcpCfg, mcpEnv, err := e.provisionMCPConfig()
+	mcpCfg, mcpEnv, err := e.provisionMCPConfigForCase(caseCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -1057,6 +1057,32 @@ func (e *defaultEvaluator) provisionMCPConfig() (runtime.MCPConfig, map[string]s
 		return runtime.MCPConfig{}, nil, e.mcpErr
 	}
 	return cloneMCPConfig(e.mcpCfg), maps.Clone(e.mcpEnv), nil
+}
+
+// provisionMCPConfigForCase computes and provisions the effective MCP config
+// for a single case. Cases without case-level overrides reuse the eval-only
+// sync.Once fast path; cases with overrides merge eval- and case-level servers
+// and provision fresh so each case installs isolated mocked fixtures.
+func (e *defaultEvaluator) provisionMCPConfigForCase(caseCfg *config.CaseConfig) (runtime.MCPConfig, map[string]string, error) {
+	if caseCfg == nil || len(caseCfg.MCP.Servers) == 0 {
+		return e.provisionMCPConfig()
+	}
+
+	effectiveMCP, err := config.MergeCaseMCP(e.evalCfg.MCP, caseCfg.MCP)
+	if err != nil {
+		return runtime.MCPConfig{}, nil, fmt.Errorf("case %s: %w", caseCfg.ID, err)
+	}
+
+	skillDir := e.skillDir
+	if e.loader != nil {
+		skillDir = e.loader.SkillDir()
+	}
+	provisioner := mcp.Provisioner{SkillDir: skillDir}
+	mcpCfg, mcpEnv, err := provisioner.Provision(effectiveMCP)
+	if err != nil {
+		return runtime.MCPConfig{}, nil, fmt.Errorf("case %s: failed to provision MCP servers: %w", caseCfg.ID, err)
+	}
+	return mcpCfg, mcpEnv, nil
 }
 
 func mergeEnvMaps(base, override map[string]string) map[string]string {

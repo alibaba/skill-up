@@ -153,11 +153,50 @@ func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 
 	errs = append(errs, validateCollectArtifacts("collect_artifacts", cfg.CollectArtifacts)...)
 
+	errs = append(errs, validateCaseMCP(cfg.MCP)...)
+
 	if len(errs) > 0 {
 		return fmt.Errorf("validation errors:\n  - %s", strings.Join(errs, "\n  - "))
 	}
 
 	return nil
+}
+
+// validateCaseMCP validates case-level MCP overrides. The MVP restricts
+// case-level servers to mocked fixture variation: every server needs a name,
+// must use mode: mocked, must be unique within the case, and must not declare
+// real-server transport fields (transport: http, endpoint, command, args).
+func validateCaseMCP(mcpCfg MCPConfig) []string {
+	var errs []string
+	seen := make(map[string]struct{}, len(mcpCfg.Servers))
+	for i, server := range mcpCfg.Servers {
+		if server.Name == "" {
+			errs = append(errs, fmt.Sprintf("mcp.servers[%d].name is required", i))
+			continue
+		}
+		if _, dup := seen[server.Name]; dup {
+			errs = append(errs, fmt.Sprintf("mcp.servers[%d].name %q is duplicated", i, server.Name))
+			continue
+		}
+		seen[server.Name] = struct{}{}
+
+		if server.Mode != mcpModeMocked {
+			errs = append(errs, fmt.Sprintf("mcp.servers[%d] (%q) must use mode: mocked at case level", i, server.Name))
+		}
+		if server.Mode == mcpModeMocked && server.Name != builtinFilesystemMCPServer && strings.TrimSpace(server.ConfigRef) == "" {
+			errs = append(errs, fmt.Sprintf("mcp.servers[%d] (%q) mocked mode requires config_ref", i, server.Name))
+		}
+		if server.Transport != "" && server.Transport != "stdio" {
+			errs = append(errs, fmt.Sprintf("mcp.servers[%d] (%q) mocked mode only supports stdio transport", i, server.Name))
+		}
+		if server.Endpoint != "" {
+			errs = append(errs, fmt.Sprintf("mcp.servers[%d] (%q) mocked mode does not support endpoint", i, server.Name))
+		}
+		if server.Command != "" || len(server.Args) > 0 {
+			errs = append(errs, fmt.Sprintf("mcp.servers[%d] (%q) mocked mode does not support command/args", i, server.Name))
+		}
+	}
+	return errs
 }
 
 func judgeNeedsLocalValidation(judge JudgeConfig) bool {

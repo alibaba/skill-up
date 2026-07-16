@@ -304,6 +304,12 @@ type CaseConfig struct {
 	Constraints Constraints `yaml:"constraints"`
 	Expect      Expect      `yaml:"expect"`
 	Judge       JudgeConfig `yaml:"judge,omitempty"`
+	// MCP declares case-level MCP server overrides. Servers are merged with
+	// eval-level mcp.servers by name: a same-name entry replaces the whole
+	// eval-level server, and a new name is appended. In the MVP, case-level
+	// servers must use mode: mocked. A case without mcp inherits the eval-level
+	// MCP config unchanged. See internal/config.MergeCaseMCP for the semantics.
+	MCP MCPConfig `yaml:"mcp,omitempty"`
 	// CollectArtifacts lists glob patterns (doublestar syntax) selecting
 	// workspace files to download as artifacts for this case. It is merged
 	// (union, de-duplicated) with cases.defaults.collect_artifacts. See

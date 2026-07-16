@@ -307,6 +307,39 @@ tool_responses:
 
 Environment-variable references support both `${VAR}` and full-value `$VAR` forms; the variable name must match `[A-Za-z_][A-Za-z0-9_]*`. Variables listed in `required_env` are injected into the Agent process; full env-var references inside `headers` are also recorded by name so the Agent can pick the right transport mechanism when installing the MCP server.
 
+#### Per-case mocked MCP overrides
+
+Eval-level `mcp.servers` is the default for every case. A case may declare its own `mcp.servers` to vary the mocked fixture while keeping the same server and tool names (introduced by SUP-0003). Servers are merged by `name`: a case-level entry with a matching name replaces that whole eval-level server, and a new name is appended. A case without `mcp` inherits the eval-level config unchanged.
+
+```yaml
+# eval.yaml — default fixture shared by all cases
+mcp:
+  servers:
+    - name: project-mgmt
+      mode: mocked
+      config_ref: evals/fixtures/mcp/project-default.yaml
+```
+
+```yaml
+# cases/project-open.yaml — same server/tool, different fixture
+id: project-open
+input:
+  prompt: Check the project status and continue the publish plan.
+
+mcp:
+  servers:
+    - name: project-mgmt
+      mode: mocked
+      config_ref: evals/fixtures/mcp/project-open.yaml
+```
+
+Rules and constraints:
+
+- Case-level servers must use `mode: mocked` in the current MVP; real MCP per-case overrides are not yet supported.
+- Replacement is whole-entry, not a field-level merge: provide the full server entry (`name`, `mode`, `config_ref`).
+- `config_ref` is resolved relative to the Skill directory (where `SKILL.md` lives), **not** the case file directory — the same rule as eval-level MCP.
+- Each case provisions and installs its own mocked server, so fixtures stay isolated even when `cases.parallelism > 1`.
+
 ### Choosing a runtime environment
 
 | Environment   | When to use                                       | Example Skills                              |

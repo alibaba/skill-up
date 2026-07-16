@@ -289,6 +289,39 @@ tool_responses:
 
 环境变量引用支持 `${VAR}` 和完整值 `$VAR` 两种形式，变量名必须匹配 `[A-Za-z_][A-Za-z0-9_]*`。`required_env` 会把变量注入 Agent 运行环境；`headers` 中完整的环境变量引用会额外记录变量名，供 Agent 安装 MCP 时选择合适的传递方式。
 
+#### 用例级 mocked MCP 覆盖
+
+eval 级的 `mcp.servers` 是所有用例的默认配置。用例（case）可以声明自己的 `mcp.servers`，在保持相同 MCP Server 名称和工具名称的前提下切换 mocked fixture（由 SUP-0003 引入）。Server 按 `name` 合并：用例级中与 eval 级同名的条目会整体替换该 eval 级 Server，未出现的新名称则追加到末尾。未声明 `mcp` 的用例继承 eval 级配置，行为不变。
+
+```yaml
+# eval.yaml —— 所有用例共享的默认 fixture
+mcp:
+  servers:
+    - name: project-mgmt
+      mode: mocked
+      config_ref: evals/fixtures/mcp/project-default.yaml
+```
+
+```yaml
+# cases/project-open.yaml —— 相同的 Server/工具，不同的 fixture
+id: project-open
+input:
+  prompt: 检查项目状态并继续发布计划。
+
+mcp:
+  servers:
+    - name: project-mgmt
+      mode: mocked
+      config_ref: evals/fixtures/mcp/project-open.yaml
+```
+
+规则与约束：
+
+- 当前 MVP 下用例级 Server 必须使用 `mode: mocked`；暂不支持用例级 real MCP 覆盖。
+- 替换为整条替换，而非字段级合并：需提供完整的 Server 条目（`name`、`mode`、`config_ref`）。
+- `config_ref` 相对于 Skill 目录（`SKILL.md` 所在目录）解析，**不是**相对于用例文件所在目录 —— 与 eval 级 MCP 规则一致。
+- 每个用例独立生成并安装自己的 mocked Server，因此即使 `cases.parallelism > 1`，各用例的 fixture 也彼此隔离。
+
 ### 运行环境选择指南
 
 | 环境类型      | 适用场景                       | 示例 Skill                       |

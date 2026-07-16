@@ -113,6 +113,7 @@ environment:
 - HTTP MCP 可 inline 或 `config_ref` 指向 `evals/fixtures/mcp/*.yaml`。
 - stdio MCP 可配置 `command` / `args`。
 - 环境变量引用：`${VAR}` 或整值 `$VAR`；`required_env` 会注入 Agent 环境。
+- eval 级 `mcp` 是默认配置；用例可在 `cases/*.yaml` 里声明自己的 `mcp.servers`（MVP 仅 `mode: mocked`）按 `name` 整条覆盖同名 Server，从而在相同 Server/工具名下切换 mocked fixture。`config_ref` 仍相对 Skill 目录解析。
 
 ## Engine 与模型
 
