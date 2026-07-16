@@ -88,9 +88,19 @@ expect:
     - "output.json"
   files_not_exist:
     - "temp.log"
+  file_contains:
+    - path: "review.md"
+      content: "security"
+  golden_file: "expected.txt"
 ```
 
 expect 不通过时，judge 会被跳过。用它来快速过滤明显不合格的输出，节省 token。
+
+**与 `cases.defaults.expect` 合并：**
+
+- 如果 `eval.yaml` 的 `cases.defaults.expect` 定义了默认检查（如 `exit_code: 0`, `must_not_contain: ["TODO"]`），每个用例的 expect 会与之合并
+- 切片字段（`must_contain`, `must_not_contain`, `files_exist`, `files_not_exist`, `file_contains`）追加去重；标量字段（`exit_code`, `golden_file`）由用例覆盖
+- 用例未设 expect 时，直接使用默认值
 
 ## 常见写法
 
