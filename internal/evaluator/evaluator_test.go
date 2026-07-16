@@ -1250,7 +1250,7 @@ func TestExecuteCase_DefaultExpect_CaseOverridesExitCode(t *testing.T) {
 	// Test that case-level exit_code overrides default
 	exitCode0 := 0
 	exitCode1 := 1
-	
+
 	e := newTestEvaluator(EvalOptions{
 		Agent: &mockAgent{
 			name: "test",
@@ -2219,6 +2219,7 @@ func TestResolveExpectConfig(t *testing.T) {
 	}
 }
 
+//nolint:funlen // Comprehensive table-driven test with multiple test cases
 func TestMergeExpectConfig(t *testing.T) {
 	t.Parallel()
 
@@ -2389,6 +2390,7 @@ func TestMergeExpectConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := mergeExpectConfig(tt.defaults, tt.caseExp)
 
 			// Compare slices
@@ -2479,6 +2481,7 @@ func TestMergeAndDeduplicate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := mergeAndDeduplicate(tt.a, tt.b)
 			if !stringSlicesEqual(result, tt.expected) {
 				t.Errorf("got %v, want %v", result, tt.expected)
@@ -2552,6 +2555,7 @@ func TestMergeFileContains(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := mergeFileContains(tt.a, tt.b)
 			if !fileContainsSlicesEqual(result, tt.expected) {
 				t.Errorf("got %v, want %v", result, tt.expected)
@@ -2560,7 +2564,7 @@ func TestMergeFileContains(t *testing.T) {
 	}
 }
 
-// Helper functions for test comparisons
+// Helper functions for test comparisons.
 func stringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
