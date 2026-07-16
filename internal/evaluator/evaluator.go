@@ -509,7 +509,11 @@ func (e *defaultEvaluator) runExpectPreCheck(
 	turnsTotal int,
 	result *EvalResult,
 ) bool {
-	expectCfg := resolveExpectConfig(&caseCfg.Expect)
+	// Merge default expect with case-level expect
+	defaultExpect := &e.evalCfg.Cases.Defaults.Expect
+	mergedExpect := mergeExpectConfig(defaultExpect, &caseCfg.Expect)
+
+	expectCfg := resolveExpectConfig(&mergedExpect)
 	if expectCfg == nil {
 		return false
 	}
@@ -807,6 +811,100 @@ func resolveExpectConfig(expectCfg *config.Expect) *config.Expect {
 		return nil
 	}
 	return expectCfg
+}
+
+// mergeExpectConfig merges default expect checks with case-level expect.
+// Slice fields (must_contain, must_not_contain, files_exist, files_not_exist,
+// file_contains) are appended and de-duplicated. Scalar fields (exit_code,
+// golden_file) are overridden by the case when set.
+func mergeExpectConfig(defaults, caseExpect *config.Expect) config.Expect {
+	if defaults == nil {
+		return *caseExpect
+	}
+
+	merged := config.Expect{}
+
+	// Merge slice fields with de-duplication
+	merged.MustContain = mergeAndDeduplicate(defaults.MustContain, caseExpect.MustContain)
+	merged.MustNotContain = mergeAndDeduplicate(defaults.MustNotContain, caseExpect.MustNotContain)
+	merged.FilesExist = mergeAndDeduplicate(defaults.FilesExist, caseExpect.FilesExist)
+	merged.FilesNotExist = mergeAndDeduplicate(defaults.FilesNotExist, caseExpect.FilesNotExist)
+	merged.FileContains = mergeFileContains(defaults.FileContains, caseExpect.FileContains)
+
+	// Scalar fields: case overrides default when set
+	if caseExpect.ExitCode != nil {
+		merged.ExitCode = caseExpect.ExitCode
+	} else {
+		merged.ExitCode = defaults.ExitCode
+	}
+
+	if caseExpect.GoldenFile != "" {
+		merged.GoldenFile = caseExpect.GoldenFile
+	} else {
+		merged.GoldenFile = defaults.GoldenFile
+	}
+
+	return merged
+}
+
+// mergeAndDeduplicate merges two string slices and removes duplicates.
+func mergeAndDeduplicate(a, b []string) []string {
+	if len(a) == 0 && len(b) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]bool)
+	var result []string
+
+	for _, s := range a {
+		if !seen[s] {
+			seen[s] = true
+			result = append(result, s)
+		}
+	}
+
+	for _, s := range b {
+		if !seen[s] {
+			seen[s] = true
+			result = append(result, s)
+		}
+	}
+
+	return result
+}
+
+// mergeFileContains merges two FileContainsCheck slices.
+// Duplicates (same path+content) are removed.
+func mergeFileContains(a, b []config.FileContainsCheck) []config.FileContainsCheck {
+	if len(a) == 0 && len(b) == 0 {
+		return nil
+	}
+
+	type key struct {
+		path    string
+		content string
+	}
+
+	seen := make(map[key]bool)
+	var result []config.FileContainsCheck
+
+	for _, check := range a {
+		k := key{path: check.Path, content: check.Content}
+		if !seen[k] {
+			seen[k] = true
+			result = append(result, check)
+		}
+	}
+
+	for _, check := range b {
+		k := key{path: check.Path, content: check.Content}
+		if !seen[k] {
+			seen[k] = true
+			result = append(result, check)
+		}
+	}
+
+	return result
 }
 
 func (e *defaultEvaluator) prepareRuntimeForCase(ctx context.Context, caseCfg *config.CaseConfig, configName string, ag agent.Agent) (runtime.Runtime, error) {

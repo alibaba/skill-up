@@ -176,6 +176,11 @@ type CaseDefaults struct {
 	// path, regardless of whether the agent succeeded, failed, or timed out.
 	// Per-case CaseConfig.CollectArtifacts is merged (union) on top of this.
 	CollectArtifacts []string `yaml:"collect_artifacts,omitempty"`
+	// Expect provides default expect checks applied to all cases. Per-case
+	// Expect is merged on top: slice fields (must_contain, must_not_contain,
+	// files_exist, files_not_exist, file_contains) are appended; scalar fields
+	// (exit_code, golden_file) are overridden when set at the case level.
+	Expect Expect `yaml:"expect,omitempty"`
 }
 
 // RetryPolicy describes retry behavior.

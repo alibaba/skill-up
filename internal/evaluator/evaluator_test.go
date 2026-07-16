@@ -2100,6 +2100,378 @@ func TestResolveExpectConfig(t *testing.T) {
 	}
 }
 
+func TestMergeExpectConfig(t *testing.T) {
+	t.Parallel()
+
+	exitCode0 := 0
+	exitCode1 := 1
+
+	tests := []struct {
+		name     string
+		defaults *config.Expect
+		caseExp  *config.Expect
+		expected config.Expect
+	}{
+		{
+			name:     "nil defaults returns case expect",
+			defaults: nil,
+			caseExp: &config.Expect{
+				MustContain: []string{"foo"},
+				ExitCode:    &exitCode0,
+			},
+			expected: config.Expect{
+				MustContain: []string{"foo"},
+				ExitCode:    &exitCode0,
+			},
+		},
+		{
+			name: "empty case returns defaults",
+			defaults: &config.Expect{
+				MustContain: []string{"default"},
+				ExitCode:    &exitCode0,
+			},
+			caseExp: &config.Expect{},
+			expected: config.Expect{
+				MustContain: []string{"default"},
+				ExitCode:    &exitCode0,
+			},
+		},
+		{
+			name: "slice fields are appended",
+			defaults: &config.Expect{
+				MustContain:    []string{"default1"},
+				MustNotContain: []string{"bad1"},
+				FilesExist:     []string{"file1.txt"},
+			},
+			caseExp: &config.Expect{
+				MustContain:    []string{"case1"},
+				MustNotContain: []string{"bad2"},
+				FilesExist:     []string{"file2.txt"},
+			},
+			expected: config.Expect{
+				MustContain:    []string{"default1", "case1"},
+				MustNotContain: []string{"bad1", "bad2"},
+				FilesExist:     []string{"file1.txt", "file2.txt"},
+			},
+		},
+		{
+			name: "duplicate strings are removed",
+			defaults: &config.Expect{
+				MustContain: []string{"foo", "bar"},
+				FilesExist:  []string{"a.txt", "b.txt"},
+			},
+			caseExp: &config.Expect{
+				MustContain: []string{"foo", "baz"},
+				FilesExist:  []string{"b.txt", "c.txt"},
+			},
+			expected: config.Expect{
+				MustContain: []string{"foo", "bar", "baz"},
+				FilesExist:  []string{"a.txt", "b.txt", "c.txt"},
+			},
+		},
+		{
+			name: "scalar fields: case overrides default exit_code",
+			defaults: &config.Expect{
+				ExitCode: &exitCode0,
+			},
+			caseExp: &config.Expect{
+				ExitCode: &exitCode1,
+			},
+			expected: config.Expect{
+				ExitCode: &exitCode1,
+			},
+		},
+		{
+			name: "scalar fields: default exit_code when case not set",
+			defaults: &config.Expect{
+				ExitCode: &exitCode0,
+			},
+			caseExp: &config.Expect{},
+			expected: config.Expect{
+				ExitCode: &exitCode0,
+			},
+		},
+		{
+			name: "scalar fields: case golden_file overrides default",
+			defaults: &config.Expect{
+				GoldenFile: "default.txt",
+			},
+			caseExp: &config.Expect{
+				GoldenFile: "case.txt",
+			},
+			expected: config.Expect{
+				GoldenFile: "case.txt",
+			},
+		},
+		{
+			name: "scalar fields: default golden_file when case not set",
+			defaults: &config.Expect{
+				GoldenFile: "default.txt",
+			},
+			caseExp: &config.Expect{},
+			expected: config.Expect{
+				GoldenFile: "default.txt",
+			},
+		},
+		{
+			name: "file_contains merges and deduplicates",
+			defaults: &config.Expect{
+				FileContains: []config.FileContainsCheck{
+					{Path: "a.txt", Content: "foo"},
+					{Path: "b.txt", Content: "bar"},
+				},
+			},
+			caseExp: &config.Expect{
+				FileContains: []config.FileContainsCheck{
+					{Path: "a.txt", Content: "foo"}, // duplicate
+					{Path: "c.txt", Content: "baz"},
+				},
+			},
+			expected: config.Expect{
+				FileContains: []config.FileContainsCheck{
+					{Path: "a.txt", Content: "foo"},
+					{Path: "b.txt", Content: "bar"},
+					{Path: "c.txt", Content: "baz"},
+				},
+			},
+		},
+		{
+			name: "complex merge: all fields",
+			defaults: &config.Expect{
+				MustContain:    []string{"default"},
+				MustNotContain: []string{"bad"},
+				ExitCode:       &exitCode0,
+				FilesExist:     []string{"default.txt"},
+				FilesNotExist:  []string{"bad.txt"},
+				GoldenFile:     "default_golden.txt",
+				FileContains:   []config.FileContainsCheck{{Path: "x.txt", Content: "y"}},
+			},
+			caseExp: &config.Expect{
+				MustContain:   []string{"case"},
+				ExitCode:      &exitCode1,
+				FilesExist:    []string{"case.txt"},
+				FilesNotExist: []string{"unwanted.txt"},
+				FileContains:  []config.FileContainsCheck{{Path: "z.txt", Content: "w"}},
+			},
+			expected: config.Expect{
+				MustContain:    []string{"default", "case"},
+				MustNotContain: []string{"bad"},
+				ExitCode:       &exitCode1, // case overrides
+				FilesExist:     []string{"default.txt", "case.txt"},
+				FilesNotExist:  []string{"bad.txt", "unwanted.txt"},
+				GoldenFile:     "default_golden.txt", // case didn't set, default remains
+				FileContains: []config.FileContainsCheck{
+					{Path: "x.txt", Content: "y"},
+					{Path: "z.txt", Content: "w"},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := mergeExpectConfig(tt.defaults, tt.caseExp)
+
+			// Compare slices
+			if !stringSlicesEqual(result.MustContain, tt.expected.MustContain) {
+				t.Errorf("MustContain: got %v, want %v", result.MustContain, tt.expected.MustContain)
+			}
+			if !stringSlicesEqual(result.MustNotContain, tt.expected.MustNotContain) {
+				t.Errorf("MustNotContain: got %v, want %v", result.MustNotContain, tt.expected.MustNotContain)
+			}
+			if !stringSlicesEqual(result.FilesExist, tt.expected.FilesExist) {
+				t.Errorf("FilesExist: got %v, want %v", result.FilesExist, tt.expected.FilesExist)
+			}
+			if !stringSlicesEqual(result.FilesNotExist, tt.expected.FilesNotExist) {
+				t.Errorf("FilesNotExist: got %v, want %v", result.FilesNotExist, tt.expected.FilesNotExist)
+			}
+
+			// Compare scalars
+			if (result.ExitCode == nil) != (tt.expected.ExitCode == nil) {
+				t.Errorf("ExitCode nil mismatch: got %v, want %v", result.ExitCode, tt.expected.ExitCode)
+			} else if result.ExitCode != nil && *result.ExitCode != *tt.expected.ExitCode {
+				t.Errorf("ExitCode: got %d, want %d", *result.ExitCode, *tt.expected.ExitCode)
+			}
+
+			if result.GoldenFile != tt.expected.GoldenFile {
+				t.Errorf("GoldenFile: got %s, want %s", result.GoldenFile, tt.expected.GoldenFile)
+			}
+
+			// Compare FileContains
+			if !fileContainsSlicesEqual(result.FileContains, tt.expected.FileContains) {
+				t.Errorf("FileContains: got %v, want %v", result.FileContains, tt.expected.FileContains)
+			}
+		})
+	}
+}
+
+func TestMergeAndDeduplicate(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		a        []string
+		b        []string
+		expected []string
+	}{
+		{
+			name:     "both nil",
+			a:        nil,
+			b:        nil,
+			expected: nil,
+		},
+		{
+			name:     "both empty",
+			a:        []string{},
+			b:        []string{},
+			expected: nil,
+		},
+		{
+			name:     "a nil, b has items",
+			a:        nil,
+			b:        []string{"x", "y"},
+			expected: []string{"x", "y"},
+		},
+		{
+			name:     "a has items, b nil",
+			a:        []string{"a", "b"},
+			b:        nil,
+			expected: []string{"a", "b"},
+		},
+		{
+			name:     "no duplicates",
+			a:        []string{"a", "b"},
+			b:        []string{"c", "d"},
+			expected: []string{"a", "b", "c", "d"},
+		},
+		{
+			name:     "with duplicates",
+			a:        []string{"a", "b", "c"},
+			b:        []string{"b", "c", "d"},
+			expected: []string{"a", "b", "c", "d"},
+		},
+		{
+			name:     "all duplicates",
+			a:        []string{"x", "y"},
+			b:        []string{"x", "y"},
+			expected: []string{"x", "y"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := mergeAndDeduplicate(tt.a, tt.b)
+			if !stringSlicesEqual(result, tt.expected) {
+				t.Errorf("got %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestMergeFileContains(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		a        []config.FileContainsCheck
+		b        []config.FileContainsCheck
+		expected []config.FileContainsCheck
+	}{
+		{
+			name:     "both nil",
+			a:        nil,
+			b:        nil,
+			expected: nil,
+		},
+		{
+			name:     "both empty",
+			a:        []config.FileContainsCheck{},
+			b:        []config.FileContainsCheck{},
+			expected: nil,
+		},
+		{
+			name: "no duplicates",
+			a: []config.FileContainsCheck{
+				{Path: "a.txt", Content: "foo"},
+			},
+			b: []config.FileContainsCheck{
+				{Path: "b.txt", Content: "bar"},
+			},
+			expected: []config.FileContainsCheck{
+				{Path: "a.txt", Content: "foo"},
+				{Path: "b.txt", Content: "bar"},
+			},
+		},
+		{
+			name: "exact duplicates",
+			a: []config.FileContainsCheck{
+				{Path: "a.txt", Content: "foo"},
+				{Path: "b.txt", Content: "bar"},
+			},
+			b: []config.FileContainsCheck{
+				{Path: "a.txt", Content: "foo"},
+			},
+			expected: []config.FileContainsCheck{
+				{Path: "a.txt", Content: "foo"},
+				{Path: "b.txt", Content: "bar"},
+			},
+		},
+		{
+			name: "same path different content",
+			a: []config.FileContainsCheck{
+				{Path: "a.txt", Content: "foo"},
+			},
+			b: []config.FileContainsCheck{
+				{Path: "a.txt", Content: "bar"},
+			},
+			expected: []config.FileContainsCheck{
+				{Path: "a.txt", Content: "foo"},
+				{Path: "a.txt", Content: "bar"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := mergeFileContains(tt.a, tt.b)
+			if !fileContainsSlicesEqual(result, tt.expected) {
+				t.Errorf("got %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+// Helper functions for test comparisons
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	if len(a) == 0 && len(b) == 0 {
+		return true
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func fileContainsSlicesEqual(a, b []config.FileContainsCheck) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	if len(a) == 0 && len(b) == 0 {
+		return true
+	}
+	for i := range a {
+		if a[i].Path != b[i].Path || a[i].Content != b[i].Content {
+			return false
+		}
+	}
+	return true
+}
+
 func TestEvalResult_Fields(t *testing.T) {
 	r := EvalResult{
 		CaseID:        "test-case",
