@@ -510,8 +510,8 @@ func (e *defaultEvaluator) runExpectPreCheck(
 	result *EvalResult,
 ) bool {
 	// Merge default expect with case-level expect
-	defaultExpect := &e.evalCfg.Cases.Defaults.Expect
-	mergedExpect := mergeExpectConfig(defaultExpect, &caseCfg.Expect)
+	defaultExpect := e.evalCfg.Cases.Defaults.Expect
+	mergedExpect := mergeExpectConfig(&defaultExpect, &caseCfg.Expect)
 
 	expectCfg := resolveExpectConfig(&mergedExpect)
 	if expectCfg == nil {
