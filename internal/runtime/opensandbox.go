@@ -62,70 +62,12 @@ type openSandboxClient interface {
 
 var createOpenSandbox = createOpenSandboxCompat
 
-func createOpenSandboxCompat(ctx context.Context, cfg opensandbox.ConnectionConfig, opts opensandbox.SandboxCreateOptions) (openSandboxClient, error) {
-	if opts.Image == "" {
-		return nil, errors.New("opensandbox image is required")
-	}
-	entrypoint := opts.Entrypoint
-	if len(entrypoint) == 0 {
-		entrypoint = opensandbox.DefaultEntrypoint
-	}
-	limits := opts.ResourceLimits
-	if limits == nil {
-		limits = opensandbox.DefaultResourceLimits
-	}
-	timeout := opts.TimeoutSeconds
-	if opts.ManualCleanup {
-		timeout = nil
-	} else if timeout == nil {
-		t := opensandbox.DefaultTimeoutSeconds
-		timeout = &t
-	}
-
-	lifecycle := newOpenSandboxLifecycleClient(cfg)
-	created, err := lifecycle.CreateSandbox(ctx, opensandbox.CreateSandboxRequest{
-		Image:          &opensandbox.ImageSpec{URI: opts.Image, Auth: opts.ImageAuth},
-		Entrypoint:     entrypoint,
-		ResourceLimits: limits,
-		Timeout:        timeout,
-		Env:            opts.Env,
-		Metadata:       opts.Metadata,
-		NetworkPolicy:  opts.NetworkPolicy,
-		Volumes:        opts.Volumes,
-		Extensions:     opts.Extensions,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("opensandbox: create sandbox: %w", err)
-	}
-
-	readyOpts := opensandbox.ReadyOptions{
-		Timeout:         opts.ReadyTimeout,
-		PollingInterval: opts.HealthCheckInterval,
-		HealthCheck:     opts.HealthCheck,
-	}
-	sb, err := opensandbox.ConnectSandbox(ctx, cfg, created.ID, readyOpts)
-	if err != nil {
-		_ = lifecycle.DeleteSandbox(context.WithoutCancel(ctx), created.ID)
-		return nil, err
-	}
-	return sb, nil
+var createOpenSandboxSDK = func(ctx context.Context, cfg opensandbox.ConnectionConfig, opts opensandbox.SandboxCreateOptions) (openSandboxClient, error) {
+	return opensandbox.CreateSandbox(ctx, cfg, opts)
 }
 
-func newOpenSandboxLifecycleClient(cfg opensandbox.ConnectionConfig) *opensandbox.LifecycleClient {
-	options := []opensandbox.Option{opensandbox.WithAuthHeader(cfg.GetAuthHeader())}
-	if cfg.HTTPClient != nil {
-		options = append(options, opensandbox.WithHTTPClient(cfg.HTTPClient))
-	}
-	if cfg.GetRequestTimeout() > 0 {
-		options = append(options, opensandbox.WithTimeout(cfg.GetRequestTimeout()))
-	}
-	if len(cfg.Headers) > 0 {
-		options = append(options, opensandbox.WithHeaders(cfg.Headers))
-	}
-	if cfg.Retry != nil {
-		options = append(options, opensandbox.WithRetry(*cfg.Retry))
-	}
-	return opensandbox.NewLifecycleClient(cfg.GetBaseURL()+"/"+opensandbox.APIVersion, cfg.GetAPIKey(), options...)
+func createOpenSandboxCompat(ctx context.Context, cfg opensandbox.ConnectionConfig, opts opensandbox.SandboxCreateOptions) (openSandboxClient, error) {
+	return createOpenSandboxSDK(ctx, cfg, opts)
 }
 
 // OpenSandboxRuntime executes cases in an OpenSandbox remote sandbox.

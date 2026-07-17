@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -53,6 +54,44 @@ func TestNewRuntimeAcceptsOpenSandbox(t *testing.T) {
 func setOpenSandboxTestAuth(t *testing.T) {
 	t.Helper()
 	t.Setenv(openSandboxAPIKeyEnv, "opensandbox-secret")
+}
+
+func TestCreateOpenSandboxCompatDelegatesAllOptionsToSDK(t *testing.T) {
+	origCreateSDK := createOpenSandboxSDK
+	t.Cleanup(func() { createOpenSandboxSDK = origCreateSDK })
+
+	fake := &fakeOpenSandbox{}
+	wantCfg := opensandbox.ConnectionConfig{Domain: "https://sandbox.example.test", APIKey: "secret"}
+	wantOpts := opensandbox.SandboxCreateOptions{
+		Image:          "dockurr/windows:latest",
+		TimeoutSeconds: intPtr(600),
+		Env:            map[string]string{"VERSION": "11"},
+		Metadata:       map[string]string{"case": "windows"},
+		Extensions:     map[string]string{"profile": "windows"},
+		Platform:       &opensandbox.PlatformSpec{OS: opensandbox.OSWindows, Arch: opensandbox.ArchAMD64},
+		ResourceLimits: opensandbox.ResourceLimits{"cpu": "8", "memory": "16Gi", "disk": "128Gi"},
+	}
+
+	var gotCfg opensandbox.ConnectionConfig
+	var gotOpts opensandbox.SandboxCreateOptions
+	createOpenSandboxSDK = func(_ context.Context, cfg opensandbox.ConnectionConfig, opts opensandbox.SandboxCreateOptions) (openSandboxClient, error) {
+		gotCfg, gotOpts = cfg, opts
+		return fake, nil
+	}
+
+	got, err := createOpenSandboxCompat(context.Background(), wantCfg, wantOpts)
+	if err != nil {
+		t.Fatalf("createOpenSandboxCompat: %v", err)
+	}
+	if got != fake {
+		t.Fatalf("client = %T, want fake client", got)
+	}
+	if !reflect.DeepEqual(gotCfg, wantCfg) {
+		t.Fatalf("connection config = %+v, want %+v", gotCfg, wantCfg)
+	}
+	if !reflect.DeepEqual(gotOpts, wantOpts) {
+		t.Fatalf("create options = %+v, want %+v", gotOpts, wantOpts)
+	}
 }
 
 func TestOpenSandboxCreateUsesSDKOptions(t *testing.T) {
