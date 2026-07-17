@@ -3,6 +3,7 @@ package config
 import (
 	"time"
 
+	"github.com/alibaba/skill-up/internal/customengine"
 	"github.com/alibaba/skill-up/internal/runtime"
 )
 
@@ -100,53 +101,8 @@ type EngineConfig struct {
 	// Kwargs carries agent-specific key/value options. Each agent reads only
 	// the keys it understands; unknown keys are ignored. Recognised keys are
 	// documented per agent (e.g. codex honours "bypass_sandbox").
-	Kwargs map[string]string   `yaml:"kwargs,omitempty"`
-	Custom *CustomEngineConfig `yaml:"custom,omitempty"`
-}
-
-// CustomEngineConfig describes a user-defined agent engine that is not a
-// built-in agent. It is read only when engine.name does not match a built-in
-// agent. See docs/design/custom-engine.md for the full contract.
-type CustomEngineConfig struct {
-	Transport      string             `yaml:"transport"` // local, http
-	TimeoutSeconds int                `yaml:"timeout_seconds,omitempty"`
-	ResponseFormat string             `yaml:"response_format,omitempty"` // session_result (default), text
-	Env            map[string]string  `yaml:"env,omitempty"`
-	Kwargs         map[string]string  `yaml:"kwargs,omitempty"`
-	Local          *CustomLocalConfig `yaml:"local,omitempty"`
-	HTTP           *CustomHTTPConfig  `yaml:"http,omitempty"`
-}
-
-// CustomLocalConfig configures the local transport: a command executed inside
-// the current runtime via runtime.Exec.
-type CustomLocalConfig struct {
-	Command    string   `yaml:"command"`
-	Args       []string `yaml:"args,omitempty"`
-	Cwd        string   `yaml:"cwd,omitempty"`
-	InputFile  string   `yaml:"input_file,omitempty"`
-	OutputFile string   `yaml:"output_file,omitempty"`
-}
-
-// CustomHTTPConfig configures the http transport: a remote or local HTTP agent
-// service. JSON request/response and multipart file upload (Files) are
-// implemented; URL artifact download in the result is a follow-up.
-type CustomHTTPConfig struct {
-	URL     string            `yaml:"url"`
-	Method  string            `yaml:"method,omitempty"` // POST
-	Headers map[string]string `yaml:"headers,omitempty"`
-	Files   []CustomHTTPFile  `yaml:"files,omitempty"`
-	// RequestBody is an arbitrary YAML value: a map, a sequence, or a scalar
-	// such as `request_body: ${session_input}`. It is rendered by the http
-	// transport (see renderBodyValue), which injects ${session_input} /
-	// ${messages} / ${kwargs} as JSON structures. Declared as `any` so yaml.v3
-	// can unmarshal a top-level scalar, not only a map.
-	RequestBody any `yaml:"request_body,omitempty"`
-}
-
-// CustomHTTPFile declares a workspace file (or glob) uploaded with an HTTP request.
-type CustomHTTPFile struct {
-	Path     string `yaml:"path"`
-	Required *bool  `yaml:"required,omitempty"` // defaults to true
+	Kwargs map[string]string    `yaml:"kwargs,omitempty"`
+	Custom *customengine.Config `yaml:"custom,omitempty"`
 }
 
 // ModelConfig describes the model to use.

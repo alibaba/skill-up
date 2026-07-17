@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	"github.com/alibaba/skill-up/internal/customengine"
 )
 
 // sensitiveEnvNamePattern matches environment variable names that look like
@@ -269,7 +271,7 @@ func resolveStringMapEnvWith(field string, m map[string]string, resolveFn func(s
 // resolveLocalEnv resolves the engine.custom.local fields. command, args, cwd
 // and the I/O paths all become (or are logged as part of) a command line, so
 // they reject secret-like references.
-func resolveLocalEnv(l *CustomLocalConfig) []string {
+func resolveLocalEnv(l *customengine.LocalConfig) []string {
 	var errs []string
 	errs = append(errs, resolveScalarEnvStrict("local.command", &l.Command)...)
 	errs = append(errs, resolveScalarEnvStrict("local.cwd", &l.Cwd)...)
@@ -287,7 +289,7 @@ func resolveLocalEnv(l *CustomLocalConfig) []string {
 }
 
 // resolveHTTPEnv resolves the engine.custom.http fields.
-func resolveHTTPEnv(h *CustomHTTPConfig) []string {
+func resolveHTTPEnv(h *customengine.HTTPConfig) []string {
 	var errs []string
 	errs = append(errs, resolveScalarEnv("http.url", &h.URL)...)
 	errs = append(errs, resolveScalarEnv("http.method", &h.Method)...)
@@ -475,7 +477,7 @@ func resolveEnvRefsWith(s string, rejectSecrets bool) (string, error) {
 //
 //revive:disable-next-line:flag-parameter
 func resolveEnvToken(inner string, rejectSecrets bool) (value string, leaveIntact bool, err error) {
-	tok := ParseTemplateToken(inner)
+	tok := customengine.ParseTemplateToken(inner)
 
 	if IsBuiltinTemplateVar(tok.Name) {
 		if rejectSecrets && isSensitiveTemplateVar(tok.Name) {

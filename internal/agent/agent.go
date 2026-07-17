@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/credential"
+	"github.com/alibaba/skill-up/internal/customengine"
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/observability"
 	"github.com/alibaba/skill-up/internal/platform"
@@ -117,7 +117,7 @@ type Config struct {
 	Kwargs map[string]string
 	// Custom carries the custom engine configuration when Name does not match
 	// a built-in agent. It is nil for built-in agents.
-	Custom *config.CustomEngineConfig
+	Custom *customengine.Config
 }
 
 // Runtime is an alias for runtime.Runtime for agent package convenience.

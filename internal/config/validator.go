@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"path"
 	"regexp"
-	"slices"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
 
 	"github.com/alibaba/skill-up/internal/agentkind"
+	"github.com/alibaba/skill-up/internal/customengine"
 )
 
 // Judge type constants.
@@ -492,7 +492,7 @@ func validateEngine(engine EngineConfig) []string {
 	return validateCustomEngine(engine.Custom)
 }
 
-func validateCustomEngine(custom *CustomEngineConfig) []string {
+func validateCustomEngine(custom *customengine.Config) []string {
 	var errs []string
 
 	// Both the local and http transports are implemented (JSON request/response
@@ -535,8 +535,8 @@ func validateCustomEngine(custom *CustomEngineConfig) []string {
 
 // validateCustomHTTP validates the engine.custom.http block: url is required,
 // method must be POST, and each files[].path must be a workspace-relative path
-// or glob. URL artifact download in the result is a follow-up.
-func validateCustomHTTP(h *CustomHTTPConfig) []string {
+// or glob.
+func validateCustomHTTP(h *customengine.HTTPConfig) []string {
 	if h == nil {
 		return []string{"engine.custom.http.url is required when transport is http"}
 	}
@@ -548,20 +548,12 @@ func validateCustomHTTP(h *CustomHTTPConfig) []string {
 		errs = append(errs, fmt.Sprintf("engine.custom.http.method must be POST (got %q)", h.Method))
 	}
 	for i := range h.Files {
-		if p := h.Files[i].Path; !WorkspaceRelPathSafe(p) {
+		if p := h.Files[i].Path; !customengine.WorkspaceRelPathSafe(p) {
 			errs = append(errs, fmt.Sprintf(
 				"engine.custom.http.files[%d].path %q must be a non-empty relative path inside the workspace (no leading / or ..)", i, p))
 		}
 	}
 	return errs
-}
-
-// WorkspaceRelPathSafe reports whether p is a non-empty, workspace-relative
-// path or glob: not absolute and with no ".." segment. It is shared by config
-// validation and the http transport's file expansion so both apply the same
-// rule (agent imports config).
-func WorkspaceRelPathSafe(p string) bool {
-	return p != "" && !strings.HasPrefix(p, "/") && !slices.Contains(strings.Split(p, "/"), "..")
 }
 
 func isValidRuntimeType(t string) bool {

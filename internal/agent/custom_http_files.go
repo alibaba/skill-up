@@ -12,7 +12,7 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 
-	"github.com/alibaba/skill-up/internal/config"
+	"github.com/alibaba/skill-up/internal/customengine"
 )
 
 // maxHTTPUploadBytes caps the total size of files uploaded in a single
@@ -24,7 +24,7 @@ const maxHTTPUploadBytes = 256 * 1024 * 1024
 // carrying the rendered JSON request body, plus one `files` part per matched
 // workspace file (the part filename is the workspace-relative path). It returns
 // the body bytes and the multipart Content-Type (which carries the boundary).
-func (t *httpTransport) buildMultipartBody(ctx context.Context, rt Runtime, h *config.CustomHTTPConfig, payload []byte) ([]byte, string, error) {
+func (t *httpTransport) buildMultipartBody(ctx context.Context, rt Runtime, h *customengine.HTTPConfig, payload []byte) ([]byte, string, error) {
 	relPaths, err := expandHTTPFiles(ctx, rt, h.Files)
 	if err != nil {
 		return nil, "", err
@@ -101,7 +101,7 @@ func addFilePart(ctx context.Context, rt Runtime, mw *multipart.Writer, rel stri
 // and .git). With required (the default), an entry that matches nothing is an
 // error; with required:false it is skipped. Results are deduplicated and sorted
 // for a deterministic request.
-func expandHTTPFiles(ctx context.Context, rt Runtime, files []config.CustomHTTPFile) ([]string, error) {
+func expandHTTPFiles(ctx context.Context, rt Runtime, files []customengine.HTTPFile) ([]string, error) {
 	listing, err := listWorkspaceFiles(ctx, rt)
 	if err != nil {
 		return nil, fmt.Errorf("http.files: list workspace: %w", err)
@@ -114,7 +114,7 @@ func expandHTTPFiles(ctx context.Context, rt Runtime, files []config.CustomHTTPF
 	seen := make(map[string]bool)
 	var out []string
 	for i, f := range files {
-		if !config.WorkspaceRelPathSafe(f.Path) {
+		if !customengine.WorkspaceRelPathSafe(f.Path) {
 			return nil, fmt.Errorf(
 				"engine.custom.http.files[%d].path %q must be a non-empty relative path inside the workspace", i, f.Path)
 		}
@@ -183,7 +183,7 @@ func listWorkspaceFiles(ctx context.Context, rt Runtime) ([]string, error) {
 		// can never reach DownloadFile, regardless of how find behaves. Also drop
 		// names with a CR/LF — they cannot be safely written into a multipart
 		// Content-Disposition filename (header corruption / injection).
-		if rel != "" && config.WorkspaceRelPathSafe(rel) && !strings.ContainsAny(rel, "\r\n") {
+		if rel != "" && customengine.WorkspaceRelPathSafe(rel) && !strings.ContainsAny(rel, "\r\n") {
 			files = append(files, rel)
 		}
 	}
