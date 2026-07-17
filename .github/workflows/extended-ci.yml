@@ -186,7 +186,7 @@ jobs:
           cat > "$config" <<EOF
           [server]
           host = "127.0.0.1"
-          port = 8081
+          port = 8080
           api_key = "$api_key"
 
           [runtime]
@@ -291,7 +291,7 @@ jobs:
           cat > "$config" <<EOF
           [server]
           host = "127.0.0.1"
-          port = 8080
+          port = 8081
           api_key = "$api_key"
 
           [runtime]
