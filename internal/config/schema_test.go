@@ -3,6 +3,8 @@ package config
 import (
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestDefaultEvalConfig(t *testing.T) { //nolint:cyclop,gocyclo // exhaustive default-config field assertions
@@ -114,6 +116,51 @@ func TestEnvironmentToRuntimeConfig_OpenSandboxFields(t *testing.T) {
 	}
 	if rtCfg.Kwargs["extensions"] != `{"template":"basic"}` || rtCfg.Metadata["case"] != "one" {
 		t.Fatalf("runtime config maps mismatch: kwargs=%v metadata=%v", rtCfg.Kwargs, rtCfg.Metadata)
+	}
+}
+
+func TestEnvironmentToRuntimeConfig_PlatformAndResources(t *testing.T) {
+	t.Parallel()
+
+	rtCfg := Environment{
+		Type:      "opensandbox",
+		Platform:  &Platform{OS: " windows ", Arch: " amd64 "},
+		Resources: &Resources{CPU: " 8 ", Memory: " 16Gi ", Disk: " 128Gi "},
+	}.ToRuntimeConfig()
+
+	if rtCfg.Platform == nil || rtCfg.Platform.OS != "windows" || rtCfg.Platform.Arch != "amd64" {
+		t.Fatalf("runtime config platform mismatch: %+v", rtCfg.Platform)
+	}
+	if rtCfg.Resources == nil || rtCfg.Resources.CPU != "8" || rtCfg.Resources.Memory != "16Gi" || rtCfg.Resources.Disk != "128Gi" {
+		t.Fatalf("runtime config resources mismatch: %+v", rtCfg.Resources)
+	}
+}
+
+func TestEnvironmentPlatformAndResourcesYAML(t *testing.T) {
+	t.Parallel()
+
+	var cfg EvalConfig
+	err := yaml.Unmarshal([]byte(`
+schema_version: v1alpha1
+environment:
+  type: opensandbox
+  image: dockurr/windows:latest
+  platform:
+    os: windows
+    arch: amd64
+  resources:
+    cpu: "8"
+    memory: 16Gi
+    disk: 128Gi
+`), &cfg)
+	if err != nil {
+		t.Fatalf("unmarshal eval config: %v", err)
+	}
+	if cfg.Environment.Platform == nil || *cfg.Environment.Platform != (Platform{OS: "windows", Arch: "amd64"}) {
+		t.Fatalf("Environment.Platform = %+v", cfg.Environment.Platform)
+	}
+	if cfg.Environment.Resources == nil || *cfg.Environment.Resources != (Resources{CPU: "8", Memory: "16Gi", Disk: "128Gi"}) {
+		t.Fatalf("Environment.Resources = %+v", cfg.Environment.Resources)
 	}
 }
 

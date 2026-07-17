@@ -166,6 +166,8 @@ type SetupStep struct {
 type Config struct {
 	Type           string
 	Image          string
+	Platform       *Platform
+	Resources      *Resources
 	WorkspaceMount string
 	Env            map[string]string
 	SetupSteps     []SetupStep
@@ -185,6 +187,21 @@ type Config struct {
 	SkillPath string
 
 	Delete bool
+}
+
+// Platform selects the target operating system and architecture for a remote
+// runtime. It is currently supported by OpenSandbox.
+type Platform struct {
+	OS   string
+	Arch string
+}
+
+// Resources overrides the CPU, memory, and disk limits for a remote runtime.
+// Empty fields inherit the runtime profile's defaults.
+type Resources struct {
+	CPU    string
+	Memory string
+	Disk   string
 }
 
 // MCPServerConfig describes a single MCP server available to a runtime.
