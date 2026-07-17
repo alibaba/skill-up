@@ -163,7 +163,7 @@ func planWindowsScript(scriptPath string, shell platform.Shell) (scriptPlan, err
 				// keep EVAL_TRANSCRIPT_PATH in that form (see envPath
 				// below) so POSIX tools inside the script can `cat` it.
 				args := append([]string{}, bashArgs...)
-				args = append(args, quote(filepath.ToSlash(remoteScript)))
+				args = append(args, quote(windowsPathToSlash(remoteScript)))
 				return strings.Join(args, " ")
 			},
 			// Stay inside bash for cleanup too. The .sh case already runs
@@ -172,9 +172,9 @@ func planWindowsScript(scriptPath string, shell platform.Shell) (scriptPlan, err
 			// `rm -rf <forward-slash dir>` avoids the bash -> cmd hop the
 			// other extensions go through.
 			cleanupCommand: func(dir string) string {
-				return "rm -rf " + quote(filepath.ToSlash(dir))
+				return "rm -rf " + quote(windowsPathToSlash(dir))
 			},
-			envPath: filepath.ToSlash,
+			envPath: windowsPathToSlash,
 		}, nil
 	default:
 		return scriptPlan{}, fmt.Errorf(
@@ -186,20 +186,24 @@ func planWindowsScript(scriptPath string, shell platform.Shell) (scriptPlan, err
 
 // judgeTempDir returns an absolute temporary directory for a single script
 // judge run, appropriate for the target OS.
-func judgeTempDir(targetGOOS string) string {
+func judgeTempDir(targetGOOS, workspace string) string {
 	name := fmt.Sprintf("skill-up-judge-%d", time.Now().UnixNano())
 	if targetGOOS == platform.GOOSWindows {
-		return filepath.Join(os.TempDir(), name)
+		return joinForGOOS(targetGOOS, workspace, ".skill-up", "tmp", name)
 	}
-	return path.Join("/tmp", name)
+	return path.Join(workspace, ".skill-up", "tmp", name)
 }
 
 // joinForGOOS joins path elements using the separator of the target OS.
 func joinForGOOS(targetGOOS string, elem ...string) string {
 	if targetGOOS == platform.GOOSWindows {
-		return filepath.Join(elem...)
+		return strings.ReplaceAll(path.Join(strings.ReplaceAll(strings.Join(elem, "/"), `\`, "/")), "/", `\`)
 	}
 	return path.Join(elem...)
+}
+
+func windowsPathToSlash(value string) string {
+	return strings.ReplaceAll(value, `\`, "/")
 }
 
 // shebangPOSIXShells lists interpreter basenames that the Windows planner

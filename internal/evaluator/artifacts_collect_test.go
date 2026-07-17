@@ -5,9 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/alibaba/skill-up/internal/config"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 )
 
@@ -29,6 +31,30 @@ func TestResolveCollectArtifacts(t *testing.T) {
 
 	if got := resolveCollectArtifacts(&config.EvalConfig{}, &config.CaseConfig{}); len(got) != 0 {
 		t.Fatalf("expected empty result, got %v", got)
+	}
+}
+
+func TestListWorkspaceFilesUsesWindowsGuestCommand(t *testing.T) {
+	var gotCommand string
+	rt := &mockRuntime{
+		workspace: `C:\workspace`,
+		shell:     platform.Shell{GOOS: platform.GOOSWindows, Family: platform.ShellCmd},
+		execFunc: func(_ context.Context, command string, _ runtime.ExecOptions) (runtime.ExecResult, error) {
+			gotCommand = command
+			return runtime.ExecResult{Stdout: "out\\result.json\r\nnotes.txt\r\n"}, nil
+		},
+	}
+
+	got, err := listWorkspaceFiles(context.Background(), rt)
+	if err != nil {
+		t.Fatalf("listWorkspaceFiles: %v", err)
+	}
+	if !strings.Contains(gotCommand, "Get-ChildItem") {
+		t.Fatalf("Windows command = %q", gotCommand)
+	}
+	want := []string{"out/result.json", "notes.txt"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("files = %#v, want %#v", got, want)
 	}
 }
 

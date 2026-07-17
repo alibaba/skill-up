@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -25,6 +25,7 @@ import (
 
 const (
 	openSandboxDefaultWorkspace = "/workspace"
+	openSandboxWindowsWorkspace = `C:\workspace`
 	// openSandboxDefaultImage is intentionally empty: users must supply a
 	// concrete image via environment.image / environment.sandbox_template or
 	// the config schema. Shipping a vendor-specific default leaks internal
@@ -41,6 +42,12 @@ const (
 )
 
 const openSandboxDefaultFileTransferParallelism = 8
+
+var openSandboxWindowsDefaultResources = opensandbox.ResourceLimits{
+	"cpu":    "4",
+	"memory": "8Gi",
+	"disk":   "64Gi",
+}
 
 // openSandboxUploadBatchSize caps how many files a single UploadFiles request
 // carries. It bounds the open file descriptors held per batch so uploading a
@@ -83,11 +90,18 @@ type OpenSandboxRuntime struct {
 
 // NewOpenSandboxRuntime creates a new OpenSandboxRuntime with the given config.
 func NewOpenSandboxRuntime(cfg Config) (*OpenSandboxRuntime, error) {
-	workspace := cfg.WorkspaceMount
+	workspace := strings.TrimSpace(cfg.WorkspaceMount)
+	paths := targetPathFor(targetGOOS(cfg))
 	if workspace == "" {
-		workspace = openSandboxDefaultWorkspace
+		if targetGOOS(cfg) == platform.GOOSWindows {
+			workspace = openSandboxWindowsWorkspace
+		} else {
+			workspace = openSandboxDefaultWorkspace
+		}
+	} else if !paths.isAbs(workspace) {
+		return nil, fmt.Errorf("opensandbox workspace_mount must be an absolute %s guest path, got %q", targetGOOS(cfg), workspace)
 	}
-	return &OpenSandboxRuntime{cfg: cfg, workspace: cleanRemotePath(workspace)}, nil
+	return &OpenSandboxRuntime{cfg: cfg, workspace: paths.clean(workspace)}, nil
 }
 
 // Create provisions the sandbox environment and creates the runtime workspace.
@@ -115,6 +129,8 @@ func (r *OpenSandboxRuntime) Create(ctx context.Context) error {
 	sb, err := createOpenSandbox(ctx, r.connectionConfig(), opensandbox.SandboxCreateOptions{
 		Image:          image,
 		Entrypoint:     r.entrypoint(),
+		Platform:       r.platformSpec(),
+		ResourceLimits: r.resourceLimits(),
 		TimeoutSeconds: durationSecondsPtr(r.cfg.SandboxTimeout),
 		Env:            r.cfg.Env,
 		Metadata:       r.cfg.Metadata,
@@ -191,9 +207,13 @@ func (r *OpenSandboxRuntime) UploadFile(ctx context.Context, sourcePath, targetP
 	if err := r.ensureCreated(); err != nil {
 		return err
 	}
-	target := r.remotePath(targetPath)
-	if err := r.ensureDirectory(ctx, path.Dir(target), 755); err != nil {
-		return fmt.Errorf("failed to create target directory %s: %w", path.Dir(target), err)
+	target, err := r.remotePath(targetPath)
+	if err != nil {
+		return err
+	}
+	targetDir := r.paths().dir(target)
+	if err := r.ensureDirectory(ctx, targetDir, 755); err != nil {
+		return fmt.Errorf("failed to create target directory %s: %w", targetDir, err)
 	}
 	return r.uploadFiles(ctx, []uploadItem{{source: sourcePath, target: target}})
 }
@@ -203,8 +223,11 @@ func (r *OpenSandboxRuntime) UploadDir(ctx context.Context, sourceDir, targetDir
 	if err := r.ensureCreated(); err != nil {
 		return err
 	}
-	targetRoot := r.remotePath(targetDir)
-	items, dirs, err := collectUploadItems(sourceDir, targetRoot)
+	targetRoot, err := r.remotePath(targetDir)
+	if err != nil {
+		return err
+	}
+	items, dirs, err := collectUploadItems(sourceDir, targetRoot, r.paths())
 	if err != nil {
 		return fmt.Errorf("failed to walk source directory %s: %w", sourceDir, err)
 	}
@@ -219,7 +242,7 @@ type uploadItem struct {
 	target string
 }
 
-func collectUploadItems(sourceDir, targetRoot string) ([]uploadItem, []string, error) {
+func collectUploadItems(sourceDir, targetRoot string, paths targetPath) ([]uploadItem, []string, error) {
 	var items []uploadItem
 	dirs := []string{targetRoot}
 	err := filepath.Walk(sourceDir, func(localPath string, info os.FileInfo, walkErr error) error {
@@ -233,7 +256,7 @@ func collectUploadItems(sourceDir, targetRoot string) ([]uploadItem, []string, e
 		if rel == "." {
 			return nil
 		}
-		remotePath := path.Join(targetRoot, filepath.ToSlash(rel))
+		remotePath := paths.join(targetRoot, filepath.ToSlash(rel))
 		if info.IsDir() {
 			dirs = append(dirs, remotePath)
 			return nil
@@ -304,7 +327,10 @@ func (r *OpenSandboxRuntime) DownloadFile(ctx context.Context, sourcePath, targe
 	if err := r.ensureCreated(); err != nil {
 		return err
 	}
-	source := r.remotePath(sourcePath)
+	source, err := r.remotePath(sourcePath)
+	if err != nil {
+		return err
+	}
 	return r.downloadRemoteFile(ctx, source, targetPath, 0)
 }
 
@@ -338,7 +364,10 @@ func (r *OpenSandboxRuntime) DownloadDir(ctx context.Context, sourceDir, targetD
 	if err := r.ensureCreated(); err != nil {
 		return err
 	}
-	source := r.remotePath(sourceDir)
+	source, err := r.remotePath(sourceDir)
+	if err != nil {
+		return err
+	}
 	files, err := r.sandbox.SearchFiles(ctx, source, "**")
 	if err != nil {
 		return fmt.Errorf("failed to search sandbox directory %s: %w", source, err)
@@ -406,14 +435,14 @@ func (r *OpenSandboxRuntime) downloadFiles(ctx context.Context, source, targetDi
 }
 
 func (r *OpenSandboxRuntime) downloadSearchResult(ctx context.Context, source, targetDir string, file opensandbox.FileInfo) error {
-	rel, err := remoteRelativePath(source, file.Path)
+	rel, err := r.paths().relative(source, file.Path)
 	if err != nil {
 		return err
 	}
 	if rel == "." {
 		return nil
 	}
-	targetPath, err := safeLocalTarget(targetDir, rel)
+	targetPath, err := safeLocalTarget(targetDir, r.paths().toSlash(rel))
 	if err != nil {
 		return err
 	}
@@ -429,10 +458,14 @@ func (r *OpenSandboxRuntime) Exec(ctx context.Context, command string, opts Exec
 	defer span.End()
 	startTime := time.Now()
 	env := mergeEnvMaps(r.cfg.Env, opts.Env)
+	cwd, err := r.execCwd(opts.Cwd)
+	if err != nil {
+		return ExecResult{}, err
+	}
 
 	req := opensandbox.RunCommandRequest{
 		Command: command,
-		Cwd:     r.execCwd(opts.Cwd),
+		Cwd:     cwd,
 		Timeout: int64(opts.TimeoutSec) * 1000,
 		Envs:    env,
 	}
@@ -500,9 +533,11 @@ func (r *OpenSandboxRuntime) MergeEnv(env map[string]string) {
 	mergeIntoEnvBaseline(&r.cfg.Env, env)
 }
 
-// Shell reports the POSIX command language used by the current Linux
-// OpenSandbox profile. A future Windows profile must return its target shell.
+// Shell reports the command language used by the configured guest platform.
 func (r *OpenSandboxRuntime) Shell() platform.Shell {
+	if targetGOOS(r.cfg) == platform.GOOSWindows {
+		return platform.Shell{GOOS: platform.GOOSWindows, Family: platform.ShellCmd}
+	}
 	return platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
 }
 
@@ -561,8 +596,48 @@ func (r *OpenSandboxRuntime) entrypoint() []string {
 	if len(r.cfg.Entrypoint) > 0 {
 		return r.cfg.Entrypoint
 	}
+	if targetGOOS(r.cfg) == platform.GOOSWindows {
+		return nil
+	}
 	// The sandbox joins entrypoint items with " && ", so the default must stay a single shell line.
 	return []string{"tail -F /dev/null"}
+}
+
+func targetGOOS(cfg Config) string {
+	if cfg.Platform == nil || strings.TrimSpace(cfg.Platform.OS) == "" {
+		return platform.GOOSLinux
+	}
+	return strings.ToLower(strings.TrimSpace(cfg.Platform.OS))
+}
+
+func (r *OpenSandboxRuntime) platformSpec() *opensandbox.PlatformSpec {
+	if r.cfg.Platform == nil {
+		return nil
+	}
+	return &opensandbox.PlatformSpec{
+		OS:   opensandbox.PlatformOS(strings.ToLower(strings.TrimSpace(r.cfg.Platform.OS))),
+		Arch: opensandbox.PlatformArch(strings.ToLower(strings.TrimSpace(r.cfg.Platform.Arch))),
+	}
+}
+
+func (r *OpenSandboxRuntime) resourceLimits() opensandbox.ResourceLimits {
+	var limits opensandbox.ResourceLimits
+	if targetGOOS(r.cfg) == platform.GOOSWindows {
+		limits = maps.Clone(openSandboxWindowsDefaultResources)
+	} else if r.cfg.Resources != nil {
+		limits = maps.Clone(opensandbox.DefaultResourceLimits)
+	}
+	if r.cfg.Resources == nil {
+		return limits
+	}
+	for key, value := range map[string]string{
+		"cpu": r.cfg.Resources.CPU, "memory": r.cfg.Resources.Memory, "disk": r.cfg.Resources.Disk,
+	} {
+		if value = strings.TrimSpace(value); value != "" {
+			limits[key] = value
+		}
+	}
+	return limits
 }
 
 func (r *OpenSandboxRuntime) networkPolicy() *opensandbox.NetworkPolicy {
@@ -616,10 +691,10 @@ func (r *OpenSandboxRuntime) ensureDirectory(ctx context.Context, dir string, mo
 	if err == nil {
 		return nil
 	}
-	quoted := shellquote.QuotePOSIX(dir)
-	result, execErr := r.runCommand(ctx, "/", "mkdir -p "+quoted+" && test -d "+quoted+" && test -w "+quoted, 30)
+	command, cwd := r.directoryFallback(dir)
+	result, execErr := r.runCommand(ctx, cwd, command, 30)
 	if execErr != nil {
-		return err
+		return fmt.Errorf("%w; shell verification failed: %w", err, execErr)
 	}
 	if result.ExitCode == 0 {
 		logging.WarnContextf(ctx, "OpenSandboxRuntime: directory API failed for %s, continuing after shell verification: %v", dir, err)
@@ -632,26 +707,43 @@ func (r *OpenSandboxRuntime) ensureDirectory(ctx context.Context, dir string, mo
 }
 
 func (r *OpenSandboxRuntime) ensureDirectories(ctx context.Context, dirs []string) error {
-	if len(dirs) == 0 {
-		return nil
-	}
-	var command strings.Builder
-	command.WriteString("mkdir -p")
 	for _, dir := range dirs {
-		command.WriteByte(' ')
-		command.WriteString(shellquote.QuotePOSIX(dir))
+		if err := r.ensureDirectory(ctx, dir, 755); err != nil {
+			return err
+		}
 	}
-	result, err := r.runCommand(ctx, "/", command.String(), 30)
-	if err != nil {
-		return fmt.Errorf("mkdir -p failed: %w", err)
+	return nil
+}
+
+func (r *OpenSandboxRuntime) directoryFallback(dir string) (command, cwd string) {
+	if targetGOOS(r.cfg) != platform.GOOSWindows {
+		quoted := shellquote.QuotePOSIX(dir)
+		return "mkdir -p " + quoted + " && test -d " + quoted + " && test -w " + quoted, "/"
 	}
-	if result.ExitCode == 0 {
-		return nil
+
+	paths := r.paths()
+	probe := paths.join(dir, ".skill-up-write-probe")
+	nul := paths.join(dir, "NUL")
+	quotedDir := quoteCmdPath(dir)
+	quotedNUL := quoteCmdPath(nul)
+	quotedProbe := quoteCmdPath(probe)
+	command = "if not exist " + quotedNUL + " mkdir " + quotedDir +
+		" & if not exist " + quotedNUL + " exit /b 1" +
+		" & >" + quotedProbe + " echo probe" +
+		" & if not exist " + quotedProbe + " exit /b 1" +
+		" & del /q " + quotedProbe
+	return command, windowsVolumeRoot(dir)
+}
+
+func quoteCmdPath(value string) string {
+	return `"` + strings.ReplaceAll(value, "%", "%%") + `"`
+}
+
+func windowsVolumeRoot(value string) string {
+	if len(value) >= 3 && value[1] == ':' {
+		return strings.ToUpper(value[:2]) + `\`
 	}
-	if result.Stderr != "" {
-		return fmt.Errorf("mkdir -p failed with exit code %d: %s", result.ExitCode, result.Stderr)
-	}
-	return fmt.Errorf("mkdir -p failed with exit code %d", result.ExitCode)
+	return `C:\`
 }
 
 func (r *OpenSandboxRuntime) runCommand(ctx context.Context, cwd, command string, timeoutSec int64) (ExecResult, error) {
@@ -674,26 +766,19 @@ func (r *OpenSandboxRuntime) ensureCreated() error {
 	return nil
 }
 
-func (r *OpenSandboxRuntime) execCwd(cwd string) string {
+func (r *OpenSandboxRuntime) execCwd(cwd string) (string, error) {
 	if cwd == "" {
-		return r.workspace
+		return r.workspace, nil
 	}
 	return r.remotePath(cwd)
 }
 
-func (r *OpenSandboxRuntime) remotePath(p string) string {
-	if p == "" || p == "." {
-		return r.workspace
-	}
-	clean := cleanRemotePath(p)
-	if strings.HasPrefix(clean, "/") {
-		return clean
-	}
-	return path.Join(r.workspace, clean)
+func (r *OpenSandboxRuntime) remotePath(value string) (string, error) {
+	return r.paths().resolve(r.workspace, value)
 }
 
-func cleanRemotePath(p string) string {
-	return path.Clean(filepath.ToSlash(p))
+func (r *OpenSandboxRuntime) paths() targetPath {
+	return targetPathFor(targetGOOS(r.cfg))
 }
 
 func durationSecondsPtr(d time.Duration) *int {
@@ -727,16 +812,7 @@ func executionToResult(exec *opensandbox.Execution) ExecResult {
 }
 
 func remoteRelativePath(root, file string) (string, error) {
-	root = strings.TrimSuffix(cleanRemotePath(root), "/")
-	file = cleanRemotePath(file)
-	if file == root {
-		return ".", nil
-	}
-	prefix := root + "/"
-	if !strings.HasPrefix(file, prefix) {
-		return "", fmt.Errorf("sandbox search result %s is outside source directory %s", file, root)
-	}
-	return strings.TrimPrefix(file, prefix), nil
+	return targetPathFor(platform.GOOSLinux).relative(root, file)
 }
 
 func safeLocalTarget(root, rel string) (string, error) {

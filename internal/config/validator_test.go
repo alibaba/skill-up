@@ -775,6 +775,49 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			errMsg:  "network_policy requires environment.type opensandbox",
 		},
 		{
+			name: "opensandbox Linux with relative workspace_mount is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:           "opensandbox",
+					WorkspaceMount: `C:\work`,
+				},
+				Engine: EngineConfig{Name: "claude_code"},
+				Cases:  CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			},
+			wantErr: true,
+			errMsg:  "environment.workspace_mount must be an absolute linux guest path",
+		},
+		{
+			name: "opensandbox Windows accepts slash-normalized absolute workspace_mount",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:           "opensandbox",
+					Platform:       &Platform{OS: "windows", Arch: "amd64"},
+					WorkspaceMount: "C:/work",
+				},
+				Engine: EngineConfig{Name: "claude_code"},
+				Cases:  CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "opensandbox Windows rejects rooted path without drive",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:           "opensandbox",
+					Platform:       &Platform{OS: "windows", Arch: "amd64"},
+					WorkspaceMount: `\work`,
+				},
+				Engine: EngineConfig{Name: "claude_code"},
+				Cases:  CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			},
+			wantErr: true,
+			errMsg:  "environment.workspace_mount must be an absolute windows guest path",
+		},
+		{
 			name: "valid docker runtime type",
 			cfg: &EvalConfig{
 				SchemaVersion: "v1alpha1",

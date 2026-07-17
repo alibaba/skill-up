@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- OpenSandbox Windows guest support through typed `environment.platform` and
+  optional `environment.resources` settings. The runtime now applies guest-OS
+  path and shell semantics across workspace setup, transfers, Custom Engine
+  execution, PowerShell script judging, and artifact collection. Extended CI
+  includes an explicit opt-in real Windows guest lifecycle test.
+
 ## [0.7.0] - 2026-07-16
 
 ### Added

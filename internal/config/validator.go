@@ -562,7 +562,28 @@ func isValidRuntimeType(t string) bool {
 }
 
 func validateOpenSandboxSettings(env Environment) []string {
-	return append(validateOpenSandboxPlatform(env), validateOpenSandboxResources(env)...)
+	errs := validateOpenSandboxPlatform(env)
+	errs = append(errs, validateOpenSandboxResources(env)...)
+	return append(errs, validateOpenSandboxWorkspace(env)...)
+}
+
+func validateOpenSandboxWorkspace(env Environment) []string {
+	mount := strings.TrimSpace(env.WorkspaceMount)
+	if env.Type != runtimeTypeOpenSandbox || mount == "" {
+		return nil
+	}
+	targetOS := "linux"
+	if env.Platform != nil && strings.TrimSpace(env.Platform.OS) != "" {
+		targetOS = strings.ToLower(strings.TrimSpace(env.Platform.OS))
+	}
+	abs := path.IsAbs(mount)
+	if targetOS == "windows" {
+		abs = len(mount) >= 3 && mount[1] == ':' && (mount[2] == '\\' || mount[2] == '/')
+	}
+	if !abs {
+		return []string{fmt.Sprintf("environment.workspace_mount must be an absolute %s guest path, got %q", targetOS, mount)}
+	}
+	return nil
 }
 
 func validateOpenSandboxPlatform(env Environment) []string {

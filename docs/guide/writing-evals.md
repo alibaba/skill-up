@@ -380,6 +380,39 @@ Common fields:
 | `kwargs.request_timeout_seconds` | Request timeout for the OpenSandbox SDK. |
 | `kwargs.file_transfer_parallelism` | Concurrency for directory download. |
 
+OpenSandbox can also target a Windows guest independently of the OS running
+skill-up:
+
+```yaml
+environment:
+  type: opensandbox
+  image: dockurr/windows:latest
+  platform:
+    os: windows
+    arch: amd64
+  resources:                 # Optional user overrides
+    cpu: "8"
+    memory: 16Gi
+    disk: 128Gi
+  workspace_mount: C:/workspace
+  ready_timeout_seconds: 1800
+```
+
+`platform.os` accepts `linux` or `windows`; `platform.arch` accepts `amd64` or
+`arm64`, and the two fields must be set together. A Windows guest defaults to
+`C:\workspace` plus 4 CPU, 8 GiB memory, and 64 GiB disk; partial `resources`
+values override those defaults. Linux keeps the SDK defaults unless
+`resources` is present, in which case partial values merge over them. An
+explicit `workspace_mount` must be absolute for the guest OS (`C:/work` is
+accepted and normalized for Windows). The OpenSandbox host must meet the
+[Windows profile prerequisites](https://github.com/opensandbox-group/OpenSandbox/blob/main/docs/guides/windows-sandbox.md).
+
+Windows guests execute `setup_steps` through `cmd.exe`, use Windows path rules
+for fixture and Skill transfer, support PowerShell (`.ps1`) script judges, and
+can run a locally configured Custom Engine. Automatic installation of the
+built-in Agent CLIs into a Windows guest is not yet supported; install the CLI
+in the image or use a Custom Engine.
+
 #### Docker configuration
 
 When `environment.type: docker` is used, the agent runs inside a local Docker container. This provides container-level isolation (filesystem, process, network) without any remote service dependency.

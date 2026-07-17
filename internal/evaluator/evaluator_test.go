@@ -93,6 +93,7 @@ func (m *mockAgent) Run(ctx context.Context, rt runtime.Runtime, opts agent.Exec
 
 type mockRuntime struct {
 	workspace        string
+	shell            platform.Shell
 	downloadFileFunc func(ctx context.Context, sourcePath, targetPath string) error
 	downloadFileCall atomic.Int32
 	downloadDirFunc  func(ctx context.Context, sourceDir, targetDir string) error
@@ -109,6 +110,9 @@ func (m *mockRuntime) RequiresProcessSandbox() bool   { return true }
 func (m *mockRuntime) MergeEnv(_ map[string]string)   {}
 
 func (m *mockRuntime) Shell() platform.Shell {
+	if m.shell.GOOS != "" {
+		return m.shell
+	}
 	return platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
 }
 func (m *mockRuntime) Start(_ context.Context) error                   { return nil }

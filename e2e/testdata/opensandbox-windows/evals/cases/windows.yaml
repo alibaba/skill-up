@@ -1,0 +1,18 @@
+id: windows-lifecycle
+title: Windows guest completes the evaluation lifecycle
+input:
+  prompt: Run the deterministic Windows custom engine.
+context:
+  repo_fixture: evals/fixtures/workspace
+constraints:
+  timeout_seconds: 600
+  max_turns: 1
+expect:
+  must_contain:
+    - windows-custom-engine-handled
+collect_artifacts:
+  - result.txt
+judge:
+  type: script
+  script_path: evals/fixtures/scripts/check.ps1
+  timeout_seconds: 60

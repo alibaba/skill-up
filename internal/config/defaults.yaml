@@ -3,6 +3,8 @@ schema_version: v1alpha1
 environment:
   type: none
   workspace_mount: /workspace
+  # platform and resources are optional OpenSandbox settings; omission keeps
+  # the existing Linux profile and SDK resource defaults.
   env: {}
 
 mcp:

@@ -81,7 +81,7 @@ func (j *ScriptJudge) evaluateInRuntime(ctx context.Context, rt evalruntime.Runt
 		return nil, fmt.Errorf("script execution failed: %w", err)
 	}
 
-	remoteDir := judgeTempDir(targetGOOS)
+	remoteDir := judgeTempDir(targetGOOS, rt.Workspace())
 	remoteScript := joinForGOOS(targetGOOS, remoteDir, plan.uploadName)
 	if err := rt.UploadFile(ctx, j.ScriptPath, remoteScript); err != nil {
 		return nil, fmt.Errorf("script execution failed: upload script judge: %w", err)
