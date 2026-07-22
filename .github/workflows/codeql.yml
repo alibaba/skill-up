@@ -27,7 +27,9 @@ jobs:
     #   - https://gh.io/supported-runners-and-hardware-resources
     #   - https://gh.io/using-larger-runners (GitHub.com only)
     # Consider using larger runners or machines with greater resources for possible analysis time improvements.
-    runs-on: self-hosted
+    # This workflow executes pull-request code during autobuild. Keep it off
+    # persistent self-hosted runners.
+    runs-on: ubuntu-24.04
     permissions:
       # required for all workflows
       security-events: write
@@ -60,6 +62,8 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v7
+      with:
+        persist-credentials: false
 
     # Add any setup steps before running the `github/codeql-action/init` action.
     # This includes steps like installing compilers or runtimes (`actions/setup-node`

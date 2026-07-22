@@ -55,7 +55,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, x64, docker, trusted]
     permissions:
       contents: read
       packages: write
@@ -68,7 +68,13 @@ jobs:
           # Fork PRs can't push packages; build-only for them.
           SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
           PUBLISH_LATEST: ${{ github.event_name == 'push' || inputs.publish_latest }}
+          REQUESTED_TAG: ${{ inputs.tag || 'v0.1.0' }}
         run: |
+          set -euo pipefail
+          if [[ ! "$REQUESTED_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "::error::Invalid image tag"
+            exit 1
+          fi
           {
             echo "tags<<__TAGS__"
             if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -80,7 +86,7 @@ jobs:
             else
               # push to main / manual dispatch = release; reusable callers can
               # opt into latest explicitly, but self-eval uses an isolated tag.
-              echo "${IMAGE}:${{ inputs.tag || 'v0.1.0' }}"
+              echo "${IMAGE}:${REQUESTED_TAG}"
               if [ "$PUBLISH_LATEST" = "true" ]; then
                 echo "${IMAGE}:latest"
               fi

@@ -12,11 +12,8 @@ on:
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
-# Required for GitHub Pages deployment via actions/deploy-pages.
-permissions:
-  contents: read
-  pages: write
-  id-token: write
+# Jobs opt into only the permissions they need.
+permissions: {}
 
 # Allow only one concurrent deployment, but do not cancel in-progress runs.
 concurrency:
@@ -25,7 +22,9 @@ concurrency:
 
 jobs:
   build:
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, x64, trusted]
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -54,7 +53,10 @@ jobs:
 
   deploy:
     needs: build
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, x64, trusted]
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

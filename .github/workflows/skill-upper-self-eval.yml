@@ -49,7 +49,7 @@ jobs:
   dogfood:
     name: Eval skill-upper (${{ matrix.engine }})
     needs: image
-    runs-on: self-hosted      # Docker container action — Linux only
+    runs-on: [self-hosted, linux, x64, docker, trusted]
     strategy:
       fail-fast: false
       matrix:
@@ -82,9 +82,8 @@ jobs:
           echo "dogfood will use ${img}"
           grep 'image: docker://' action.yml
 
-      # Fork PRs run without repository secrets; skip cleanly instead of 401ing.
-      # The judge hop always needs the dashscope key, so require it for every
-      # engine; qodercli additionally needs its own PAT.
+      # This workflow is manual and trusted. Missing credentials are a
+      # configuration error and must fail instead of producing a green no-op.
       - name: Check secret availability
         id: secrets
         env:
@@ -94,19 +93,13 @@ jobs:
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
         run: |
           if [ -z "$DASHSCOPE_API_KEY" ]; then
-            echo "::notice::Skipping self-eval (${{ matrix.engine }}): required secret not provisioned (likely a fork PR)."
-            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::error::DASHSCOPE_API_KEY is required for self-eval (${{ matrix.engine }})."
+            exit 1
           elif [ "${{ matrix.engine }}" = "qodercli" ] && [ -z "$QODER_ACCESS_TOKEN" ]; then
-            echo "::notice::Skipping self-eval (${{ matrix.engine }}): required secret not provisioned (likely a fork PR)."
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=true" >> "$GITHUB_OUTPUT"
-            if [ "${{ matrix.engine }}" = "qodercli" ]; then
-              echo "api_key=${QODER_ACCESS_TOKEN}" >> "$GITHUB_OUTPUT"
-            else
-              echo "api_key=${DASHSCOPE_API_KEY}" >> "$GITHUB_OUTPUT"
-            fi
+            echo "::error::QODER_ACCESS_TOKEN is required for qodercli self-eval."
+            exit 1
           fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
 
       - name: Run skill-upper eval via the action
         if: steps.secrets.outputs.available == 'true'
@@ -132,7 +125,9 @@ jobs:
           engine: ${{ matrix.engine }}
           provider: ${{ matrix.provider }}
           model: ${{ matrix.model }}
-          api-key: ${{ steps.secrets.outputs.api_key }}
+          # Pass the selected credential directly; never copy a secret through
+          # step outputs, which GitHub may suppress as secret-bearing data.
+          api-key: ${{ matrix.engine == 'qodercli' && secrets.QODER_ACCESS_TOKEN || secrets.DASHSCOPE_API_KEY }}
           # Run cases concurrently so the larger per-case timeout (600s, needed
           # by the slower codex coder model) doesn't blow up wall-clock — but
           # keep qodercli serial: concurrent qodercli processes race on the fixed

@@ -14,7 +14,9 @@ permissions:
 jobs:
   e2e-windows:
     name: E2E (none runtime, Windows)
-    runs-on: self-hosted
+    # No trusted Windows self-hosted runner is provisioned. Use a clean,
+    # explicitly versioned GitHub-hosted Windows image.
+    runs-on: windows-2025
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -41,7 +43,7 @@ jobs:
 
   e2e:
     name: E2E (none runtime)
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -52,11 +54,10 @@ jobs:
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
         run: |
           if [ -z "$DASHSCOPE_API_KEY" ]; then
-            echo "::notice::Skipping e2e: DASHSCOPE_API_KEY not provisioned."
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "::error::DASHSCOPE_API_KEY is required for full e2e."
+            exit 1
           fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         if: steps.secrets.outputs.available == 'true'
@@ -135,7 +136,7 @@ jobs:
 
   e2e-opensandbox:
     name: E2E (opensandbox runtime)
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, x64, docker, trusted]
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -146,11 +147,10 @@ jobs:
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
         run: |
           if [ -z "$DASHSCOPE_API_KEY" ]; then
-            echo "::notice::Skipping opensandbox e2e: DASHSCOPE_API_KEY not provisioned."
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "::error::DASHSCOPE_API_KEY is required for opensandbox e2e."
+            exit 1
           fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         if: steps.secrets.outputs.available == 'true'
@@ -239,7 +239,7 @@ jobs:
 
   e2e-docker:
     name: E2E (docker runtime)
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, x64, docker, trusted]
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -262,7 +262,7 @@ jobs:
 
   e2e-docker-full:
     name: E2E (docker runtime, full LLM)
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, x64, docker, trusted]
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -273,11 +273,10 @@ jobs:
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
         run: |
           if [ -z "$DASHSCOPE_API_KEY" ]; then
-            echo "::notice::Skipping docker full e2e: DASHSCOPE_API_KEY not provisioned."
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "::error::DASHSCOPE_API_KEY is required for docker full e2e."
+            exit 1
           fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         if: steps.secrets.outputs.available == 'true'
@@ -310,7 +309,7 @@ jobs:
 
   release-dryrun:
     name: GoReleaser Check
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
