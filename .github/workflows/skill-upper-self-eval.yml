@@ -5,8 +5,8 @@ name: Skill Upper Self-Eval
 # green check here is the action's end-to-end integration test for every engine
 # it claims to support.
 #
-# NOTE: the runner image bakes skill-up from the public GitHub Releases
-# (Dockerfile: install.sh … latest), so an engine can only be dogfooded here
+# NOTE: the runner image bakes a pinned skill-up version from GitHub Releases,
+# so an engine can only be dogfooded here
 # once a skill-up RELEASE ships it. qwen_code is intentionally NOT in the matrix
 # yet — the released skill-up would reject `--engine qwen_code` as unsupported.
 # Add the row once a release includes the engine (the action image already
@@ -50,6 +50,7 @@ jobs:
     name: Eval skill-upper (${{ matrix.engine }})
     needs: image
     runs-on: [self-hosted, linux, x64, docker, trusted]
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -78,7 +79,7 @@ jobs:
         run: |
           tag="self-eval-${{ github.run_id }}"
           img="ghcr.io/${{ github.repository_owner }}/skill-up-runner:${tag}"
-          sed -i "s#image: docker://ghcr.io/[^[:space:]]*/skill-up-runner:.*#image: docker://${img}#" action.yml
+          sed -E -i "s#image: docker://ghcr.io/[^[:space:]]*/skill-up-runner[:@][^[:space:]]+#image: docker://${img}#" action.yml
           echo "dogfood will use ${img}"
           grep 'image: docker://' action.yml
 
@@ -137,16 +138,6 @@ jobs:
           # Point at the skill dir; skill-up finds evals/eval.yaml inside and
           # resolves cases (evals/cases/*.yaml) relative to the skill root.
           skill-target: skills/skill-upper
-
-      - name: Restore report ownership
-        # The Docker container action runs as root. The action entrypoint fixes
-        # this on exit; keep a host-side fallback so artifact upload and the
-        # next checkout can read and remove generated reports on self-hosted
-        # runners.
-        if: always() && steps.secrets.outputs.available == 'true'
-        run: |
-          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE/skill-up-workspace" || true
-          chmod -R u+rwX,go+rX "$GITHUB_WORKSPACE/skill-up-workspace" || true
 
       - name: Upload eval report
         if: always() && steps.secrets.outputs.available == 'true'

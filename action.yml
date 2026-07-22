@@ -43,7 +43,7 @@ inputs:
   skill-up-version:
     description: 'skill-up version. Ignored when the image already ships skill-up (the default).'
     required: false
-    default: 'latest'
+    default: '0.7.0'
   skill-up-command:
     description: 'The skill-up command itself; must start with `skill-up`.'
     required: false
@@ -70,7 +70,8 @@ outputs:
 # NOTE: Docker container actions run on Linux runners only.
 runs:
   using: docker
-  image: docker://ghcr.io/alibaba/skill-up-runner:v0.1.0
+  # v0.1.0; update the digest deliberately when publishing a verified image.
+  image: docker://ghcr.io/alibaba/skill-up-runner@sha256:f90aa1a320dadd14f354c12013dbbf78df262ece0e4f82683b8a70140a65bbcf
   args:
     - --engine
     - ${{ inputs.engine }}

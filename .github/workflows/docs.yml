@@ -23,6 +23,7 @@ concurrency:
 jobs:
   build:
     runs-on: [self-hosted, linux, x64, trusted]
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -54,6 +55,7 @@ jobs:
   deploy:
     needs: build
     runs-on: [self-hosted, linux, x64, trusted]
+    timeout-minutes: 10
     permissions:
       pages: write
       id-token: write

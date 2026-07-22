@@ -10,8 +10,6 @@ name: Runner Image
 #   - push to main touching the action runtime -> republish.
 #   - workflow_dispatch -> manual (re)publish at an explicit tag.
 #
-# Fork PRs lack package-write on GITHUB_TOKEN: they build without pushing.
-#
 # NOTE: pushing under the org namespace requires the org to allow Actions to
 # create packages (verified working for this repo).
 
@@ -44,7 +42,7 @@ on:
         description: 'Also publish the latest tag'
         required: true
         type: boolean
-        default: true
+        default: false
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/skill-up-runner
@@ -56,16 +54,20 @@ concurrency:
 jobs:
   build:
     runs-on: [self-hosted, linux, x64, docker, trusted]
+    timeout-minutes: 30
+    environment: release-image
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Resolve tags & push policy
         id: meta
         env:
-          # Fork PRs can't push packages; build-only for them.
+          # Keep the reusable workflow build-only if a future PR caller is added.
           SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
           PUBLISH_LATEST: ${{ github.event_name == 'push' || inputs.publish_latest }}
           REQUESTED_TAG: ${{ inputs.tag || 'v0.1.0' }}
@@ -106,6 +108,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ./action
@@ -117,5 +120,23 @@ jobs:
           platforms: linux/amd64
           push: ${{ steps.meta.outputs.push == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            VCS_REF=${{ github.sha }}
+          provenance: mode=max
+          sbom: true
           # Avoid the GitHub Actions Cache backend here: transient GHA cache
           # outages fail the whole image build after the registry push starts.
+
+      - name: Record image digest
+        if: steps.meta.outputs.push == 'true'
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          if [ -z "$IMAGE_DIGEST" ]; then
+            echo "::error::Build completed without an image digest"
+            exit 1
+          fi
+          echo "### Published runner image" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          echo "${IMAGE}@${IMAGE_DIGEST}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
