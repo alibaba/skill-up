@@ -19,9 +19,11 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.25.x"
           cache: true
@@ -46,26 +48,30 @@ jobs:
     runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Check secret availability
         id: secrets
         env:
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
         run: |
+          set -euo pipefail
           if [ -z "$DASHSCOPE_API_KEY" ]; then
             echo "::error::DASHSCOPE_API_KEY is required for full e2e."
             exit 1
           fi
           echo "available=true" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         if: steps.secrets.outputs.available == 'true'
         with:
           go-version: "1.25.x"
           cache: true
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         if: steps.secrets.outputs.available == 'true'
         with:
           node-version: "22"
@@ -73,18 +79,21 @@ jobs:
       - name: Install claude-code CLI
         if: steps.secrets.outputs.available == 'true'
         run: |
+          set -euo pipefail
           npm install -g --include=optional '@anthropic-ai/claude-code@2.1.217'
           claude --version
 
       - name: Install codex CLI
         if: steps.secrets.outputs.available == 'true'
         run: |
+          set -euo pipefail
           npm install -g --include=optional '@openai/codex@0.80.0'
           codex --version
 
       - name: Install qwen-code CLI
         if: steps.secrets.outputs.available == 'true'
         run: |
+          set -euo pipefail
           npm install -g '@qwen-code/qwen-code@0.20.1'
           qwen --version
 
@@ -94,6 +103,7 @@ jobs:
           QODER_VERSION: "1.0.14"
           QODER_SHA256: "4d83ec3d3a0948b73012cfdd6e2757be0a5da5c89a288425a5607fd42be1de7b"
         run: |
+          set -euo pipefail
           TARBALL=$(mktemp)
           curl -fsSL "https://qoder-ide.oss-accelerate.aliyuncs.com/qodercli/releases/${QODER_VERSION}/qodercli-linux-x64.tar.gz" -o "$TARBALL"
           echo "$QODER_SHA256  $TARBALL" | sha256sum -c -
@@ -105,8 +115,11 @@ jobs:
       - name: Verify qodercli on PATH
         if: steps.secrets.outputs.available == 'true'
         run: |
+          set -euo pipefail
           which qodercli
-          qodercli --version || true
+          if ! qodercli --version; then
+            echo "::warning::qodercli does not support a successful --version probe"
+          fi
 
       - name: Run e2e tests (none runtime, full mode)
         if: steps.secrets.outputs.available == 'true'
@@ -139,20 +152,23 @@ jobs:
     runs-on: [self-hosted, linux, x64, docker, trusted]
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Check secret availability
         id: secrets
         env:
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
         run: |
+          set -euo pipefail
           if [ -z "$DASHSCOPE_API_KEY" ]; then
             echo "::error::DASHSCOPE_API_KEY is required for opensandbox e2e."
             exit 1
           fi
           echo "available=true" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         if: steps.secrets.outputs.available == 'true'
         with:
           go-version: "1.25.x"
@@ -165,6 +181,7 @@ jobs:
       - name: Install OpenSandbox server
         if: steps.secrets.outputs.available == 'true'
         run: |
+          set -euo pipefail
           uv tool install 'opensandbox-server==0.1.13'
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
@@ -174,6 +191,7 @@ jobs:
           OPENSANDBOX_IMAGE: node:22@sha256:5647be709086c696ff32edaaf1c70cd26d1da6ab2b39c32f3c7b4c4a31957e37
           OPENSANDBOX_EXECD_IMAGE: opensandbox/execd:v1.0.16@sha256:af7b55c861926c1304371c4578007fbaa424538219154a6a49a5d636217d2a3a
         run: |
+          set -euo pipefail
           docker version
           api_key="ci-$(openssl rand -hex 16)"
           echo "::add-mask::$api_key"
@@ -224,6 +242,7 @@ jobs:
       - name: Stop OpenSandbox server
         if: always() && steps.secrets.outputs.available == 'true'
         run: |
+          set -euo pipefail
           if [ -n "${OPENSANDBOX_SERVER_PID:-}" ]; then
             if kill "$OPENSANDBOX_SERVER_PID" 2>/dev/null; then
               echo "OpenSandbox server stopped"
@@ -255,15 +274,18 @@ jobs:
     runs-on: [self-hosted, linux, x64, docker, trusted]
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.25.x"
           cache: true
 
       - name: Verify docker is available
         run: |
+          set -euo pipefail
           docker version
           docker info
 
@@ -278,20 +300,23 @@ jobs:
     runs-on: [self-hosted, linux, x64, docker, trusted]
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Check secret availability
         id: secrets
         env:
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
         run: |
+          set -euo pipefail
           if [ -z "$DASHSCOPE_API_KEY" ]; then
             echo "::error::DASHSCOPE_API_KEY is required for docker full e2e."
             exit 1
           fi
           echo "available=true" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         if: steps.secrets.outputs.available == 'true'
         with:
           go-version: "1.25.x"
@@ -325,11 +350,13 @@ jobs:
     runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.25.x"
           cache: true

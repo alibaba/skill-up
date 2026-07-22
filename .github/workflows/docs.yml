@@ -10,6 +10,13 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/docs.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/docs.yml'
   workflow_dispatch:
 
 # Jobs opt into only the permissions they need.
@@ -17,22 +24,25 @@ permissions: {}
 
 # Allow only one concurrent deployment, but do not cancel in-progress runs.
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: docs-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
-    runs-on: [self-hosted, linux, x64, trusted]
+    name: Build
+    # Documentation dependencies and build scripts are pull-request code.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
     steps:
-      - name: Checkout
+      - name: Checkout source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Setup Node
+      - name: Set up Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: '20'
@@ -44,17 +54,21 @@ jobs:
       - name: Build VitePress site
         run: npm run docs:build
 
-      - name: Setup Pages
+      - name: Configure GitHub Pages
+        if: github.event_name != 'pull_request'
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
 
-      - name: Upload artifact
+      - name: Upload GitHub Pages artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: docs/.vitepress/dist
 
   deploy:
+    name: Deploy
+    if: github.event_name != 'pull_request'
     needs: build
-    runs-on: [self-hosted, linux, x64, trusted]
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       pages: write

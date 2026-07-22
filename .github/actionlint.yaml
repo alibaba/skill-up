@@ -1,0 +1,5 @@
+# Custom labels provisioned on the repository's self-hosted runners.
+self-hosted-runner:
+  labels:
+    - docker
+    - trusted

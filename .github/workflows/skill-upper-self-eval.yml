@@ -70,13 +70,15 @@ jobs:
             provider: ''
             model: ''
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       # Point the local action at the image the `image` job just built for this
       # run. The tag is intentionally run-scoped so manual dogfood runs from
       # feature branches never clobber production runner image tags.
       - name: Pin action to this run's runner image
         run: |
+          set -euo pipefail
           tag="self-eval-${{ github.run_id }}"
           img="ghcr.io/${{ github.repository_owner }}/skill-up-runner:${tag}"
           sed -E -i "s#image: docker://ghcr.io/[^[:space:]]*/skill-up-runner[:@][^[:space:]]+#image: docker://${img}#" action.yml
@@ -93,6 +95,7 @@ jobs:
           QODER_ACCESS_TOKEN: ${{ secrets.QODER_ACCESS_TOKEN }}
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
         run: |
+          set -euo pipefail
           if [ -z "$DASHSCOPE_API_KEY" ]; then
             echo "::error::DASHSCOPE_API_KEY is required for self-eval (${{ matrix.engine }})."
             exit 1
@@ -168,6 +171,7 @@ jobs:
         env:
           MIN_PASS_PCT: '60'
         run: |
+          set -euo pipefail
           report=$(ls -1 "$GITHUB_WORKSPACE"/skill-up-workspace/iteration-*/report.json 2>/dev/null | tail -1)
           if [ -z "$report" ] || [ ! -f "$report" ]; then
             echo "::error::no report.json produced — the eval did not run to completion"
