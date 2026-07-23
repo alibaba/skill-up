@@ -31,6 +31,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.request
 
 
@@ -345,8 +346,16 @@ def install_skill_up(bin_dir, version):
     if version and version != "latest":
         install_env["SKILL_UP_VERSION"] = version
 
-    with urllib.request.urlopen(SKILL_UP_INSTALL_URL, timeout=120) as response:
-        installer = response.read()
+    try:
+        with urllib.request.urlopen(SKILL_UP_INSTALL_URL, timeout=120) as response:
+            installer = response.read()
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        print(
+            f"error: failed to download skill-up installer from "
+            f"{SKILL_UP_INSTALL_URL}: {exc}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     actual_sha256 = hashlib.sha256(installer).hexdigest()
     if actual_sha256 != SKILL_UP_INSTALL_SHA256:
         print(
