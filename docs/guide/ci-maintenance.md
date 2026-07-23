@@ -59,6 +59,57 @@ The `release` environment gates the job that publishes already-built GoReleaser 
 
 The build job pushes a run-scoped `build-<run-id>-<attempt>` staging tag so the protected job can promote the exact registry object. Periodically remove unreferenced staging versions according to the package retention policy. Never silently move the image tag used by the action. The digest change must remain reviewable and reversible. Reusable callers consume the workflow's digest output, not the mutable tag.
 
+## Manual skill-up version synchronization
+
+The official Action image does not track `latest`. A CLI release and an Action image refresh are two separate operations. Publishing a CLI release alone leaves the existing Action image unchanged.
+
+The image build reads its CLI version from `ARG SKILL_UP_VERSION` in `action/Dockerfile`; the **Runner Image** dispatch `tag` controls only the GHCR tag and does not select the CLI version.
+
+After publishing a new CLI release such as `v0.8.0`, perform the following procedure:
+
+1. Verify that the GitHub Release exists and contains the expected archives and checksum file. The image installer downloads these release assets, so the image cannot be built before they exist.
+2. Create a version-synchronization pull request that updates all three defaults to the version without the `v` prefix:
+   - `action/Dockerfile`: `ARG SKILL_UP_VERSION=0.8.0`
+   - `action.yml`: the `skill-up-version` fallback default
+   - `action/main.py`: the `--skill-up-version` fallback default
+3. If `install.sh` changed, also update the pinned installer commit and SHA-256 in both `action/Dockerfile` and `action/main.py`. Do not change these pins when the installer content is unchanged.
+4. Run CI, CodeQL, Workflow Security, the Dockerfile build review, and the relevant deterministic E2E checks. Merge the synchronization pull request into `main`.
+5. Dispatch **Runner Image** from `main`:
+   - set `tag` to the intended image tag, normally the CLI release tag such as `v0.8.0`;
+   - leave `publish_latest` disabled unless maintainers explicitly need the convenience tag;
+   - remember that neither value changes `SKILL_UP_VERSION`.
+6. Inspect the build log and require `skill-up --version` to report exactly `0.8.0`. Reject the `release-image` deployment if the version differs.
+7. Inspect the immutable build digest, then approve the `release-image` environment. Confirm that the publish job promotes the same digest without rebuilding it.
+8. Copy the published digest and create a second pull request that updates the `image: docker://...@sha256:...` reference and its version comment in `action.yml`.
+9. Run the composite Action smoke test, **Extended CI**, and **Skill Upper Self-Eval** against that digest. Merge only after the expected engines complete successfully or a documented waiver is reviewed.
+10. Verify the merged `action.yml`, GHCR digest, image label, and `skill-up --version` all describe the same release.
+
+The `skill-up-version` Action input does not override the official image because `action/main.py` skips installation when the bundled binary is present. It exists only as a fallback for custom images without skill-up. Do not tell users to select a newer official CLI version through this input.
+
+The current repository does not automatically publish a separate immutable Action release tag after the image digest pull request. Until that process exists:
+
+- `@main` follows the latest merged Action image;
+- a post-refresh commit SHA is the stable immutable Action reference;
+- an existing CLI release tag must never be moved to include a later digest;
+- a CLI release tag may contain the Action image that existed when the tag was created, not necessarily the CLI version named by that tag.
+
+### Runner image release checklist
+
+- [ ] The CLI GitHub Release and checksum file exist.
+- [ ] The three skill-up version defaults match.
+- [ ] Installer commit and checksum pins match the intended `install.sh` content.
+- [ ] The image build log reports the expected `skill-up --version`.
+- [ ] Agent CLI versions remain compatible with the new skill-up release.
+- [ ] SBOM and provenance generation succeed.
+- [ ] Self-Eval consumes the immutable digest, not a tag.
+- [ ] `action.yml` is updated to the verified digest.
+- [ ] Production `action.yml` does not reference `latest`.
+- [ ] The image version, GHCR digest, Action comment, and maintenance record agree.
+
+### Rollback
+
+Do not rebuild or move an old digest. To roll back, create a pull request that restores the last known-good `action.yml` digest, rerun the Action smoke test, and merge through the normal ruleset. If the CLI release itself is faulty, publish a new patch release and repeat the synchronization procedure; never rewrite a published CLI tag.
+
 ## Release procedure
 
 1. Ensure the release commit is on `main` and CI is green.
@@ -67,6 +118,8 @@ The build job pushes a run-scoped `build-<run-id>-<attempt>` staging tag so the 
 4. Inspect the tag, commit, changelog, and build summary, then approve the `release` environment deployment.
 5. Verify that the publish job attested and uploaded the exact release-candidate archives and checksums without rebuilding them.
 6. If publication fails, fix forward and create a new version; do not rewrite a published tag.
+
+After the CLI Release succeeds, continue with **Manual skill-up version synchronization**. The CLI release is not considered available through the official GitHub Action until the runner-image digest update has been tested and merged.
 
 ## Cache policy
 

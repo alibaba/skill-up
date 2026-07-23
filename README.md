@@ -328,12 +328,41 @@ Key inputs: `engine`, `model`, `provider`, `api-key`, `base-url`, `skill-target`
 runner image, so a run is just "pull image, eval". See [`action.yml`](action.yml)
 for the full input/output reference.
 
+### Bundled skill-up version
+
+The container image includes a deliberately pinned skill-up CLI version. The
+version is not resolved from `latest` when a workflow starts, so a given image
+digest always runs the same CLI.
+
+The `skill-up-version` input is only a fallback for a custom image that does not
+already contain the `skill-up` binary. The official image contains the binary,
+so this input cannot override its bundled version. To find the effective
+version, check the `skill-up --version` line in the Action log.
+
+Publishing a new skill-up CLI release does not automatically update the GitHub
+Action image. Maintainers must synchronize the pinned version, publish and test
+a new runner image, and update the image digest in `action.yml`. The complete
+maintainer procedure is documented in the
+[CI maintenance runbook](docs/guide/ci-maintenance.md#manual-skill-up-version-synchronization).
+
+The production Action must use an immutable `sha256:` image digest. Do not
+replace it with `skill-up-runner:latest`; a mutable tag would allow existing
+Action references to change behavior without a repository commit.
+
 ### Versioning
 
 `uses:` points at any git ref that contains `action.yml`. Pin a **release tag**
 (the first release that includes the action onward) or a commit SHA for stability;
 `@main` always tracks the latest. Release tags published **before** the action was
 added do not contain `action.yml` and cannot be used as the ref.
+
+A CLI release tag captures the `action.yml` and runner-image digest that existed
+when that tag was created. Because the current runner image is refreshed
+manually after CLI release assets become available, do not assume that a CLI tag
+automatically contains an Action image with the same CLI version. Until a
+separate Action release tag process is introduced, use a post-refresh commit SHA
+for an immutable reference or `@main` when intentionally following Action
+updates.
 
 ## License
 

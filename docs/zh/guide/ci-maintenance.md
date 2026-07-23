@@ -59,6 +59,57 @@ Zizmor 在 Model E2E 中报告的三个 `adhoc-packages` 属于已接受的低�
 
 构建 Job 会推送 `build-<run-id>-<attempt>` 形式的流水线暂存 tag，使受保护发布 Job 能够提升同一个 Registry 对象；应按 Package 保留策略定期清理不再引用的暂存版本。禁止静默移动 Action 使用的镜像标签；digest 变更必须可审查、可回滚。可复用工作流的调用方必须消费 digest 输出，不得依赖可变 tag。
 
+## 人工同步 skill-up 版本
+
+官方 Action 镜像不会跟踪 `latest`。CLI Release 和 Action 镜像刷新是两个独立操作；只发布 CLI Release 不会改变现有 Action 镜像。
+
+镜像构建从 `action/Dockerfile` 的 `ARG SKILL_UP_VERSION` 读取 CLI 版本；手动触发 **Runner Image** 时填写的 `tag` 只控制 GHCR tag，不会选择 CLI 版本。
+
+发布新的 CLI Release（例如 `v0.8.0`）后，按照以下流程操作：
+
+1. 确认 GitHub Release 已存在，并包含预期归档和校验和文件。镜像安装器会下载这些 Release 资产，因此资产存在之前不能构建该版本镜像。
+2. 创建版本同步 Pull Request，把以下三个默认值统一更新为不带 `v` 前缀的版本：
+   - `action/Dockerfile`：`ARG SKILL_UP_VERSION=0.8.0`
+   - `action.yml`：`skill-up-version` fallback 默认值
+   - `action/main.py`：`--skill-up-version` fallback 默认值
+3. 如果 `install.sh` 内容发生变化，还要同步更新 `action/Dockerfile` 和 `action/main.py` 中固定的安装脚本 commit 与 SHA-256；安装脚本内容没有变化时不要无意义更新。
+4. 运行 CI、CodeQL、Workflow Security、Dockerfile 评审和相关确定性 E2E，合并版本同步 PR 到 `main`。
+5. 从 `main` 手动触发 **Runner Image**：
+   - `tag` 填写目标镜像 tag，通常与 CLI Release 一致，例如 `v0.8.0`；
+   - 除非维护者明确需要便利 tag，否则保持 `publish_latest` 关闭；
+   - 两个输入都不会改变 `SKILL_UP_VERSION`。
+6. 检查构建日志，必须确认 `skill-up --version` 精确输出 `0.8.0`；不一致时拒绝 `release-image` 部署。
+7. 检查不可变构建 digest，批准 `release-image` Environment；确认发布 Job 提升的是同一 digest，期间没有重新构建。
+8. 复制已发布 digest，创建第二个 Pull Request，更新 `action.yml` 中的 `image: docker://...@sha256:...` 引用及其版本注释。
+9. 使用该 digest 运行复合 Action 冒烟测试、**Extended CI** 和 **Skill Upper Self-Eval**；预期引擎全部完成，或经过评审的 waiver 有明确记录后，才能合并。
+10. 确认合并后的 `action.yml`、GHCR digest、镜像 label 和 `skill-up --version` 指向同一个版本。
+
+官方镜像已经包含 skill-up，因此 `action/main.py` 会跳过安装，`skill-up-version` Action input 不能覆盖官方镜像内版本。该 input 只用于没有预装 skill-up 的自定义镜像。不得指导用户通过它选择更新的官方 CLI 版本。
+
+仓库当前不会在镜像 digest PR 合并后自动发布独立、不可变的 Action Release tag。在该机制建立前：
+
+- `@main` 跟踪最新合并的 Action 镜像；
+- digest 更新后的 commit SHA 是稳定、不可变的 Action 引用；
+- 禁止移动已经发布的 CLI tag 来包含后续 digest；
+- CLI Release tag 可能包含创建 tag 时已有的 Action 镜像，不保证镜像 CLI 版本与 tag 名称一致。
+
+### Runner 镜像发布检查清单
+
+- [ ] CLI GitHub Release 和校验和文件已经存在。
+- [ ] 三处 skill-up 版本默认值保持一致。
+- [ ] 安装脚本 commit 与 checksum pin 对应预期 `install.sh` 内容。
+- [ ] 镜像构建日志中的 `skill-up --version` 符合预期。
+- [ ] Agent CLI 版本与新版 skill-up 兼容。
+- [ ] SBOM 和 provenance 生成成功。
+- [ ] Self-Eval 消费不可变 digest，而不是 tag。
+- [ ] `action.yml` 已更新为验证通过的 digest。
+- [ ] 生产 `action.yml` 未引用 `latest`。
+- [ ] 镜像版本、GHCR digest、Action 注释和维护记录一致。
+
+### 回滚
+
+禁止重新构建或移动旧 digest。需要回滚时，通过 Pull Request 恢复 `action.yml` 上一个已知正常的 digest，重新运行 Action 冒烟测试并按正常 Ruleset 合并。如果 CLI Release 本身有问题，应发布新的 patch 版本并重新执行同步流程，不得改写已发布 CLI tag。
+
 ## Release 发布
 
 1. 确认发布 commit 位于 `main` 且 CI 全部通过。
@@ -67,6 +118,8 @@ Zizmor 在 Model E2E 中报告的三个 `adhoc-packages` 属于已接受的低�
 4. 检查 tag、commit、变更日志和构建摘要后，批准 `release` Environment 部署。
 5. 验证发布 Job 对同一批候选归档和校验和生成了 Attestation 并完成上传，期间没有重新构建。
 6. 发布失败时修复后发布新版本，不要改写已经发布的 tag。
+
+CLI Release 成功后，继续执行“人工同步 skill-up 版本”。只有 Runner Image digest 更新完成测试并合并后，才能认为该 CLI 版本已经可通过官方 GitHub Action 使用。
 
 ## 缓存策略
 
