@@ -44,6 +44,8 @@ on:
         type: boolean
         default: false
 
+permissions: {}
+
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/skill-up-runner
 
@@ -72,6 +74,8 @@ jobs:
           SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
           PUBLISH_LATEST: ${{ github.event_name == 'push' || inputs.publish_latest }}
           REQUESTED_TAG: ${{ inputs.tag || 'v0.1.0' }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           if [[ ! "$REQUESTED_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
@@ -80,12 +84,12 @@ jobs:
           fi
           {
             echo "tags<<__TAGS__"
-            if [ "${{ github.event_name }}" = "pull_request" ]; then
+            if [ "$EVENT_NAME" = "pull_request" ]; then
               # PR dogfood builds publish an isolated, PR-scoped tag — NEVER the
               # mutable release tags (v0.1.0 / latest), which released action
               # users consume via alibaba/skill-up@v0.1.0. An unmerged PR must
               # not be able to replace the production runner image.
-              echo "${IMAGE}:pr-${{ github.event.pull_request.number }}"
+              echo "${IMAGE}:pr-${PR_NUMBER}"
             else
               # push to main / manual dispatch = release; reusable callers can
               # opt into latest explicitly, but self-eval uses an isolated tag.

@@ -24,10 +24,15 @@ Ruleset 必须使用下表的 Job 展示名称。`build` 等 Job ID 只是实现
 | CodeQL | `push`、`pull_request`、`merge_group`、定时任务 | `Analyze (actions)`、`Analyze (go)`、`Analyze (python)` | — |
 | Extended CI | `merge_group`、手动触发 | `E2E (none runtime, Windows)`、`E2E (docker runtime)`、`GoReleaser Check` | `E2E (none runtime)`、`E2E (opensandbox runtime)`、`E2E (docker runtime, full LLM)` |
 | Docs | 文档相关的 `push` 和 `pull_request` | 不要设为全局必需；路径过滤会使非文档 PR 没有该检查 | `Build` |
+| Workflow Security | 工作流相关的 `push`、`pull_request`、`merge_group` | 初始基线完成处置前保持可选 | `Zizmor` |
 
 模型检查依赖外部服务、凭据、额度和非确定性输出，因此保持可选。只有在可靠性经过量化，并确认 Merge Queue 能访问所需环境和 Secret 后，才可升级为必需检查。
 
 所有提供必需检查的工作流都必须监听 `merge_group`，否则 Merge Queue 会永久等待一个不会创建的检查。重命名 Job 后，应先让新检查成功运行一次，再修改 Ruleset。
+
+所有工作流必须在顶层设置 `permissions: {}`，并由各 Job 单独申请权限。所有 `actions/checkout` 步骤必须设置 `persist-credentials: false`。仓库 Actions 策略应强制完整 commit SHA，并只允许当前工作流实际使用的 Action 仓库。
+
+Zizmor 在 Extended CI 中报告的三个 `adhoc-packages` 属于已接受的低风险例外：这些固定版本的全局 CLI 正是测试对象，不是应用依赖。任何 High 或 Medium 级别的 Zizmor 发现都必须在合并前修复或完成显式评审。
 
 ## Secrets 与 Environments
 

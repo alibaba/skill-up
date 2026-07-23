@@ -24,10 +24,15 @@ Configure rulesets using the displayed job names below. Job IDs such as `build` 
 | CodeQL | `push`, `pull_request`, `merge_group`, schedule | `Analyze (actions)`, `Analyze (go)`, `Analyze (python)` | — |
 | Extended CI | `merge_group`, manual | `E2E (none runtime, Windows)`, `E2E (docker runtime)`, `GoReleaser Check` | `E2E (none runtime)`, `E2E (opensandbox runtime)`, `E2E (docker runtime, full LLM)` |
 | Docs | docs-related `push` and `pull_request` | Do not make globally required because path filters can leave it absent | `Build` |
+| Workflow Security | workflow-related `push`, `pull_request`, `merge_group` | Keep optional while the initial baseline is triaged | `Zizmor` |
 
 Model-backed checks depend on external services, credentials, quotas, and non-deterministic output, so they remain optional. Promote one to required only after measuring its reliability and ensuring the merge queue can access its environment and secrets.
 
 Every workflow that supplies a required check must listen to `merge_group`; otherwise a merge queue can wait forever for a check that was never created. After renaming a job, update the repository ruleset only after the new check has completed once.
+
+Every workflow must set top-level `permissions: {}` and grant permissions per job. Every `actions/checkout` step must set `persist-credentials: false`. Repository Actions policy should enforce full-length commit SHA references and allow only the action repositories currently used by the workflows.
+
+Zizmor's three `adhoc-packages` findings in Extended CI are accepted low-severity exceptions: those exact-version global CLI installations are the test subjects, not application dependencies. Any High or Medium Zizmor finding must be fixed or explicitly reviewed before merge.
 
 ## Secrets and environments
 
