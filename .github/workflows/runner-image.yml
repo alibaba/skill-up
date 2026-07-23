@@ -26,6 +26,10 @@ on:
         required: false
         type: boolean
         default: false
+    outputs:
+      digest:
+        description: 'Immutable digest of the image built by this run'
+        value: ${{ jobs.publish.outputs.digest }}
   push:
     branches: [main]
     paths:
@@ -50,14 +54,19 @@ env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/skill-up-runner
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Publishing mutable container tags is a global critical section. Queue a
+  # newer run rather than cancelling a run after it has started publishing.
+  group: runner-image-publish
+  cancel-in-progress: false
 
 jobs:
   build:
+    name: Build immutable image
     runs-on: [self-hosted, linux, x64, docker, trusted]
     timeout-minutes: 30
-    environment: release-image
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      source: ${{ steps.meta.outputs.source }}
     permissions:
       contents: read
       packages: write
@@ -67,46 +76,17 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Resolve tags & push policy
+      - name: Resolve immutable build tag
         id: meta
-        env:
-          # Keep the reusable workflow build-only if a future PR caller is added.
-          SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-          PUBLISH_LATEST: ${{ github.event_name == 'push' || inputs.publish_latest }}
-          REQUESTED_TAG: ${{ inputs.tag || 'v0.1.0' }}
-          EVENT_NAME: ${{ github.event_name }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          if [[ ! "$REQUESTED_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
-            echo "::error::Invalid image tag"
-            exit 1
-          fi
-          {
-            echo "tags<<__TAGS__"
-            if [ "$EVENT_NAME" = "pull_request" ]; then
-              # PR dogfood builds publish an isolated, PR-scoped tag — NEVER the
-              # mutable release tags (v0.1.0 / latest), which released action
-              # users consume via alibaba/skill-up@v0.1.0. An unmerged PR must
-              # not be able to replace the production runner image.
-              echo "${IMAGE}:pr-${PR_NUMBER}"
-            else
-              # push to main / manual dispatch = release; reusable callers can
-              # opt into latest explicitly, but self-eval uses an isolated tag.
-              echo "${IMAGE}:${REQUESTED_TAG}"
-              if [ "$PUBLISH_LATEST" = "true" ]; then
-                echo "${IMAGE}:latest"
-              fi
-            fi
-            echo "__TAGS__"
-          } >> "$GITHUB_OUTPUT"
-          echo "push=${SAME_REPO}" >> "$GITHUB_OUTPUT"
+          source="${IMAGE}:build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "source=$source" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Log in to ghcr.io
-        if: steps.meta.outputs.push == 'true'
         uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: ghcr.io
@@ -124,8 +104,8 @@ jobs:
           # --version self-check exits 1). Revisit with native arm64 runners
           # if self-hosted arm consumers show up.
           platforms: linux/amd64
-          push: ${{ steps.meta.outputs.push == 'true' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          push: true
+          tags: ${{ steps.meta.outputs.source }}
           build-args: |
             VCS_REF=${{ github.sha }}
           provenance: mode=max
@@ -133,17 +113,94 @@ jobs:
           # Avoid the GitHub Actions Cache backend here: transient GHA cache
           # outages fail the whole image build after the registry push starts.
 
-      - name: Record image digest
-        if: steps.meta.outputs.push == 'true'
+      - name: Record immutable image digest
         env:
           IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE_SOURCE: ${{ steps.meta.outputs.source }}
         run: |
           set -euo pipefail
           if [ -z "$IMAGE_DIGEST" ]; then
             echo "::error::Build completed without an image digest"
             exit 1
           fi
-          echo "### Published runner image" >> "$GITHUB_STEP_SUMMARY"
-          echo '```text' >> "$GITHUB_STEP_SUMMARY"
-          echo "${IMAGE}@${IMAGE_DIGEST}" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Immutable runner image built"
+            echo
+            echo "- Staging reference: \`${IMAGE_SOURCE}\`"
+            echo "- Digest: \`${IMAGE_DIGEST}\`"
+            echo
+            echo "The protected publish job will promote this digest without rebuilding."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    name: Approve and publish image tags
+    needs: build
+    runs-on: [self-hosted, linux, x64, docker, trusted]
+    timeout-minutes: 15
+    environment: release-image
+    outputs:
+      digest: ${{ needs.build.outputs.digest }}
+    permissions:
+      packages: write
+    steps:
+      - name: Resolve publication tags
+        id: meta
+        env:
+          PUBLISH_LATEST: ${{ github.event_name == 'push' || inputs.publish_latest }}
+          REQUESTED_TAG: ${{ inputs.tag || 'v0.1.0' }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$REQUESTED_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "::error::Invalid image tag"
+            exit 1
+          fi
+          {
+            echo "tags<<__TAGS__"
+            echo "${IMAGE}:${REQUESTED_TAG}"
+            if [ "$PUBLISH_LATEST" = "true" ]; then
+              echo "${IMAGE}:latest"
+            fi
+            echo "__TAGS__"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish approved tags for immutable digest
+        env:
+          IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          if [ -z "$IMAGE_DIGEST" ]; then
+            echo "::error::Build job did not return an image digest"
+            exit 1
+          fi
+          args=()
+          while IFS= read -r tag; do
+            [ -n "$tag" ] && args+=(--tag "$tag")
+          done <<< "$IMAGE_TAGS"
+          docker buildx imagetools create "${args[@]}" "${IMAGE}@${IMAGE_DIGEST}"
+
+      - name: Summarize published runner image
+        env:
+          IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Runner image published"
+            echo
+            echo "- Digest: \`${IMAGE_DIGEST}\`"
+            echo "- Tags:"
+            while IFS= read -r tag; do
+              [ -n "$tag" ] && echo "  - \`${tag}\`"
+            done <<< "$IMAGE_TAGS"
+          } >> "$GITHUB_STEP_SUMMARY"

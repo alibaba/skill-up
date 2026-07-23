@@ -76,16 +76,19 @@ jobs:
         with:
           persist-credentials: false
 
-      # Point the local action at the image the `image` job just built for this
-      # run. The tag is intentionally run-scoped so manual dogfood runs from
-      # feature branches never clobber production runner image tags.
-      - name: Pin action to this run's runner image
+      # Consume the immutable digest returned by the reusable image workflow.
+      # A mutable tag can no longer change the image between build and eval.
+      - name: Pin action to this run's runner image digest
         env:
-          RUN_TAG: self-eval-${{ github.run_id }}
+          IMAGE_DIGEST: ${{ needs.image.outputs.digest }}
           IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/skill-up-runner
         run: |
           set -euo pipefail
-          img="${IMAGE_REPOSITORY}:${RUN_TAG}"
+          if [[ ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Reusable image workflow returned an invalid digest"
+            exit 1
+          fi
+          img="${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
           sed -E -i "s#image: docker://ghcr.io/[^[:space:]]*/skill-up-runner[:@][^[:space:]]+#image: docker://${img}#" action.yml
           echo "dogfood will use ${img}"
           grep 'image: docker://' action.yml
