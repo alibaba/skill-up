@@ -1,11 +1,11 @@
 ---
 name: skill-upper
-description: "Set up, run, and interpret Agent Skill evaluations (evals) with the skill-up CLI / 使用 skill-up CLI 给 Agent Skill 搭建和运行评测. Use when the user asks to evaluate, test, regress, or verify a Skill; add evals or cases; write eval.yaml/case.yaml; run skill-up run/validate/list-cases/report/import/init; or migrate from Anthropic evals.json. Handles Skill discovery, evals scaffolding, judge authoring, credentials, user config, validation, runs, and reports."
+description: "Create, run, diagnose, and iteratively improve Agent Skill evaluations (evals) with the skill-up CLI / 使用 skill-up CLI 创建、运行、诊断并持续改进 Agent Skill 评测. Use when the user asks to evaluate, test, regress, verify, fix, improve, iterate, or evolve a Skill; add or strengthen eval cases; write eval.yaml/case.yaml; run skill-up run/validate/list-cases/report/import/init; or migrate from Anthropic evals.json. Handles Skill discovery, eval scaffolding, judge authoring, validation, runs, reports, and evidence-based repair loops."
 ---
 
 # use-skill-up-cli
 
-Help the user set up, run, and interpret evaluations for Agent Skills via the `skill-up` CLI.
+Help the user evaluate and evolve Agent Skills through the `skill-up` CLI.
 
 Manual: <https://alibaba.github.io/skill-up/>
 
@@ -54,6 +54,7 @@ my-skill/
 Use this skill in any of the following situations:
 
 - The user asks to "run / evaluate / verify / test this skill".
+- The user asks to "fix / improve / iterate / evolve this skill" from eval failures.
 - The user wants to "add evals, test cases, or regression cases to a skill".
 - The user wants to edit `eval.yaml` / `case.yaml`, or asks you to choose an appropriate `judge` type.
 - The user mentions `skill-up run/validate/list-cases/report/import/init`.
@@ -180,6 +181,19 @@ Artifacts under `<skill-root>/<skill-name>-workspace/iteration-N/`:
 - `<case-id>/with_skill/grading.json`, `outputs/`
 
 Summarize: pass rate and timing; for failures, case id, assertion `text`, and `evidence`; benchmark deltas if enabled; offer HTML path or `skill-up report result.json --format html`.
+
+### Step 8: Evolve the Skill when requested
+
+Only enter this loop when the user asks to fix, improve, iterate, or evolve the
+target Skill. If the user only asks to evaluate or report results, stop after
+Step 7 without modifying it.
+
+1. Diagnose failures from `result.json`, `grading.json`, and output evidence.
+2. Fix `SKILL.md` or supporting files when the Skill behavior is incorrect.
+3. Add or refine eval cases when coverage is missing.
+4. Do not weaken valid assertions merely to make a failure pass.
+5. Rerun failed cases first, then run the full eval suite.
+6. Continue until the evals pass or clearly report what remains blocked.
 
 ## Command quick reference
 
