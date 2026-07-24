@@ -31,6 +31,7 @@ skill-up run [path] [flags]
 | `--engine`             | From config                   | Override engine name                                                                                                                                       |
 | `--model`              | From config                   | Override model (format: `provider/name`)                                                                                                                   |
 | `--parallelism`        | From config                   | Override `cases.parallelism`. Allowed range: 1–256                                                                                                          |
+| `--baseline`           | From config                   | Override `benchmark.enabled` to `true` for this run                                                                                                         |
 | `--api-key`            | —                             | Pass an API key (higher precedence than env vars)                                                                                                          |
 | `-v, --verbose`        | `0`                           | Increase log verbosity. Default `info`; `-v` / `--verbose` / `--verbose=true` → `debug`; `-vv` / `--verbose=2` → `trace`; `--verbose=false` disables extra detail |
 
@@ -58,6 +59,9 @@ skill-up run ./evals/eval.yaml --engine codex --model openai/gpt-4
 
 # Temporarily override case parallelism
 skill-up run ./evals/eval.yaml --parallelism 4
+
+# Run with baseline comparison
+skill-up run ./evals/eval.yaml --baseline
 
 # Multiple report formats
 skill-up run ./evals/eval.yaml --format json --format html --format junit
