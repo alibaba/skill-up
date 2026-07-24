@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: skill-up
-  text: Evaluation framework for Agent Skill developers
-  tagline: Declare your eval environment, dependencies, test cases, and grading strategy in YAML — run it locally or in CI.
+  text: Evaluate and evolve Agent Skills
+  tagline: Measure Skill quality, then turn failures into automatic eval fixes and the next iteration.
   image:
     src: /logo.png
     alt: skill-up
@@ -20,8 +20,8 @@ hero:
       link: https://github.com/alibaba/skill-up
 
 features:
-  - title: AI-Assisted with skill-upper
-    details: Use the skill-upper Agent Skill to create and run evals through natural conversation with AI agents like Cursor, Claude Code, or Qoder. No need to memorize CLI syntax.
+  - title: Eval-to-Evolution with skill-upper
+    details: Create evals through natural conversation, then let skill-upper diagnose failures, repair or expand cases, and rerun skill-up until the suite evolves.
     link: /guide/getting-started#recommended-usage-ai-assisted-with-skill-upper
     linkText: Learn more
   - title: Declarative Eval Config
@@ -47,3 +47,11 @@ features:
     link: /guide/cli-reference#exit-codes
     linkText: Exit codes
 ---
+
+## Overview
+
+skill-up combines **evaluation** and **evolution** for Agent Skills. It makes quality measurable through declarative YAML evals, isolated multi-engine runs, flexible judges, and structured reports. Then skill-upper turns failures into progress: it can automatically repair or expand the eval suite and rerun the loop with you.
+
+The same workflow runs locally or in CI, supports Anthropic `evals.json` imports, and emits JSON, JUnit, and HTML reports.
+
+![How skill-up evaluates and evolves Agent Skills through automatic eval repair and iteration](/skill-up-overview.png)

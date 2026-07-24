@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: skill-up
-  text: 面向 Agent Skill 开发者的评测框架
-  tagline: 用 YAML 声明评测环境、依赖、用例与评分策略，本地或 CI 中一键运行。
+  text: 评测并持续演进 Agent Skill
+  tagline: 度量 Skill 质量，再把失败转化为自动修复和下一轮迭代。
   image:
     src: /logo.png
     alt: skill-up
@@ -20,8 +20,8 @@ hero:
       link: https://github.com/alibaba/skill-up
 
 features:
-  - title: AI 辅助配合 skill-upper
-    details: 使用 skill-upper Agent Skill，通过自然对话与 AI Agent（如 Cursor、Claude Code、Qoder 等）创建和运行评测，无需记忆 CLI 语法。
+  - title: skill-upper 从评测到演进
+    details: 通过自然对话创建评测，让 skill-upper 诊断失败、修复或补充用例，并持续重新运行 skill-up，推动评测集不断演进。
     link: /zh/guide/getting-started#推荐使用方式-ai-辅助配合-skill-upper
     linkText: 了解更多
   - title: 声明式评测配置
@@ -47,3 +47,11 @@ features:
     link: /zh/guide/cli-reference#退出码
     linkText: 退出码说明
 ---
+
+## 工作原理
+
+skill-up 将 Agent Skill 的**评测**与**演进**合为一个闭环：通过声明式 YAML 评测、隔离的多引擎运行、灵活的 Judge 和结构化报告，让质量可度量；再由 skill-upper 把失败转化为改进，自动修复或补充 eval 用例，并与你持续重跑和迭代。
+
+同一套流程既可在本地运行，也可接入 CI；同时兼容 Anthropic `evals.json` 导入，并输出 JSON、JUnit 和 HTML 报告。
+
+![skill-up 通过自动修复和迭代 eval 来评测并演进 Agent Skill](/skill-up-overview.png)

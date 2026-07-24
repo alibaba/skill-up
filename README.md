@@ -6,6 +6,10 @@
   <h1>skill-up</h1>
 
   <p align="center">
+    <b>The evaluation and evolution tool for Agent Skills.</b>
+  </p>
+
+  <p align="center">
     <a href="https://github.com/alibaba/skill-up/actions">
       <img src="https://github.com/alibaba/skill-up/actions/workflows/ci.yml/badge.svg" alt="CI" />
     </a>
@@ -42,10 +46,16 @@
 
 ## Overview
 
-**skill-up** is a CLI evaluation framework for Agent Skill developers. Declare your eval environment, dependencies, test cases, and grading strategy in `evals/eval.yaml` and `evals/cases/*.yaml`, then run evaluations locally or in CI to generate structured reports.
+**skill-up** is an evaluation and evolution tool for Agent Skills.
+
+- **Evaluation** makes Skill quality measurable and repeatable: declarative YAML cases run across multiple Agent Engines, use rule, script, or Agent judges, and produce structured reports locally or in CI.
+- **Evolution** turns those results into the next improvement: through conversation, **skill-upper** reads failures, automatically repairs or expands the eval suite, reruns skill-up, and keeps iterating with you.
+
+![How skill-up evaluates and evolves Agent Skills through automatic eval repair and iteration](docs/public/skill-up-overview.png)
 
 ## Features
 
+- **Eval-to-Evolution Loop with skill-upper**: Create evals through natural conversation, diagnose failures, automatically repair or expand cases, and rerun skill-up until the eval suite evolves.
 - **Declarative Eval Config**: Define evaluation environment, engine, model, and cases through YAML (`eval.yaml` + `cases/*.yaml`).
 - **Multi-Engine Support**: Works with Qoder CLI, Claude Code, and Codex as built-in Agent Engines, plus user-defined agents via `engine.custom` (local transport — see [docs/design/custom-engine.md](docs/design/custom-engine.md)).
 - **Flexible Judging**: Supports `rule_based`, `script`, and `agent_judge` evaluation strategies.
@@ -58,19 +68,19 @@
 The official [Agent Skills evaluation guide](https://agentskills.io/skill-creation/evaluating-skills) describes the right evaluation loop: write realistic cases, run with and without the Skill, grade outputs, aggregate results, and iterate. `skill-up` turns that workflow into a reusable CLI:
 
 - Replaces ad hoc run folders with a declarative `eval.yaml` + `cases/*.yaml` format.
+- Closes the improvement loop: skill-upper can interpret failed reports, repair or add eval cases, and drive the next skill-up run through conversation.
 - Automates workspace setup, Skill installation, Agent Engine invocation, judging, and report generation.
 - Supports multiple engines (`claude_code`, `codex`, `qodercli`, `qwen_code`) instead of tying the workflow to one client.
 - Keeps compatibility with Anthropic-style `evals.json` while adding richer judges, CI-friendly commands, and structured reports.
 
-## Recommended Usage: AI-Assisted with skill-upper
+## Quick Start: Evolve a Skill with skill-upper
 
-For the best experience, use **skill-upper** — the Agent Skill shipped in this
-repository. It lets you ask an AI agent to scaffold, validate, run, and explain
-evals instead of hand-writing every YAML file first.
+The recommended way to use skill-up is through **skill-upper**, the Agent Skill
+shipped in this repository. It lets your AI agent create evals, run skill-up,
+understand failures, fix the Skill or its evals, add regression coverage, and
+repeat the loop through conversation.
 
-### 1. Install the `skill-upper` Agent Skill
-
-Recommended: install it with the `skills` CLI:
+### 1. Install skill-upper
 
 ```bash
 # Codex, global install
@@ -80,32 +90,22 @@ npx skills add https://github.com/alibaba/skill-up/tree/main/skills/skill-upper 
 npx skills add https://github.com/alibaba/skill-up/tree/main/skills/skill-upper -g -a claude-code -y
 ```
 
-You do not need to install `skill-up` before installing this Skill.
-`skill-upper` checks whether the `skill-up` command is available when it runs
-and guides the agent through installation if it is missing.
+You normally do not need to install skill-up first. skill-upper checks for the
+CLI when it runs and guides the agent through installation if needed.
 
-### 2. Add and run evals
+### 2. Create and run the first evals
 
-Open the target Skill project in your AI agent. The target project should have
-this shape:
+Open a project that contains your Skill's `SKILL.md` in Codex, Claude Code, or
+another compatible Agent, then ask:
 
-```text
-my-skill/
-  SKILL.md
+```markdown
+Use skill-upper to evaluate this Skill.
+Read SKILL.md, identify its most important behaviors, create realistic eval
+cases with appropriate judges, validate the configuration, and run skill-up.
+Summarize the results and the highest-impact failures.
 ```
 
-Then ask the agent something concrete:
-
-```text
-Use skill-upper to add evals for this Skill.
-Add this evaluation case:
-- Input: write a hello world program.
-- Evaluation: check that the output contains hello and world.
-
-After that run skill-up to validate and run.
-```
-
-The agent should create files like:
+skill-upper creates the declarative eval suite and drives the CLI for you:
 
 ```text
 my-skill/
@@ -113,97 +113,42 @@ my-skill/
   evals/
     eval.yaml
     cases/
-      basic.yaml
+      <case-id>.yaml
 my-skill-workspace/
   iteration-1/
     result.json
 ```
 
-When `evals/eval.yaml` lives under a directory containing `SKILL.md`,
-`skill-up` automatically installs that local Skill for the run, so you usually
-do not need to list the Skill path manually in `eval.yaml`.
+### 3. Fix, regress, and iterate
 
-## Installation
+Continue in the same conversation:
 
-Install with the script:
+```markdown
+Review the latest skill-up results. For each failure, determine whether the
+Skill or the eval is wrong. Fix SKILL.md and supporting files, or repair the
+eval case and judge as appropriate. Add regression cases for the bugs you
+found, rerun skill-up, and continue until the important behaviors pass.
+```
+
+This is the evolution loop: reports become fixes, fixes become regression
+cases, and every iteration makes the Skill and its eval suite stronger.
+
+### Prefer manual setup?
+
+You can still install the CLI directly and hand-write `eval.yaml` and case
+files:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/alibaba/skill-up/main/install.sh | bash
 ```
 
-The installer downloads the matching binary from [GitHub Releases](https://github.com/alibaba/skill-up/releases).
-
-To build locally from a checkout, install [Go](https://go.dev/dl/) 1.25 or later:
-
-```bash
-make build
-# or
-go build -o bin/skill-up ./cmd/skill-up
-```
-
-**Windows users**: skill-up runs natively on Windows. See
-[Windows Support](docs/guide/windows.md) for the recommended workflow,
-known limitations (notably: native agent CLI execution requires Git
-Bash), and the PowerShell tooling under `scripts/windows/`.
-
-## Quick Start
-
-### 1. Create Eval Config
-
-In your Skill directory, create `evals/eval.yaml`:
-
-```yaml
-schema_version: v1alpha1
-
-environment:
-  type: none
-
-engine:
-  name: claude_code
-
-cases:
-  files:
-    - evals/cases/hello-world.yaml
-```
-
-When `evals/eval.yaml` lives under a directory that contains `SKILL.md`, skill-up installs the current Skill automatically. The omitted fields use defaults: JSON report output, `timeout_seconds: 300`, `max_turns: 10`, and `parallelism: 1`.
-
-For the full `eval.yaml` schema, see [Writing Evals](docs/guide/writing-evals.md).
-
-### 2. Write an Eval Case
-
-Create `evals/cases/hello-world.yaml`:
-
-```yaml
-input:
-  prompt: |
-    Please generate a Hello World program
-
-expect:
-  must_contain:
-    - "Hello"
-    - "World"
-```
-
-The case `id` defaults to the filename (`hello-world`). Add a `judge` block only when you need script-based or agent-based grading.
-
-### 3. Validate Config
-
-```bash
-skill-up validate
-```
-
-This step is optional, but useful before the first run: it checks `eval.yaml` and all referenced case files without starting an Agent Engine.
-
-### 4. Run Evaluation
-
-```bash
-skill-up run
-```
-
-Results are written to `<skill-name>-workspace/iteration-1/`.
-
-For engineering conventions (Conventional Commits, Git hooks, golangci-lint), see [CONTRIBUTING.md](CONTRIBUTING.md).
+See the official documentation for
+[Getting Started](https://alibaba.github.io/skill-up/guide/getting-started),
+[Writing Evals](https://alibaba.github.io/skill-up/guide/writing-evals),
+[CLI Reference](https://alibaba.github.io/skill-up/guide/cli-reference), and
+[User Configuration](https://alibaba.github.io/skill-up/guide/user-config).
+Windows-specific setup and limitations are covered in the
+[Windows guide](https://alibaba.github.io/skill-up/guide/windows).
 
 ## User config
 
