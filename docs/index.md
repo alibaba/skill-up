@@ -22,7 +22,7 @@ hero:
 features:
   - title: Eval-to-Evolution with skill-upper
     details: Create evals through natural conversation, then let skill-upper diagnose failures, repair or expand cases, and rerun skill-up until the suite evolves.
-    link: /guide/getting-started#recommended-usage-ai-assisted-with-skill-upper
+    link: /guide/getting-started#eval-to-evolution-with-skill-upper
     linkText: Learn more
   - title: Declarative Eval Config
     details: Define evaluation environment, engine, model, and cases through YAML (eval.yaml + cases/*.yaml).

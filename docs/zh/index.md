@@ -22,7 +22,7 @@ hero:
 features:
   - title: skill-upper 从评测到演进
     details: 通过自然对话创建评测，让 skill-upper 诊断失败、修复或补充用例，并持续重新运行 skill-up，推动评测集不断演进。
-    link: /zh/guide/getting-started#推荐使用方式-ai-辅助配合-skill-upper
+    link: /zh/guide/getting-started#使用-skill-upper-从评测到演进
     linkText: 了解更多
   - title: 声明式评测配置
     details: 通过 YAML（eval.yaml + cases/*.yaml）定义评测环境、引擎、模型与用例。

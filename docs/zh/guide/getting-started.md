@@ -1,14 +1,17 @@
 # 快速上手
 
-skill-up 是一个面向 Agent Skill 开发者的评测工具。你可以用它来验证 Skill 在真实 Agent Engine（如 Claude Code、Codex、 Qodercli）中的功能正确性，并在本地或 CI 中持续回归。
+skill-up 是一个面向 Agent Skill 开发者的评测与演进工具。你可以用它验证
+Skill 在真实 Agent Engine（如 Claude Code、Codex、Qoder CLI）中的功能
+正确性，把失败转化为有针对性的修复，并在本地或 CI 中持续回归。
 
 ---
 
-## 推荐使用方式：AI 辅助配合 skill-upper
+## 使用 skill-upper 从评测到演进
 
-推荐使用仓库内置的 **skill-upper** Agent Skill。它会引导 AI Agent
-为目标 Skill 生成评测配置、校验、运行并解释结果，避免一开始就手写所有
-YAML。
+推荐使用仓库内置的 **skill-upper** Agent Skill，作为对话式的演进驱动器。
+它会引导 AI Agent 创建评测、运行 skill-up、诊断失败、修复目标 Skill
+或配套文件，在发现覆盖缺口时补充或改进 eval 用例，然后重新运行评测，
+把单次测试变成可重复的“评测 → 诊断 → 修复 → 重跑”闭环。
 
 ### 1. 安装 `skill-upper` Agent Skill
 
@@ -25,7 +28,7 @@ npx skills add https://github.com/alibaba/skill-up/tree/main/skills/skill-upper 
 安装这个 Skill 前不需要先安装 `skill-up`。`skill-upper` 在运行时会检查
 `skill-up` 命令是否可用；如果缺失，它会引导 Agent 完成安装。
 
-### 2. 添加与运行评测
+### 2. 创建并运行第一组评测
 
 在 AI Agent 中打开目标 Skill 项目。目标项目至少应包含：
 
@@ -61,6 +64,20 @@ my-skill-workspace/
 
 当 `evals/eval.yaml` 位于包含 `SKILL.md` 的目录下时，`skill-up` 会在运行时
 自动安装这个本地 Skill，通常不需要在 `eval.yaml` 里手动写 Skill 路径。
+
+### 3. 诊断、修复并持续迭代
+
+首次运行后，不必手工逐条解读报告，可以继续与 Agent 对话：
+
+```text
+使用 skill-upper 检查最近一次 skill-up 的评测结果。
+逐项诊断失败，修复 SKILL.md 或配套文件；如果评测覆盖不足，
+补充或改进 eval 用例，然后重新运行 skill-up。
+持续迭代直到评测通过，或说明仍然受阻的原因。
+```
+
+skill-upper 会根据 skill-up 的结构化结果驱动下一次修改。每轮迭代都会让
+Skill 实现和 eval 评测集保持同步，使修复沉淀为回归保障，而不是一次性补丁。
 
 ---
 
