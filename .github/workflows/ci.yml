@@ -13,25 +13,34 @@ on:
       - 'docs/**'
       - '*.md'
       - '.github/workflows/docs.yml'
+  # Required checks must also run for commits synthesized by Merge Queue.
+  merge_group:
 
-# Keep the default gate small and cancel superseded work on both PRs and main.
+# Keep the default gate small and cancel only superseded pull-request work.
 # Expensive engine, sandbox, Windows and release checks live in extended-ci.yml.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   build:
     name: Build & Test
-    runs-on: self-hosted
+    # Pull requests can contain untrusted code. Use an ephemeral GitHub-hosted
+    # runner instead of a persistent self-hosted machine.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.25.x"
           cache: true
@@ -47,6 +56,7 @@ jobs:
 
       - name: Report coverage
         run: |
+          set -euo pipefail
           pct=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%","",$3); print $3}')
           if [ -z "$pct" ]; then
             echo "could not parse total coverage" >&2
@@ -56,12 +66,18 @@ jobs:
 
   e2e-smoke:
     name: E2E Smoke
-    runs-on: self-hosted
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.25.x"
           cache: true
@@ -82,18 +98,25 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: self-hosted
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.25.x"
           cache: true
 
       - name: Check formatting
         run: |
+          set -euo pipefail
           files=$(gofmt -l .)
           if [ -n "$files" ]; then
             echo "Following files are not formatted:"
@@ -101,7 +124,7 @@ jobs:
             exit 1
           fi
 
-      - name: golangci-lint
+      - name: Run golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
           version: v2.11.4
@@ -109,5 +132,5 @@ jobs:
       - name: Install revive
         run: go install github.com/mgechev/revive@v1.10.0
 
-      - name: revive
+      - name: Run revive
         run: revive -config revive.toml ./...

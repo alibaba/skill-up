@@ -9,10 +9,10 @@
 #     that have read access to the repository, otherwise the rule is ignored.
 #   - Multiple owners can be listed, separated by spaces.
 #
-# Recommended Branch Protection (Settings -> Branches -> Add rule):
+# Recommended ruleset (Settings -> Rules -> Rulesets):
 #   - Require a pull request before merging
 #   - Require review from Code Owners
-#   - Require status checks to pass (select `build` and `lint` jobs from CI)
+#   - Require the stable checks documented in docs/guide/ci-maintenance.md
 
 # Global fallback: every file is owned by the maintainers by default.
 *                           @hittyt @libinfs
@@ -22,6 +22,10 @@
 
 # CI / release configuration.
 /.github/                   @hittyt @libinfs
+/.github/workflows/         @hittyt @libinfs
+/.github/dependabot.yml     @hittyt @libinfs
+/action.yml                 @hittyt @libinfs
+/action/                    @hittyt @libinfs
 /Makefile                   @hittyt @libinfs
 /.goreleaser.yaml           @hittyt @libinfs
 
