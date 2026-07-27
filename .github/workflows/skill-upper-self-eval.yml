@@ -5,8 +5,8 @@ name: Skill Upper Self-Eval
 # green check here is the action's end-to-end integration test for every engine
 # it claims to support.
 #
-# NOTE: the runner image bakes skill-up from the public GitHub Releases
-# (Dockerfile: install.sh … latest), so an engine can only be dogfooded here
+# NOTE: the runner image bakes a pinned skill-up version from GitHub Releases,
+# so an engine can only be dogfooded here
 # once a skill-up RELEASE ships it. qwen_code is intentionally NOT in the matrix
 # yet — the released skill-up would reject `--engine qwen_code` as unsupported.
 # Add the row once a release includes the engine (the action image already
@@ -30,8 +30,7 @@ concurrency:
 
 # Least-privilege default for every job (the image job overrides with
 # packages: write for the ghcr push).
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   # Rebuild & republish the runner image from THIS commit first, so the dogfood
@@ -49,7 +48,10 @@ jobs:
   dogfood:
     name: Eval skill-upper (${{ matrix.engine }})
     needs: image
-    runs-on: self-hosted      # Docker container action — Linux only
+    runs-on: [self-hosted, linux, x64, docker, trusted]
+    timeout-minutes: 60
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -69,22 +71,30 @@ jobs:
             provider: ''
             model: ''
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
-      # Point the local action at the image the `image` job just built for this
-      # run. The tag is intentionally run-scoped so manual dogfood runs from
-      # feature branches never clobber production runner image tags.
-      - name: Pin action to this run's runner image
+      # Consume the immutable digest returned by the reusable image workflow.
+      # A mutable tag can no longer change the image between build and eval.
+      - name: Pin action to this run's runner image digest
+        env:
+          IMAGE_DIGEST: ${{ needs.image.outputs.digest }}
+          IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/skill-up-runner
         run: |
-          tag="self-eval-${{ github.run_id }}"
-          img="ghcr.io/${{ github.repository_owner }}/skill-up-runner:${tag}"
-          sed -i "s#image: docker://ghcr.io/[^[:space:]]*/skill-up-runner:.*#image: docker://${img}#" action.yml
+          set -euo pipefail
+          if [[ ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Reusable image workflow returned an invalid digest"
+            exit 1
+          fi
+          img="${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
+          sed -E -i "s#image: docker://ghcr.io/[^[:space:]]*/skill-up-runner[:@][^[:space:]]+#image: docker://${img}#" action.yml
           echo "dogfood will use ${img}"
           grep 'image: docker://' action.yml
 
-      # Fork PRs run without repository secrets; skip cleanly instead of 401ing.
-      # The judge hop always needs the dashscope key, so require it for every
-      # engine; qodercli additionally needs its own PAT.
+      # This workflow is manual and trusted. Missing credentials are a
+      # configuration error and must fail instead of producing a green no-op.
       - name: Check secret availability
         id: secrets
         env:
@@ -92,21 +102,17 @@ jobs:
           # indexing, which CodeQL flags as exposing the whole secrets context).
           QODER_ACCESS_TOKEN: ${{ secrets.QODER_ACCESS_TOKEN }}
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          ENGINE: ${{ matrix.engine }}
         run: |
+          set -euo pipefail
           if [ -z "$DASHSCOPE_API_KEY" ]; then
-            echo "::notice::Skipping self-eval (${{ matrix.engine }}): required secret not provisioned (likely a fork PR)."
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          elif [ "${{ matrix.engine }}" = "qodercli" ] && [ -z "$QODER_ACCESS_TOKEN" ]; then
-            echo "::notice::Skipping self-eval (${{ matrix.engine }}): required secret not provisioned (likely a fork PR)."
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=true" >> "$GITHUB_OUTPUT"
-            if [ "${{ matrix.engine }}" = "qodercli" ]; then
-              echo "api_key=${QODER_ACCESS_TOKEN}" >> "$GITHUB_OUTPUT"
-            else
-              echo "api_key=${DASHSCOPE_API_KEY}" >> "$GITHUB_OUTPUT"
-            fi
+            echo "::error::DASHSCOPE_API_KEY is required for self-eval ($ENGINE)."
+            exit 1
+          elif [ "$ENGINE" = "qodercli" ] && [ -z "$QODER_ACCESS_TOKEN" ]; then
+            echo "::error::QODER_ACCESS_TOKEN is required for qodercli self-eval."
+            exit 1
           fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
 
       - name: Run skill-upper eval via the action
         if: steps.secrets.outputs.available == 'true'
@@ -132,7 +138,9 @@ jobs:
           engine: ${{ matrix.engine }}
           provider: ${{ matrix.provider }}
           model: ${{ matrix.model }}
-          api-key: ${{ steps.secrets.outputs.api_key }}
+          # Pass the selected credential directly; never copy a secret through
+          # step outputs, which GitHub may suppress as secret-bearing data.
+          api-key: ${{ matrix.engine == 'qodercli' && secrets.QODER_ACCESS_TOKEN || secrets.DASHSCOPE_API_KEY }}
           # Run cases concurrently so the larger per-case timeout (600s, needed
           # by the slower codex coder model) doesn't blow up wall-clock — but
           # keep qodercli serial: concurrent qodercli processes race on the fixed
@@ -142,16 +150,6 @@ jobs:
           # Point at the skill dir; skill-up finds evals/eval.yaml inside and
           # resolves cases (evals/cases/*.yaml) relative to the skill root.
           skill-target: skills/skill-upper
-
-      - name: Restore report ownership
-        # The Docker container action runs as root. The action entrypoint fixes
-        # this on exit; keep a host-side fallback so artifact upload and the
-        # next checkout can read and remove generated reports on self-hosted
-        # runners.
-        if: always() && steps.secrets.outputs.available == 'true'
-        run: |
-          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE/skill-up-workspace" || true
-          chmod -R u+rwX,go+rX "$GITHUB_WORKSPACE/skill-up-workspace" || true
 
       - name: Upload eval report
         if: always() && steps.secrets.outputs.available == 'true'
@@ -181,7 +179,9 @@ jobs:
         if: matrix.engine != 'codex' && steps.secrets.outputs.available == 'true'
         env:
           MIN_PASS_PCT: '60'
+          ENGINE: ${{ matrix.engine }}
         run: |
+          set -euo pipefail
           report=$(ls -1 "$GITHUB_WORKSPACE"/skill-up-workspace/iteration-*/report.json 2>/dev/null | tail -1)
           if [ -z "$report" ] || [ ! -f "$report" ]; then
             echo "::error::no report.json produced — the eval did not run to completion"
@@ -189,7 +189,7 @@ jobs:
           fi
           total=$(jq '.case_results | length' "$report")
           passed=$(jq '[.case_results[] | select(.status=="PASS")] | length' "$report")
-          echo "engine=${{ matrix.engine }}: ${passed}/${total} cases passed (threshold ${MIN_PASS_PCT}%)"
+          echo "engine=${ENGINE}: ${passed}/${total} cases passed (threshold ${MIN_PASS_PCT}%)"
           jq -r '.case_results[] | "  \(.status)\t\(.case_id)"' "$report"
           if [ "${total:-0}" -eq 0 ]; then echo "::error::no cases in report"; exit 1; fi
           pct=$(( passed * 100 / total ))
@@ -197,4 +197,4 @@ jobs:
             echo "::error::pass rate ${pct}% below threshold ${MIN_PASS_PCT}%"
             exit 1
           fi
-          echo "::notice::${{ matrix.engine }} pass rate ${pct}% meets threshold"
+          echo "::notice::${ENGINE} pass rate ${pct}% meets threshold"

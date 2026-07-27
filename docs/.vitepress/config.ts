@@ -68,6 +68,12 @@ export default defineConfig({
                 { text: 'Migrating from Anthropic', link: '/guide/migration' },
               ],
             },
+            {
+              text: 'Maintainers',
+              items: [
+                { text: 'CI Maintenance', link: '/guide/ci-maintenance' },
+              ],
+            },
           ],
         },
         editLink: {
@@ -122,6 +128,12 @@ export default defineConfig({
                 { text: 'CLI 命令参考', link: '/zh/guide/cli-reference' },
                 { text: '用户配置', link: '/zh/guide/user-config' },
                 { text: '从 Anthropic 格式迁移', link: '/zh/guide/migration' },
+              ],
+            },
+            {
+              text: '维护者',
+              items: [
+                { text: 'CI 维护手册', link: '/zh/guide/ci-maintenance' },
               ],
             },
           ],

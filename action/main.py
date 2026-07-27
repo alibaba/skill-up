@@ -24,11 +24,15 @@ binaries are already present.
 """
 
 import argparse
+import hashlib
 import os
 import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
+import urllib.error
+import urllib.request
 
 
 # provider -> per-protocol (openai / anthropic) base_url.
@@ -55,7 +59,13 @@ ENGINE_PROTOCOL = {
 # endpoint (api.anthropic.com / api.openai.com) rather than an internal gateway.
 ENGINE_DEFAULT_BASE_URL = {}
 
-SKILL_UP_INSTALL_URL = "https://raw.githubusercontent.com/alibaba/skill-up/main/install.sh"
+SKILL_UP_INSTALL_URL = (
+    "https://raw.githubusercontent.com/alibaba/skill-up/"
+    "5ac7ce0467a164d07aacbbf7052bcffda68a446b/install.sh"
+)
+SKILL_UP_INSTALL_SHA256 = (
+    "2b7fbea303dc8b6feb09db6f9cc7307fb9263ff6cc4b0c68cdfe9c2897d109ef"
+)
 
 
 def _provider_env_prefix(provider):
@@ -309,7 +319,7 @@ def parse_inputs(argv=None):
     parser.add_argument("--base-url", default="")
     parser.add_argument("--open-sandbox-api-key", default="")
     parser.add_argument("--skill-target", default=".")
-    parser.add_argument("--skill-up-version", default="latest")
+    parser.add_argument("--skill-up-version", default="0.7.0")
     parser.add_argument("--skill-up-command", default="skill-up run")
     parser.add_argument("--parallelism", default="")
     parser.add_argument("--agent-install-command", default="")
@@ -332,16 +342,38 @@ def install_skill_up(bin_dir, version):
     on github.com hosted runners.
     """
     os.makedirs(bin_dir, exist_ok=True)
-    version_env = ""
+    install_env = {"INSTALL_DIR": bin_dir}
     if version and version != "latest":
-        version_env = "export SKILL_UP_VERSION=" + shlex.quote(version)
-    script = f"""
-set -e
-export INSTALL_DIR={shlex.quote(bin_dir)}
-{version_env}
-curl -fsSL --connect-timeout 10 --max-time 120 {shlex.quote(SKILL_UP_INSTALL_URL)} | bash
-"""
-    _run(script)
+        install_env["SKILL_UP_VERSION"] = version
+
+    try:
+        with urllib.request.urlopen(SKILL_UP_INSTALL_URL, timeout=120) as response:
+            installer = response.read()
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        print(
+            f"error: failed to download skill-up installer from "
+            f"{SKILL_UP_INSTALL_URL}: {exc}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    actual_sha256 = hashlib.sha256(installer).hexdigest()
+    if actual_sha256 != SKILL_UP_INSTALL_SHA256:
+        print(
+            "error: skill-up installer checksum mismatch "
+            f"(expected {SKILL_UP_INSTALL_SHA256}, got {actual_sha256})",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    installer_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False) as installer_file:
+            installer_file.write(installer)
+            installer_path = installer_file.name
+        _run("bash " + shlex.quote(installer_path), env=install_env)
+    finally:
+        if installer_path:
+            os.unlink(installer_path)
 
 
 def _set_output(name, value):

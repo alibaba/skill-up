@@ -1,0 +1,35 @@
+name: Workflow Security
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/**'
+      - 'action.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/**'
+      - 'action.yml'
+  merge_group:
+
+permissions: {}
+
+jobs:
+  zizmor:
+    name: Zizmor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      # Advanced Security mode uploads SARIF without blocking on the initial
+      # baseline. Promote Zizmor to a required check after findings are triaged.
+      - name: Analyze workflows with Zizmor
+        uses: zizmorcore/zizmor-action@5f14fd08f7cf1cb1609c1e344975f152c7ee938d # v0.5.6
