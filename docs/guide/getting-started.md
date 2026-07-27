@@ -1,14 +1,20 @@
 # Getting Started
 
-skill-up is an evaluation tool for Agent Skill developers. Use it to verify that your Skill behaves correctly inside real Agent Engines (Claude Code, Codex, Qoder CLI) and to run continuous regression locally or in CI.
+skill-up is an evaluation and evolution tool for Agent Skill developers. Use it
+to verify that your Skill behaves correctly inside real Agent Engines (Claude
+Code, Codex, Qoder CLI), turn failures into targeted fixes, and run continuous
+regression locally or in CI.
 
 ---
 
-## Recommended Usage: AI-Assisted with skill-upper
+## Eval-to-Evolution with skill-upper
 
-For the best experience, use **skill-upper** — the Agent Skill shipped in this
-repository. It lets you ask an AI agent to scaffold, validate, run, and explain
-evals instead of hand-writing every YAML file first.
+For the best experience, use **skill-upper** — the conversational evolution
+driver shipped with this repository. It guides an AI agent to create evals, run
+skill-up, diagnose failures, repair the target Skill or its supporting files,
+strengthen the eval suite when it finds coverage gaps, and rerun the evaluation.
+This turns a single test run into a repeatable evaluate → diagnose → fix →
+rerun loop.
 
 ### 1. Install the `skill-upper` Agent Skill
 
@@ -26,7 +32,7 @@ You do not need to install `skill-up` before installing this Skill.
 `skill-upper` checks whether the `skill-up` command is available when it runs
 and guides the agent through installation if it is missing.
 
-### 2. Add and run evals
+### 2. Create and run the first evals
 
 Open the target Skill project in your AI agent. The target project should have
 this shape:
@@ -64,6 +70,22 @@ my-skill-workspace/
 When `evals/eval.yaml` lives under a directory containing `SKILL.md`,
 `skill-up` automatically installs that local Skill for the run, so you usually
 do not need to list the Skill path manually in `eval.yaml`.
+
+### 3. Diagnose, fix, and iterate
+
+After the first run, continue the conversation instead of manually interpreting
+every report:
+
+```text
+Use skill-upper to inspect the latest skill-up results.
+Diagnose each failure, fix SKILL.md or its supporting files, and add or refine
+eval cases when the suite is missing coverage. Then rerun skill-up.
+Continue until the evals pass, or explain what remains blocked.
+```
+
+skill-upper uses the structured skill-up results to drive the next change. Each
+iteration keeps the Skill implementation and its eval suite aligned, so fixes
+become regression coverage rather than one-off patches.
 
 ---
 
