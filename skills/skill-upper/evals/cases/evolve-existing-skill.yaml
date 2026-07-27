@@ -1,0 +1,36 @@
+id: evolve-existing-skill
+title: 根据评测失败修复 Skill 并补充回归用例
+description: |
+  验证 skill-upper 在用户明确要求演进时，能够根据失败现象修复目标 Skill，
+  同时补充回归用例，而不是删除或弱化已有评测。
+
+context:
+  repo_fixture: evals/fixtures/skills/sample-with-evals
+  git:
+    init: true
+
+input:
+  prompt: |
+    todo-manager 最近的评测发现：当没有待办事项时，Agent 没有明确告诉用户列表为空。
+    请使用 skill-upper 演进这个 Skill：
+    1. 修复 SKILL.md，明确空列表时的预期行为；
+    2. 添加一个 ID 为 list-empty-todos 的 rule_based 回归用例；
+    3. 保留且不要弱化已有的 add-todo 用例。
+
+expect:
+  files_exist:
+    - "SKILL.md"
+    - "evals/eval.yaml"
+    - "evals/cases/add-todo.yaml"
+    - "evals/cases/list-empty-todos.yaml"
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "SKILL.md 明确说明没有待办事项时应告知用户列表为空"
+    - "新增 evals/cases/list-empty-todos.yaml，且 id 为 list-empty-todos、judge.type 为 rule_based"
+    - "新用例覆盖空待办列表场景，并检查输出能明确表达列表为空"
+    - "原有 evals/cases/add-todo.yaml 被保留，原有断言没有被删除或弱化"
+    - "eval.yaml 的 cases.files 同时引用 add-todo.yaml 和 list-empty-todos.yaml"
+  pass_threshold: 0.8
