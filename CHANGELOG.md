@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Eval-level default expect checks under `cases.defaults.expect`, with
+  append-and-deduplicate semantics for list checks and case-level overrides for
+  `exit_code` and `golden_file`.
+
 ## [0.7.0] - 2026-07-16
 
 ### Added
