@@ -73,6 +73,7 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	if cfg.Environment.Type == runtimeTypeDocker {
 		errs = append(errs, validateDockerEnvironment(cfg.Environment)...)
 	}
+	errs = append(errs, validateOpenSandboxSettings(cfg.Environment)...)
 
 	errs = append(errs, validateNetworkPolicy(cfg.Environment)...)
 
@@ -558,6 +559,84 @@ func validateCustomHTTP(h *customengine.HTTPConfig) []string {
 
 func isValidRuntimeType(t string) bool {
 	return t == runtimeTypeNone || t == runtimeTypeOpenSandbox || t == runtimeTypeDocker
+}
+
+func validateOpenSandboxSettings(env Environment) []string {
+	errs := validateOpenSandboxPlatform(env)
+	errs = append(errs, validateOpenSandboxResources(env)...)
+	return append(errs, validateOpenSandboxWorkspace(env)...)
+}
+
+func validateOpenSandboxWorkspace(env Environment) []string {
+	mount := strings.TrimSpace(env.WorkspaceMount)
+	if env.Type != runtimeTypeOpenSandbox || mount == "" {
+		return nil
+	}
+	targetOS := "linux"
+	if env.Platform != nil && strings.TrimSpace(env.Platform.OS) != "" {
+		targetOS = strings.ToLower(strings.TrimSpace(env.Platform.OS))
+	}
+	abs := path.IsAbs(mount)
+	if targetOS == "windows" {
+		abs = len(mount) >= 3 && mount[1] == ':' && (mount[2] == '\\' || mount[2] == '/')
+	}
+	if !abs {
+		return []string{fmt.Sprintf("environment.workspace_mount must be an absolute %s guest path, got %q", targetOS, mount)}
+	}
+	return nil
+}
+
+func validateOpenSandboxPlatform(env Environment) []string {
+	if env.Platform == nil {
+		return nil
+	}
+	if env.Type != runtimeTypeOpenSandbox {
+		return []string{"environment.platform requires environment.type opensandbox"}
+	}
+
+	var errs []string
+	osName := strings.TrimSpace(env.Platform.OS)
+	arch := strings.TrimSpace(env.Platform.Arch)
+	if osName == "" && arch == "" {
+		errs = append(errs, "environment.platform.os and environment.platform.arch are required")
+	} else if (osName == "") != (arch == "") {
+		errs = append(errs, "environment.platform.os and environment.platform.arch must be set together")
+	}
+	if osName != "" && osName != "linux" && osName != "windows" {
+		errs = append(errs, "environment.platform.os must be one of: linux, windows")
+	}
+	if arch != "" && arch != "amd64" && arch != "arm64" {
+		errs = append(errs, "environment.platform.arch must be one of: amd64, arm64")
+	}
+	return errs
+}
+
+func validateOpenSandboxResources(env Environment) []string {
+	if env.Resources == nil {
+		return nil
+	}
+	if env.Type != runtimeTypeOpenSandbox {
+		return []string{"environment.resources requires environment.type opensandbox"}
+	}
+	if env.Resources.CPU == "" && env.Resources.Memory == "" && env.Resources.Disk == "" {
+		return []string{"environment.resources must set at least one of: cpu, memory, disk"}
+	}
+
+	var errs []string
+	fields := []struct {
+		name  string
+		value string
+	}{
+		{name: "cpu", value: env.Resources.CPU},
+		{name: "memory", value: env.Resources.Memory},
+		{name: "disk", value: env.Resources.Disk},
+	}
+	for _, field := range fields {
+		if field.value != "" && strings.TrimSpace(field.value) == "" {
+			errs = append(errs, "environment.resources."+field.name+" must not be blank")
+		}
+	}
+	return errs
 }
 
 // validateDockerEnvironment collects preflight errors for fields the docker

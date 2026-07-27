@@ -348,10 +348,13 @@ func TestCleanupCommand_Windows_ShellScriptUsesBashRm(t *testing.T) {
 }
 
 func TestJudgeTempDir(t *testing.T) {
-	if d := judgeTempDir("linux"); !strings.HasPrefix(d, "/tmp/skill-up-judge-") {
+	if d := judgeTempDir("linux", "/workspace"); !strings.HasPrefix(d, "/workspace/.skill-up/tmp/skill-up-judge-") {
 		t.Fatalf("posix judgeTempDir = %q, want /tmp/skill-up-judge- prefix", d)
 	}
-	if d := judgeTempDir("windows"); !strings.Contains(d, "skill-up-judge-") {
-		t.Fatalf("windows judgeTempDir = %q, want skill-up-judge- substring", d)
+	if d := judgeTempDir("windows", `C:\workspace`); !strings.HasPrefix(d, `C:\workspace\.skill-up\tmp\skill-up-judge-`) {
+		t.Fatalf("windows judgeTempDir = %q, want guest workspace temp path", d)
+	}
+	if got := joinForGOOS("windows", `C:\workspace`, "nested", "file.txt"); got != `C:\workspace\nested\file.txt` {
+		t.Fatalf("Windows joinForGOOS = %q", got)
 	}
 }

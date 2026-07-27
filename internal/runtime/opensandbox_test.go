@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -53,6 +54,44 @@ func TestNewRuntimeAcceptsOpenSandbox(t *testing.T) {
 func setOpenSandboxTestAuth(t *testing.T) {
 	t.Helper()
 	t.Setenv(openSandboxAPIKeyEnv, "opensandbox-secret")
+}
+
+func TestCreateOpenSandboxCompatDelegatesAllOptionsToSDK(t *testing.T) {
+	origCreateSDK := createOpenSandboxSDK
+	t.Cleanup(func() { createOpenSandboxSDK = origCreateSDK })
+
+	fake := &fakeOpenSandbox{}
+	wantCfg := opensandbox.ConnectionConfig{Domain: "https://sandbox.example.test", APIKey: "secret"}
+	wantOpts := opensandbox.SandboxCreateOptions{
+		Image:          "dockurr/windows:latest",
+		TimeoutSeconds: intPtr(600),
+		Env:            map[string]string{"VERSION": "11"},
+		Metadata:       map[string]string{"case": "windows"},
+		Extensions:     map[string]string{"profile": "windows"},
+		Platform:       &opensandbox.PlatformSpec{OS: opensandbox.OSWindows, Arch: opensandbox.ArchAMD64},
+		ResourceLimits: opensandbox.ResourceLimits{"cpu": "8", "memory": "16Gi", "disk": "128Gi"},
+	}
+
+	var gotCfg opensandbox.ConnectionConfig
+	var gotOpts opensandbox.SandboxCreateOptions
+	createOpenSandboxSDK = func(_ context.Context, cfg opensandbox.ConnectionConfig, opts opensandbox.SandboxCreateOptions) (openSandboxClient, error) {
+		gotCfg, gotOpts = cfg, opts
+		return fake, nil
+	}
+
+	got, err := createOpenSandboxCompat(context.Background(), wantCfg, wantOpts)
+	if err != nil {
+		t.Fatalf("createOpenSandboxCompat: %v", err)
+	}
+	if got != fake {
+		t.Fatalf("client = %T, want fake client", got)
+	}
+	if !reflect.DeepEqual(gotCfg, wantCfg) {
+		t.Fatalf("connection config = %+v, want %+v", gotCfg, wantCfg)
+	}
+	if !reflect.DeepEqual(gotOpts, wantOpts) {
+		t.Fatalf("create options = %+v, want %+v", gotOpts, wantOpts)
+	}
 }
 
 func TestOpenSandboxCreateUsesSDKOptions(t *testing.T) {
@@ -120,6 +159,86 @@ func TestOpenSandboxRuntimeShellIsLinuxPOSIX(t *testing.T) {
 	want := platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
 	if got := rt.Shell(); got != want {
 		t.Fatalf("Shell() = %+v, want %+v", got, want)
+	}
+}
+
+func TestOpenSandboxRuntimeWindowsProfileDefaults(t *testing.T) {
+	rt, err := NewOpenSandboxRuntime(Config{
+		Platform: &Platform{OS: platform.GOOSWindows, Arch: "amd64"},
+	})
+	if err != nil {
+		t.Fatalf("NewOpenSandboxRuntime: %v", err)
+	}
+	if got := rt.Workspace(); got != `C:\workspace` {
+		t.Fatalf("Workspace() = %q, want C:\\workspace", got)
+	}
+	wantShell := platform.Shell{GOOS: platform.GOOSWindows, Family: platform.ShellCmd}
+	if got := rt.Shell(); got != wantShell {
+		t.Fatalf("Shell() = %+v, want %+v", got, wantShell)
+	}
+	if got := rt.entrypoint(); got != nil {
+		t.Fatalf("entrypoint() = %#v, want nil so the SDK/server apply the Windows profile default", got)
+	}
+}
+
+func TestOpenSandboxRuntimeRejectsRelativeGuestWorkspace(t *testing.T) {
+	tests := []Config{
+		{WorkspaceMount: "relative/work"},
+		{Platform: &Platform{OS: platform.GOOSWindows, Arch: "amd64"}, WorkspaceMount: `\work`},
+	}
+	for _, cfg := range tests {
+		if _, err := NewOpenSandboxRuntime(cfg); err == nil {
+			t.Fatalf("NewOpenSandboxRuntime(%+v) accepted relative guest workspace", cfg)
+		}
+	}
+}
+
+func TestOpenSandboxCreatePassesWindowsPlatformAndMergedResources(t *testing.T) {
+	origCreate := createOpenSandbox
+	t.Cleanup(func() { createOpenSandbox = origCreate })
+	setOpenSandboxTestAuth(t)
+
+	var gotOpts opensandbox.SandboxCreateOptions
+	createOpenSandbox = func(_ context.Context, _ opensandbox.ConnectionConfig, opts opensandbox.SandboxCreateOptions) (openSandboxClient, error) {
+		gotOpts = opts
+		return &fakeOpenSandbox{}, nil
+	}
+
+	rt, err := NewOpenSandboxRuntime(Config{
+		Image:     "dockurr/windows:latest",
+		Platform:  &Platform{OS: platform.GOOSWindows, Arch: "amd64"},
+		Resources: &Resources{Memory: "16Gi"},
+		Kwargs:    map[string]string{"base_url": "https://sandbox.example.test"},
+		Delete:    true,
+	})
+	if err != nil {
+		t.Fatalf("NewOpenSandboxRuntime: %v", err)
+	}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	wantPlatform := &opensandbox.PlatformSpec{OS: opensandbox.OSWindows, Arch: opensandbox.ArchAMD64}
+	if !reflect.DeepEqual(gotOpts.Platform, wantPlatform) {
+		t.Fatalf("Platform = %+v, want %+v", gotOpts.Platform, wantPlatform)
+	}
+	wantResources := opensandbox.ResourceLimits{"cpu": "4", "memory": "16Gi", "disk": "64Gi"}
+	if !reflect.DeepEqual(gotOpts.ResourceLimits, wantResources) {
+		t.Fatalf("ResourceLimits = %+v, want %+v", gotOpts.ResourceLimits, wantResources)
+	}
+}
+
+func TestOpenSandboxLinuxResourceOverridesMergeSDKDefaults(t *testing.T) {
+	rt, err := NewOpenSandboxRuntime(Config{Resources: &Resources{CPU: "2", Disk: "20Gi"}})
+	if err != nil {
+		t.Fatalf("NewOpenSandboxRuntime: %v", err)
+	}
+	want := opensandbox.ResourceLimits{"cpu": "2", "memory": "2Gi", "disk": "20Gi"}
+	if got := rt.resourceLimits(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("resourceLimits() = %+v, want %+v", got, want)
+	}
+	if got := (&OpenSandboxRuntime{}).resourceLimits(); got != nil {
+		t.Fatalf("default Linux resourceLimits() = %+v, want nil for SDK defaults", got)
 	}
 }
 
@@ -338,20 +457,28 @@ func TestOpenSandboxRuntimeStateAndPathHelpers(t *testing.T) {
 	if got := rt.Workspace(); got != testWorkspaceMount {
 		t.Fatalf("Workspace() = %q, want /work", got)
 	}
-	if got := rt.execCwd(""); got != testWorkspaceMount {
+	if got, err := rt.execCwd(""); err != nil || got != testWorkspaceMount {
 		t.Fatalf("execCwd empty = %q, want /work", got)
 	}
-	if got := rt.execCwd("nested"); got != "/work/nested" {
+	if got, err := rt.execCwd("nested"); err != nil || got != "/work/nested" {
 		t.Fatalf("execCwd nested = %q, want /work/nested", got)
 	}
-	if got := rt.remotePath("/abs/path"); got != "/abs/path" {
+	if got, err := rt.remotePath("/abs/path"); err != nil || got != "/abs/path" {
 		t.Fatalf("remotePath absolute = %q, want /abs/path", got)
 	}
-	if got := rt.remotePath("../escape"); got != "/escape" {
-		t.Fatalf("remotePath cleans traversal relative to workspace, got %q", got)
+	if _, err := rt.remotePath("../escape"); err == nil {
+		t.Fatal("remotePath accepted traversal outside workspace")
 	}
-	if got := cleanRemotePath("./nested/../file.txt"); got != "file.txt" {
-		t.Fatalf("cleanRemotePath = %q, want file.txt", got)
+
+	windows, err := NewOpenSandboxRuntime(Config{
+		Platform:       &Platform{OS: platform.GOOSWindows, Arch: "amd64"},
+		WorkspaceMount: `C:/work`,
+	})
+	if err != nil {
+		t.Fatalf("NewOpenSandboxRuntime Windows: %v", err)
+	}
+	if got, err := windows.execCwd(`nested/scripts`); err != nil || got != `C:\work\nested\scripts` {
+		t.Fatalf("Windows execCwd = %q, err %v", got, err)
 	}
 }
 
@@ -443,6 +570,28 @@ func TestOpenSandboxDirectoryFallbacks(t *testing.T) {
 		t.Fatalf("fallback command = %#v", fake.execs)
 	}
 
+	windowsFake := &fakeOpenSandbox{createDirErr: errors.New("api unavailable")}
+	windows := &OpenSandboxRuntime{
+		cfg:       Config{Platform: &Platform{OS: platform.GOOSWindows, Arch: "amd64"}},
+		workspace: `C:\workspace`,
+		sandbox:   windowsFake,
+	}
+	if err := windows.ensureDirectory(context.Background(), `C:\work\a b`, 0o755); err != nil {
+		t.Fatalf("Windows ensureDirectory should accept shell-verified directory: %v", err)
+	}
+	if len(windowsFake.execs) != 1 {
+		t.Fatalf("Windows fallback execs = %#v, want one", windowsFake.execs)
+	}
+	windowsCommand := windowsFake.execs[0].Command
+	for _, want := range []string{`if not exist "C:\work\a b\NUL" mkdir "C:\work\a b"`, `.skill-up-write-probe`, `del /q`} {
+		if !strings.Contains(windowsCommand, want) {
+			t.Fatalf("Windows fallback command = %q, want %q", windowsCommand, want)
+		}
+	}
+	if windowsFake.execs[0].Cwd != `C:\` {
+		t.Fatalf("Windows fallback cwd = %q, want C:\\", windowsFake.execs[0].Cwd)
+	}
+
 	exit := 2
 	fake = &fakeOpenSandbox{
 		createDirErr: errors.New("api unavailable"),
@@ -453,7 +602,7 @@ func TestOpenSandboxDirectoryFallbacks(t *testing.T) {
 		t.Fatalf("ensureDirectory error = %v, want shell stderr", err)
 	}
 
-	fake = &fakeOpenSandbox{execResult: &opensandbox.Execution{ExitCode: &exit}}
+	fake = &fakeOpenSandbox{createDirErr: errors.New("api unavailable"), execResult: &opensandbox.Execution{ExitCode: &exit}}
 	rt = &OpenSandboxRuntime{sandbox: fake}
 	if err := rt.ensureDirectories(context.Background(), []string{"/work/a", "/work/b"}); err == nil || !strings.Contains(err.Error(), "exit code 2") {
 		t.Fatalf("ensureDirectories error = %v, want exit code", err)
@@ -786,16 +935,11 @@ func TestOpenSandboxUploadDirUploadsFilesInSingleBatch(t *testing.T) {
 	if string(fake.uploads["/workspace/dest/nested/other.txt"]) != "other" {
 		t.Fatalf("uploaded nested content mismatch: %q", fake.uploads["/workspace/dest/nested/other.txt"])
 	}
-	if len(fake.createdDirs) != 0 {
-		t.Fatalf("created dirs = %#v, want UploadDir to use batched mkdir", fake.createdDirs)
+	if len(fake.createdDirs) != 3 {
+		t.Fatalf("created dirs = %#v, want API-first creation for all directories", fake.createdDirs)
 	}
-	if len(fake.execs) != 1 {
-		t.Fatalf("UploadDir execs = %#v, want one batched mkdir command", fake.execs)
-	}
-	for _, want := range []string{"'/workspace/dest'", "'/workspace/dest/empty'", "'/workspace/dest/nested'"} {
-		if !strings.Contains(fake.execs[0].Command, want) {
-			t.Fatalf("UploadDir mkdir command = %q, want %s", fake.execs[0].Command, want)
-		}
+	if len(fake.execs) != 0 {
+		t.Fatalf("UploadDir execs = %#v, want no fallback when directory API succeeds", fake.execs)
 	}
 	if fake.uploadFilesCalls != 1 {
 		t.Fatalf("UploadFiles calls = %d, want a single batched call", fake.uploadFilesCalls)
@@ -803,8 +947,26 @@ func TestOpenSandboxUploadDirUploadsFilesInSingleBatch(t *testing.T) {
 	if len(fake.uploadFilesBatchSizes) != 1 || fake.uploadFilesBatchSizes[0] != 2 {
 		t.Fatalf("UploadFiles batch sizes = %#v, want one batch of 2 files", fake.uploadFilesBatchSizes)
 	}
-	if strings.Contains(fake.execs[0].Command, "tar") {
-		t.Fatalf("UploadDir exec command = %q, want no tar command", fake.execs[0].Command)
+}
+
+func TestOpenSandboxWindowsUploadDirUsesGuestPaths(t *testing.T) {
+	dir := t.TempDir()
+	writeUploadDirFixture(t, dir)
+	fake := &fakeOpenSandbox{}
+	rt := &OpenSandboxRuntime{
+		cfg:       Config{Platform: &Platform{OS: platform.GOOSWindows, Arch: "amd64"}},
+		workspace: `C:\workspace`,
+		sandbox:   fake,
+	}
+
+	if err := rt.UploadDir(context.Background(), dir, `dest\fixtures`); err != nil {
+		t.Fatalf("UploadDir returned error: %v", err)
+	}
+	if string(fake.uploads[`C:\workspace\dest\fixtures\nested\other.txt`]) != "other" {
+		t.Fatalf("Windows uploaded paths = %#v", fake.uploads)
+	}
+	if _, err := rt.Exec(context.Background(), "echo ok", ExecOptions{Cwd: `..\escape`}); err == nil {
+		t.Fatal("Exec accepted Windows cwd traversal")
 	}
 }
 

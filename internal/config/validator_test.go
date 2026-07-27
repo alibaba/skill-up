@@ -64,6 +64,140 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "valid opensandbox windows platform with partial resource override",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:      "opensandbox",
+					Image:     "dockurr/windows:latest",
+					Platform:  &Platform{OS: "windows", Arch: "amd64"},
+					Resources: &Resources{Memory: "16Gi"},
+				},
+				Engine: EngineConfig{Name: "claude_code"},
+				Cases:  CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "platform requires opensandbox runtime",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:     "none",
+					Platform: &Platform{OS: "windows", Arch: "amd64"},
+				},
+				Engine: EngineConfig{Name: "claude_code"},
+				Cases:  CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			},
+			wantErr: true,
+			errMsg:  "environment.platform requires environment.type opensandbox",
+		},
+		{
+			name: "platform requires os and arch together",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:     "opensandbox",
+					Image:    "dockurr/windows:latest",
+					Platform: &Platform{OS: "windows"},
+				},
+				Engine: EngineConfig{Name: "claude_code"},
+				Cases:  CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			},
+			wantErr: true,
+			errMsg:  "environment.platform.os and environment.platform.arch must be set together",
+		},
+		{
+			name: "platform rejects empty block",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:     "opensandbox",
+					Image:    "ubuntu:24.04",
+					Platform: &Platform{},
+				},
+				Engine: EngineConfig{Name: "claude_code"},
+				Cases:  CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			},
+			wantErr: true,
+			errMsg:  "environment.platform.os and environment.platform.arch are required",
+		},
+		{
+			name: "platform rejects unknown os",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:     "opensandbox",
+					Image:    "custom:latest",
+					Platform: &Platform{OS: "plan9", Arch: "amd64"},
+				},
+				Engine: EngineConfig{Name: "claude_code"},
+				Cases:  CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			},
+			wantErr: true,
+			errMsg:  "environment.platform.os must be one of: linux, windows",
+		},
+		{
+			name: "platform rejects unknown arch",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:     "opensandbox",
+					Image:    "custom:latest",
+					Platform: &Platform{OS: "windows", Arch: "riscv64"},
+				},
+				Engine: EngineConfig{Name: "claude_code"},
+				Cases:  CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			},
+			wantErr: true,
+			errMsg:  "environment.platform.arch must be one of: amd64, arm64",
+		},
+		{
+			name: "resources require opensandbox runtime",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:      "docker",
+					Image:     "alpine:3.20",
+					Resources: &Resources{CPU: "2"},
+				},
+				Engine: EngineConfig{Name: "claude_code"},
+				Cases:  CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			},
+			wantErr: true,
+			errMsg:  "environment.resources requires environment.type opensandbox",
+		},
+		{
+			name: "resources reject empty override value",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:      "opensandbox",
+					Image:     "ubuntu:24.04",
+					Resources: &Resources{CPU: "  "},
+				},
+				Engine: EngineConfig{Name: "claude_code"},
+				Cases:  CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			},
+			wantErr: true,
+			errMsg:  "environment.resources.cpu must not be blank",
+		},
+		{
+			name: "resources reject empty block",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:      "opensandbox",
+					Image:     "ubuntu:24.04",
+					Resources: &Resources{},
+				},
+				Engine: EngineConfig{Name: "claude_code"},
+				Cases:  CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			},
+			wantErr: true,
+			errMsg:  "environment.resources must set at least one of: cpu, memory, disk",
+		},
+		{
 			name: "valid config with opensandbox template",
 			cfg: &EvalConfig{
 				SchemaVersion: "v1alpha1",
@@ -639,6 +773,49 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			},
 			wantErr: true,
 			errMsg:  "network_policy requires environment.type opensandbox",
+		},
+		{
+			name: "opensandbox Linux with relative workspace_mount is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:           "opensandbox",
+					WorkspaceMount: `C:\work`,
+				},
+				Engine: EngineConfig{Name: "claude_code"},
+				Cases:  CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			},
+			wantErr: true,
+			errMsg:  "environment.workspace_mount must be an absolute linux guest path",
+		},
+		{
+			name: "opensandbox Windows accepts slash-normalized absolute workspace_mount",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:           "opensandbox",
+					Platform:       &Platform{OS: "windows", Arch: "amd64"},
+					WorkspaceMount: "C:/work",
+				},
+				Engine: EngineConfig{Name: "claude_code"},
+				Cases:  CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "opensandbox Windows rejects rooted path without drive",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment: Environment{
+					Type:           "opensandbox",
+					Platform:       &Platform{OS: "windows", Arch: "amd64"},
+					WorkspaceMount: `\work`,
+				},
+				Engine: EngineConfig{Name: "claude_code"},
+				Cases:  CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			},
+			wantErr: true,
+			errMsg:  "environment.workspace_mount must be an absolute windows guest path",
 		},
 		{
 			name: "valid docker runtime type",

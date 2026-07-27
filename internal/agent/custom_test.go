@@ -10,6 +10,7 @@ import (
 
 	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/credential"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
@@ -22,6 +23,54 @@ func newCustomTestRuntime(t *testing.T) *runtime.NoneRuntime {
 	}
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
+}
+
+type customGuestPathRuntime struct {
+	runtime.Runtime
+
+	workspace string
+	shell     platform.Shell
+}
+
+func (r *customGuestPathRuntime) Workspace() string     { return r.workspace }
+func (r *customGuestPathRuntime) Shell() platform.Shell { return r.shell }
+
+func TestCustomEngineWindowsGuestPathsAndCommandQuoting(t *testing.T) {
+	rt := &customGuestPathRuntime{
+		workspace: `C:\workspace`,
+		shell:     platform.Shell{GOOS: platform.GOOSWindows, Family: platform.ShellCmd},
+	}
+
+	if got, err := workspacePath(rt, `inputs/messages.json`); err != nil || got != `C:\workspace\inputs\messages.json` {
+		t.Fatalf("workspacePath = %q, %v", got, err)
+	}
+	if _, err := workspacePath(rt, `..\escape.json`); err == nil {
+		t.Fatal("workspacePath accepted Windows traversal")
+	}
+	if got := runtimePathJoin(rt, "inputs", "messages.json"); got != `C:\workspace\inputs\messages.json` {
+		t.Fatalf("runtimePathJoin = %q", got)
+	}
+
+	ag := customLocalAgent(&config.CustomEngineConfig{})
+	custom := &config.CustomEngineConfig{Local: &config.CustomLocalConfig{
+		Command: "powershell.exe",
+		Args:    []string{"-File", `${workspace}\agent.ps1`, `${input_file}`},
+	}}
+	vars := map[string]string{
+		"workspace":  `C:\workspace`,
+		"input_file": `C:\workspace\inputs\messages.json`,
+	}
+	command, opts, err := ag.buildLocalExec(context.Background(), rt, ExecOptions{}, custom, vars, 30)
+	if err != nil {
+		t.Fatalf("buildLocalExec: %v", err)
+	}
+	want := `"powershell.exe" "-File" "C:\workspace\agent.ps1" "C:\workspace\inputs\messages.json"`
+	if command != want {
+		t.Fatalf("command = %q, want %q", command, want)
+	}
+	if opts.Cwd != `C:\workspace` {
+		t.Fatalf("cwd = %q", opts.Cwd)
+	}
 }
 
 func customLocalAgent(custom *config.CustomEngineConfig) *CustomAgent {

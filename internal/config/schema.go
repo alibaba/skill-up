@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"time"
 
 	"github.com/alibaba/skill-up/internal/customengine"
@@ -24,6 +25,8 @@ type EvalConfig struct {
 type Environment struct {
 	Type                  string            `yaml:"type"` // none, opensandbox, docker
 	Image                 string            `yaml:"image,omitempty"`
+	Platform              *Platform         `yaml:"platform,omitempty"`
+	Resources             *Resources        `yaml:"resources,omitempty"`
 	SandboxTemplate       string            `yaml:"sandbox_template,omitempty"`
 	WorkspaceMount        string            `yaml:"workspace_mount,omitempty"`
 	Env                   map[string]string `yaml:"env,omitempty"`
@@ -38,6 +41,20 @@ type Environment struct {
 	AllowedEgress         []string          `yaml:"allowed_egress,omitempty"` // FQDN/wildcard egress allowlist for allow_declared
 }
 
+// Platform selects the target operating system and architecture for an
+// OpenSandbox runtime.
+type Platform struct {
+	OS   string `yaml:"os"`
+	Arch string `yaml:"arch"`
+}
+
+// Resources optionally overrides OpenSandbox runtime resource limits.
+type Resources struct {
+	CPU    string `yaml:"cpu,omitempty"`
+	Memory string `yaml:"memory,omitempty"`
+	Disk   string `yaml:"disk,omitempty"`
+}
+
 // ToRuntimeConfig converts Environment to runtime.Config.
 func (e Environment) ToRuntimeConfig() runtime.Config {
 	setupSteps := make([]runtime.SetupStep, len(e.SetupSteps))
@@ -45,9 +62,24 @@ func (e Environment) ToRuntimeConfig() runtime.Config {
 		setupSteps[i] = runtime.SetupStep{Run: s.Run}
 	}
 
+	var platform *runtime.Platform
+	if e.Platform != nil {
+		platform = &runtime.Platform{OS: strings.TrimSpace(e.Platform.OS), Arch: strings.TrimSpace(e.Platform.Arch)}
+	}
+	var resources *runtime.Resources
+	if e.Resources != nil {
+		resources = &runtime.Resources{
+			CPU:    strings.TrimSpace(e.Resources.CPU),
+			Memory: strings.TrimSpace(e.Resources.Memory),
+			Disk:   strings.TrimSpace(e.Resources.Disk),
+		}
+	}
+
 	return runtime.Config{
 		Type:            e.Type,
 		Image:           e.Image,
+		Platform:        platform,
+		Resources:       resources,
 		WorkspaceMount:  e.WorkspaceMount,
 		Env:             e.Env,
 		SetupSteps:      setupSteps,

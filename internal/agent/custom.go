@@ -11,13 +11,16 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	stdpath "path"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/alibaba/skill-up/internal/customengine"
 	"github.com/alibaba/skill-up/internal/logging"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
@@ -268,8 +271,16 @@ func (a *CustomAgent) clearStaleOutputFile(ctx context.Context, rt Runtime, outp
 		return false
 	}
 	outputFile = safe
-	q := shellQuote(outputFile)
-	cmd := "if [ -e " + q + " ]; then rm -f -- " + q + " && printf %s " + shellQuote(customStaleClearedMarker) + "; fi"
+	quote, quoteErr := rt.Shell().Quoter()
+	if quoteErr != nil {
+		logging.DebugContextf(ctx, "CustomAgent: could not select shell quoting for stale output file: %v", quoteErr)
+		return false
+	}
+	q := quote(outputFile)
+	cmd := "if [ -e " + q + " ]; then rm -f -- " + q + " && printf %s " + quote(customStaleClearedMarker) + "; fi"
+	if rt.Shell().Family == platform.ShellCmd {
+		cmd = "if exist " + q + " (del /q " + q + " && echo " + customStaleClearedMarker + ")"
+	}
 	result, err := rt.Exec(ctx, cmd, ExecOptions{})
 	if err != nil {
 		logging.DebugContextf(ctx, "CustomAgent: could not clear stale output file %s: %v", outputFile, err)
@@ -288,7 +299,11 @@ func (a *CustomAgent) buildLocalExec(ctx context.Context, rt Runtime, opts ExecO
 	if a.containsAPIKey(command) {
 		return "", ExecOptions{}, errSecretInCommand("local.command")
 	}
-	parts := []string{shellQuote(command)}
+	quote, err := rt.Shell().Quoter()
+	if err != nil {
+		return "", ExecOptions{}, fmt.Errorf("select local command quoter: %w", err)
+	}
+	parts := []string{quote(command)}
 	for i, raw := range local.Args {
 		arg, rErr := renderTemplate(raw, vars)
 		if rErr != nil {
@@ -297,7 +312,7 @@ func (a *CustomAgent) buildLocalExec(ctx context.Context, rt Runtime, opts ExecO
 		if a.containsAPIKey(arg) {
 			return "", ExecOptions{}, errSecretInCommand(fmt.Sprintf("local.args[%d]", i))
 		}
-		parts = append(parts, shellQuote(arg))
+		parts = append(parts, quote(arg))
 	}
 
 	cwd := rt.Workspace()
@@ -1031,8 +1046,8 @@ func (a *CustomAgent) buildBaseVars(rt Runtime, opts ExecOptions, messages []tra
 	return map[string]string{
 		"workspace":       workspace,
 		"prompt":          singleTurnPrompt(messages),
-		"input_file":      filepath.Join(workspace, customDefaultInputFile),
-		"output_file":     filepath.Join(workspace, customDefaultOutputFile),
+		"input_file":      runtimePathJoin(rt, customDefaultInputFile),
+		"output_file":     runtimePathJoin(rt, customDefaultOutputFile),
 		"model":           formatAgentModel(a.Cfg.ModelProvider, a.Cfg.ModelName),
 		"model_provider":  a.Cfg.ModelProvider,
 		"model_name":      a.Cfg.ModelName,
@@ -1077,7 +1092,7 @@ func (a *CustomAgent) completeTemplateVars(baseVars, renderedKwargs map[string]s
 // it is consistent regardless of local.cwd (the command sees the same path the
 // runtime upload/download APIs key on).
 func resolveCustomIOFiles(rt Runtime, custom *customengine.Config, vars map[string]string) (inputFile, outputFile string, err error) {
-	inputFile = filepath.Join(rt.Workspace(), customDefaultInputFile)
+	inputFile = runtimePathJoin(rt, customDefaultInputFile)
 	if custom.Local.InputFile != "" {
 		rendered, rErr := renderTemplate(custom.Local.InputFile, vars)
 		if rErr != nil {
@@ -1087,7 +1102,7 @@ func resolveCustomIOFiles(rt Runtime, custom *customengine.Config, vars map[stri
 			return "", "", fmt.Errorf("local.input_file: %w", err)
 		}
 	}
-	outputFile = filepath.Join(rt.Workspace(), customDefaultOutputFile)
+	outputFile = runtimePathJoin(rt, customDefaultOutputFile)
 	if custom.Local.OutputFile != "" {
 		rendered, rErr := renderTemplate(custom.Local.OutputFile, vars)
 		if rErr != nil {
@@ -1115,6 +1130,9 @@ func resolveCustomIOFiles(rt Runtime, custom *customengine.Config, vars map[stri
 func workspacePath(rt Runtime, p string) (string, error) {
 	if p == "" {
 		return p, nil
+	}
+	if rt.Shell().GOOS != goruntime.GOOS {
+		return lexicalGuestWorkspacePath(rt.Shell().GOOS, rt.Workspace(), p)
 	}
 	ws, err := filepath.EvalSymlinks(filepath.Clean(rt.Workspace()))
 	if err != nil {
@@ -1146,6 +1164,55 @@ func workspacePath(rt Runtime, p string) (string, error) {
 	// the post-engine TOCTOU window — the second call sees whatever the
 	// engine just planted on disk.
 	return resolved, nil
+}
+
+func runtimePathJoin(rt Runtime, elem ...string) string {
+	parts := append([]string{rt.Workspace()}, elem...)
+	return cleanGuestPath(rt.Shell().GOOS, strings.Join(parts, "/"))
+}
+
+func lexicalGuestWorkspacePath(targetGOOS, workspace, value string) (string, error) {
+	workspace = cleanGuestPath(targetGOOS, workspace)
+	value = cleanGuestPath(targetGOOS, value)
+	abs := strings.HasPrefix(value, "/")
+	sep := "/"
+	if targetGOOS == platform.GOOSWindows {
+		abs = len(value) >= 3 && value[1] == ':' && value[2] == '\\'
+		sep = `\`
+	}
+	if !abs {
+		if value == ".." || strings.HasPrefix(value, ".."+sep) {
+			return "", fmt.Errorf("path %q escapes the runtime workspace", value)
+		}
+		value = cleanGuestPath(targetGOOS, workspace+sep+value)
+	}
+	prefix := workspace + sep
+	inside := value == workspace || strings.HasPrefix(value, prefix)
+	if targetGOOS == platform.GOOSWindows {
+		inside = strings.EqualFold(value, workspace) || strings.HasPrefix(strings.ToLower(value), strings.ToLower(prefix))
+	}
+	if !inside {
+		return "", fmt.Errorf("path %q escapes the runtime workspace", value)
+	}
+	return value, nil
+}
+
+func cleanGuestPath(targetGOOS, value string) string {
+	if targetGOOS != platform.GOOSWindows {
+		return stdpath.Clean(strings.ReplaceAll(value, `\`, "/"))
+	}
+	value = strings.ReplaceAll(value, `\`, "/")
+	volume := ""
+	if len(value) >= 2 && value[1] == ':' {
+		volume, value = value[:2], value[2:]
+	}
+	rooted := strings.HasPrefix(value, "/")
+	clean := strings.ReplaceAll(stdpath.Clean(value), "/", `\`)
+	if rooted {
+		clean = strings.TrimPrefix(clean, `\`)
+		return volume + `\` + strings.TrimPrefix(clean, `.`+`\`)
+	}
+	return volume + clean
 }
 
 // resolveExistingPrefix returns abs with its longest existing ancestor passed

@@ -362,6 +362,36 @@ environment:
 | `kwargs.request_timeout_seconds` | OpenSandbox SDK 请求超时时间 |
 | `kwargs.file_transfer_parallelism` | 目录下载并发度 |
 
+OpenSandbox 还可以在不依赖 skill-up 宿主 OS 的情况下选择 Windows guest：
+
+```yaml
+environment:
+  type: opensandbox
+  image: dockurr/windows:latest
+  platform:
+    os: windows
+    arch: amd64
+  resources:                 # 可选的用户覆盖
+    cpu: "8"
+    memory: 16Gi
+    disk: 128Gi
+  workspace_mount: C:/workspace
+  ready_timeout_seconds: 1800
+```
+
+`platform.os` 支持 `linux`、`windows`，`platform.arch` 支持 `amd64`、`arm64`，
+且两个字段必须同时配置。Windows guest 默认使用 `C:\workspace`、4 CPU、8 GiB
+内存和 64 GiB 磁盘，`resources` 可按字段覆盖这些默认值。Linux 在没有
+`resources` 时保持 SDK 默认值；提供部分字段时则在 SDK 默认值上覆盖。显式的
+`workspace_mount` 必须是 guest OS 的绝对路径（Windows 可写成 `C:/work`，运行时
+会规范化）。OpenSandbox 宿主机还需要满足
+[Windows profile 前置条件](https://github.com/opensandbox-group/OpenSandbox/blob/main/docs/guides/windows-sandbox.md)。
+
+Windows guest 的 `setup_steps` 通过 `cmd.exe` 执行；fixture 与 Skill 上传遵循
+Windows 路径规则；script judge 支持 PowerShell（`.ps1`）；本地 Custom Engine
+也可以完成整条评测链路。当前尚不自动向 Windows guest 安装内置 Agent CLI；
+请预装到镜像中，或使用 Custom Engine。
+
 #### Docker 配置
 
 使用 `environment.type: docker` 时，Agent 在本地 Docker 容器中运行，提供容器级别的隔离（文件系统、进程、网络），无需任何远程服务。

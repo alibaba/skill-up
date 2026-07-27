@@ -10,8 +10,8 @@ limitations, and the recommended workflow.
 - **Build and unit tests** — `go build ./...` and `go test ./...` pass on
   Windows. CI exercises a `windows-latest` runner alongside Linux.
 - **The `none` runtime** — commands run on the host through `cmd.exe`.
-- **The `opensandbox` runtime** — unaffected by the host OS; it always
-  executes inside a Linux sandbox.
+- **The `opensandbox` runtime** — unaffected by the host OS; it can target a
+  Linux sandbox or an explicitly configured Windows guest.
 - **The script judge** — dispatches by file extension (or shebang):
 
   | Script            | Interpreter on Windows                      |
@@ -42,21 +42,38 @@ generates. Users who want to drive script judges through WSL must arrange
 path translation upstream and point `SKILL_UP_BASH` at a non-WSL bash — or
 simply run skill-up inside WSL itself (see "Recommended workflow" below).
 
-## OpenSandbox runtime on Windows
+## OpenSandbox Windows guests
 
-The `opensandbox` runtime talks to a remote OpenSandbox server over HTTP and
-never spawns a host shell. Running `skill-up.exe` on native Windows against a
-remote sandbox works today: all host-side path handling already crosses the
-host→sandbox boundary through `filepath.ToSlash`, and the sandbox itself is a
-Linux container, so the script judge and any agent run inside it behave
-exactly as they do on Linux.
+The `opensandbox` runtime talks to a remote OpenSandbox server over HTTP, so the
+skill-up host and guest OS are independent. Configure a Windows guest with
+`environment.platform`; when omitted, existing Linux behavior is unchanged.
 
-OpenSandbox also offers a [**Windows guest profile**](https://github.com/alibaba/OpenSandbox/blob/main/docs/windows-sandbox.md):
-the server runs `dockur/windows` (Windows in KVM/QEMU inside a Linux container)
-and the API accepts `platform: {"os": "windows", "arch": "amd64"}` on create.
-At the time of writing the Go SDK does not yet expose the `Platform` field, so
-driving a Windows-guest sandbox from skill-up is blocked on an upstream Go SDK
-update — tracked separately.
+```yaml
+environment:
+  type: opensandbox
+  image: dockurr/windows:latest
+  platform:
+    os: windows
+    arch: amd64
+  resources:
+    memory: 16Gi
+  workspace_mount: C:/workspace
+  ready_timeout_seconds: 1800
+```
+
+Windows defaults are `C:\workspace`, 4 CPU, 8 GiB memory, and 64 GiB disk.
+Users may override any resource field without repeating the others. Both Linux
+and Windows use the OpenSandbox directory API first and fall back to their
+native shell only when the API cannot create or verify a writable directory.
+Uploads, downloads, command working directories, script judges, and artifact
+collection all use guest OS path semantics even when skill-up runs on another
+OS.
+
+The OpenSandbox server needs KVM, TUN, sufficient storage, and a Windows-capable
+profile; see the upstream
+[Windows Sandbox guide](https://github.com/opensandbox-group/OpenSandbox/blob/main/docs/guides/windows-sandbox.md).
+Cold boot can take many minutes, so use a long `ready_timeout_seconds` and
+persistent server-side storage where appropriate.
 
 For a Windows machine that needs the full agent workflow **without** a remote
 sandbox, run skill-up inside **WSL2**. WSL2 is a Linux environment, so both the
@@ -92,6 +109,9 @@ go test -race ./...
   launched through a bash-based Node/nvm bootstrap. That bootstrap does not
   run under `cmd.exe`. To run full agent evals on Windows, either install
   Node.js and the agent CLIs yourself beforehand, or use WSL2.
+- **Built-in Agent CLI bootstrap in a Windows OpenSandbox guest** — the runtime
+  lifecycle is supported, but automatic installation of built-in Agent CLIs is
+  not. Preinstall the CLI in the guest image or configure a Custom Engine.
 - **`.ps1` script judges require a Windows target** — when the runtime target
   is POSIX (for example the `opensandbox` Linux sandbox), only `.sh` scripts
   are supported.

@@ -2,6 +2,7 @@ package evaluator
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/logging"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 )
 
@@ -105,18 +107,25 @@ func (e *defaultEvaluator) collectGlobArtifacts(ctx context.Context, rt runtime.
 }
 
 // listWorkspaceFiles returns the workspace-relative paths (slash-separated, no
-// leading "./") of every regular file in the runtime workspace. It uses a
-// portable `find . -type f` so it works uniformly across the none, docker, and
-// opensandbox runtimes.
+// leading "./") of every regular file in the runtime workspace. It selects a
+// native POSIX or PowerShell listing command from the runtime target shell,
+// which may differ from the skill-up host.
 //
 // The `.git` directory is excluded: agent_judge runs commit a baseline into the
 // workspace (see prepareWorkspaceDiffState), and doublestar's `**`/`*` match
 // dotfile paths, so a broad glob like "**" would otherwise sweep the entire VCS
 // object store into the artifacts — framework noise, not agent output.
 func listWorkspaceFiles(ctx context.Context, rt runtime.Runtime) ([]string, error) {
-	result, err := rt.Exec(ctx, "find . -type f -not -path './.git/*'", runtime.ExecOptions{Cwd: rt.Workspace()})
+	command := "find . -type f -not -path './.git/*'"
+	if rt.Shell().GOOS == platform.GOOSWindows {
+		command = `powershell.exe -NoProfile -Command "$root=(Get-Location).Path; Get-ChildItem -LiteralPath . -File -Recurse -Force | Where-Object { $_.FullName -notlike ($root + '\.git\*') } | ForEach-Object { $_.FullName.Substring($root.Length + 1).Replace('\','/') }"`
+	}
+	result, err := rt.Exec(ctx, command, runtime.ExecOptions{Cwd: rt.Workspace()})
 	if err != nil {
 		return nil, err
+	}
+	if result.ExitCode != 0 {
+		return nil, fmt.Errorf("list workspace files exited with code %d: %s", result.ExitCode, result.Stderr)
 	}
 	var files []string
 	for line := range strings.SplitSeq(result.Stdout, "\n") {
@@ -124,7 +133,7 @@ func listWorkspaceFiles(ctx context.Context, rt runtime.Runtime) ([]string, erro
 		if line == "" {
 			continue
 		}
-		rel := strings.TrimPrefix(line, "./")
+		rel := strings.ReplaceAll(strings.TrimPrefix(line, "./"), `\`, "/")
 		if rel == "" {
 			continue
 		}
