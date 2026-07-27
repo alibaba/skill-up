@@ -18,7 +18,7 @@ permissions: {}
 jobs:
   zizmor:
     name: Zizmor
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 10
     permissions:
       contents: read

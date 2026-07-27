@@ -30,9 +30,9 @@ jobs:
     #   - https://gh.io/supported-runners-and-hardware-resources
     #   - https://gh.io/using-larger-runners (GitHub.com only)
     # Consider using larger runners or machines with greater resources for possible analysis time improvements.
-    # This workflow executes pull-request code during autobuild. Keep it off
-    # persistent self-hosted runners.
-    runs-on: ubuntu-24.04
+    # External pull-request workflows require maintainer approval before they
+    # can execute on the trusted self-hosted runner fleet.
+    runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 45
     permissions:
       security-events: write

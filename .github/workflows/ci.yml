@@ -27,9 +27,9 @@ permissions: {}
 jobs:
   build:
     name: Build & Test
-    # Pull requests can contain untrusted code. Use an ephemeral GitHub-hosted
-    # runner instead of a persistent self-hosted machine.
-    runs-on: ubuntu-24.04
+    # Workflows from external contributors require maintainer approval before
+    # they can execute on the trusted self-hosted runner fleet.
+    runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 10
     permissions:
       contents: read
@@ -66,7 +66,7 @@ jobs:
 
   e2e-smoke:
     name: E2E Smoke
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 15
     permissions:
       contents: read
@@ -98,7 +98,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 10
     permissions:
       contents: read
