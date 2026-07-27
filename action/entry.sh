@@ -15,7 +15,7 @@ for p in /usr/local/bin /usr/bin "$HOME/.local/bin"; do
 done
 export PATH
 
-set -e
+set -euo pipefail
 
 restore_workspace_permissions() {
   local workspace="${GITHUB_WORKSPACE:-}"
@@ -28,16 +28,25 @@ restore_workspace_permissions() {
   # Hand generated reports back to the runner user so the next checkout can
   # clean the workspace on self-hosted runners.
   local owner
-  owner="$(stat -c '%u:%g' "$workspace" 2>/dev/null || true)"
-  if [ -n "$owner" ]; then
-    chown -R "$owner" "$report_dir" 2>/dev/null || true
+  if ! owner="$(stat -c '%u:%g' "$workspace")"; then
+    echo "[entry] failed to determine workspace ownership" >&2
+    return 1
   fi
-  chmod -R u+rwX,go+rX "$report_dir" 2>/dev/null || true
+  if ! chown -R "$owner" "$report_dir"; then
+    echo "[entry] failed to restore report ownership" >&2
+    return 1
+  fi
+  if ! chmod -R u+rwX,go+rX "$report_dir"; then
+    echo "[entry] failed to restore report permissions" >&2
+    return 1
+  fi
 }
 
 cleanup() {
   local status=$?
-  restore_workspace_permissions
+  if ! restore_workspace_permissions && [ "$status" -eq 0 ]; then
+    status=1
+  fi
   exit "$status"
 }
 trap cleanup EXIT

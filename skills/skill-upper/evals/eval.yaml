@@ -17,6 +17,7 @@ cases:
     - evals/cases/scaffold-with-qodercli-engine.yaml
     - evals/cases/scaffold-with-script-judge.yaml
     - evals/cases/english-context-generates-english-only-cases.yaml
+    - evals/cases/evolve-existing-skill.yaml
   defaults:
     # Budget sized to be engine-agnostic: claude_code finishes well under this,
     # but slower coding agents (codex on a coder model) need more wall-clock and

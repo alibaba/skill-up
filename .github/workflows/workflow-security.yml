@@ -1,0 +1,49 @@
+name: Workflow Security
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/**'
+      - 'action.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/**'
+      - 'action.yml'
+  merge_group:
+
+permissions: {}
+
+env:
+  ZIZMOR_VERSION: 1.28.0
+
+jobs:
+  zizmor:
+    name: Zizmor
+    runs-on: [self-hosted, linux, x64, trusted]
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+
+      - name: Analyze workflows with Zizmor
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: uvx "zizmor@${ZIZMOR_VERSION}" --format=sarif . > results.sarif
+
+      # Advanced Security mode uploads SARIF without blocking on the initial
+      # baseline. Promote Zizmor to a required check after findings are triaged.
+      - name: Upload Zizmor SARIF
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        with:
+          sarif_file: results.sarif
+          category: zizmor

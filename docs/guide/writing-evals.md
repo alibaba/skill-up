@@ -793,6 +793,8 @@ Setting `benchmark.enabled: true` runs every case **twice**:
 2. **without_skill** — Skill removed (baseline)
 
 The diff highlights the value the Skill adds (pass-rate uplift, time/token deltas).
+For one-off comparisons, `skill-up run ./evals/eval.yaml --baseline` enables the
+same mode without changing `eval.yaml`.
 
 ```yaml
 benchmark:

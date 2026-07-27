@@ -762,6 +762,8 @@ judge:
 2. **without_skill** — 不安装 Skill 执行（基线组）
 
 对比结果会体现 Skill 带来的增量价值（通过率提升、时间和 token 消耗差异）。
+临时对比时，也可以运行 `skill-up run ./evals/eval.yaml --baseline`，
+无需修改 `eval.yaml`。
 
 ```yaml
 benchmark:
