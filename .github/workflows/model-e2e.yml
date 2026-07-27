@@ -324,7 +324,7 @@ jobs:
     name: Model E2E Summary
     if: always()
     needs: [e2e, e2e-opensandbox, e2e-docker]
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 5
     permissions: {}
     steps:
