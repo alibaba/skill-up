@@ -60,6 +60,7 @@ report:
 ```
 
 `cases.parallelism` 可被 `skill-up run --parallelism N`（1–256）临时覆盖。
+临时启用基线对比时，可以使用 `skill-up run --baseline`，等价于为本次运行设置 `benchmark.enabled: true`。
 
 `collect_artifacts`（`cases.defaults` 级，或单个 `case.yaml` 内追加）用 [doublestar](https://github.com/bmatcuk/doublestar) glob（`*` 单层、`**` 跨目录）声明要采集的 workspace 文件。无论 Agent 成功/失败/超时，命中文件都会保留相对路径下载到 `<output-dir>/<case>/<config>/outputs/workspace/`。两层按并集去重合并。它与 `report.artifacts`（产物*类型*）、`agent_judge` 的 git diff（字符串）正交。
 
