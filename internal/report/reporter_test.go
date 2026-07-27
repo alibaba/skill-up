@@ -31,6 +31,9 @@ func sampleInput() Input {
 				Status:     judge.StatusPass,
 				DurationMs: 45200,
 				Turns:      5,
+				JudgeSkills: []judge.SkillInfo{
+					{Source: "local_path", Path: "evals/fixtures/judge-skill", Target: "~/.claude/skills/judge-skill", Name: "judge-skill"},
+				},
 				Grading: &judge.Result{
 					Status:        judge.StatusPass,
 					TurnsExecuted: 5,
@@ -115,6 +118,9 @@ func TestJSONReporter_Write(t *testing.T) {
 	if parsed.CaseResults[1].Status != judge.StatusFail {
 		t.Fatalf("expected second case FAIL, got %s", parsed.CaseResults[1].Status)
 	}
+	if len(parsed.CaseResults[0].JudgeSkills) != 1 || parsed.CaseResults[0].JudgeSkills[0].Path != "evals/fixtures/judge-skill" {
+		t.Fatalf("judge_skills not preserved in JSON: %#v", parsed.CaseResults[0].JudgeSkills)
+	}
 }
 
 func TestJSONReporter_ContainsAssertions(t *testing.T) {
@@ -174,6 +180,12 @@ func TestJUnitReporter_Write(t *testing.T) {
 	if !strings.Contains(content, `errors="1"`) {
 		t.Fatal("expected 1 error")
 	}
+	if !strings.Contains(content, `name="judge.skills.count" value="1"`) {
+		t.Fatal("junit should include judge skill count property")
+	}
+	if !strings.Contains(content, `name="judge.skills.0.path" value="evals/fixtures/judge-skill"`) {
+		t.Fatal("junit should include judge skill path property")
+	}
 }
 
 func TestJUnitReporter_FailureDetails(t *testing.T) {
@@ -232,6 +244,9 @@ func TestHTMLReporter_Write(t *testing.T) {
 	if !strings.Contains(content, "edge-case-null") {
 		t.Fatal("missing failed case ID")
 	}
+	if !strings.Contains(content, "evals/fixtures/judge-skill") {
+		t.Fatal("missing judge skill path in embedded report data")
+	}
 }
 
 func TestHTMLReporter_ContainsAssertionDetails(t *testing.T) {
@@ -248,6 +263,40 @@ func TestHTMLReporter_ContainsAssertionDetails(t *testing.T) {
 	}
 	if !strings.Contains(content, "25%") {
 		t.Fatal("html should contain pass rate (1 of 4 = 25%)")
+	}
+}
+
+func TestHTMLReporter_SynthesizedTurnFailurePassRateScript(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "result.html")
+	r := &HTMLReporter{OutputPath: path}
+
+	input := Input{
+		SkillName: "multi-turn",
+		CaseResults: []CaseResult{{
+			CaseID: "turn-failure",
+			Status: judge.StatusFail,
+			Turns:  2,
+			TurnResults: []CaseTurnResult{
+				{TurnNumber: 1, Status: "completed", Response: "ok"},
+				{TurnNumber: 2, Status: "failed", Reason: "missing token"},
+			},
+		}},
+	}
+	if err := r.Write(context.Background(), input); err != nil {
+		t.Fatalf("HTMLReporter.Write failed: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read html file: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "Math.round((passed.length / total) * 100)") {
+		t.Fatal("HTML should compute synthesized turn-failure pass rate from passed/total")
+	}
+	if !strings.Contains(content, "total === 0 ? 0") {
+		t.Fatal("HTML should guard synthesized turn-failure pass rate when total is zero")
 	}
 }
 

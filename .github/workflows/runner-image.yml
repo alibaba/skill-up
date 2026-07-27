@@ -1,0 +1,206 @@
+name: Runner Image
+
+# Builds the runner image used by the Agent Skill Eval action (action.yml):
+# bakes skill-up + claude + codex + qodercli from public registries and pushes
+# to ghcr.io/<this-org>/skill-up-runner via the built-in GITHUB_TOKEN (no PAT).
+#
+# Triggers:
+#   - workflow_call: invoked by skill-upper-self-eval.yml so the dogfood eval always
+#     runs against an image built from the same commit (no pull/push race).
+#   - push to main touching the action runtime -> republish.
+#   - workflow_dispatch -> manual (re)publish at an explicit tag.
+#
+# NOTE: pushing under the org namespace requires the org to allow Actions to
+# create packages (verified working for this repo).
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Image tag to publish'
+        required: false
+        type: string
+        default: 'v0.1.0'
+      publish_latest:
+        description: 'Also publish the latest tag'
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      digest:
+        description: 'Immutable digest of the image built by this run'
+        value: ${{ jobs.publish.outputs.digest }}
+  push:
+    branches: [main]
+    paths:
+      - 'action.yml'
+      - 'action/**'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag to publish (e.g. v0.1.0)'
+        required: true
+        type: string
+        default: 'v0.1.0'
+      publish_latest:
+        description: 'Also publish the latest tag'
+        required: true
+        type: boolean
+        default: false
+
+permissions: {}
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/skill-up-runner
+
+concurrency:
+  # Publishing mutable container tags is a global critical section. Queue a
+  # newer run rather than cancelling a run after it has started publishing.
+  group: runner-image-publish
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build immutable image
+    runs-on: [self-hosted, linux, x64, docker, trusted]
+    timeout-minutes: 30
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      source: ${{ steps.meta.outputs.source }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Resolve immutable build tag
+        id: meta
+        run: |
+          set -euo pipefail
+          source="${IMAGE}:build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "source=$source" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ./action
+          file: ./action/Dockerfile
+          # amd64 only: GitHub cloud runners are x86_64, and qodercli's
+          # bun-compiled binary crashes under qemu arm64 emulation (its
+          # --version self-check exits 1). Revisit with native arm64 runners
+          # if self-hosted arm consumers show up.
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.source }}
+          build-args: |
+            VCS_REF=${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+          # Avoid the GitHub Actions Cache backend here: transient GHA cache
+          # outages fail the whole image build after the registry push starts.
+
+      - name: Record immutable image digest
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE_SOURCE: ${{ steps.meta.outputs.source }}
+        run: |
+          set -euo pipefail
+          if [ -z "$IMAGE_DIGEST" ]; then
+            echo "::error::Build completed without an image digest"
+            exit 1
+          fi
+          {
+            echo "### Immutable runner image built"
+            echo
+            echo "- Staging reference: \`${IMAGE_SOURCE}\`"
+            echo "- Digest: \`${IMAGE_DIGEST}\`"
+            echo
+            echo "The protected publish job will promote this digest without rebuilding."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    name: Approve and publish image tags
+    needs: build
+    runs-on: [self-hosted, linux, x64, docker, trusted]
+    timeout-minutes: 15
+    environment: release-image
+    outputs:
+      digest: ${{ needs.build.outputs.digest }}
+    permissions:
+      packages: write
+    steps:
+      - name: Resolve publication tags
+        id: meta
+        env:
+          PUBLISH_LATEST: ${{ github.event_name == 'push' || inputs.publish_latest }}
+          REQUESTED_TAG: ${{ inputs.tag || 'v0.1.0' }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$REQUESTED_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "::error::Invalid image tag"
+            exit 1
+          fi
+          {
+            echo "tags<<__TAGS__"
+            echo "${IMAGE}:${REQUESTED_TAG}"
+            if [ "$PUBLISH_LATEST" = "true" ]; then
+              echo "${IMAGE}:latest"
+            fi
+            echo "__TAGS__"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish approved tags for immutable digest
+        env:
+          IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          if [ -z "$IMAGE_DIGEST" ]; then
+            echo "::error::Build job did not return an image digest"
+            exit 1
+          fi
+          args=()
+          while IFS= read -r tag; do
+            [ -n "$tag" ] && args+=(--tag "$tag")
+          done <<< "$IMAGE_TAGS"
+          docker buildx imagetools create "${args[@]}" "${IMAGE}@${IMAGE_DIGEST}"
+
+      - name: Summarize published runner image
+        env:
+          IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Runner image published"
+            echo
+            echo "- Digest: \`${IMAGE_DIGEST}\`"
+            echo "- Tags:"
+            while IFS= read -r tag; do
+              [ -n "$tag" ] && echo "  - \`${tag}\`"
+            done <<< "$IMAGE_TAGS"
+          } >> "$GITHUB_STEP_SUMMARY"

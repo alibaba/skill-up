@@ -47,6 +47,15 @@ cases:
     max_retries: 1
     retry_on: [timeout, error]
 
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  skills:                         # 可选：仅安装给 judge agent 的评分 Skill
+    - source: local_path
+      path: evals/fixtures/judge-rubric
+  criteria:
+    - "按 judge-rubric 中的细则判断输出是否满足要求"
+
 benchmark:
   enabled: false
 
@@ -56,8 +65,11 @@ report:
 ```
 
 `cases.parallelism` 可被 `skill-up run --parallelism N`（1–256）临时覆盖。
+临时启用基线对比时，可以使用 `skill-up run --baseline`，等价于为本次运行设置 `benchmark.enabled: true`。
 
 `collect_artifacts`（`cases.defaults` 级，或单个 `case.yaml` 内追加）用 [doublestar](https://github.com/bmatcuk/doublestar) glob（`*` 单层、`**` 跨目录）声明要采集的 workspace 文件。无论 Agent 成功/失败/超时，命中文件都会保留相对路径下载到 `<output-dir>/<case>/<config>/outputs/workspace/`。两层按并集去重合并。它与 `report.artifacts`（产物*类型*）、`agent_judge` 的 git diff（字符串）正交。
+
+`judge.skills` 仅支持 `judge.type: agent_judge`，用于给 judge agent 安装可复用的评分 Rubric Skill。它不会安装到主运行 agent；顶层 `skills` 也不会自动安装到 judge。benchmark 下 `with_skill` / `without_skill` 都会安装 judge Skills，因为它们属于评分工具。路径相对 Skill 根目录解析，安装依赖具体 Agent adapter 的原生 Skill 支持；不要把 Skill 文件内容复制进 `criteria`。
 
 ## 运行环境
 
@@ -107,6 +119,7 @@ environment:
 - HTTP MCP 可 inline 或 `config_ref` 指向 `evals/fixtures/mcp/*.yaml`。
 - stdio MCP 可配置 `command` / `args`。
 - 环境变量引用：`${VAR}` 或整值 `$VAR`；`required_env` 会注入 Agent 环境。
+- eval 级 `mcp` 是默认配置；用例可在 `cases/*.yaml` 里声明自己的 `mcp.servers`（MVP 仅 `mode: mocked`）按 `name` 整条覆盖同名 Server，从而在相同 Server/工具名下切换 mocked fixture。`config_ref` 仍相对 Skill 目录解析。
 
 ## Engine 与模型
 

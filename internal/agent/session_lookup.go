@@ -116,6 +116,17 @@ func workspaceKeyForRuntime(rt Runtime) string {
 	return strings.ReplaceAll(workspace, "/", "-")
 }
 
+// extractSessionIDFromPath extracts a session identifier from a session JSONL
+// file path. It strips the directory and .jsonl extension, returning the bare
+// filename which agents use as the session identifier for resume.
+func extractSessionIDFromPath(sessionPath string) string {
+	base := filepath.Base(sessionPath)
+	if ext := filepath.Ext(base); ext != "" {
+		base = base[:len(base)-len(ext)]
+	}
+	return base
+}
+
 // buildSessionLookupScript renders the shared shell snippet that picks the
 // newest *.jsonl under the configured root.
 func buildSessionLookupScript(lookup agentSessionLookup) string {

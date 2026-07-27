@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/alibaba/skill-up/internal/agent"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
@@ -78,6 +79,7 @@ type mockJudgeTestAgent struct {
 	// TimeoutSeconds correctly. ok mirrors ctx.Deadline()'s second return.
 	observedDeadline   time.Time
 	observedDeadlineOK bool
+	lastMessages       []transcript.Message
 }
 
 func (m *mockJudgeTestAgent) Name() string { return "mock-judge-agent" }
@@ -98,8 +100,9 @@ func (m *mockJudgeTestAgent) Check(_ context.Context, _ runtime.Runtime) error {
 
 func (m *mockJudgeTestAgent) CheckCredentials(_ context.Context) error { return nil }
 
-func (m *mockJudgeTestAgent) Run(ctx context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ []transcript.Message) (*agent.SessionResult, error) {
+func (m *mockJudgeTestAgent) Run(ctx context.Context, _ runtime.Runtime, _ agent.ExecOptions, messages []transcript.Message) (*agent.SessionResult, error) {
 	m.observedDeadline, m.observedDeadlineOK = ctx.Deadline()
+	m.lastMessages = messages
 	if m.runDelay > 0 {
 		select {
 		case <-ctx.Done():
@@ -122,7 +125,9 @@ func (m *mockJudgeTestRuntime) Workspace() string              { return "/tmp/te
 func (m *mockJudgeTestRuntime) RequiresProcessSandbox() bool   { return true }
 func (m *mockJudgeTestRuntime) MergeEnv(_ map[string]string)   {}
 
-func (m *mockJudgeTestRuntime) TargetGOOS() string                                { return "linux" }
+func (m *mockJudgeTestRuntime) Shell() platform.Shell {
+	return platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
+}
 func (m *mockJudgeTestRuntime) Start(_ context.Context) error                     { return nil }
 func (m *mockJudgeTestRuntime) Stop(_ context.Context) error                      { return nil }
 func (m *mockJudgeTestRuntime) UploadFile(_ context.Context, _, _ string) error   { return nil }

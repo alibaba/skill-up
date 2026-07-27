@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/alibaba/skill-up/internal/logging"
+	"github.com/alibaba/skill-up/internal/platform"
 )
 
 // osWindows is the goruntime.GOOS value for Windows, used by tests that skip
@@ -26,6 +27,13 @@ import (
 const osWindows = "windows"
 
 var logCaptureMu sync.Mutex
+
+func TestNoneRuntimeShellMatchesHostTarget(t *testing.T) {
+	rt := &NoneRuntime{}
+	if got, want := rt.Shell(), platform.Host().Target; got != want {
+		t.Fatalf("Shell() = %+v, want host target %+v", got, want)
+	}
+}
 
 func TestNoneRuntime_CreateAndClose(t *testing.T) {
 	t.Parallel()
@@ -356,6 +364,87 @@ func TestNoneRuntime_ExecKillsDescendantsOnTimeout(t *testing.T) {
 	time.Sleep(4 * time.Second)
 	if _, statErr := os.Stat(filepath.Join(rt.Workspace(), "leaked.txt")); statErr == nil {
 		t.Fatal("descendant process survived the timeout and wrote leaked.txt")
+	}
+}
+
+// TestNoneRuntime_ExecTerminatesGracefullyThenEscalates verifies the
+// SIGTERM-first escalation path: a command that installs a SIGTERM trap gets a
+// chance to run it (writing a marker) before the group is force-killed. This
+// exercises the graceful half of the contract — children can release locks and
+// clean up rather than being torn down by an immediate SIGKILL.
+func TestNoneRuntime_ExecTerminatesGracefullyThenEscalates(t *testing.T) {
+	if goruntime.GOOS == osWindows {
+		t.Skip("POSIX signal-trap semantics; no Windows equivalent")
+	}
+	t.Parallel()
+
+	rt := &NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	// The shell traps SIGTERM, writes a marker, and exits. If cancellation used
+	// an immediate SIGKILL the trap would never run and the marker would be
+	// absent; with SIGTERM-first it is written before the process exits.
+	_, err := rt.Exec(ctx, "trap 'touch cleaned.txt; exit 0' TERM; sleep 10", ExecOptions{})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context deadline exceeded, got %v", err)
+	}
+
+	if _, statErr := os.Stat(filepath.Join(rt.Workspace(), "cleaned.txt")); statErr != nil {
+		t.Fatalf("SIGTERM trap did not run before termination: %v", statErr)
+	}
+}
+
+// TestNoneRuntime_ExecStaleLockDoesNotHangNextCommand is the issue's lock-file
+// regression: a first command times out while a background child holds a lock
+// (a live process whose PID is recorded in a lock file). After the timeout the
+// child's process group must be gone, so a second command that checks the lock
+// sees a dead PID and does not block on the stale child.
+func TestNoneRuntime_ExecStaleLockDoesNotHangNextCommand(t *testing.T) {
+	if goruntime.GOOS == osWindows {
+		t.Skip("POSIX process-group kill semantics; no Windows equivalent")
+	}
+	t.Parallel()
+
+	rt := &NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	// First command: spawn a long-lived background child, record its PID as a
+	// lock, then block past the deadline. On timeout the whole group (including
+	// the child) must be terminated.
+	ctx1, cancel1 := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel1()
+	_, err := rt.Exec(ctx1, "sleep 60 & echo $! > lock.pid; sleep 30", ExecOptions{})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("first command: expected context deadline exceeded, got %v", err)
+	}
+
+	// Give the group a moment to be reaped after the SIGTERM→SIGKILL path.
+	time.Sleep(noneExecKillGrace + 500*time.Millisecond)
+
+	// Second command: read the recorded PID and check whether that process is
+	// still alive (kill -0). A stale-but-dead lock must not hold anything up;
+	// the command completes promptly and reports the child as gone.
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel2()
+	start := time.Now()
+	result, err := rt.Exec(ctx2, `pid=$(cat lock.pid); if kill -0 "$pid" 2>/dev/null; then echo ALIVE; else echo DEAD; fi`, ExecOptions{})
+	if err != nil {
+		t.Fatalf("second command errored: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("second command hung on stale child for %s", elapsed)
+	}
+	if !strings.Contains(result.Stdout, "DEAD") {
+		t.Fatalf("stale lock child survived timeout; second command saw %q", result.Stdout)
 	}
 }
 

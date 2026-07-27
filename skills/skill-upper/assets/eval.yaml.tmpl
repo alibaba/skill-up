@@ -45,5 +45,13 @@ cases:
 # benchmark:
 #   enabled: true
 
+# judge:
+#   type: agent_judge
+#   model: anthropic/claude-sonnet-4-6
+#   context:
+#     profile: standard          # standard = file refs for transcript/diff; minimal = omit them
+#   criteria:
+#     - "The response satisfies the case-specific success criteria."
+
 report:
   formats: [json]

@@ -128,6 +128,13 @@ func skipIfNotFullE2E(t *testing.T) {
 	}
 }
 
+func skipIfGitUnavailable(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found in PATH")
+	}
+}
+
 // projectRootFromTest returns the repository root (one level above e2e/).
 // Kept alongside getProjectRoot for readability at call sites.
 func projectRootFromTest() string {

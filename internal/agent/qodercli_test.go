@@ -203,6 +203,111 @@ func TestBuildQoderRunCmd_WithoutModel(t *testing.T) {
 	}
 }
 
+func TestBuildQoderResumeCmd(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		instruction string
+		model       string
+		sessionID   string
+		wantParts   []string
+		wantAbsent  []string
+	}{
+		{
+			name:        "with model",
+			instruction: "continue",
+			model:       modelAuto,
+			sessionID:   "session-abc",
+			wantParts:   []string{"--permission-mode=bypass_permissions", "--model 'auto'", "-r 'session-abc'", "-p 'continue'"},
+		},
+		{
+			name:        "without model",
+			instruction: "next",
+			model:       "",
+			sessionID:   "sid-xyz",
+			wantParts:   []string{"-r 'sid-xyz'", "-p 'next'"},
+			wantAbsent:  []string{"--model"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cmd := buildQoderResumeCmd(tt.instruction, tt.model, tt.sessionID)
+			for _, part := range tt.wantParts {
+				if !strings.Contains(cmd, part) {
+					t.Fatalf("expected command to contain %q, got %q", part, cmd)
+				}
+			}
+			for _, absent := range tt.wantAbsent {
+				if strings.Contains(cmd, absent) {
+					t.Fatalf("expected command to NOT contain %q, got %q", absent, cmd)
+				}
+			}
+		})
+	}
+}
+
+func TestQoderCLIRunTurn_FirstTurnDelegatesToRun(t *testing.T) {
+	t.Parallel()
+
+	rt := &qoderTestRuntime{
+		workspace: t.TempDir(),
+		execResult: runtime.ExecResult{
+			Stdout:   "hello back\n",
+			ExitCode: 0,
+		},
+	}
+	ag := NewQoderCLIAgent(Config{ModelName: modelAuto})
+
+	result, err := ag.RunTurn(context.Background(), rt, ExecOptions{}, transcript.Message{
+		Role:    transcript.RoleUser,
+		Content: "start",
+		Turn:    1,
+	}, "")
+	if err != nil {
+		t.Fatalf("RunTurn (first turn): %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	// First turn should NOT use -r flag
+	if strings.Contains(rt.agentCommand, " -r ") {
+		t.Fatalf("first turn should not use -r flag: %q", rt.agentCommand)
+	}
+}
+
+func TestQoderCLIRunTurn_ResumeUsesCorrectFlag(t *testing.T) {
+	t.Parallel()
+
+	rt := &qoderTestRuntime{
+		workspace: t.TempDir(),
+		execResult: runtime.ExecResult{
+			Stdout:   "resumed answer\n",
+			ExitCode: 0,
+		},
+	}
+	ag := NewQoderCLIAgent(Config{ModelName: modelAuto})
+
+	result, err := ag.RunTurn(context.Background(), rt, ExecOptions{}, transcript.Message{
+		Role:    transcript.RoleUser,
+		Content: "follow up",
+		Turn:    2,
+	}, "qoder-session-123")
+	if err != nil {
+		t.Fatalf("RunTurn (resume): %v", err)
+	}
+	if result.SessionID != "qoder-session-123" {
+		t.Fatalf("expected SessionID = %q, got %q", "qoder-session-123", result.SessionID)
+	}
+	if !strings.Contains(rt.agentCommand, "-r 'qoder-session-123'") {
+		t.Fatalf("expected -r flag with session ID, got %q", rt.agentCommand)
+	}
+	if !strings.Contains(rt.agentCommand, "-p 'follow up'") {
+		t.Fatalf("expected -p flag with instruction, got %q", rt.agentCommand)
+	}
+}
+
 func TestQoderCLIEffectiveModelName_AllowsSupportedModel(t *testing.T) {
 	t.Parallel()
 
@@ -383,6 +488,7 @@ type qoderTestRuntime struct {
 	workspace           string
 	execResult          runtime.ExecResult
 	lastCommand         string
+	agentCommand        string // first non-probe, non-intercepted command
 	lastExecEnv         map[string]string
 	probeResponseStdout string
 	mergedEnv           map[string]string
@@ -412,7 +518,15 @@ func (r *qoderTestRuntime) Exec(_ context.Context, command string, opts runtime.
 		}
 		return runtime.ExecResult{Stdout: stdout}, nil
 	}
+	// Session file lookup scripts start with printenv HOME; treat them as
+	// background operations that do not overwrite the agent command.
+	if strings.HasPrefix(command, "home=$(printenv HOME)") {
+		return runtime.ExecResult{}, nil
+	}
 	r.lastCommand = command
+	if r.agentCommand == "" {
+		r.agentCommand = command
+	}
 	if strings.Contains(command, "qodercli --permission-mode=bypass_permissions") ||
 		strings.Contains(command, "qodercli -p ") ||
 		strings.Contains(command, "qoder.com/install") {
@@ -432,4 +546,6 @@ func (r *qoderTestRuntime) MergeEnv(env map[string]string) {
 	maps.Copy(r.mergedEnv, env)
 }
 
-func (r *qoderTestRuntime) TargetGOOS() string { return platform.GOOSLinux }
+func (r *qoderTestRuntime) Shell() platform.Shell {
+	return platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
+}

@@ -125,7 +125,7 @@ func (a *QwenCodeAgent) CheckCredentials(ctx context.Context) error {
 // Run executes qwen non-interactively (instruction piped to `qwen --yolo`) and
 // builds a transcript from the session file (falling back to stdout).
 func (a *QwenCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (*SessionResult, error) {
-	if err := requireBashOnWindowsHost(rt); err != nil {
+	if err := requireBashTargetShell(rt); err != nil {
 		return nil, fmt.Errorf("%s: %w", a.Name(), err)
 	}
 	start := time.Now()
@@ -164,9 +164,27 @@ func (a *QwenCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 		}, err
 	}
 
-	cmd := buildQwenCodeRunCmd(instruction, model)
+	cmd, promptDelivery, err := deliverPrompt(ctx, rt, opts, instruction, promptCommandBuilder{
+		Inline: func(prompt string) string {
+			return buildQwenCodeRunCmd(prompt, model)
+		},
+		StdinFile: func(path string) string {
+			return buildQwenCodeRunStdinCmd(path, model)
+		},
+	})
+	if err != nil {
+		return &SessionResult{
+			Engine:     a.Name(),
+			ExitCode:   1,
+			DurationMs: time.Since(start).Milliseconds(),
+			Artifacts:  &SessionArtifacts{},
+		}, err
+	}
 	result, err := rt.Exec(ctx, cmd, opts)
 	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result)
+	if sessionResult != nil {
+		sessionResult.PromptDelivery = promptDelivery
+	}
 	if err != nil {
 		return sessionResult, fmt.Errorf("qwen_code run failed: %w", err)
 	}
@@ -190,6 +208,14 @@ func buildQwenCodeRunCmd(instruction, model string) string {
 	// (the positional-prompt form is not). --yolo auto-approves every tool
 	// action so the run never blocks on a confirmation prompt.
 	cmd := "printf '%s' " + shellQuote(instruction) + " | qwen --yolo"
+	if model != "" {
+		cmd += " -m " + shellQuote(model)
+	}
+	return cmd
+}
+
+func buildQwenCodeRunStdinCmd(promptPath, model string) string {
+	cmd := "cat " + shellQuote(promptPath) + " | qwen --yolo"
 	if model != "" {
 		cmd += " -m " + shellQuote(model)
 	}

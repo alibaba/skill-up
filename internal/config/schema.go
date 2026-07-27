@@ -3,6 +3,7 @@ package config
 import (
 	"time"
 
+	"github.com/alibaba/skill-up/internal/customengine"
 	"github.com/alibaba/skill-up/internal/runtime"
 )
 
@@ -100,53 +101,8 @@ type EngineConfig struct {
 	// Kwargs carries agent-specific key/value options. Each agent reads only
 	// the keys it understands; unknown keys are ignored. Recognised keys are
 	// documented per agent (e.g. codex honours "bypass_sandbox").
-	Kwargs map[string]string   `yaml:"kwargs,omitempty"`
-	Custom *CustomEngineConfig `yaml:"custom,omitempty"`
-}
-
-// CustomEngineConfig describes a user-defined agent engine that is not a
-// built-in agent. It is read only when engine.name does not match a built-in
-// agent. See docs/design/custom-engine.md for the full contract.
-type CustomEngineConfig struct {
-	Transport      string             `yaml:"transport"` // local, http
-	TimeoutSeconds int                `yaml:"timeout_seconds,omitempty"`
-	ResponseFormat string             `yaml:"response_format,omitempty"` // session_result (default), text
-	Env            map[string]string  `yaml:"env,omitempty"`
-	Kwargs         map[string]string  `yaml:"kwargs,omitempty"`
-	Local          *CustomLocalConfig `yaml:"local,omitempty"`
-	HTTP           *CustomHTTPConfig  `yaml:"http,omitempty"`
-}
-
-// CustomLocalConfig configures the local transport: a command executed inside
-// the current runtime via runtime.Exec.
-type CustomLocalConfig struct {
-	Command    string   `yaml:"command"`
-	Args       []string `yaml:"args,omitempty"`
-	Cwd        string   `yaml:"cwd,omitempty"`
-	InputFile  string   `yaml:"input_file,omitempty"`
-	OutputFile string   `yaml:"output_file,omitempty"`
-}
-
-// CustomHTTPConfig configures the http transport: a remote or local HTTP agent
-// service. JSON request/response and multipart file upload (Files) are
-// implemented; URL artifact download in the result is a follow-up.
-type CustomHTTPConfig struct {
-	URL     string            `yaml:"url"`
-	Method  string            `yaml:"method,omitempty"` // POST
-	Headers map[string]string `yaml:"headers,omitempty"`
-	Files   []CustomHTTPFile  `yaml:"files,omitempty"`
-	// RequestBody is an arbitrary YAML value: a map, a sequence, or a scalar
-	// such as `request_body: ${session_input}`. It is rendered by the http
-	// transport (see renderBodyValue), which injects ${session_input} /
-	// ${messages} / ${kwargs} as JSON structures. Declared as `any` so yaml.v3
-	// can unmarshal a top-level scalar, not only a map.
-	RequestBody any `yaml:"request_body,omitempty"`
-}
-
-// CustomHTTPFile declares a workspace file (or glob) uploaded with an HTTP request.
-type CustomHTTPFile struct {
-	Path     string `yaml:"path"`
-	Required *bool  `yaml:"required,omitempty"` // defaults to true
+	Kwargs map[string]string    `yaml:"kwargs,omitempty"`
+	Custom *customengine.Config `yaml:"custom,omitempty"`
 }
 
 // ModelConfig describes the model to use.
@@ -191,10 +147,12 @@ type RetryPolicy struct {
 
 // JudgeConfig describes the evaluation strategy.
 type JudgeConfig struct {
-	Type       string   `json:"type"                     yaml:"type"` // rule_based, script, agent_judge
-	ScriptPath string   `json:"script_path,omitempty"    yaml:"script_path,omitempty"`
-	Model      string   `json:"model,omitempty"          yaml:"model,omitempty"`
-	Criteria   []string `json:"criteria,omitempty"       yaml:"criteria,omitempty"`
+	Type       string              `json:"type"                     yaml:"type"` // rule_based, script, agent_judge
+	ScriptPath string              `json:"script_path,omitempty"    yaml:"script_path,omitempty"`
+	Model      string              `json:"model,omitempty"          yaml:"model,omitempty"`
+	Criteria   []string            `json:"criteria,omitempty"       yaml:"criteria,omitempty"`
+	Skills     []SkillRef          `json:"skills,omitempty"         yaml:"skills,omitempty"`
+	Context    *JudgeContextConfig `json:"context,omitempty" yaml:"context,omitempty"`
 	// PassThreshold is the minimum pass rate for agent_judge.
 	// Nil means "not configured", so the judge layer applies its default of 0.7.
 	// When set explicitly, the value must be in the inclusive range [0.0, 1.0].
@@ -209,13 +167,67 @@ type JudgeConfig struct {
 	Failure        []Rule `json:"failure,omitempty"        yaml:"failure,omitempty"`
 }
 
+// JudgeContextConfig controls how agent_judge receives evaluation materials.
+type JudgeContextConfig struct {
+	Profile        string                   `json:"profile,omitempty"         yaml:"profile,omitempty"`
+	FinalMessage   string                   `json:"final_message,omitempty"   yaml:"final_message,omitempty"`
+	Transcript     string                   `json:"transcript,omitempty"      yaml:"transcript,omitempty"`
+	WorkspaceDiff  string                   `json:"workspace_diff,omitempty"  yaml:"workspace_diff,omitempty"`
+	GeneratedFiles string                   `json:"generated_files,omitempty" yaml:"generated_files,omitempty"`
+	Limits         *JudgeContextLimits      `json:"limits,omitempty"          yaml:"limits,omitempty"`
+	Attachments    []JudgeContextAttachment `json:"attachments,omitempty"     yaml:"attachments,omitempty"`
+}
+
+// JudgeContextLimits bounds inline material size for agent_judge prompts.
+type JudgeContextLimits struct {
+	MaxBytes              int `json:"max_bytes,omitempty"                yaml:"max_bytes,omitempty"`
+	TranscriptMaxTurns    int `json:"transcript_max_turns,omitempty"     yaml:"transcript_max_turns,omitempty"`
+	WorkspaceDiffMaxLines int `json:"workspace_diff_max_lines,omitempty" yaml:"workspace_diff_max_lines,omitempty"`
+}
+
+// JudgeContextAttachment declares an additional file for agent_judge review.
+type JudgeContextAttachment struct {
+	Path  string `json:"path"            yaml:"path"`
+	Label string `json:"label,omitempty" yaml:"label,omitempty"`
+}
+
 // Rule is a single assertion rule for rule_based evaluation.
 type Rule struct {
-	OutputContains *OutputContainsRule `json:"output_contains,omitempty" yaml:"output_contains,omitempty"`
-	ExitCode       *int                `json:"exit_code,omitempty"       yaml:"exit_code,omitempty"`
-	ToolCalled     *ToolCalledRule     `json:"tool_called,omitempty"     yaml:"tool_called,omitempty"`
-	FilesExist     []string            `json:"files_exist,omitempty"     yaml:"files_exist,omitempty"`
-	FilesNotExist  []string            `json:"files_not_exist,omitempty" yaml:"files_not_exist,omitempty"`
+	OutputContains          *OutputContainsRule          `json:"output_contains,omitempty"            yaml:"output_contains,omitempty"`
+	ExitCode                *int                         `json:"exit_code,omitempty"                  yaml:"exit_code,omitempty"`
+	ToolCalled              *ToolCalledRule              `json:"tool_called,omitempty"                yaml:"tool_called,omitempty"`
+	FilesExist              []string                     `json:"files_exist,omitempty"                yaml:"files_exist,omitempty"`
+	FilesNotExist           []string                     `json:"files_not_exist,omitempty"            yaml:"files_not_exist,omitempty"`
+	TurnResponseContains    *TurnResponseContainsRule    `json:"turn_response_contains,omitempty"     yaml:"turn_response_contains,omitempty"`
+	TurnResponseNotContains *TurnResponseNotContainsRule `json:"turn_response_not_contains,omitempty" yaml:"turn_response_not_contains,omitempty"`
+	ToolCalledInTurn        *ToolCalledInTurnRule        `json:"tool_called_in_turn,omitempty"        yaml:"tool_called_in_turn,omitempty"`
+	ToolNotCalledInTurn     *ToolNotCalledInTurnRule     `json:"tool_not_called_in_turn,omitempty"    yaml:"tool_not_called_in_turn,omitempty"`
+}
+
+// TurnResponseContainsRule checks that a specific turn response contains required text.
+type TurnResponseContainsRule struct {
+	Turn        int      `json:"turn"                   yaml:"turn"`
+	ContainsAll []string `json:"contains_all,omitempty" yaml:"contains_all,omitempty"`
+	ContainsAny []string `json:"contains_any,omitempty" yaml:"contains_any,omitempty"`
+}
+
+// TurnResponseNotContainsRule checks that a specific turn response does not contain forbidden text.
+type TurnResponseNotContainsRule struct {
+	Turn        int      `json:"turn"          yaml:"turn"`
+	NotContains []string `json:"not_contains"  yaml:"not_contains"`
+}
+
+// ToolCalledInTurnRule checks that a tool was called during a specific turn.
+type ToolCalledInTurnRule struct {
+	Turn int            `json:"turn"           yaml:"turn"`
+	Name string         `json:"name"           yaml:"name"`
+	Args map[string]any `json:"args,omitempty" yaml:"args,omitempty"`
+}
+
+// ToolNotCalledInTurnRule checks that a tool was NOT called during a specific turn.
+type ToolNotCalledInTurnRule struct {
+	Turn int    `json:"turn" yaml:"turn"`
+	Name string `json:"name" yaml:"name"`
 }
 
 // OutputContainsRule checks if output contains specific text.
@@ -253,6 +265,12 @@ type CaseConfig struct {
 	Constraints Constraints `yaml:"constraints"`
 	Expect      Expect      `yaml:"expect"`
 	Judge       JudgeConfig `yaml:"judge,omitempty"`
+	// MCP declares case-level MCP server overrides. Servers are merged with
+	// eval-level mcp.servers by name: a same-name entry replaces the whole
+	// eval-level server, and a new name is appended. In the MVP, case-level
+	// servers must use mode: mocked. A case without mcp inherits the eval-level
+	// MCP config unchanged. See internal/config.MergeCaseMCP for the semantics.
+	MCP MCPConfig `yaml:"mcp,omitempty"`
 	// CollectArtifacts lists glob patterns (doublestar syntax) selecting
 	// workspace files to download as artifacts for this case. It is merged
 	// (union, de-duplicated) with cases.defaults.collect_artifacts. See
@@ -275,15 +293,26 @@ type Input struct {
 
 // Turn is a single conversation turn.
 type Turn struct {
-	Role          string         `yaml:"role"` // user
-	Content       string         `yaml:"content"`
-	PostCondition *PostCondition `yaml:"post_condition,omitempty"`
+	Role           string         `yaml:"role"` // user
+	Content        string         `yaml:"content"`
+	PostCondition  *PostCondition `yaml:"post_condition,omitempty"`
+	Capture        []CaptureRule  `yaml:"capture,omitempty"`
+	TimeoutSeconds int            `yaml:"timeout_seconds,omitempty"`
 }
 
 // PostCondition checks output after a turn.
 type PostCondition struct {
 	MustContainAny []string `yaml:"must_contain_any,omitempty"`
+	MustContainAll []string `yaml:"must_contain_all,omitempty"`
+	MustNotContain []string `yaml:"must_not_contain,omitempty"`
 	OnFail         string   `yaml:"on_fail,omitempty"` // skip_remaining, fail
+}
+
+// CaptureRule defines how to extract a value from a turn response.
+type CaptureRule struct {
+	Variable string `yaml:"variable"`
+	Pattern  string `yaml:"pattern,omitempty"`
+	JSONPath string `yaml:"jsonpath,omitempty"`
 }
 
 // Context describes test case setup.

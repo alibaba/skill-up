@@ -6,6 +6,10 @@
   <h1>skill-up</h1>
 
   <p align="center">
+    <b>Agent Skill 的评测与演进工具。</b>
+  </p>
+
+  <p align="center">
     <a href="https://github.com/alibaba/skill-up/actions">
       <img src="https://github.com/alibaba/skill-up/actions/workflows/ci.yml/badge.svg" alt="CI" />
     </a>
@@ -42,13 +46,16 @@
 
 ## 简介
 
-**skill-up** 是面向 Agent Skill 开发者的 CLI 评测框架。在 Skill 包内通过 `evals/eval.yaml` 与 `evals/cases/*.yaml` 声明评测环境、依赖、用例与评估方式，在本地或 CI 中运行评测并生成结构化报告。
+**skill-up** 是 Agent Skill 的评测与演进工具。
 
-> [!WARNING]
-> 本项目仍处于 **早期演进阶段**：代码尚未完全稳定，部分 CLI 命令、配置字段以及公共 API 在后续版本中仍有可能调整。请在生产环境使用前关注 [CHANGELOG](CHANGELOG.md) 并做好兼容性验证。
+- **评测（Evaluation）**让 Skill 质量可度量、可复现：声明式 YAML 用例可在多个 Agent Engine 中运行，通过规则、脚本或 Agent Judge 评分，并在本地或 CI 中生成结构化报告。
+- **演进（Evolution）**把评测结果变成下一轮改进：通过对话，**skill-upper** 读取失败、自动修复或补充 eval 用例、重新运行 skill-up，并与你持续迭代。
+
+![skill-up 通过自动修复和迭代 eval 来评测并演进 Agent Skill](docs/public/skill-up-overview.png)
 
 ## 特性
 
+- **skill-upper 从评测到演进的闭环**：通过自然对话创建评测、诊断失败、自动修复或补充用例并重新运行 skill-up，让 eval 评测集持续演进。
 - **声明式评测配置**：通过 YAML（`eval.yaml` + `cases/*.yaml`）定义评测环境、引擎、模型和用例。
 - **多引擎支持**：内置支持 Qoder CLI、Claude Code、Codex；亦可通过 `engine.custom` 接入用户自定义 Agent（本地传输，详见 [docs/design/custom-engine.md](docs/design/custom-engine.md)）。
 - **灵活评分**：支持 `rule_based`（规则匹配）、`script`（脚本评分）、`agent_judge`（Agent 评分）三种评估策略。
@@ -61,19 +68,18 @@
 官方的 [Agent Skills 评测指南](https://agentskills.io/skill-creation/evaluating-skills) 说明了正确的评测循环：编写真实用例，分别运行 with/without Skill，评分输出，汇总结果，然后持续迭代。`skill-up` 的价值是把这套流程产品化成一个可复用的 CLI：
 
 - 用声明式的 `eval.yaml` + `cases/*.yaml` 取代临时拼出来的运行目录。
+- 补齐持续改进闭环：skill-upper 可以解读失败报告、修复或新增 eval 用例，并通过对话驱动下一轮 skill-up 运行。
 - 自动完成 workspace 准备、Skill 安装、Agent Engine 调用、评分和报告生成。
 - 支持多个引擎（`claude_code`、`codex`、`qodercli`、`qwen_code`），不绑定单一客户端。
 - 兼容 Anthropic 风格的 `evals.json`，同时提供更丰富的 judge、适合 CI 的命令和结构化报告。
 
-## 推荐使用方式：AI 辅助配合 skill-upper
+## 快速上手：使用 skill-upper 演进 Skill
 
-推荐使用仓库内置的 **skill-upper** Agent Skill。它会引导 AI Agent
-为目标 Skill 生成评测配置、校验、运行并解释结果，避免一开始就手写所有
-YAML。
+推荐通过仓库内置的 **skill-upper** Agent Skill 使用 skill-up。它可以让
+AI Agent 通过对话创建评测、运行 skill-up、理解失败原因、修复 Skill 或
+eval、补充回归用例，并持续完成下一轮迭代。
 
-### 1. 安装 `skill-upper` Agent Skill
-
-推荐使用 `skills` CLI 安装：
+### 第一步：安装 skill-upper
 
 ```bash
 # Codex，全局安装
@@ -83,30 +89,21 @@ npx skills add https://github.com/alibaba/skill-up/tree/main/skills/skill-upper 
 npx skills add https://github.com/alibaba/skill-up/tree/main/skills/skill-upper -g -a claude-code -y
 ```
 
-安装这个 Skill 前不需要先安装 `skill-up`。`skill-upper` 在运行时会检查
-`skill-up` 命令是否可用；如果缺失，它会引导 Agent 完成安装。
+通常不需要提前安装 skill-up。skill-upper 运行时会检查 CLI；如果缺失，
+它会引导 Agent 完成安装。
 
-### 2. 添加与运行评测
+### 第二步：创建并运行第一组评测
 
-在 AI Agent 中打开目标 Skill 项目。目标项目至少应包含：
+在 Codex、Claude Code 或其他兼容 Agent 中打开包含 `SKILL.md` 的 Skill
+项目，然后直接对话：
 
-```text
-my-skill/
-  SKILL.md
+```markdown
+使用 skill-upper 评测这个 Skill。
+阅读 SKILL.md，识别最重要的能力，创建真实的 eval 用例并选择合适的
+Judge，校验配置后运行 skill-up。最后总结结果和影响最大的失败项。
 ```
 
-然后直接给 Agent 一个明确任务：
-
-```text
-使用 skill-upper 给这个 Skill 添加评测。
-添加这个评测用例：
-- 输入：写一个 hello world 的程序。
-- 评测：是否包含 hello 和 world 打印。
-
-然后运行 skill-up 完成校验和评测。
-```
-
-Agent 应该会生成类似结构：
+skill-upper 会生成声明式评测集并替你驱动 CLI：
 
 ```text
 my-skill/
@@ -114,100 +111,40 @@ my-skill/
   evals/
     eval.yaml
     cases/
-      basic.yaml
+      <case-id>.yaml
 my-skill-workspace/
   iteration-1/
     result.json
 ```
 
-当 `evals/eval.yaml` 位于包含 `SKILL.md` 的目录下时，`skill-up` 会在运行时
-自动安装这个本地 Skill，通常不需要在 `eval.yaml` 里手动写 Skill 路径。
+### 第三步：修复、回归并持续迭代
 
-## 安装
+在同一段对话中继续：
 
-使用安装脚本：
+```markdown
+检查最新的 skill-up 评测结果。逐个判断失败来自 Skill 还是 eval：
+按需修复 SKILL.md 和相关文件，或修复 eval 用例与 Judge；为发现的问题
+补充回归用例，然后重新运行 skill-up，直到关键能力通过评测。
+```
+
+这就是演进闭环：报告转化为修复，修复沉淀为回归用例，每轮迭代都会让
+Skill 和它的评测集更可靠。
+
+### 更喜欢手工配置？
+
+你仍然可以直接安装 CLI，并手写 `eval.yaml` 与用例文件：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/alibaba/skill-up/main/install.sh | bash
 ```
 
-安装脚本会从 [GitHub Releases](https://github.com/alibaba/skill-up/releases) 下载当前平台对应的二进制文件。
-
-如需从仓库 checkout 后本地构建，需要安装 [Go](https://go.dev/dl/) 1.25 或更高版本：
-
-```bash
-make build
-# 或
-go build -o bin/skill-up ./cmd/skill-up
-```
-
-**Windows 用户**：skill-up 原生支持 Windows。请参阅
-[Windows 支持指南](docs/zh/guide/windows.md) 了解推荐工作流、已知限制
-（特别是：原生运行 agent CLI 需要 Git Bash）以及 `scripts/windows/`
-下的 PowerShell 工具脚本。
-
-## 快速上手
-
-### 第一步：创建评测配置
-
-在 Skill 目录下创建 `evals/eval.yaml`：
-
-```yaml
-schema_version: v1alpha1
-
-environment:
-  type: none
-
-engine:
-  name: claude_code
-
-cases:
-  files:
-    - evals/cases/hello-world.yaml
-```
-
-当 `evals/eval.yaml` 位于包含 `SKILL.md` 的目录下时，skill-up 会自动安装当前 Skill。未写出的字段会使用默认值：JSON 报告、`timeout_seconds: 300`、`max_turns: 10`、`parallelism: 1`。
-
-完整的 `eval.yaml` 配置说明见 [编写评测配置与用例](docs/zh/guide/writing-evals.md)。
-
-### 第二步：编写 Eval Case
-
-创建 `evals/cases/hello-world.yaml`：
-
-```yaml
-input:
-  prompt: |
-    请帮我生成一个 Hello World 程序
-
-expect:
-  must_contain:
-    - "Hello"
-    - "World"
-```
-
-用例 `id` 默认取文件名（这里是 `hello-world`）。只有在需要脚本评测或 Agent 评测时，才需要额外添加 `judge` 配置。
-
-### 第三步：校验配置
-
-```bash
-skill-up validate
-```
-
-这一步是可选的，但建议首次运行前执行：它只检查 `eval.yaml` 和引用的用例文件，不会启动 Agent Engine。
-
-### 第四步：运行评测
-
-```bash
-skill-up run
-```
-
-评测结果将写入 `<skill-name>-workspace/iteration-1/` 目录。
-
-### 从 Anthropic 格式导入
-
-```bash
-skill-up import ./evals/evals.json --output ./evals
-```
+详细步骤请查看官网的
+[快速开始](https://alibaba.github.io/skill-up/zh/guide/getting-started)、
+[编写评测](https://alibaba.github.io/skill-up/zh/guide/writing-evals)、
+[CLI 命令参考](https://alibaba.github.io/skill-up/zh/guide/cli-reference)和
+[用户配置](https://alibaba.github.io/skill-up/zh/guide/user-config)。
+Windows 的安装方式与已知限制请参阅
+[Windows 指南](https://alibaba.github.io/skill-up/zh/guide/windows)。
 
 ## CLI 命令概览
 

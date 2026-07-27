@@ -464,6 +464,14 @@ The `local` transport runs a command via `runtime.Exec`. The command runs inside
 current runtime, so it can access the runtime workspace, installed skills, fixtures,
 MCP config, and environment variables.
 
+Top-level `skills` are installed before the main run agent executes. If
+`judge.type: agent_judge` declares `judge.skills`, those Skills are installed
+separately before the judge agent runs. Both paths use the Agent adapter's
+`InstallSkill` implementation; skill-up does not concatenate Skill files into
+the prompt as a fallback. Custom and remote engines that need judge Skills must
+make their agent process discover the installed Skill directory according to
+their own conventions.
+
 Example:
 
 ```yaml

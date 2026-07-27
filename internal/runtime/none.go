@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	goruntime "runtime"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -206,9 +205,11 @@ func (r *NoneRuntime) Exec(ctx context.Context, command string, opts ExecOptions
 	shell := platform.Host()
 	cmd := shell.Cmd(ctx, command)
 	// Run in a dedicated process group (POSIX only — no-op on Windows) and
-	// kill the whole group on cancellation, so a timed-out command's
-	// descendants do not outlive it.
-	configureProcessGroup(cmd)
+	// terminate the whole group on cancellation, so a timed-out command's
+	// descendants do not outlive it. done is closed once Wait returns so the
+	// SIGTERM→SIGKILL escalation timer stops before the PID can be recycled.
+	done := make(chan struct{})
+	configureProcessGroup(cmd, done)
 	// Bound how long Wait blocks after ctx-cancel so a child holding the
 	// stdio pipes can't pin Exec past the deadline. See noneExecWaitDelay
 	// above for the per-OS reasoning.
@@ -234,7 +235,7 @@ func (r *NoneRuntime) Exec(ctx context.Context, command string, opts ExecOptions
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	exitCode, execErr := classifyExecError(ctx, cmd.Run())
+	exitCode, execErr := classifyExecError(ctx, runCmd(cmd, done))
 	result := ExecResult{
 		Stdout:   stdout.String(),
 		Stderr:   stderr.String(),
@@ -279,6 +280,18 @@ func (r *NoneRuntime) Exec(ctx context.Context, command string, opts ExecOptions
 	}
 
 	return result, execErr
+}
+
+// runCmd starts cmd and waits for it, closing done once Wait returns so the
+// process-group escalation goroutine (see configureProcessGroup) stops before
+// the child's PID can be recycled. It mirrors cmd.Run() but exposes that
+// completion signal. A Start failure leaves done closed and returns the error.
+func runCmd(cmd *exec.Cmd, done chan<- struct{}) error {
+	defer close(done)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Wait()
 }
 
 // classifyExecError translates a *exec.Cmd Run error into the (exitCode, error)
@@ -368,8 +381,5 @@ func (r *NoneRuntime) RequiresProcessSandbox() bool {
 	return true
 }
 
-// TargetGOOS reports the host OS, since NoneRuntime executes commands directly
-// on the host.
-func (r *NoneRuntime) TargetGOOS() string {
-	return goruntime.GOOS
-}
+// Shell reports the host shell selected by NoneRuntime.Exec.
+func (r *NoneRuntime) Shell() platform.Shell { return platform.Host().Target }

@@ -312,6 +312,39 @@ tool_responses:
 
 Environment-variable references support both `${VAR}` and full-value `$VAR` forms; the variable name must match `[A-Za-z_][A-Za-z0-9_]*`. Variables listed in `required_env` are injected into the Agent process; full env-var references inside `headers` are also recorded by name so the Agent can pick the right transport mechanism when installing the MCP server.
 
+#### Per-case mocked MCP overrides
+
+Eval-level `mcp.servers` is the default for every case. A case may declare its own `mcp.servers` to vary the mocked fixture while keeping the same server and tool names (introduced by SUP-0003). Servers are merged by `name`: a case-level entry with a matching name replaces that whole eval-level server, and a new name is appended. A case without `mcp` inherits the eval-level config unchanged.
+
+```yaml
+# eval.yaml — default fixture shared by all cases
+mcp:
+  servers:
+    - name: project-mgmt
+      mode: mocked
+      config_ref: evals/fixtures/mcp/project-default.yaml
+```
+
+```yaml
+# cases/project-open.yaml — same server/tool, different fixture
+id: project-open
+input:
+  prompt: Check the project status and continue the publish plan.
+
+mcp:
+  servers:
+    - name: project-mgmt
+      mode: mocked
+      config_ref: evals/fixtures/mcp/project-open.yaml
+```
+
+Rules and constraints:
+
+- Case-level servers must use `mode: mocked` in the current MVP; real MCP per-case overrides are not yet supported.
+- Replacement is whole-entry, not a field-level merge: provide the full server entry (`name`, `mode`, `config_ref`).
+- `config_ref` is resolved relative to the Skill directory (where `SKILL.md` lives), **not** the case file directory — the same rule as eval-level MCP.
+- Each case provisions and installs its own mocked server, so fixtures stay isolated even when `cases.parallelism > 1`.
+
 ### Choosing a runtime environment
 
 | Environment   | When to use                                       | Example Skills                              |
@@ -470,6 +503,125 @@ context:
 
 ---
 
+## Multi-turn conversations
+
+Use `input.turns` instead of `input.prompt` when your evaluation requires
+multiple sequential interactions with the agent — for example, iterative
+refinement, phase-gated workflows, or clarification loops.
+
+### When to use `input.prompt` vs `input.turns`
+
+| Scenario | Use |
+|----------|-----|
+| Single instruction, judge the final output | `input.prompt` |
+| Multi-step workflow with inter-turn gates | `input.turns` |
+| Iterative refinement (e.g. "now improve naming") | `input.turns` |
+| Agent must reject invalid requests mid-conversation | `input.turns` |
+
+### Basic multi-turn case
+
+```yaml
+input:
+  turns:
+    - role: user
+      content: "Implement a binary search function in Go."
+      post_condition:
+        must_contain_all: ["func", "binary"]
+        on_fail: fail
+    - role: user
+      content: "Add unit tests for the function you wrote."
+      post_condition:
+        must_contain_any: ["Test", "t.Run", "testing"]
+        on_fail: fail
+```
+
+### `post_condition` — inter-turn gate
+
+`post_condition` checks the agent's response after each turn. It is a **gate**,
+not a replacement for the judge. Use it to ensure the conversation stays on
+track before sending the next turn.
+
+Fields:
+
+- `must_contain_all`: all strings must appear in the response.
+- `must_contain_any`: at least one string must appear.
+- `must_not_contain`: none of the strings may appear.
+- `on_fail`: what happens when the condition fails:
+  - `fail` (default): mark the case as FAIL immediately.
+  - `skip_remaining`: skip all subsequent turns; the case result depends on
+    what the judge sees.
+
+### `capture` — template variables
+
+Capture values from a turn response for use in later turns:
+
+```yaml
+input:
+  turns:
+    - role: user
+      content: "Generate a session token."
+      capture:
+        - variable: token
+          pattern: "token[=: ]+(?P<value>[A-Za-z0-9]+)"
+    - role: user
+      content: "Verify the token {{token}} is valid."
+```
+
+Capture semantics:
+
+- Named group `(?P<value>...)` is preferred; if absent, exactly one unnamed
+  capture group is allowed.
+- Extractor type: `pattern` (regex) or `jsonpath` — specify exactly one.
+- No match or empty value → the case enters ERROR state.
+- Variables are scoped to the current case execution only (never shared across
+  cases, retries, or baseline variants).
+- Referencing an unknown variable fails the turn before the agent is invoked.
+
+### Agent support matrix
+
+| Engine | Multi-turn support | Mechanism |
+|--------|-------------------|------------|
+| `claude_code` | Yes | `--resume` flag with session ID |
+| `qodercli` | Yes | `-r <session-id>` flag |
+| `codex` | Yes | `codex resume <thread-id>` command |
+| `qwen_code` | Not yet | Falls back to batch mode |
+| `custom` | Not yet | Falls back to batch mode |
+
+When an agent does not implement session resumption, all turns are concatenated
+and sent as a single prompt. A warning is logged.
+
+### Per-turn judge assertions
+
+The rule-based judge supports per-turn assertions:
+
+```yaml
+judge:
+  type: rule_based
+  success:
+    - turn_response_contains:
+        turn: 1
+        contains_all: ["binary_search"]
+    - turn_response_not_contains:
+        turn: 2
+        not_contains: ["TODO", "FIXME"]
+    - tool_called_in_turn:
+        turn: 1
+        name: write_file
+        args:
+          path: "search.go"
+    - tool_not_called_in_turn:
+        turn: 2
+        name: delete_file
+```
+
+Failure behavior:
+
+- Missing turn (not executed) → assertion fails.
+- Skipped/failed/errored turn → assertion fails (only "completed" turns are
+  assertable).
+
+---
+
 ## Grading strategies
 
 Grading happens in two layers: **expect** (gating checks) and **judge** (quality assessment).
@@ -583,12 +735,60 @@ Let an LLM grade against rubric criteria — useful when semantic understanding 
 judge:
   type: agent_judge
   model: anthropic/claude-sonnet-4-6        # Model used by the judge
+  skills:                                   # Optional: judge-only Skills
+    - source: local_path
+      path: evals/fixtures/judge-rubric
   criteria:                                  # Natural-language rubric
     - "Identifies a real bug with an accurate location"
     - "Does not flag correct code as a bug"
     - "Recommendations are actionable, not generic"
   pass_threshold: 0.7                        # Default 0.7
   timeout_seconds: 60                        # Optional: bound a single judge call (0 = no judge-level deadline, parent case timeout still applies)
+```
+
+`judge.skills` is supported only for `agent_judge`. These Skills are installed
+into the judge agent, not the run agent, and top-level `skills` are not
+automatically installed into the judge. In benchmark mode, judge Skills are
+installed for both `with_skill` and `without_skill` runs because they are
+grading tooling, not the Skill under test. Installation uses each Agent
+adapter's native Skill mechanism; skill-up does not concatenate Skill files
+into the judge prompt.
+
+`agent_judge` materializes review context into files and injects a small
+materials table into the judge prompt. When `judge.context` is omitted, the
+default profile is `standard`: `final_message` is included inline, while
+`transcript` and `workspace_diff` are provided as file references to avoid
+large prompt/argv failures.
+
+Use `minimal` for long repository-change benchmarks where the judge should rely
+on explicit attachments or script outputs instead of the full conversation:
+
+```yaml
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  context:
+    profile: minimal                         # transcript/diff omitted, final_message truncated
+    attachments:
+      - path: evals/fixtures/diff-result.json
+        label: diff_result
+  criteria:
+    - "Determine whether the reported changes satisfy the expected rules."
+```
+
+Per-field modes are available when you need to tune the profile:
+
+```yaml
+judge:
+  type: agent_judge
+  context:
+    profile: standard
+    final_message: include                   # include | truncate | file_ref | omit
+    transcript: file_ref                     # include auto-downgrades to file_ref above limits.max_bytes
+    workspace_diff: file_ref
+    generated_files: index                   # index | include | omit
+    limits:
+      max_bytes: 65536
 ```
 
 > **Cost note:** `agent_judge` consumes additional tokens. Prefer `expect` or `rule_based` for deterministic checks and reserve `agent_judge` for assertions that genuinely require semantic understanding.
@@ -603,6 +803,8 @@ Setting `benchmark.enabled: true` runs every case **twice**:
 2. **without_skill** — Skill removed (baseline)
 
 The diff highlights the value the Skill adds (pass-rate uplift, time/token deltas).
+For one-off comparisons, `skill-up run ./evals/eval.yaml --baseline` enables the
+same mode without changing `eval.yaml`.
 
 ```yaml
 benchmark:

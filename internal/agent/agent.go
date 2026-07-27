@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/credential"
+	"github.com/alibaba/skill-up/internal/customengine"
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/observability"
 	"github.com/alibaba/skill-up/internal/platform"
@@ -24,23 +24,19 @@ import (
 // ErrAgentNotFound is returned when the agent executable is not found.
 var ErrAgentNotFound = errors.New("agent not found in PATH")
 
-// ErrAgentRequiresBash is returned when an agent CLI is invoked on a Windows
-// host where Git Bash (or another bash discoverable by platform.DiscoverBash)
-// is not available. Agent commands are POSIX-quoted and assume a bash
-// interpreter; running them through the cmd.exe fallback would let metachars
-// (`& | " %VAR%`) in the instruction reach the shell unprotected. See
-// docs/guide/windows.md for the documented limitation.
-var ErrAgentRequiresBash = errors.New("agent CLI execution on Windows requires bash; install Git for Windows or set SKILL_UP_BASH")
+// ErrAgentRequiresBash is returned when an agent CLI targets Windows without
+// a bash-compatible target shell. Agent commands use POSIX shell syntax.
+var ErrAgentRequiresBash = errors.New("agent CLI execution on Windows requires a bash target shell")
 
-// requireBashOnWindowsHost rejects agent execution when the runtime's target
-// is Windows but the host shell would be cmd.exe. We only enforce this for
-// runtimes whose target matches the host (NoneRuntime today); sandboxed
-// runtimes target a non-Windows guest and never go through platform.Host().
-func requireBashOnWindowsHost(rt Runtime) error {
-	if rt.TargetGOOS() != platform.GOOSWindows {
+func requireBashTargetShell(rt Runtime) error {
+	shell := rt.Shell()
+	if err := shell.Validate(); err != nil {
+		return fmt.Errorf("invalid runtime shell: %w", err)
+	}
+	if shell.GOOS != platform.GOOSWindows {
 		return nil
 	}
-	if platform.Host().IsBash {
+	if shell.IsBash() {
 		return nil
 	}
 	return ErrAgentRequiresBash
@@ -51,17 +47,30 @@ var ErrAgentInstallFailed = errors.New("agent installation failed")
 
 // SessionResult holds the result of an agent session execution.
 type SessionResult struct {
-	Engine       string                `json:"engine,omitempty"`
-	Model        string                `json:"model,omitempty"`
-	ExitCode     int                   `json:"exit_code"`
-	DurationMs   int64                 `json:"duration_ms"`
-	Turns        int                   `json:"turns"`
-	InputTokens  int                   `json:"input_tokens,omitempty"`
-	OutputTokens int                   `json:"output_tokens,omitempty"`
-	FinalMessage string                `json:"final_message,omitempty"`
-	Stderr       string                `json:"stderr,omitempty"`
-	Transcript   transcript.Transcript `json:"transcript,omitempty"`
-	Artifacts    *SessionArtifacts     `json:"artifacts,omitempty"`
+	Engine         string                  `json:"engine,omitempty"`
+	Model          string                  `json:"model,omitempty"`
+	SessionID      string                  `json:"session_id,omitempty"`
+	ExitCode       int                     `json:"exit_code"`
+	DurationMs     int64                   `json:"duration_ms"`
+	Turns          int                     `json:"turns"`
+	InputTokens    int                     `json:"input_tokens,omitempty"`
+	OutputTokens   int                     `json:"output_tokens,omitempty"`
+	FinalMessage   string                  `json:"final_message,omitempty"`
+	Stderr         string                  `json:"stderr,omitempty"`
+	Transcript     transcript.Transcript   `json:"transcript,omitempty"`
+	Artifacts      *SessionArtifacts       `json:"artifacts,omitempty"`
+	PromptDelivery *PromptDeliveryMetadata `json:"prompt_delivery,omitempty"`
+}
+
+// SessionResumer is an optional interface that agents may implement to support
+// multi-turn conversation evaluation. It allows the evaluator to resume an
+// existing session and send additional messages without starting a new session.
+//
+// Agents that implement SessionResumer know how to start/resume their own CLI
+// sessions. The evaluator checks for this interface and passes the SessionID
+// forward between turns.
+type SessionResumer interface {
+	RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, message transcript.Message, sessionID string) (*SessionResult, error)
 }
 
 // SessionArtifacts holds artifacts produced during an agent session.
@@ -108,7 +117,7 @@ type Config struct {
 	Kwargs map[string]string
 	// Custom carries the custom engine configuration when Name does not match
 	// a built-in agent. It is nil for built-in agents.
-	Custom *config.CustomEngineConfig
+	Custom *customengine.Config
 }
 
 // Runtime is an alias for runtime.Runtime for agent package convenience.
@@ -137,6 +146,13 @@ type Agent interface {
 	// CheckCredentials checks if the required credentials are set.
 	CheckCredentials(ctx context.Context) error
 }
+
+// Compile-time interface satisfaction checks for SessionResumer.
+var (
+	_ SessionResumer = (*ClaudeCodeAgent)(nil)
+	_ SessionResumer = (*QoderCLIAgent)(nil)
+	_ SessionResumer = (*CodexAgent)(nil)
+)
 
 // BaseAgent provides common functionality for agents.
 // Embedded by specific agent implementations.
@@ -172,6 +188,11 @@ func NewBaseAgent(cfg Config) BaseAgent {
 // Name returns the agent name.
 func (a *BaseAgent) Name() string {
 	return a.Cfg.Name
+}
+
+// SkillPath returns the agent's default skill installation path.
+func (a *BaseAgent) SkillPath() string {
+	return a.Cfg.SkillPath
 }
 
 // CheckCredentials checks if the required credentials are set.

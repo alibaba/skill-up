@@ -63,6 +63,26 @@ func TestConvertToAnthropicGrading(t *testing.T) {
 			t.Errorf("expected 0 expectations, got %d", len(grading.Expectations))
 		}
 	})
+
+	t.Run("judge context metadata", func(t *testing.T) {
+		t.Parallel()
+		result := judge.NewResult([]judge.AssertionResult{
+			{Text: "check", Passed: true, Evidence: "ok"},
+		}, 1, 1)
+		result.JudgeContext = &judge.ContextMetadata{
+			Profile:        "minimal",
+			PromptDelivery: "file",
+			PromptBytes:    512,
+		}
+
+		grading := ConvertToAnthropicGrading(result)
+		if grading.JudgeContext == nil {
+			t.Fatal("expected judge context metadata")
+		}
+		if grading.JudgeContext.Profile != "minimal" || grading.JudgeContext.PromptDelivery != "file" {
+			t.Fatalf("unexpected judge context: %#v", grading.JudgeContext)
+		}
+	})
 }
 
 func TestConvertToAnthropicGrading_JSONFormat(t *testing.T) {

@@ -5,26 +5,140 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: write
+permissions: {}
+
+concurrency:
+  # Release tags share one publication lane. Different tags must not mutate
+  # GitHub Releases concurrently.
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  goreleaser:
-    runs-on: ubuntu-latest
+  build:
+    name: Build release artifacts
+    runs-on: [self-hosted, linux, x64, trusted]
+    timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "::error::Release tag must be valid SemVer with a v prefix: $RELEASE_TAG"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
+            echo "::error::Release commit must be reachable from origin/main"
+            exit 1
+          fi
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.25.x"
+          # Release artifacts must not consume caches writable by other jobs.
+          cache: false
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7
+      - name: Build release artifacts with GoReleaser
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:
           distribution: goreleaser
-          version: "~> v2"
-          args: release --clean
+          version: "v2.17.0"
+          # Build once without publishing. The protected job below publishes
+          # these exact files after approval; it never recompiles them.
+          args: release --clean --skip=publish
         env:
+          # The changelog provider reads repository history through the API.
+          # This token is read-only in the build job and cannot publish.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload release artifacts for approval
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-dist-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*_checksums.txt
+            dist/CHANGELOG.md
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Summarize release candidate
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Release candidate built"
+            echo
+            echo "- Tag: \`${RELEASE_TAG}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Artifact: \`release-dist-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}\`"
+            echo
+            echo "The protected publish job will release these exact files."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    name: Approve and publish release
+    needs: build
+    runs-on: [self-hosted, linux, x64, trusted]
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: write
+      attestations: write
+      id-token: write
+    steps:
+      - name: Download approved release candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-dist-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-dist
+
+      - name: Attest release artifacts
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+        with:
+          subject-path: |
+            release-dist/*.tar.gz
+            release-dist/*.zip
+            release-dist/*_checksums.txt
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          assets=(release-dist/*.tar.gz release-dist/*.zip release-dist/*_checksums.txt)
+          notes=(--generate-notes)
+          if [ -s release-dist/CHANGELOG.md ]; then
+            notes=(--notes-file release-dist/CHANGELOG.md)
+          fi
+          gh release create "$RELEASE_TAG" "${assets[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$RELEASE_TAG" \
+            --verify-tag \
+            "${notes[@]}"
+
+      - name: Summarize published release
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Release published"
+            echo
+            echo "- Tag: \`${RELEASE_TAG}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Provenance: GitHub artifact attestation generated"
+          } >> "$GITHUB_STEP_SUMMARY"

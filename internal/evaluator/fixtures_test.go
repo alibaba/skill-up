@@ -3,6 +3,7 @@ package evaluator
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,11 +21,20 @@ func currentBranch(t *testing.T, rt runtime.Runtime) string {
 	return strings.TrimSpace(res.Stdout)
 }
 
+func requireGit(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found in PATH")
+	}
+}
+
 func gitContextCase(git *config.GitContext) *config.CaseConfig {
 	return &config.CaseConfig{Context: config.Context{Git: git}}
 }
 
 func TestGitCheckoutUploader_CreatesBranchWhenMissing(t *testing.T) {
+	requireGit(t)
+
 	rt := &mockRuntime{workspace: t.TempDir()}
 	caseCfg := gitContextCase(&config.GitContext{Init: true, Checkout: "feature-branch"})
 
@@ -41,6 +51,8 @@ func TestGitCheckoutUploader_CreatesBranchWhenMissing(t *testing.T) {
 }
 
 func TestGitCheckoutUploader_SwitchesToExistingBranch(t *testing.T) {
+	requireGit(t)
+
 	rt := &mockRuntime{workspace: t.TempDir()}
 	caseCfg := gitContextCase(&config.GitContext{Init: true, Checkout: "main"})
 
@@ -63,6 +75,8 @@ func TestGitCheckoutUploader_SwitchesToExistingBranch(t *testing.T) {
 }
 
 func TestGitCheckoutUploader_FailsForMissingBranchInCommittedRepo(t *testing.T) {
+	requireGit(t)
+
 	rt := &mockRuntime{workspace: t.TempDir()}
 	caseCfg := gitContextCase(&config.GitContext{Init: true, Checkout: "typo-branch"})
 
@@ -82,6 +96,8 @@ func TestGitCheckoutUploader_FailsForMissingBranchInCommittedRepo(t *testing.T) 
 }
 
 func TestGitCheckoutUploader_ErrorPathDoesNotEvaluateBranch(t *testing.T) {
+	requireGit(t)
+
 	rt := &mockRuntime{workspace: t.TempDir()}
 	// A branch name carrying a command substitution but no whitespace/control
 	// chars, so it passes validateGitBranch and reaches the shell script.

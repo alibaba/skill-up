@@ -1,0 +1,144 @@
+name: Extended CI
+
+# Deterministic, credential-free checks that are suitable for merge-queue
+# gating. Live-model tests live in model-e2e.yml and run only on demand.
+on:
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  e2e-windows:
+    name: E2E (none runtime, Windows)
+    # No trusted Windows self-hosted runner is provisioned. Use a clean,
+    # explicitly versioned GitHub-hosted Windows image.
+    runs-on: windows-2025
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      - name: Run e2e tests (none runtime, quick mode)
+        shell: bash
+        run: go test -tags e2e -timeout 1200s -count=1 -v ./e2e
+        env:
+          SKILL_UP_E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-artifacts
+
+      - name: Upload e2e workspace artifacts
+        if: always() && hashFiles('e2e-artifacts/**') != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-windows-workspaces
+          path: e2e-artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  e2e-docker:
+    name: E2E (docker runtime)
+    runs-on: [self-hosted, linux, x64, docker, trusted]
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      - name: Verify Docker is available
+        run: |
+          set -euo pipefail
+          docker version
+          docker info
+
+      - name: Pre-pull base image
+        run: docker pull alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+
+      - name: Run Docker integration tests
+        run: go test -tags docker_integration -timeout 600s -count=1 -v ./internal/runtime/
+
+  release-dryrun:
+    name: GoReleaser Check
+    runs-on: [self-hosted, linux, x64, trusted]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.25.x"
+          # This job builds snapshot release artifacts; avoid cache poisoning.
+          cache: false
+
+      - name: GoReleaser check
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
+        with:
+          distribution: goreleaser
+          version: "v2.17.0"
+          args: check
+
+      - name: GoReleaser snapshot build
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
+        with:
+          distribution: goreleaser
+          version: "v2.17.0"
+          args: release --snapshot --clean --skip=publish
+
+  summary:
+    name: Extended CI Summary
+    if: always()
+    needs: [e2e-windows, e2e-docker, release-dryrun]
+    runs-on: [self-hosted, linux, x64, trusted]
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Write job summary
+        env:
+          WINDOWS_RESULT: ${{ needs.e2e-windows.result }}
+          DOCKER_RESULT: ${{ needs.e2e-docker.result }}
+          RELEASE_RESULT: ${{ needs.release-dryrun.result }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Extended CI"
+            echo
+            echo "| Check | Result |"
+            echo "|---|---|"
+            echo "| Windows E2E | ${WINDOWS_RESULT} |"
+            echo "| Docker integration | ${DOCKER_RESULT} |"
+            echo "| GoReleaser check | ${RELEASE_RESULT} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$WINDOWS_RESULT" != success ] ||
+             [ "$DOCKER_RESULT" != success ] ||
+             [ "$RELEASE_RESULT" != success ]; then
+            echo "::error::One or more deterministic extended checks failed"
+            exit 1
+          fi

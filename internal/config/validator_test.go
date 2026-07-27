@@ -335,7 +335,7 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			errMsg:  "cases.retry_policy.max_retries must be <=",
 		},
 		{
-			name: "invalid judge.type at eval level is ignored",
+			name: "invalid judge.type at eval level is rejected",
 			cfg: &EvalConfig{
 				SchemaVersion: "v1alpha1",
 				Environment:   Environment{Type: "none"},
@@ -353,10 +353,59 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 					Type: "invalid",
 				},
 			},
+			wantErr: true,
+			errMsg:  "judge.type must be one of",
+		},
+		{
+			name: "valid judge context at eval level",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Context: &JudgeContextConfig{
+						Profile:        "standard",
+						Transcript:     "file_ref",
+						GeneratedFiles: "index",
+						Attachments:    []JudgeContextAttachment{{Path: "fixtures/result.json"}},
+					},
+				},
+			},
 			wantErr: false,
 		},
 		{
-			name: "script without script_path at eval level is ignored",
+			name: "invalid judge context at eval level",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Context: &JudgeContextConfig{Profile: "legacy"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.context.profile must be one of: minimal, standard",
+		},
+		{
+			name: "script without script_path at eval level is checked by ValidateAll",
 			cfg: &EvalConfig{
 				SchemaVersion: "v1alpha1",
 				Environment:   Environment{Type: "none"},
@@ -377,7 +426,7 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "agent_judge without model at eval level is ignored",
+			name: "agent_judge without model at eval level is checked by ValidateAll",
 			cfg: &EvalConfig{
 				SchemaVersion: "v1alpha1",
 				Environment:   Environment{Type: "none"},
@@ -422,7 +471,7 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "agent_judge with threshold above one at eval level is ignored",
+			name: "agent_judge with threshold above one at eval level is rejected",
 			cfg: &EvalConfig{
 				SchemaVersion: "v1alpha1",
 				Environment:   Environment{Type: "none"},
@@ -443,7 +492,8 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 					PassThreshold: float64Ptr(1.1),
 				},
 			},
-			wantErr: false,
+			wantErr: true,
+			errMsg:  "judge.pass_threshold must be between",
 		},
 		{
 			name: "valid network_policy deny_all with opensandbox",
@@ -719,7 +769,7 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 	}
 }
 
-// nolint:funlen // table-driven test cases drive the line count; splitting hurts readability.
+// nolint:funlen,maintidx // table-driven test cases drive the line count; splitting hurts readability.
 func TestValidator_ValidateCaseConfig(t *testing.T) {
 	t.Parallel()
 	validator := NewValidator()
@@ -763,6 +813,18 @@ func TestValidator_ValidateCaseConfig(t *testing.T) {
 			errMsg:  "input.prompt or input.turns is required",
 		},
 		{
+			name: "prompt and turns are mutually exclusive",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Prompt: "Say hello",
+					Turns:  []Turn{{Role: "user", Content: "Hi"}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "input.prompt and input.turns are mutually exclusive",
+		},
+		{
 			name: "turn with missing role",
 			cfg: &CaseConfig{
 				ID: "test-case",
@@ -776,6 +838,19 @@ func TestValidator_ValidateCaseConfig(t *testing.T) {
 			errMsg:  "input.turns[0].role is required",
 		},
 		{
+			name: "turn with non-user role",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "assistant", Content: "Hello"},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "input.turns[0].role must be \"user\"",
+		},
+		{
 			name: "turn with missing content",
 			cfg: &CaseConfig{
 				ID: "test-case",
@@ -787,6 +862,19 @@ func TestValidator_ValidateCaseConfig(t *testing.T) {
 			},
 			wantErr: true,
 			errMsg:  "input.turns[0].content is required",
+		},
+		{
+			name: "turn with negative timeout_seconds",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hi", TimeoutSeconds: -1},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "input.turns[0].timeout_seconds must be non-negative",
 		},
 		{
 			name: "case-level agent_judge with negative threshold",
@@ -820,6 +908,164 @@ func TestValidator_ValidateCaseConfig(t *testing.T) {
 			},
 			wantErr: true,
 			errMsg:  "judge.timeout_seconds must be non-negative",
+		},
+		{
+			name: "valid case-level mocked MCP override",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				MCP: MCPConfig{Servers: []MCPServer{
+					{Name: "project-mgmt", Mode: "mocked", ConfigRef: "evals/fixtures/mcp/open.yaml"},
+				}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid case-level filesystem mocked MCP override without config_ref",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				MCP: MCPConfig{Servers: []MCPServer{
+					{Name: "filesystem", Mode: "mocked"},
+				}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "case-level agent_judge with valid context",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Prompt: "Say hello",
+				},
+				Judge: JudgeConfig{
+					Type:     "agent_judge",
+					Model:    "test-model",
+					Criteria: []string{"criterion"},
+					Context: &JudgeContextConfig{
+						Profile:        "minimal",
+						FinalMessage:   "truncate",
+						Transcript:     "omit",
+						WorkspaceDiff:  "file_ref",
+						GeneratedFiles: "index",
+						Limits:         &JudgeContextLimits{MaxBytes: 1024},
+						Attachments:    []JudgeContextAttachment{{Path: "fixtures/result.json"}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "case-level real MCP rejected",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				MCP: MCPConfig{Servers: []MCPServer{
+					{Name: "project-mgmt", Mode: "real"},
+				}},
+			},
+			wantErr: true,
+			errMsg:  "must use mode: mocked",
+		},
+		{
+			name: "case-level MCP missing name",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				MCP: MCPConfig{Servers: []MCPServer{
+					{Mode: "mocked"},
+				}},
+			},
+			wantErr: true,
+			errMsg:  "mcp.servers[0].name is required",
+		},
+		{
+			name: "case-level MCP missing config_ref",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				MCP: MCPConfig{Servers: []MCPServer{
+					{Name: "svc", Mode: "mocked"},
+				}},
+			},
+			wantErr: true,
+			errMsg:  "mocked mode requires config_ref",
+		},
+		{
+			name: "case-level MCP duplicate names",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				MCP: MCPConfig{Servers: []MCPServer{
+					{Name: "svc", Mode: "mocked", ConfigRef: "evals/fixtures/mcp/open.yaml"},
+					{Name: "svc", Mode: "mocked", ConfigRef: "evals/fixtures/mcp/closed.yaml"},
+				}},
+			},
+			wantErr: true,
+			errMsg:  "is duplicated",
+		},
+		{
+			name: "case-level MCP with endpoint rejected",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				MCP: MCPConfig{Servers: []MCPServer{
+					{Name: "svc", Mode: "mocked", Endpoint: "http://localhost:1234"},
+				}},
+			},
+			wantErr: true,
+			errMsg:  "does not support endpoint",
+		},
+		{
+			name: "case-level agent_judge with invalid context profile",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Prompt: "Say hello",
+				},
+				Judge: JudgeConfig{
+					Type:     "agent_judge",
+					Model:    "test-model",
+					Criteria: []string{"criterion"},
+					Context:  &JudgeContextConfig{Profile: "legacy"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.context.profile must be one of: minimal, standard",
+		},
+		{
+			name: "case-level agent_judge with invalid context mode",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Prompt: "Say hello",
+				},
+				Judge: JudgeConfig{
+					Type:     "agent_judge",
+					Model:    "test-model",
+					Criteria: []string{"criterion"},
+					Context:  &JudgeContextConfig{Transcript: "inline"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.context.transcript must be one of: include, omit, truncate, file_ref",
+		},
+		{
+			name: "case-level agent_judge with empty attachment path",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Prompt: "Say hello",
+				},
+				Judge: JudgeConfig{
+					Type:     "agent_judge",
+					Model:    "test-model",
+					Criteria: []string{"criterion"},
+					Context:  &JudgeContextConfig{Attachments: []JudgeContextAttachment{{}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.context.attachments[0].path must not be empty",
 		},
 	}
 
@@ -890,6 +1136,81 @@ func TestValidator_ValidateAll(t *testing.T) {
 	})
 }
 
+func TestValidator_JudgeSkills(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	base := func(judge JudgeConfig) *EvalConfig {
+		return &EvalConfig{
+			SchemaVersion: "v1alpha1",
+			Environment:   Environment{Type: "none"},
+			Engine:        EngineConfig{Name: "claude_code"},
+			Cases:         CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			Judge:         judge,
+		}
+	}
+
+	tests := []struct {
+		name   string
+		judge  JudgeConfig
+		errMsg string
+	}{
+		{
+			name: "agent_judge accepts skills",
+			judge: JudgeConfig{
+				Type:     "agent_judge",
+				Model:    "test-model",
+				Criteria: []string{"criterion"},
+				Skills:   []SkillRef{{Source: "local_path", Path: "evals/fixtures/judge-skill"}},
+			},
+		},
+		{
+			name: "rule_based rejects skills",
+			judge: JudgeConfig{
+				Type:   "rule_based",
+				Skills: []SkillRef{{Source: "local_path", Path: "evals/fixtures/judge-skill"}},
+			},
+			errMsg: "judge.skills is only supported",
+		},
+		{
+			name: "local_path requires path",
+			judge: JudgeConfig{
+				Type:     "agent_judge",
+				Model:    "test-model",
+				Criteria: []string{"criterion"},
+				Skills:   []SkillRef{{Source: "local_path"}},
+			},
+			errMsg: "judge.skills[0].path is required",
+		},
+		{
+			name: "non local source requires path",
+			judge: JudgeConfig{
+				Type:     "agent_judge",
+				Model:    "test-model",
+				Criteria: []string{"criterion"},
+				Skills:   []SkillRef{{Source: "registry"}},
+			},
+			errMsg: "judge.skills[0].path is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validator.ValidateEvalConfig(base(tt.judge))
+			if tt.errMsg == "" {
+				if err != nil {
+					t.Fatalf("ValidateEvalConfig() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.errMsg) {
+				t.Fatalf("ValidateEvalConfig() error = %v, want containing %q", err, tt.errMsg)
+			}
+		})
+	}
+}
+
 // caseIDSrc pairs an effective case ID with the cases.files entry it was
 // loaded from, as the loader populates CaseConfig.ID / CaseConfig.SourceFile.
 type caseIDSrc struct {
@@ -915,7 +1236,7 @@ func TestValidator_ValidateCases_Duplicates(t *testing.T) {
 	tests := []struct {
 		name      string
 		cases     []caseIDSrc
-		wantParts []string // non-empty ⇒ expect an error containing every part
+		wantParts []string // non-empty means expect an error containing every part
 	}{
 		{
 			name:      "duplicate explicit id names both files",
@@ -923,13 +1244,11 @@ func TestValidator_ValidateCases_Duplicates(t *testing.T) {
 			wantParts: []string{`duplicate case id "dup"`, "evals/cases/a.yaml", "evals/cases/b.yaml"},
 		},
 		{
-			// Files in different dirs with colliding basenames ⇒ same implicit ID.
 			name:      "duplicate filename-derived id",
 			cases:     []caseIDSrc{{"smoke", "evals/cases/smoke.yaml"}, {"smoke", "evals/full/smoke.yaml"}},
 			wantParts: []string{`duplicate case id "smoke"`},
 		},
 		{
-			// Same file, differently spelled; normalization must collapse them.
 			name:      "duplicate file reference after normalization",
 			cases:     []caseIDSrc{{"a", "evals/cases/a.yaml"}, {"a", "./evals/cases/a.yaml"}},
 			wantParts: []string{"cases.files lists"},
@@ -963,10 +1282,69 @@ func TestValidator_ValidateCases_Duplicates(t *testing.T) {
 	}
 }
 
+func TestValidator_ValidateAll_CaseAgentJudgeInheritsGlobalModel(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	result := &EvalResult{
+		Eval: &EvalConfig{
+			SchemaVersion: "v1alpha1",
+			Environment:   Environment{Type: "none"},
+			Engine:        EngineConfig{Name: "claude_code"},
+			Cases:         CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			Judge: JudgeConfig{
+				Type:     "agent_judge",
+				Model:    "global-model",
+				Criteria: []string{"global criterion"},
+			},
+		},
+		Cases: []*CaseConfig{
+			{
+				ID:    "case-agent-judge",
+				Input: Input{Prompt: "test"},
+				Judge: JudgeConfig{
+					Type:     "agent_judge",
+					Criteria: []string{"case criterion"},
+					Skills:   []SkillRef{{Source: "local_path", Path: "evals/fixtures/case-judge"}},
+				},
+			},
+		},
+	}
+
+	if err := validator.ValidateAll(result); err != nil {
+		t.Fatalf("ValidateAll() error = %v, want nil", err)
+	}
+}
+
+func TestValidator_ValidateAll_EffectiveAgentJudgeRequiresCriteria(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	result := &EvalResult{
+		Eval: &EvalConfig{
+			SchemaVersion: "v1alpha1",
+			Environment:   Environment{Type: "none"},
+			Engine:        EngineConfig{Name: "claude_code"},
+			Cases:         CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			Judge: JudgeConfig{
+				Type:  "agent_judge",
+				Model: "global-model",
+			},
+		},
+		Cases: []*CaseConfig{
+			{ID: "case-agent-judge", Input: Input{Prompt: "test"}},
+		},
+	}
+
+	err := validator.ValidateAll(result)
+	if err == nil || !strings.Contains(err.Error(), "judge.criteria is required") {
+		t.Fatalf("ValidateAll() error = %v, want missing criteria", err)
+	}
+}
+
 // TestValidator_ValidateCases_OnlyChecksGivenCases confirms ValidateCases
 // validates just the cases passed to it: an invalid case omitted from the slice
-// (e.g. filtered out by `skill-up run`) does not cause a failure, while
-// ValidateAll over the full set still catches it.
+// does not cause a failure, while passing the invalid case still catches it.
 func TestValidator_ValidateCases_OnlyChecksGivenCases(t *testing.T) {
 	t.Parallel()
 	validator := NewValidator()
@@ -979,6 +1357,21 @@ func TestValidator_ValidateCases_OnlyChecksGivenCases(t *testing.T) {
 	}
 	if err := validator.ValidateCases([]*CaseConfig{valid, invalid}); err == nil {
 		t.Fatal("ValidateCases([valid, invalid]) = nil, want error for the invalid case")
+	}
+}
+
+func TestValidator_ValidateCasesWithEvalDefaults_AllowsLoadedCasesWithoutCaseFiles(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+	eval := DefaultEvalConfig()
+	eval.Cases.Files = nil
+
+	valid := &CaseConfig{ID: "anthropic-case", Input: Input{Prompt: "hi"}}
+	if err := validator.ValidateCasesWithEvalDefaults(eval, []*CaseConfig{valid}); err != nil {
+		t.Fatalf("ValidateCasesWithEvalDefaults() error = %v, want nil", err)
+	}
+	if err := validator.ValidateAll(&EvalResult{Eval: eval, Cases: []*CaseConfig{valid}}); err == nil {
+		t.Fatal("ValidateAll() error = nil, want missing cases.files error")
 	}
 }
 
@@ -1049,4 +1442,481 @@ func TestValidator_CollectArtifacts(t *testing.T) {
 			t.Fatalf("expected invalid-glob error, got %v", err)
 		}
 	})
+}
+
+//nolint:funlen // table-driven test
+func TestValidator_PostCondition(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	tests := []struct {
+		name    string
+		cfg     *CaseConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid post_condition with must_contain_any",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", PostCondition: &PostCondition{
+							MustContainAny: []string{"hi", "hello"},
+						}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid post_condition with must_contain_all",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", PostCondition: &PostCondition{
+							MustContainAll: []string{"greeting", "response"},
+						}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid post_condition with must_not_contain",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", PostCondition: &PostCondition{
+							MustNotContain: []string{"error"},
+						}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid post_condition with on_fail=fail",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", PostCondition: &PostCondition{
+							MustContainAny: []string{"ok"},
+							OnFail:         "fail",
+						}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid post_condition with on_fail=skip_remaining",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", PostCondition: &PostCondition{
+							MustContainAny: []string{"ok"},
+							OnFail:         "skip_remaining",
+						}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "post_condition with invalid on_fail",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", PostCondition: &PostCondition{
+							MustContainAny: []string{"ok"},
+							OnFail:         "abort",
+						}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "on_fail must be empty",
+		},
+		{
+			name: "post_condition with no check fields",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", PostCondition: &PostCondition{
+							OnFail: "fail",
+						}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "must include at least one of must_contain_any, must_contain_all, or must_not_contain",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validator.ValidateCaseConfig(tt.cfg)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && err != nil && tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+				t.Errorf("error = %v, should contain %q", err, tt.errMsg)
+			}
+		})
+	}
+}
+
+//nolint:funlen // table-driven test
+func TestValidator_CaptureRules(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	tests := []struct {
+		name    string
+		cfg     *CaseConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid capture with pattern",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", Capture: []CaptureRule{
+							{Variable: "session_id", Pattern: `id:\s*(?P<value>[a-f0-9]+)`},
+						}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid capture with jsonpath",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", Capture: []CaptureRule{
+							{Variable: "name", JSONPath: "$.result.name"},
+						}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "capture with empty variable",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", Capture: []CaptureRule{
+							{Variable: "", Pattern: `id:\s+(\w+)`},
+						}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "variable is required",
+		},
+		{
+			name: "capture with invalid variable name",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", Capture: []CaptureRule{
+							{Variable: "123invalid", Pattern: `id:\s+(\w+)`},
+						}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "must match pattern",
+		},
+		{
+			name: "capture with no extractor",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", Capture: []CaptureRule{
+							{Variable: "myvar"},
+						}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "must specify exactly one extractor",
+		},
+		{
+			name: "capture with both extractors",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", Capture: []CaptureRule{
+							{Variable: "myvar", Pattern: `(\w+)`, JSONPath: "$.x"},
+						}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "must specify exactly one extractor: pattern or jsonpath (both set)",
+		},
+		{
+			name: "capture with invalid regex pattern",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello", Capture: []CaptureRule{
+							{Variable: "myvar", Pattern: `[invalid`},
+						}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "pattern is invalid regex",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validator.ValidateCaseConfig(tt.cfg)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && err != nil && tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+				t.Errorf("error = %v, should contain %q", err, tt.errMsg)
+			}
+		})
+	}
+}
+
+//nolint:funlen // table-driven test
+func TestValidator_PerTurnJudgeRules(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	tests := []struct {
+		name    string
+		cfg     *CaseConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid turn_response_contains",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+						{Role: "user", Content: "How are you?"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{TurnResponseContains: &TurnResponseContainsRule{Turn: 1, ContainsAll: []string{"hello"}}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "turn_response_contains with turn < 1",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{TurnResponseContains: &TurnResponseContainsRule{Turn: 0, ContainsAll: []string{"x"}}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "turn_response_contains.turn must be >= 1",
+		},
+		{
+			name: "turn_response_contains exceeds total turns",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{TurnResponseContains: &TurnResponseContainsRule{Turn: 5, ContainsAll: []string{"x"}}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "exceeds total turns",
+		},
+		{
+			name: "turn_response_contains without contains_all or contains_any",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{TurnResponseContains: &TurnResponseContainsRule{Turn: 1}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "must specify contains_all or contains_any",
+		},
+		{
+			name: "turn_response_not_contains without not_contains",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{TurnResponseNotContains: &TurnResponseNotContainsRule{Turn: 1}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "turn_response_not_contains.not_contains is required",
+		},
+		{
+			name: "tool_called_in_turn without name",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{ToolCalledInTurn: &ToolCalledInTurnRule{Turn: 1}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "tool_called_in_turn.name is required",
+		},
+		{
+			name: "tool_not_called_in_turn without name",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{ToolNotCalledInTurn: &ToolNotCalledInTurnRule{Turn: 1}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "tool_not_called_in_turn.name is required",
+		},
+		{
+			name: "tool_called_in_turn with turn < 1",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{ToolCalledInTurn: &ToolCalledInTurnRule{Turn: 0, Name: "write_file"}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "tool_called_in_turn.turn must be >= 1",
+		},
+		{
+			name: "valid per-turn rules in failure list",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+						{Role: "user", Content: "Bye"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Failure: []Rule{
+						{TurnResponseContains: &TurnResponseContainsRule{Turn: 2, ContainsAny: []string{"error"}}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "per-turn rules valid when no turns defined (prompt mode)",
+			cfg: &CaseConfig{
+				ID: "test",
+				Input: Input{
+					Prompt: "Hello",
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{TurnResponseContains: &TurnResponseContainsRule{Turn: 1, ContainsAll: []string{"x"}}},
+					},
+				},
+			},
+			wantErr: false, // no turns defined means turnsTotal=0, skip upper-bound check
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validator.ValidateCaseConfig(tt.cfg)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && err != nil && tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+				t.Errorf("error = %v, should contain %q", err, tt.errMsg)
+			}
+		})
+	}
 }

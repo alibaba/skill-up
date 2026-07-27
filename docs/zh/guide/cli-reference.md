@@ -31,6 +31,7 @@ skill-up run [path] [flags]
 | `--engine`            | 配置文件中的值                | 覆盖 Engine 名称                                                                                                                                          |
 | `--model`             | 配置文件中的值                | 覆盖模型（格式：`provider/name`）                                                                                                                          |
 | `--parallelism`       | 配置文件中的值                | 覆盖 `cases.parallelism`，用于临时调整用例并行数，取值范围为 1 到 256                                                                                       |
+| `--baseline`          | 配置文件中的值                | 为本次运行覆盖 `benchmark.enabled` 为 `true`                                                                                                                |
 | `--api-key`           | —                            | 传入 API Key（优先级高于环境变量）                                                                                                                          |
 | `-v, --verbose`       | `0`                          | 增加日志详细程度。默认输出 `info`；`-v`/`--verbose`/`--verbose=true` 输出 `debug`；`-vv`/`--verbose=2` 输出 `trace`；`--verbose=false` 关闭附加详细日志        |
 
@@ -51,6 +52,9 @@ skill-up run ./evals/eval.yaml --engine codex --model openai/gpt-4
 
 # 临时覆盖用例并行数
 skill-up run ./evals/eval.yaml --parallelism 4
+
+# 启用基线对比
+skill-up run ./evals/eval.yaml --baseline
 
 # 生成多种格式报告
 skill-up run ./evals/eval.yaml --format json --format html --format junit
