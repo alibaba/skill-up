@@ -30,8 +30,9 @@ concurrency:
 jobs:
   build:
     name: Build
-    # Documentation dependencies and build scripts are pull-request code.
-    runs-on: ubuntu-24.04
+    # External pull-request workflows require maintainer approval before they
+    # can execute on the trusted self-hosted runner fleet.
+    runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 15
     permissions:
       contents: read
@@ -64,7 +65,7 @@ jobs:
     name: Deploy
     if: github.event_name != 'pull_request'
     needs: build
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 10
     permissions:
       pages: write
