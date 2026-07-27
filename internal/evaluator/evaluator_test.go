@@ -1404,6 +1404,40 @@ func TestExecuteCase_NonZeroExit_WithExpectExitCode_ProceedsToEvaluation(t *test
 	}
 }
 
+func TestExecuteCase_NonZeroExit_WithDefaultExpectExitCode_ProceedsToEvaluation(t *testing.T) {
+	exitCode := 1
+	e := newTestEvaluator(EvalOptions{
+		Agent: &mockAgent{
+			name: "test",
+			runFunc: func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ []transcript.Message) (*agent.SessionResult, error) {
+				return &agent.SessionResult{ExitCode: 1, FinalMessage: "expected error"}, nil
+			},
+		},
+		EvalCfg: &config.EvalConfig{
+			Cases: config.CasesConfig{
+				Defaults: config.CaseDefaults{
+					Expect: config.Expect{ExitCode: &exitCode},
+				},
+			},
+		},
+	})
+
+	caseCfg := &config.CaseConfig{
+		ID:    "case-default-expect-exit-code",
+		Title: "Default Expect Exit Code",
+		Input: config.Input{Prompt: "hello"},
+	}
+
+	result := e.executeCase(context.Background(), caseCfg, "with_skill", &mockRuntime{workspace: t.TempDir()}, nil)
+
+	if result.Status != judge.StatusPass {
+		t.Errorf("expected PASS when inherited expect.exit_code matches, got %s", result.Status)
+	}
+	if result.ExpectResult == nil || !result.ExpectResult.Passed {
+		t.Errorf("expected inherited exit code check to run and pass, got %#v", result.ExpectResult)
+	}
+}
+
 func TestExecuteCase_ExpectFail_ShortCircuit(t *testing.T) {
 	e := newTestEvaluator(EvalOptions{
 		Agent: &mockAgent{name: "test", output: "no match here"},

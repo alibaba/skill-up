@@ -96,6 +96,7 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	}
 
 	errs = append(errs, validateCollectArtifacts("cases.defaults.collect_artifacts", cfg.Cases.Defaults.CollectArtifacts)...)
+	errs = append(errs, validateExpect("cases.defaults.expect", cfg.Cases.Defaults.Expect)...)
 	errs = append(errs, validateJudgeTypeAndLocalFields(cfg.Judge)...)
 
 	if len(errs) > 0 {
@@ -152,6 +153,7 @@ func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 	errs = append(errs, validatePerTurnRules(allRules, turnsTotal)...)
 
 	errs = append(errs, validateCollectArtifacts("collect_artifacts", cfg.CollectArtifacts)...)
+	errs = append(errs, validateExpect("expect", cfg.Expect)...)
 
 	errs = append(errs, validateCaseMCP(cfg.MCP)...)
 
@@ -160,6 +162,33 @@ func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 	}
 
 	return nil
+}
+
+func validateExpect(prefix string, expect Expect) []string {
+	var errs []string
+	validateStrings := func(field string, values []string) {
+		for i, value := range values {
+			if strings.TrimSpace(value) == "" {
+				errs = append(errs, fmt.Sprintf("%s.%s[%d] must not be empty", prefix, field, i))
+			}
+		}
+	}
+
+	validateStrings("must_contain", expect.MustContain)
+	validateStrings("must_not_contain", expect.MustNotContain)
+	validateStrings("files_exist", expect.FilesExist)
+	validateStrings("files_not_exist", expect.FilesNotExist)
+
+	for i, check := range expect.FileContains {
+		if strings.TrimSpace(check.Path) == "" {
+			errs = append(errs, fmt.Sprintf("%s.file_contains[%d].path is required", prefix, i))
+		}
+		if check.Content == "" {
+			errs = append(errs, fmt.Sprintf("%s.file_contains[%d].content is required", prefix, i))
+		}
+	}
+
+	return errs
 }
 
 // validateCaseMCP validates case-level MCP overrides. The MVP restricts

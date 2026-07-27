@@ -13,7 +13,6 @@ constraints:
 expect:
   must_contain: ["calculation result"]
   must_not_contain: ["error"]
-  exit_code: 0
 judge:
   type: rule_based
   success:

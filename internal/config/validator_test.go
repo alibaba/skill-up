@@ -1444,6 +1444,46 @@ func TestValidator_CollectArtifacts(t *testing.T) {
 	})
 }
 
+func TestValidator_Expect(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	evalCfg := &EvalConfig{
+		SchemaVersion: "v1alpha1",
+		Environment:   Environment{Type: "none"},
+		Engine:        EngineConfig{Name: "claude_code"},
+		Cases: CasesConfig{
+			Files: []string{"evals/cases/a.yaml"},
+			Defaults: CaseDefaults{
+				Expect: Expect{
+					MustContain:  []string{" "},
+					FileContains: []FileContainsCheck{{Content: "ready"}},
+				},
+			},
+		},
+	}
+	err := validator.ValidateEvalConfig(evalCfg)
+	if err == nil ||
+		!strings.Contains(err.Error(), "cases.defaults.expect.must_contain[0] must not be empty") ||
+		!strings.Contains(err.Error(), "cases.defaults.expect.file_contains[0].path is required") {
+		t.Fatalf("expected default expect validation errors, got %v", err)
+	}
+
+	caseCfg := &CaseConfig{
+		Input: Input{Prompt: "hi"},
+		Expect: Expect{
+			FilesExist:   []string{""},
+			FileContains: []FileContainsCheck{{Path: "result.json"}},
+		},
+	}
+	err = validator.ValidateCaseConfig(caseCfg)
+	if err == nil ||
+		!strings.Contains(err.Error(), "expect.files_exist[0] must not be empty") ||
+		!strings.Contains(err.Error(), "expect.file_contains[0].content is required") {
+		t.Fatalf("expected case expect validation errors, got %v", err)
+	}
+}
+
 //nolint:funlen // table-driven test
 func TestValidator_PostCondition(t *testing.T) {
 	t.Parallel()

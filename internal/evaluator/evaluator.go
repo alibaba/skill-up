@@ -463,7 +463,9 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	// an ERROR return above, so we're guaranteed execErr == nil here and the
 	// case timeout strictly bounds agent + judge as a single budget.)
 	if sessionResult != nil && sessionResult.ExitCode != 0 {
-		hasExitCodeCheck := caseCfg.Expect.ExitCode != nil
+		defaultExpect := e.evalCfg.Cases.Defaults.Expect
+		effectiveExpect := mergeExpectConfig(&defaultExpect, &caseCfg.Expect)
+		hasExitCodeCheck := effectiveExpect.ExitCode != nil
 		hasJudge := judgeCfg.Type != ""
 		if !hasExitCodeCheck && !hasJudge {
 			if result.DurationMs == 0 {
