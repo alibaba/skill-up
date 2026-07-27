@@ -15,10 +15,13 @@ on:
 
 permissions: {}
 
+env:
+  ZIZMOR_VERSION: 1.28.0
+
 jobs:
   zizmor:
     name: Zizmor
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 10
     permissions:
       contents: read
@@ -29,7 +32,18 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+
+      - name: Analyze workflows with Zizmor
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: uvx "zizmor@${ZIZMOR_VERSION}" --format=sarif . > results.sarif
+
       # Advanced Security mode uploads SARIF without blocking on the initial
       # baseline. Promote Zizmor to a required check after findings are triaged.
-      - name: Analyze workflows with Zizmor
-        uses: zizmorcore/zizmor-action@6599ee8b7a49aef6a770f63d261d214911a7ce02 # v0.6.0
+      - name: Upload Zizmor SARIF
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        with:
+          sarif_file: results.sarif
+          category: zizmor

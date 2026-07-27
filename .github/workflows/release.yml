@@ -91,7 +91,7 @@ jobs:
   publish:
     name: Approve and publish release
     needs: build
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 15
     environment: release
     permissions:

@@ -32,6 +32,7 @@ skill-up run [path] [flags]
 | `--runtime`           | 配置中的值         | 覆盖 `environment.type`（`none`、`opensandbox`、`docker`）                                                                                                                        |
 | `--model`             | 配置中的值         | 覆盖模型（格式：`provider/name`）                                                                                                                                                 |
 | `--parallelism`       | 配置中的值         | 覆盖 `cases.parallelism`，临时调整用例并行数，取值 1–256                                                                                                                          |
+| `--baseline`          | 配置中的值         | 为本次运行覆盖 `benchmark.enabled` 为 `true`                                                                                                                                      |
 | `--api-key`           | —                  | 传入 API Key（优先级高于环境变量）                                                                                                                                                |
 | `-v, --verbose`       | `0`                | 日志详细程度：`info` 默认；`-v` 为 `debug`；`-vv` / `--verbose=2` 为 `trace`                                                                                                      |
 
@@ -50,6 +51,7 @@ skill-up run ./evals/eval.yaml --include-case-name "basic-*"
 skill-up run ./evals/eval.yaml --exclude-case-name "*-old"
 skill-up run ./evals/eval.yaml --engine codex --model openai/gpt-4
 skill-up run ./evals/eval.yaml --parallelism 4
+skill-up run ./evals/eval.yaml --baseline
 skill-up run ./evals/eval.yaml --format html --format junit
 skill-up run ./evals/eval.yaml --iteration 3
 skill-up run ./evals/eval.yaml

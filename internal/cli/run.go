@@ -110,6 +110,7 @@ func init() {
 	runCmd.Flags().String("model", "", "Override model (accepts either a bare model name or provider/name)")
 	runCmd.Flags().String("api-key", "", "API key for the model provider")
 	runCmd.Flags().Int("parallelism", 0, "Override cases.parallelism. Must be between 1 and 256 when specified")
+	runCmd.Flags().Bool("baseline", false, "Override benchmark.enabled to true for this run")
 	runCmd.Flags().SetNormalizeFunc(normalizeRunFlagName)
 	runCmd.Flags().StringArray(runtimeKwargFlagName, nil, "Environment kwarg in key=value format (can be used multiple times; --rk is accepted as an alias)")
 	runCmd.Flags().StringArray(engineKwargFlagName, nil, "Engine kwarg in key=value format (can be used multiple times; --ek is accepted as an alias). Recognised keys are per-agent (e.g. codex honours bypass_sandbox=true)")
@@ -524,6 +525,9 @@ func applyRunConfigOverrides(evalCfg *config.EvalConfig, cmd *cobra.Command) err
 	if err := applyRuntimeTypeOverride(evalCfg, cmd); err != nil {
 		return err
 	}
+	if err := applyBaselineOverride(evalCfg, cmd); err != nil {
+		return err
+	}
 	applyUserConfigKwargs(cmd.Context(), evalCfg)
 
 	parallelismFlag := cmd.Flags().Lookup("parallelism")
@@ -543,6 +547,22 @@ func applyRunConfigOverrides(evalCfg *config.EvalConfig, cmd *cobra.Command) err
 	}
 
 	evalCfg.Cases.Parallelism = parallelism
+	return nil
+}
+
+func applyBaselineOverride(evalCfg *config.EvalConfig, cmd *cobra.Command) error {
+	flag := cmd.Flags().Lookup("baseline")
+	if flag == nil || !flag.Changed {
+		return nil
+	}
+	enabled, err := cmd.Flags().GetBool("baseline")
+	if err != nil {
+		return fmt.Errorf("read --baseline: %w", err)
+	}
+	if !enabled {
+		return nil
+	}
+	evalCfg.Benchmark.Enabled = true
 	return nil
 }
 

@@ -116,7 +116,7 @@ jobs:
     name: Extended CI Summary
     if: always()
     needs: [e2e-windows, e2e-docker, release-dryrun]
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 5
     permissions: {}
     steps:
