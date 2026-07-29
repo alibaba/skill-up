@@ -179,6 +179,10 @@ func validateExpect(prefix string, expect Expect) []string {
 	validateStrings("files_exist", expect.FilesExist)
 	validateStrings("files_not_exist", expect.FilesNotExist)
 
+	if expect.GoldenFile != "" && strings.TrimSpace(expect.GoldenFile) == "" {
+		errs = append(errs, fmt.Sprintf("%s.golden_file must not be empty", prefix))
+	}
+
 	for i, check := range expect.FileContains {
 		if strings.TrimSpace(check.Path) == "" {
 			errs = append(errs, fmt.Sprintf("%s.file_contains[%d].path is required", prefix, i))
