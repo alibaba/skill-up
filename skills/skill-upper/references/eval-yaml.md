@@ -37,6 +37,11 @@ cases:
     collect_artifacts:          # 可选：用 glob 采集 workspace 产物文件
       - "**/*.json"
       - "report/**"
+    expect:                     # 可选：默认 expect 检查，应用于所有用例
+      exit_code: 0
+      must_not_contain:
+        - "TODO"
+        - "I cannot"
   parallelism: 2
   retry_policy:
     max_retries: 1

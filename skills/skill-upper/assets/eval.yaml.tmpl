@@ -40,6 +40,10 @@ cases:
   defaults:
     timeout_seconds: 120
     max_turns: 5
+    # expect:                     # Optional checks inherited by every case
+    #   exit_code: 0
+    #   must_not_contain:
+    #     - "TODO"
   # parallelism: 4                # Stateless cases can run in parallel; or use skill-up run --parallelism N to override
 
 # benchmark:

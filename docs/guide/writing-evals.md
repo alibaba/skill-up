@@ -98,6 +98,11 @@ cases:
     collect_artifacts:            # Glob patterns selecting workspace files to download (see below)
       - "**/*.json"
       - "report/**"
+    expect:                       # Default expect checks applied to all cases (see Expect section)
+      exit_code: 0
+      must_not_contain:
+        - "TODO"
+        - "I cannot"
   parallelism: 2                  # Case parallelism, default 1
   retry_policy:
     max_retries: 1
@@ -639,7 +644,45 @@ expect:
     - "output.json"
   files_not_exist:              # Files that must not exist
     - "temp.log"
+  file_contains:                # Files must contain specific text
+    - path: "review.md"
+      content: "security"
+  golden_file: "expected.txt"   # Compare output to golden file
 ```
+
+#### Default expect checks
+
+Define common expect checks once in `cases.defaults.expect` instead of repeating them in every case:
+
+```yaml
+# In eval.yaml
+cases:
+  defaults:
+    expect:
+      exit_code: 0
+      must_not_contain:
+        - "TODO"
+        - "I cannot"
+      files_exist:
+        - "result.json"
+```
+
+Each case can add to or override these defaults:
+
+```yaml
+# In case.yaml
+expect:
+  must_contain:
+    - "SPECIAL_OK"              # Added to defaults
+  exit_code: 1                  # Overrides default exit_code
+```
+
+**Merge semantics:**
+
+- **Slice fields** (`must_contain`, `must_not_contain`, `files_exist`, `files_not_exist`, `file_contains`) are **appended** and de-duplicated (defaults first).
+- **Scalar fields** (`exit_code`, `golden_file`) are **overridden** by the case when set.
+- If no case-level `expect` is defined, defaults are used as-is.
+- The merged expect runs before judge; a failing merged expect skips judge execution.
 
 ### judge: rule_based — deterministic rules
 

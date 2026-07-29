@@ -10,7 +10,6 @@ constraints:
   timeout_seconds: 30
   max_turns: 1
 expect:
-  exit_code: 0
   files_exist: ["output.txt"]
 judge:
   type: rule_based
