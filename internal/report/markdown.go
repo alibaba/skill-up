@@ -36,9 +36,17 @@ func (r *MarkdownReporter) Write(_ context.Context, in Input) error {
 
 func writeMarkdownHeader(sb *strings.Builder, in Input) {
 	fmt.Fprintf(sb, "# Skill Report: %s\n\n", markdownText(in.SkillName))
-	if in.EngineName != "" || in.ModelName != "" {
+	wroteMetadata := false
+	if in.EngineName != "" {
 		fmt.Fprintf(sb, "- **Engine**: %s\n", markdownText(in.EngineName))
-		fmt.Fprintf(sb, "- **Model**: %s\n\n", markdownText(in.ModelName))
+		wroteMetadata = true
+	}
+	if in.ModelName != "" {
+		fmt.Fprintf(sb, "- **Model**: %s\n", markdownText(in.ModelName))
+		wroteMetadata = true
+	}
+	if wroteMetadata {
+		sb.WriteString("\n")
 	}
 }
 

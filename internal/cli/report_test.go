@@ -101,10 +101,10 @@ func TestBuildReporter_HTML(t *testing.T) {
 	}
 }
 
-func TestBuildReporter_Markdown(t *testing.T) {
+func TestBuildReportCommandReporter_Markdown(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	r, path, err := buildReporter("markdown", dir)
+	r, path, err := buildReportCommandReporter("markdown", dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -125,8 +125,22 @@ func TestBuildReporter_Unsupported(t *testing.T) {
 	if !strings.Contains(err.Error(), "csv") {
 		t.Errorf("error should mention the unsupported format, got: %v", err)
 	}
+	if strings.Contains(err.Error(), "markdown") {
+		t.Errorf("shared reporter error should not mention markdown, got: %v", err)
+	}
+}
+
+func TestBuildReportCommandReporter_Unsupported(t *testing.T) {
+	t.Parallel()
+	_, _, err := buildReportCommandReporter("csv", t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for unsupported format, got nil")
+	}
+	if !strings.Contains(err.Error(), "csv") {
+		t.Errorf("error should mention the unsupported format, got: %v", err)
+	}
 	if !strings.Contains(err.Error(), "markdown") {
-		t.Errorf("error should mention markdown as a supported format, got: %v", err)
+		t.Errorf("report command error should mention markdown as a supported format, got: %v", err)
 	}
 }
 

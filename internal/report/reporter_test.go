@@ -376,6 +376,56 @@ func TestMarkdownReporter_EscapesTableCells(t *testing.T) {
 	}
 }
 
+func TestMarkdownReporter_OmitsEmptyMetadataLines(t *testing.T) {
+	tests := []struct {
+		name    string
+		engine  string
+		model   string
+		want    string
+		notWant string
+	}{
+		{
+			name:    "engine only",
+			engine:  "codex",
+			want:    "- **Engine**: codex",
+			notWant: "- **Model**:",
+		},
+		{
+			name:    "model only",
+			model:   "gpt-5",
+			want:    "- **Model**: gpt-5",
+			notWant: "- **Engine**:",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "report.md")
+			input := sampleInput()
+			input.EngineName = tc.engine
+			input.ModelName = tc.model
+
+			r := &MarkdownReporter{OutputPath: path}
+			if err := r.Write(context.Background(), input); err != nil {
+				t.Fatalf("MarkdownReporter.Write failed: %v", err)
+			}
+
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read markdown file: %v", err)
+			}
+			content := string(data)
+			if !strings.Contains(content, tc.want) {
+				t.Fatalf("markdown missing %q:\n%s", tc.want, content)
+			}
+			if strings.Contains(content, tc.notWant) {
+				t.Fatalf("markdown should omit empty metadata line %q:\n%s", tc.notWant, content)
+			}
+		})
+	}
+}
+
 func TestMarkdownReporter_EscapesHTML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "report.md")

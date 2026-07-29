@@ -200,7 +200,7 @@ skill-up report result.json --format html --output-dir ./reports
 | `html`  | `report.html`  | Human-readable visualization; open in a browser                    |
 | `markdown` | `report.md` | Concise Markdown summary for CI logs and GitHub PR comments        |
 
-`markdown` is supported by `skill-up report` when regenerating reports from an existing `result.json`. It is not currently accepted by `skill-up run --format` or `eval.yaml report.formats`.
+`markdown` is intentionally limited to `skill-up report` as an offline conversion format for an existing `result.json`. It is not currently accepted by `skill-up run --format`, `skill-up debug report --format`, `skill-up debug judge --report`, or `eval.yaml report.formats`.
 
 ---
 

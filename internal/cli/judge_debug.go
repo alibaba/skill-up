@@ -129,7 +129,7 @@ Supported judge types:
 
 func init() {
 	debugJudgeCmd.Flags().String("output", "grading.json", "Output path for grading.json")
-	debugJudgeCmd.Flags().String("report", "", "Also generate a report after judge evaluation (json, junit, html, markdown)")
+	debugJudgeCmd.Flags().String("report", "", "Also generate a report after judge evaluation (json, junit, html)")
 }
 
 func runJudgeDebug(cmd *cobra.Command, args []string) error {

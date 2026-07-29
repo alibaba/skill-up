@@ -70,7 +70,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
 	for _, format := range formats {
-		reporter, outputPath, err := buildReporter(format, outputDir)
+		reporter, outputPath, err := buildReportCommandReporter(format, outputDir)
 		if err != nil {
 			return err
 		}
@@ -91,6 +91,20 @@ func runReport(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// buildReportCommandReporter creates a Reporter for formats accepted by the
+// offline report command.
+func buildReportCommandReporter(format, outputDir string) (report.Reporter, string, error) {
+	if format == "markdown" {
+		path := filepath.Join(outputDir, "report.md")
+		return &report.MarkdownReporter{OutputPath: path}, path, nil
+	}
+	reporter, path, err := buildReporter(format, outputDir)
+	if err != nil {
+		return nil, "", fmt.Errorf("unsupported report format %q (supported: json, junit, html, markdown)", format)
+	}
+	return reporter, path, nil
+}
+
 // buildReporter creates a Reporter for the given format string.
 func buildReporter(format, outputDir string) (report.Reporter, string, error) {
 	switch format {
@@ -103,11 +117,8 @@ func buildReporter(format, outputDir string) (report.Reporter, string, error) {
 	case "html":
 		path := filepath.Join(outputDir, "report.html")
 		return &report.HTMLReporter{OutputPath: path}, path, nil
-	case "markdown":
-		path := filepath.Join(outputDir, "report.md")
-		return &report.MarkdownReporter{OutputPath: path}, path, nil
 	default:
-		return nil, "", fmt.Errorf("unsupported report format %q (supported: json, junit, html, markdown)", format)
+		return nil, "", fmt.Errorf("unsupported report format %q (supported: json, junit, html)", format)
 	}
 }
 
