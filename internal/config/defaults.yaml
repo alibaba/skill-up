@@ -19,6 +19,7 @@ cases:
   defaults:
     timeout_seconds: 300
     max_turns: 10
+    expect: {}
   parallelism: 1
 
 report:

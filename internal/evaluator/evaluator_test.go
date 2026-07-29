@@ -1404,6 +1404,40 @@ func TestExecuteCase_NonZeroExit_WithExpectExitCode_ProceedsToEvaluation(t *test
 	}
 }
 
+func TestExecuteCase_NonZeroExit_WithDefaultExpectExitCode_ProceedsToEvaluation(t *testing.T) {
+	exitCode := 1
+	e := newTestEvaluator(EvalOptions{
+		Agent: &mockAgent{
+			name: "test",
+			runFunc: func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ []transcript.Message) (*agent.SessionResult, error) {
+				return &agent.SessionResult{ExitCode: 1, FinalMessage: "expected error"}, nil
+			},
+		},
+		EvalCfg: &config.EvalConfig{
+			Cases: config.CasesConfig{
+				Defaults: config.CaseDefaults{
+					Expect: config.Expect{ExitCode: &exitCode},
+				},
+			},
+		},
+	})
+
+	caseCfg := &config.CaseConfig{
+		ID:    "case-default-expect-exit-code",
+		Title: "Default Expect Exit Code",
+		Input: config.Input{Prompt: "hello"},
+	}
+
+	result := e.executeCase(context.Background(), caseCfg, "with_skill", &mockRuntime{workspace: t.TempDir()}, nil)
+
+	if result.Status != judge.StatusPass {
+		t.Errorf("expected PASS when inherited expect.exit_code matches, got %s", result.Status)
+	}
+	if result.ExpectResult == nil || !result.ExpectResult.Passed {
+		t.Errorf("expected inherited exit code check to run and pass, got %#v", result.ExpectResult)
+	}
+}
+
 func TestExecuteCase_ExpectFail_ShortCircuit(t *testing.T) {
 	e := newTestEvaluator(EvalOptions{
 		Agent: &mockAgent{name: "test", output: "no match here"},
@@ -1461,6 +1495,125 @@ func TestExecuteCase_ExpectPass_ThenJudge(t *testing.T) {
 	}
 	if result.Grading.Summary.PassRate != 1.0 {
 		t.Errorf("expected pass_rate 1.0, got %f", result.Grading.Summary.PassRate)
+	}
+}
+
+func TestExecuteCase_DefaultExpect_AppliedToCase(t *testing.T) {
+	// Test that default expect checks from CaseDefaults are applied
+	e := newTestEvaluator(EvalOptions{
+		Agent: &mockAgent{name: "test", output: "no default keyword"},
+		EvalCfg: &config.EvalConfig{
+			Cases: config.CasesConfig{
+				Defaults: config.CaseDefaults{
+					Expect: config.Expect{
+						MustContain: []string{"default-keyword"},
+					},
+				},
+			},
+		},
+	})
+
+	caseCfg := &config.CaseConfig{
+		ID:    "case-default-expect",
+		Title: "Default Expect Test",
+		Input: config.Input{Prompt: "test"},
+	}
+
+	result := e.executeCase(context.Background(), caseCfg, "with_skill", &mockRuntime{workspace: t.TempDir()}, nil)
+
+	if result.Status != judge.StatusFail {
+		t.Errorf("expected FAIL status, got %s", result.Status)
+	}
+	if result.ExpectResult == nil {
+		t.Fatal("expected non-nil ExpectResult")
+	}
+	if result.ExpectResult.Passed {
+		t.Error("expected expect check to fail due to default expect")
+	}
+}
+
+func TestExecuteCase_DefaultExpect_MergedWithCaseExpect(t *testing.T) {
+	// Test that default and case-level expects are merged
+	e := newTestEvaluator(EvalOptions{
+		Agent: &mockAgent{name: "test", output: "has default-keyword and case-keyword"},
+		EvalCfg: &config.EvalConfig{
+			Cases: config.CasesConfig{
+				Defaults: config.CaseDefaults{
+					Expect: config.Expect{
+						MustContain: []string{"default-keyword"},
+					},
+				},
+			},
+		},
+	})
+
+	caseCfg := &config.CaseConfig{
+		ID:    "case-merged-expect",
+		Title: "Merged Expect Test",
+		Input: config.Input{Prompt: "test"},
+		Expect: config.Expect{
+			MustContain: []string{"case-keyword"},
+		},
+	}
+
+	result := e.executeCase(context.Background(), caseCfg, "with_skill", &mockRuntime{workspace: "/tmp/test"}, nil)
+
+	if result.Status != judge.StatusPass {
+		t.Errorf("expected PASS status, got %s", result.Status)
+	}
+	if result.ExpectResult == nil {
+		t.Fatal("expected non-nil ExpectResult")
+	}
+	if !result.ExpectResult.Passed {
+		t.Error("expected both default and case expect checks to pass")
+	}
+}
+
+func TestExecuteCase_DefaultExpect_CaseOverridesExitCode(t *testing.T) {
+	// Test that case-level exit_code overrides default
+	exitCode0 := 0
+	exitCode1 := 1
+
+	e := newTestEvaluator(EvalOptions{
+		Agent: &mockAgent{
+			name: "test",
+			runFunc: func(ctx context.Context, rt runtime.Runtime, opts agent.ExecOptions, messages []transcript.Message) (*agent.SessionResult, error) {
+				return &agent.SessionResult{
+					FinalMessage: "result",
+					ExitCode:     1,
+				}, nil
+			},
+		},
+		EvalCfg: &config.EvalConfig{
+			Cases: config.CasesConfig{
+				Defaults: config.CaseDefaults{
+					Expect: config.Expect{
+						ExitCode: &exitCode0,
+					},
+				},
+			},
+		},
+	})
+
+	caseCfg := &config.CaseConfig{
+		ID:    "case-override-exitcode",
+		Title: "Override Exit Code Test",
+		Input: config.Input{Prompt: "test"},
+		Expect: config.Expect{
+			ExitCode: &exitCode1, // Case expects exit 1, should pass
+		},
+	}
+
+	result := e.executeCase(context.Background(), caseCfg, "with_skill", &mockRuntime{workspace: "/tmp/test"}, nil)
+
+	if result.Status != judge.StatusPass {
+		t.Errorf("expected PASS status (case exit_code overrides default), got %s", result.Status)
+	}
+	if result.ExpectResult == nil {
+		t.Fatal("expected non-nil ExpectResult")
+	}
+	if !result.ExpectResult.Passed {
+		t.Error("expected expect check to pass with case-level exit_code override")
 	}
 }
 
@@ -2377,6 +2530,376 @@ func TestResolveExpectConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+//nolint:funlen // Comprehensive table-driven test with multiple test cases
+func TestMergeExpectConfig(t *testing.T) {
+	t.Parallel()
+
+	exitCode0 := 0
+	exitCode1 := 1
+
+	tests := []struct {
+		name     string
+		defaults *config.Expect
+		caseExp  *config.Expect
+		expected config.Expect
+	}{
+		{
+			name:     "nil defaults returns case expect",
+			defaults: nil,
+			caseExp: &config.Expect{
+				MustContain: []string{"foo"},
+				ExitCode:    &exitCode0,
+			},
+			expected: config.Expect{
+				MustContain: []string{"foo"},
+				ExitCode:    &exitCode0,
+			},
+		},
+		{
+			name: "empty case returns defaults",
+			defaults: &config.Expect{
+				MustContain: []string{"default"},
+				ExitCode:    &exitCode0,
+			},
+			caseExp: &config.Expect{},
+			expected: config.Expect{
+				MustContain: []string{"default"},
+				ExitCode:    &exitCode0,
+			},
+		},
+		{
+			name: "slice fields are appended",
+			defaults: &config.Expect{
+				MustContain:    []string{"default1"},
+				MustNotContain: []string{"bad1"},
+				FilesExist:     []string{"file1.txt"},
+			},
+			caseExp: &config.Expect{
+				MustContain:    []string{"case1"},
+				MustNotContain: []string{"bad2"},
+				FilesExist:     []string{"file2.txt"},
+			},
+			expected: config.Expect{
+				MustContain:    []string{"default1", "case1"},
+				MustNotContain: []string{"bad1", "bad2"},
+				FilesExist:     []string{"file1.txt", "file2.txt"},
+			},
+		},
+		{
+			name: "duplicate strings are removed",
+			defaults: &config.Expect{
+				MustContain: []string{"foo", "bar"},
+				FilesExist:  []string{"a.txt", "b.txt"},
+			},
+			caseExp: &config.Expect{
+				MustContain: []string{"foo", "baz"},
+				FilesExist:  []string{"b.txt", "c.txt"},
+			},
+			expected: config.Expect{
+				MustContain: []string{"foo", "bar", "baz"},
+				FilesExist:  []string{"a.txt", "b.txt", "c.txt"},
+			},
+		},
+		{
+			name: "scalar fields: case overrides default exit_code",
+			defaults: &config.Expect{
+				ExitCode: &exitCode0,
+			},
+			caseExp: &config.Expect{
+				ExitCode: &exitCode1,
+			},
+			expected: config.Expect{
+				ExitCode: &exitCode1,
+			},
+		},
+		{
+			name: "scalar fields: default exit_code when case not set",
+			defaults: &config.Expect{
+				ExitCode: &exitCode0,
+			},
+			caseExp: &config.Expect{},
+			expected: config.Expect{
+				ExitCode: &exitCode0,
+			},
+		},
+		{
+			name: "scalar fields: case golden_file overrides default",
+			defaults: &config.Expect{
+				GoldenFile: "default.txt",
+			},
+			caseExp: &config.Expect{
+				GoldenFile: "case.txt",
+			},
+			expected: config.Expect{
+				GoldenFile: "case.txt",
+			},
+		},
+		{
+			name: "scalar fields: default golden_file when case not set",
+			defaults: &config.Expect{
+				GoldenFile: "default.txt",
+			},
+			caseExp: &config.Expect{},
+			expected: config.Expect{
+				GoldenFile: "default.txt",
+			},
+		},
+		{
+			name: "file_contains merges and deduplicates",
+			defaults: &config.Expect{
+				FileContains: []config.FileContainsCheck{
+					{Path: "a.txt", Content: "foo"},
+					{Path: "b.txt", Content: "bar"},
+				},
+			},
+			caseExp: &config.Expect{
+				FileContains: []config.FileContainsCheck{
+					{Path: "a.txt", Content: "foo"}, // duplicate
+					{Path: "c.txt", Content: "baz"},
+				},
+			},
+			expected: config.Expect{
+				FileContains: []config.FileContainsCheck{
+					{Path: "a.txt", Content: "foo"},
+					{Path: "b.txt", Content: "bar"},
+					{Path: "c.txt", Content: "baz"},
+				},
+			},
+		},
+		{
+			name: "complex merge: all fields",
+			defaults: &config.Expect{
+				MustContain:    []string{"default"},
+				MustNotContain: []string{"bad"},
+				ExitCode:       &exitCode0,
+				FilesExist:     []string{"default.txt"},
+				FilesNotExist:  []string{"bad.txt"},
+				GoldenFile:     "default_golden.txt",
+				FileContains:   []config.FileContainsCheck{{Path: "x.txt", Content: "y"}},
+			},
+			caseExp: &config.Expect{
+				MustContain:   []string{"case"},
+				ExitCode:      &exitCode1,
+				FilesExist:    []string{"case.txt"},
+				FilesNotExist: []string{"unwanted.txt"},
+				FileContains:  []config.FileContainsCheck{{Path: "z.txt", Content: "w"}},
+			},
+			expected: config.Expect{
+				MustContain:    []string{"default", "case"},
+				MustNotContain: []string{"bad"},
+				ExitCode:       &exitCode1, // case overrides
+				FilesExist:     []string{"default.txt", "case.txt"},
+				FilesNotExist:  []string{"bad.txt", "unwanted.txt"},
+				GoldenFile:     "default_golden.txt", // case didn't set, default remains
+				FileContains: []config.FileContainsCheck{
+					{Path: "x.txt", Content: "y"},
+					{Path: "z.txt", Content: "w"},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := mergeExpectConfig(tt.defaults, tt.caseExp)
+
+			// Compare slices
+			if !stringSlicesEqual(result.MustContain, tt.expected.MustContain) {
+				t.Errorf("MustContain: got %v, want %v", result.MustContain, tt.expected.MustContain)
+			}
+			if !stringSlicesEqual(result.MustNotContain, tt.expected.MustNotContain) {
+				t.Errorf("MustNotContain: got %v, want %v", result.MustNotContain, tt.expected.MustNotContain)
+			}
+			if !stringSlicesEqual(result.FilesExist, tt.expected.FilesExist) {
+				t.Errorf("FilesExist: got %v, want %v", result.FilesExist, tt.expected.FilesExist)
+			}
+			if !stringSlicesEqual(result.FilesNotExist, tt.expected.FilesNotExist) {
+				t.Errorf("FilesNotExist: got %v, want %v", result.FilesNotExist, tt.expected.FilesNotExist)
+			}
+
+			// Compare scalars
+			if (result.ExitCode == nil) != (tt.expected.ExitCode == nil) {
+				t.Errorf("ExitCode nil mismatch: got %v, want %v", result.ExitCode, tt.expected.ExitCode)
+			} else if result.ExitCode != nil && *result.ExitCode != *tt.expected.ExitCode {
+				t.Errorf("ExitCode: got %d, want %d", *result.ExitCode, *tt.expected.ExitCode)
+			}
+
+			if result.GoldenFile != tt.expected.GoldenFile {
+				t.Errorf("GoldenFile: got %s, want %s", result.GoldenFile, tt.expected.GoldenFile)
+			}
+
+			// Compare FileContains
+			if !fileContainsSlicesEqual(result.FileContains, tt.expected.FileContains) {
+				t.Errorf("FileContains: got %v, want %v", result.FileContains, tt.expected.FileContains)
+			}
+		})
+	}
+}
+
+func TestMergeAndDeduplicate(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		a        []string
+		b        []string
+		expected []string
+	}{
+		{
+			name:     "both nil",
+			a:        nil,
+			b:        nil,
+			expected: nil,
+		},
+		{
+			name:     "both empty",
+			a:        []string{},
+			b:        []string{},
+			expected: nil,
+		},
+		{
+			name:     "a nil, b has items",
+			a:        nil,
+			b:        []string{"x", "y"},
+			expected: []string{"x", "y"},
+		},
+		{
+			name:     "a has items, b nil",
+			a:        []string{"a", "b"},
+			b:        nil,
+			expected: []string{"a", "b"},
+		},
+		{
+			name:     "no duplicates",
+			a:        []string{"a", "b"},
+			b:        []string{"c", "d"},
+			expected: []string{"a", "b", "c", "d"},
+		},
+		{
+			name:     "with duplicates",
+			a:        []string{"a", "b", "c"},
+			b:        []string{"b", "c", "d"},
+			expected: []string{"a", "b", "c", "d"},
+		},
+		{
+			name:     "all duplicates",
+			a:        []string{"x", "y"},
+			b:        []string{"x", "y"},
+			expected: []string{"x", "y"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := mergeAndDeduplicate(tt.a, tt.b)
+			if !stringSlicesEqual(result, tt.expected) {
+				t.Errorf("got %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestMergeFileContains(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		a        []config.FileContainsCheck
+		b        []config.FileContainsCheck
+		expected []config.FileContainsCheck
+	}{
+		{
+			name:     "both nil",
+			a:        nil,
+			b:        nil,
+			expected: nil,
+		},
+		{
+			name:     "both empty",
+			a:        []config.FileContainsCheck{},
+			b:        []config.FileContainsCheck{},
+			expected: nil,
+		},
+		{
+			name: "no duplicates",
+			a: []config.FileContainsCheck{
+				{Path: "a.txt", Content: "foo"},
+			},
+			b: []config.FileContainsCheck{
+				{Path: "b.txt", Content: "bar"},
+			},
+			expected: []config.FileContainsCheck{
+				{Path: "a.txt", Content: "foo"},
+				{Path: "b.txt", Content: "bar"},
+			},
+		},
+		{
+			name: "exact duplicates",
+			a: []config.FileContainsCheck{
+				{Path: "a.txt", Content: "foo"},
+				{Path: "b.txt", Content: "bar"},
+			},
+			b: []config.FileContainsCheck{
+				{Path: "a.txt", Content: "foo"},
+			},
+			expected: []config.FileContainsCheck{
+				{Path: "a.txt", Content: "foo"},
+				{Path: "b.txt", Content: "bar"},
+			},
+		},
+		{
+			name: "same path different content",
+			a: []config.FileContainsCheck{
+				{Path: "a.txt", Content: "foo"},
+			},
+			b: []config.FileContainsCheck{
+				{Path: "a.txt", Content: "bar"},
+			},
+			expected: []config.FileContainsCheck{
+				{Path: "a.txt", Content: "foo"},
+				{Path: "a.txt", Content: "bar"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := mergeFileContains(tt.a, tt.b)
+			if !fileContainsSlicesEqual(result, tt.expected) {
+				t.Errorf("got %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+// Helper functions for test comparisons.
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func fileContainsSlicesEqual(a, b []config.FileContainsCheck) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Path != b[i].Path || a[i].Content != b[i].Content {
+			return false
+		}
+	}
+	return true
 }
 
 func TestEvalResult_Fields(t *testing.T) {

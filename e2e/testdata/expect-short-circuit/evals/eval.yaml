@@ -26,6 +26,8 @@ cases:
   defaults:
     timeout_seconds: 60
     max_turns: 3
+    expect:
+      exit_code: 0
   parallelism: 1
 
 report:

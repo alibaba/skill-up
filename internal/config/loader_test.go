@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -469,16 +470,64 @@ cases:
 	}
 }
 
+func TestLoader_LoadEvalConfig_DefaultExpect(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	evalPath := filepath.Join(tmpDir, "eval.yaml")
+	content := `schema_version: v1alpha1
+cases:
+  files:
+    - evals/cases/test1.yaml
+  defaults:
+    expect:
+      must_contain: ["ready"]
+      must_not_contain: ["TODO"]
+      exit_code: 0
+      files_exist: ["result.json"]
+      files_not_exist: ["error.log"]
+      golden_file: "expected.txt"
+      file_contains:
+        - path: "result.json"
+          content: '"status":"ok"'
+`
+	if err := os.WriteFile(evalPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write temp eval.yaml: %v", err)
+	}
+
+	cfg, err := NewLoader(evalPath).LoadEvalConfig()
+	if err != nil {
+		t.Fatalf("LoadEvalConfig failed: %v", err)
+	}
+
+	expect := cfg.Cases.Defaults.Expect
+	if !equalStringSlice(expect.MustContain, []string{"ready"}) {
+		t.Errorf("MustContain = %v, want [ready]", expect.MustContain)
+	}
+	if !equalStringSlice(expect.MustNotContain, []string{"TODO"}) {
+		t.Errorf("MustNotContain = %v, want [TODO]", expect.MustNotContain)
+	}
+	if expect.ExitCode == nil || *expect.ExitCode != 0 {
+		t.Errorf("ExitCode = %v, want 0", expect.ExitCode)
+	}
+	if !equalStringSlice(expect.FilesExist, []string{"result.json"}) {
+		t.Errorf("FilesExist = %v, want [result.json]", expect.FilesExist)
+	}
+	if !equalStringSlice(expect.FilesNotExist, []string{"error.log"}) {
+		t.Errorf("FilesNotExist = %v, want [error.log]", expect.FilesNotExist)
+	}
+	if expect.GoldenFile != "expected.txt" {
+		t.Errorf("GoldenFile = %q, want expected.txt", expect.GoldenFile)
+	}
+	if len(expect.FileContains) != 1 ||
+		expect.FileContains[0].Path != "result.json" ||
+		expect.FileContains[0].Content != `"status":"ok"` {
+		t.Errorf("FileContains = %v, want result.json status check", expect.FileContains)
+	}
+}
+
 func equalStringSlice(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
+	return slices.Equal(a, b)
 }
 
 func TestLoader_LoadCaseConfig(t *testing.T) {
