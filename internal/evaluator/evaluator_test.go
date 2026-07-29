@@ -1519,7 +1519,7 @@ func TestExecuteCase_DefaultExpect_AppliedToCase(t *testing.T) {
 		Input: config.Input{Prompt: "test"},
 	}
 
-	result := e.executeCase(context.Background(), caseCfg, "with_skill", &mockRuntime{workspace: "/tmp/test"}, nil)
+	result := e.executeCase(context.Background(), caseCfg, "with_skill", &mockRuntime{workspace: t.TempDir()}, nil)
 
 	if result.Status != judge.StatusFail {
 		t.Errorf("expected FAIL status, got %s", result.Status)
