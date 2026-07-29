@@ -172,7 +172,7 @@ skill-up report <path to result.json> [flags]
 
 | Flag           | Default                       | Description                                                       |
 | :------------: | :---------------------------: | :---------------------------------------------------------------: |
-| `--format`     | `json`                        | Report format: `json` / `junit` / `html` (repeatable)              |
+| `--format`     | `json`                        | Report format: `json` / `junit` / `html` / `markdown` (repeatable) |
 | `--output-dir` | Same dir as `result.json`      | Output directory; created if missing                                |
 
 ### Examples
@@ -182,7 +182,10 @@ skill-up report <path to result.json> [flags]
 skill-up report result.json --format html
 
 # Multiple formats at once
-skill-up report result.json --format json --format junit --format html
+skill-up report result.json --format json --format junit --format html --format markdown
+
+# Generate a Markdown summary for CI or a PR comment
+skill-up report result.json --format markdown
 
 # Pin the output directory
 skill-up report result.json --format html --output-dir ./reports
@@ -195,6 +198,9 @@ skill-up report result.json --format html --output-dir ./reports
 | `json`  | `report.json`  | Machine-readable structured data; consumable by downstream tools   |
 | `junit` | `report.xml`   | JUnit XML; parseable by CI systems (Jenkins, GitHub Actions, …)    |
 | `html`  | `report.html`  | Human-readable visualization; open in a browser                    |
+| `markdown` | `report.md` | Concise Markdown summary for CI logs and GitHub PR comments        |
+
+`markdown` is supported by `skill-up report` when regenerating reports from an existing `result.json`. It is not currently accepted by `skill-up run --format` or `eval.yaml report.formats`.
 
 ---
 

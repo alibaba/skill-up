@@ -129,7 +129,7 @@ Supported judge types:
 
 func init() {
 	debugJudgeCmd.Flags().String("output", "grading.json", "Output path for grading.json")
-	debugJudgeCmd.Flags().String("report", "", "Also generate a report after judge evaluation (json, junit, html)")
+	debugJudgeCmd.Flags().String("report", "", "Also generate a report after judge evaluation (json, junit, html, markdown)")
 }
 
 func runJudgeDebug(cmd *cobra.Command, args []string) error {
@@ -248,8 +248,8 @@ func evaluateJudgeWithExpect(ctx context.Context, cmd *cobra.Command, j judge.Ju
 	return result, nil
 }
 
-// generateDebugReport renders the optional report file (json/junit/html) into
-// the current directory using the same Reporter machinery the real pipeline uses.
+// generateDebugReport renders the optional report file into the current
+// directory using the same Reporter machinery the real pipeline uses.
 func generateDebugReport(ctx context.Context, cmd *cobra.Command, format string, input judgeDebugInput, result *judge.Result) error {
 	reporter, reportPath, err := buildReporter(format, ".")
 	if err != nil {

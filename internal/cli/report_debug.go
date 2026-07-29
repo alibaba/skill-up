@@ -5,6 +5,7 @@
 //	skill-up debug report <input.json> --format json
 //	skill-up debug report <input.json> --format junit
 //	skill-up debug report <input.json> --format html
+//	skill-up debug report <input.json> --format markdown
 //
 // This command reads a JSON file conforming to report.Input,
 // generates a report in the chosen format, and writes it to the current directory.
@@ -41,17 +42,19 @@ Supported formats:
   - json:  machine-readable JSON (fact source)
   - junit: JUnit XML (CI gate)
   - html:  human-readable HTML summary
+  - markdown: concise Markdown summary
 
 Output files:
   - json  → report.json
   - junit → report.xml
-  - html  → report.html`,
+  - html  → report.html
+  - markdown → report.md`,
 	Args: cobra.ExactArgs(1),
 	RunE: runReportDebug,
 }
 
 func init() {
-	debugReportCmd.Flags().String("format", "json", "Report format: json, junit, html")
+	debugReportCmd.Flags().String("format", "json", "Report format: json, junit, html, markdown")
 }
 
 func runReportDebug(cmd *cobra.Command, args []string) error {

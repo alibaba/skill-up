@@ -80,6 +80,10 @@ func TestRunReportDebug_HTMLFormat(t *testing.T) {
 	runReportDebugFormatCase(t, "html", judge.StatusPass, "report.html")
 }
 
+func TestRunReportDebug_MarkdownFormat(t *testing.T) {
+	runReportDebugFormatCase(t, "markdown", judge.StatusFail, "report.md")
+}
+
 func TestRunReportDebug_MissingFile(t *testing.T) {
 	t.Parallel()
 	cmd := newDebugReportCmd()

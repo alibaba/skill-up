@@ -101,6 +101,21 @@ func TestBuildReporter_HTML(t *testing.T) {
 	}
 }
 
+func TestBuildReporter_Markdown(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	r, path, err := buildReporter("markdown", dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := r.(*report.MarkdownReporter); !ok {
+		t.Errorf("expected *report.MarkdownReporter, got %T", r)
+	}
+	if want := filepath.Join(dir, "report.md"); path != want {
+		t.Errorf("path: want %s, got %s", want, path)
+	}
+}
+
 func TestBuildReporter_Unsupported(t *testing.T) {
 	t.Parallel()
 	_, _, err := buildReporter("csv", t.TempDir())
@@ -109,6 +124,9 @@ func TestBuildReporter_Unsupported(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "csv") {
 		t.Errorf("error should mention the unsupported format, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "markdown") {
+		t.Errorf("error should mention markdown as a supported format, got: %v", err)
 	}
 }
 
@@ -203,6 +221,30 @@ func TestRunReport_MultipleFormats(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Errorf("%s not created: %v", f, err)
 		}
+	}
+}
+
+func TestRunReport_MarkdownFormat(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	resultPath := writeResultJSON(t, dir, makeReportInput(judge.StatusPass))
+
+	cmd := newReportCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	if err := cmd.Flags().Set("format", "markdown"); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+
+	if err := runReport(cmd, []string{resultPath}); err != nil {
+		t.Fatalf("runReport error: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "report.md")); err != nil {
+		t.Errorf("report.md not created: %v", err)
+	}
+	if !strings.Contains(out.String(), "report.md") {
+		t.Errorf("stdout should mention report.md, got: %s", out.String())
 	}
 }
 
