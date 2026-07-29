@@ -183,7 +183,7 @@ func validateExpect(prefix string, expect Expect) []string {
 		if strings.TrimSpace(check.Path) == "" {
 			errs = append(errs, fmt.Sprintf("%s.file_contains[%d].path is required", prefix, i))
 		}
-		if check.Content == "" {
+		if strings.TrimSpace(check.Content) == "" {
 			errs = append(errs, fmt.Sprintf("%s.file_contains[%d].content is required", prefix, i))
 		}
 	}
