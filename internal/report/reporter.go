@@ -40,17 +40,61 @@ func (in Input) TotalDuration() time.Duration {
 }
 
 // OverallPassRate calculates the overall pass rate across all cases.
+//
+// In benchmark mode (benchmark.enabled: true), CaseResults holds two entries
+// per case: one "with_skill" and one "without_skill" baseline. The baseline
+// is a reference data point, not an independent evaluation outcome, so it
+// must not be double-counted here — otherwise a baseline failure would drag
+// down the overall pass rate even though every with_skill case passed. See
+// PrimaryCaseResults for the de-duplication rule.
 func (in Input) OverallPassRate() float64 {
-	if len(in.CaseResults) == 0 {
+	primary := in.PrimaryCaseResults()
+	if len(primary) == 0 {
 		return 0
 	}
 	passed := 0
-	for _, cr := range in.CaseResults {
+	for _, cr := range primary {
 		if cr.Status == judge.StatusPass {
 			passed++
 		}
 	}
-	return float64(passed) / float64(len(in.CaseResults))
+	return float64(passed) / float64(len(primary))
+}
+
+// PrimaryCaseResults returns one CaseResult per case ID, preferring the
+// "with_skill" result over the "without_skill" baseline when benchmark mode
+// produced both for the same case. Order follows first-seen case ID order in
+// CaseResults. Use this instead of iterating CaseResults directly whenever
+// computing an aggregate (pass rate, counts, CI failure signal) that should
+// reflect one outcome per case rather than one outcome per configuration.
+func (in Input) PrimaryCaseResults() []CaseResult {
+	type slot struct {
+		result   CaseResult
+		hasWith  bool
+		occupied bool
+	}
+	order := make([]string, 0, len(in.CaseResults))
+	byID := make(map[string]slot, len(in.CaseResults))
+
+	for _, cr := range in.CaseResults {
+		s, ok := byID[cr.CaseID]
+		if !ok {
+			order = append(order, cr.CaseID)
+		}
+		if cr.Configuration != "without_skill" {
+			byID[cr.CaseID] = slot{result: cr, hasWith: true, occupied: true}
+			continue
+		}
+		if !s.occupied {
+			byID[cr.CaseID] = slot{result: cr, hasWith: false, occupied: true}
+		}
+	}
+
+	out := make([]CaseResult, 0, len(order))
+	for _, id := range order {
+		out = append(out, byID[id].result)
+	}
+	return out
 }
 
 // CaseResult represents the result of a single case execution.

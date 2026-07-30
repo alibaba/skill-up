@@ -320,6 +320,83 @@ func TestInput_OverallPassRate_Empty(t *testing.T) {
 	}
 }
 
+// benchmarkModeInput simulates a benchmark run (benchmark.enabled: true)
+// where every with_skill case passes but the without_skill baseline fails
+// for half of them. Aggregate statistics must reflect only with_skill.
+func benchmarkModeInput() Input {
+	return Input{
+		SkillName: "code-review",
+		CaseResults: []CaseResult{
+			{CaseID: "case-1", Status: judge.StatusPass, Configuration: "with_skill"},
+			{CaseID: "case-1", Status: judge.StatusFail, Configuration: "without_skill"},
+			{CaseID: "case-2", Status: judge.StatusPass, Configuration: "with_skill"},
+			{CaseID: "case-2", Status: judge.StatusFail, Configuration: "without_skill"},
+		},
+	}
+}
+
+func TestInput_OverallPassRate_IgnoresWithoutSkillBaseline(t *testing.T) {
+	in := benchmarkModeInput()
+	// Both with_skill cases passed; the without_skill baseline failures must
+	// not drag the rate below 100%.
+	if rate := in.OverallPassRate(); rate != 1.0 {
+		t.Fatalf("expected OverallPassRate to ignore without_skill baseline failures, got %f", rate)
+	}
+}
+
+func TestInput_PrimaryCaseResults_PrefersWithSkill(t *testing.T) {
+	in := benchmarkModeInput()
+	primary := in.PrimaryCaseResults()
+	if len(primary) != 2 {
+		t.Fatalf("expected 2 de-duplicated cases, got %d", len(primary))
+	}
+	for _, cr := range primary {
+		if cr.Configuration != "with_skill" {
+			t.Fatalf("expected primary result to be with_skill for case %s, got %q", cr.CaseID, cr.Configuration)
+		}
+		if cr.Status != judge.StatusPass {
+			t.Fatalf("expected primary result PASS for case %s, got %s", cr.CaseID, cr.Status)
+		}
+	}
+}
+
+func TestInput_PrimaryCaseResults_FallsBackToBaselineWhenNoWithSkill(t *testing.T) {
+	in := Input{
+		CaseResults: []CaseResult{
+			{CaseID: "case-1", Status: judge.StatusFail, Configuration: "without_skill"},
+		},
+	}
+	primary := in.PrimaryCaseResults()
+	if len(primary) != 1 || primary[0].Configuration != "without_skill" {
+		t.Fatalf("expected fallback to the only available (without_skill) result, got %#v", primary)
+	}
+}
+
+func TestJUnitReporter_BenchmarkMode_ExcludesBaselineFromFailures(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "result.xml")
+	r := &JUnitReporter{OutputPath: path}
+
+	if err := r.Write(context.Background(), benchmarkModeInput()); err != nil {
+		t.Fatalf("JUnitReporter.Write failed: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read junit file: %v", err)
+	}
+	content := string(data)
+
+	// 2 cases, both with_skill passing; without_skill baseline failures must
+	// not inflate tests/failures counts.
+	if !strings.Contains(content, `tests="2"`) {
+		t.Fatalf("expected tests=2 (de-duplicated per case), got: %s", content)
+	}
+	if !strings.Contains(content, `failures="0"`) {
+		t.Fatalf("expected failures=0 (baseline failures excluded), got: %s", content)
+	}
+}
+
 func TestInput_TotalDuration(t *testing.T) {
 	in := sampleInput()
 	d := in.TotalDuration()
