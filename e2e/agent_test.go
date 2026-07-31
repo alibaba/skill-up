@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1172,6 +1173,93 @@ report:
 	} else {
 		t.Logf("claude run succeeded")
 	}
+}
+
+// TestAgent_ClaudeCode_WindowsTokenUsage verifies that a real Claude Code run
+// on Windows resolves the CLI's workspace-key directory and reports non-zero
+// token usage from the persisted session JSONL.
+func TestAgent_ClaudeCode_WindowsTokenUsage(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-specific Claude Code session lookup acceptance test")
+	}
+	skipIfNotFullE2E(t)
+	skipIfClaudeUnavailable(t)
+	if os.Getenv("ANTHROPIC_API_KEY") == "" {
+		t.Skip("ANTHROPIC_API_KEY not set, skipping real token usage test")
+	}
+
+	evalDir := createTestEvalDir(t, "test-skill-claude-windows-tokens")
+	evalContent := `schema_version: v1alpha1
+
+environment:
+  type: none
+  workspace_mount: /workspace
+
+mcp:
+  servers: []
+
+engine:
+  name: claude_code
+  model:
+    provider: dashscope
+    name: qwen3.6-plus
+
+skills: []
+
+cases:
+  files:
+    - evals/cases/test-case.yaml
+  defaults:
+    timeout_seconds: 120
+    max_turns: 1
+  parallelism: 1
+
+judge:
+  type: rule_based
+  rule_based:
+    must_contain:
+      - "hello"
+
+report:
+  formats: [json]
+  artifacts: [transcript]
+`
+	evalPath := filepath.Join(evalDir, "eval.yaml")
+	if err := os.WriteFile(evalPath, []byte(evalContent), 0o644); err != nil {
+		t.Fatalf("write eval.yaml: %v", err)
+	}
+
+	outputDir := t.TempDir()
+	preserveWorkspaceArtifacts(t, outputDir)
+	result := Run(t, RunConfig{Timeout: 180 * time.Second},
+		"run", evalPath, "--output-dir", outputDir)
+	if result.ExitCode != 0 {
+		t.Fatalf("Claude Code run failed: exit=%d\nstdout=%s\nstderr=%s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+
+	resultPath := filepath.Join(outputDir, "iteration-1", "result.json")
+	data, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("read result.json: %v", err)
+	}
+	var report struct {
+		CaseResults []struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"case_results"`
+	}
+	if err := json.Unmarshal(data, &report); err != nil {
+		t.Fatalf("parse result.json: %v", err)
+	}
+	if len(report.CaseResults) != 1 {
+		t.Fatalf("case_results length = %d, want 1\n%s", len(report.CaseResults), data)
+	}
+	usage := report.CaseResults[0]
+	if usage.InputTokens <= 0 || usage.OutputTokens <= 0 {
+		t.Fatalf("expected non-zero Claude token usage, got input=%d output=%d\n%s",
+			usage.InputTokens, usage.OutputTokens, data)
+	}
+	t.Logf("verified Claude token usage: input=%d output=%d", usage.InputTokens, usage.OutputTokens)
 }
 
 func TestAgent_ClaudeCode_Installation(t *testing.T) {
