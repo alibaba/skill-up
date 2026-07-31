@@ -1232,7 +1232,7 @@ report:
 	outputDir := t.TempDir()
 	preserveWorkspaceArtifacts(t, outputDir)
 	result := Run(t, RunConfig{Timeout: 180 * time.Second},
-		"run", evalPath, "--output-dir", outputDir)
+		"run", evalPath, "--output-dir", outputDir, "--verbose")
 	if result.ExitCode != 0 {
 		t.Fatalf("Claude Code run failed: exit=%d\nstdout=%s\nstderr=%s", result.ExitCode, result.Stdout, result.Stderr)
 	}
@@ -1256,8 +1256,8 @@ report:
 	}
 	usage := report.CaseResults[0]
 	if usage.InputTokens <= 0 || usage.OutputTokens <= 0 {
-		t.Fatalf("expected non-zero Claude token usage, got input=%d output=%d\n%s",
-			usage.InputTokens, usage.OutputTokens, data)
+		t.Fatalf("expected non-zero Claude token usage, got input=%d output=%d\n%s\nstdout=%s\nstderr=%s",
+			usage.InputTokens, usage.OutputTokens, data, result.Stdout, result.Stderr)
 	}
 	t.Logf("verified Claude token usage: input=%d output=%d", usage.InputTokens, usage.OutputTokens)
 }

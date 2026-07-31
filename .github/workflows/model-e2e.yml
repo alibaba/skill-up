@@ -326,6 +326,19 @@ jobs:
           ANTHROPIC_BASE_URL: https://dashscope.aliyuncs.com/apps/anthropic
           ANTHROPIC_MODEL: qwen3.6-plus
 
+      - name: List Claude project directories on failure
+        if: failure() && steps.secrets.outputs.available == 'true'
+        shell: pwsh
+        run: |
+          $projects = Join-Path $HOME ".claude\projects"
+          if (-not (Test-Path $projects)) {
+            Write-Host "Claude projects directory does not exist"
+            exit 0
+          }
+          Get-ChildItem $projects -Directory | ForEach-Object {
+            Write-Host "Claude project directory: $($_.Name)"
+          }
+
       - name: Upload Windows Claude workspace artifacts
         if: always() && steps.secrets.outputs.available == 'true' && hashFiles('e2e-windows-live-artifacts/**') != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

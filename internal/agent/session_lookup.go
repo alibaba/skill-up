@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/platform"
 )
 
@@ -96,18 +97,22 @@ func findAgentSessionJSONL(ctx context.Context, rt Runtime, lookup agentSessionL
 	if workspaceKey == "" {
 		return ""
 	}
+	logging.DebugContextf(ctx, "agent session lookup: workspace=%q key=%q", rt.Workspace(), workspaceKey)
 
 	script := buildSessionLookupScript(lookup)
 	result, err := rt.Exec(ctx, script, ExecOptions{
 		Env: map[string]string{lookup.envVar: workspaceKey},
 	})
 	if err != nil || result.ExitCode != 0 {
+		logging.DebugContextf(ctx, "agent session lookup failed: err=%v exit_code=%d", err, result.ExitCode)
 		return ""
 	}
 	sessionPath := strings.TrimSpace(result.Stdout)
 	if sessionPath == "" || !strings.HasSuffix(sessionPath, ".jsonl") {
+		logging.DebugContextf(ctx, "agent session lookup returned no JSONL path")
 		return ""
 	}
+	logging.DebugContextf(ctx, "agent session lookup found %q", sessionPath)
 	return sessionPath
 }
 
