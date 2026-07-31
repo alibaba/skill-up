@@ -641,3 +641,29 @@ func TestWorkspaceKeyForRuntime(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildSessionLookupScriptPathFormat(t *testing.T) {
+	t.Parallel()
+
+	lookup := agentSessionLookup{
+		envVar:   "SKILL_UP_CLAUDE_WSKEY",
+		rootTmpl: "$home/.claude/projects/$SKILL_UP_CLAUDE_WSKEY",
+	}
+	tests := []struct {
+		name        string
+		build       func(agentSessionLookup) string
+		wantCygpath bool
+	}{
+		{name: "posix path", build: buildSessionLookupScript, wantCygpath: false},
+		{name: "windows native path", build: buildWindowsSessionLookupScript, wantCygpath: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			script := tt.build(lookup)
+			if got := strings.Contains(script, `cygpath -w "$best"`); got != tt.wantCygpath {
+				t.Fatalf("cygpath conversion present = %v, want %v\n%s", got, tt.wantCygpath, script)
+			}
+		})
+	}
+}

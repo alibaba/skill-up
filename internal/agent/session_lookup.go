@@ -100,6 +100,9 @@ func findAgentSessionJSONL(ctx context.Context, rt Runtime, lookup agentSessionL
 	logging.DebugContextf(ctx, "agent session lookup: workspace=%q key=%q", rt.Workspace(), workspaceKey)
 
 	script := buildSessionLookupScript(lookup)
+	if rt.Shell().GOOS == platform.GOOSWindows {
+		script = buildWindowsSessionLookupScript(lookup)
+	}
 	result, err := rt.Exec(ctx, script, ExecOptions{
 		Env: map[string]string{lookup.envVar: workspaceKey},
 	})
@@ -145,6 +148,20 @@ func extractSessionIDFromPath(sessionPath string) string {
 // buildSessionLookupScript renders the shared shell snippet that picks the
 // newest *.jsonl under the configured root.
 func buildSessionLookupScript(lookup agentSessionLookup) string {
+	return buildSessionLookupScriptWithPrinter(lookup, `printf %s "$best"`)
+}
+
+func buildWindowsSessionLookupScript(lookup agentSessionLookup) string {
+	// Git Bash reports /c/... paths, which Windows filepath handling does
+	// not consider absolute. Convert the selected session path before it is
+	// passed to Runtime.DownloadFile.
+	return buildSessionLookupScriptWithPrinter(
+		lookup,
+		`if [ -n "$best" ]; then cygpath -w "$best" 2>/dev/null || printf %s "$best"; fi`,
+	)
+}
+
+func buildSessionLookupScriptWithPrinter(lookup agentSessionLookup, printBest string) string {
 	extra := ""
 	if lookup.findExtra != "" {
 		extra = " " + lookup.findExtra
@@ -160,5 +177,5 @@ while IFS= read -r p || [ -n "$p" ]; do
   case $m in ''|*[!0-9]*) continue;; esac
   if [ "$ts" -eq -1 ] || [ "$m" -gt "$ts" ]; then ts=$m; best=$p; fi
 done <"$tmp"
-printf %%s "$best"`, lookup.rootTmpl, extra)
+%s`, lookup.rootTmpl, extra, printBest)
 }
