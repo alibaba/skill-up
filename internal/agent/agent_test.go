@@ -619,6 +619,12 @@ func TestWorkspaceKeyForRuntime(t *testing.T) {
 			want:      "C--Users-tester-AppData-Local-Temp-skill-up-123",
 		},
 		{
+			name:      "windows short path",
+			workspace: `C:\Users\RUNNER~1\AppData\Local\Temp\skill-up-123`,
+			shell:     platform.Shell{GOOS: platform.GOOSWindows, Family: platform.ShellPOSIX, BashPath: `C:\Git\bin\bash.exe`},
+			want:      "C--Users-RUNNER-1-AppData-Local-Temp-skill-up-123",
+		},
+		{
 			name:      "posix colon remains valid",
 			workspace: "/tmp/skill-up:123",
 			shell:     platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX},

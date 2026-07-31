@@ -324,27 +324,6 @@ jobs:
           ANTHROPIC_BASE_URL: https://dashscope.aliyuncs.com/apps/anthropic
           ANTHROPIC_MODEL: qwen3.6-plus
 
-      - name: Collect Windows Claude session diagnostics
-        if: always() && steps.secrets.outputs.available == 'true'
-        shell: pwsh
-        run: |
-          $source = Join-Path $HOME ".claude\projects"
-          $destination = Join-Path $env:GITHUB_WORKSPACE "e2e-windows-live-artifacts\claude-projects"
-          if (-not (Test-Path $source)) {
-            Write-Host "Claude projects directory does not exist: $source"
-            exit 0
-          }
-          Get-ChildItem $source -Directory | ForEach-Object {
-            Write-Host "Claude project directory: $($_.Name)"
-          }
-          Get-ChildItem $source -Recurse -File -Filter "*.jsonl" | ForEach-Object {
-            $relative = [System.IO.Path]::GetRelativePath($source, $_.FullName)
-            $target = Join-Path $destination $relative
-            New-Item -ItemType Directory -Force -Path (Split-Path $target) | Out-Null
-            Copy-Item $_.FullName $target
-            Write-Host "Collected Claude session: $relative"
-          }
-
       - name: Upload Windows Claude workspace artifacts
         if: always() && steps.secrets.outputs.available == 'true' && hashFiles('e2e-windows-live-artifacts/**') != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

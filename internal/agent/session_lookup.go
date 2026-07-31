@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 // against a dead ctx and logs misleading "command exited with code -1"
 // noise that hides the real timeout.
 const sessionCleanupTimeout = 30 * time.Second
+
+var windowsWorkspaceKeyInvalidChars = regexp.MustCompile(`[^A-Za-z0-9_-]`)
 
 // sessionCleanupContext derives a context for post-run session-file
 // persistence, lookup and download. It detaches from cancellation of the
@@ -117,7 +120,7 @@ func workspaceKeyForRuntime(rt Runtime) string {
 		workspace = realPath
 	}
 	if rt.Shell().GOOS == platform.GOOSWindows {
-		return strings.NewReplacer("\\", "-", "/", "-", ":", "-").Replace(workspace)
+		return windowsWorkspaceKeyInvalidChars.ReplaceAllString(workspace, "-")
 	}
 	return strings.ReplaceAll(workspace, "/", "-")
 }
