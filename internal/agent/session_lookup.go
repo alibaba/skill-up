@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/alibaba/skill-up/internal/platform"
 )
 
 // sessionCleanupTimeout caps how long the post-run session-file lookup,
@@ -107,11 +109,15 @@ func findAgentSessionJSONL(ctx context.Context, rt Runtime, lookup agentSessionL
 }
 
 // workspaceKeyForRuntime computes the projects-tree subdirectory name for the
-// runtime's workspace path (slashes replaced with hyphens, symlinks resolved).
+// runtime's workspace path (path separators replaced with hyphens, symlinks
+// resolved).
 func workspaceKeyForRuntime(rt Runtime) string {
 	workspace := rt.Workspace()
 	if realPath, err := filepath.EvalSymlinks(workspace); err == nil {
 		workspace = realPath
+	}
+	if rt.Shell().GOOS == platform.GOOSWindows {
+		return strings.NewReplacer("\\", "-", "/", "-", ":", "-").Replace(workspace)
 	}
 	return strings.ReplaceAll(workspace, "/", "-")
 }
