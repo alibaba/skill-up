@@ -310,8 +310,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm install -g --include=optional '@anthropic-ai/claude-code@2.1.217'
-          claude --version
+          cd .github/model-e2e
+          npm ci --include=optional
+          ./node_modules/.bin/claude --version
+          cygpath -w "$(pwd)/node_modules/.bin" >> "$GITHUB_PATH"
 
       - name: Verify Windows Claude token usage
         if: steps.secrets.outputs.available == 'true'
