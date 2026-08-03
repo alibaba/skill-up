@@ -114,7 +114,14 @@ func (r *JUnitReporter) buildTestSuite(in Input) junitTestSuites {
 		cases    []junitTestCase
 	)
 
-	for _, cr := range in.CaseResults {
+	// Use PrimaryCaseResults (with_skill preferred) instead of the raw
+	// CaseResults so that a benchmark-mode "without_skill" baseline failure
+	// is not counted as an additional CI failure/test. CI systems that
+	// consume this JUnit XML gate builds on tests/failures/errors, and the
+	// baseline is expected-to-sometimes-fail reference data, not a real
+	// regression. Baseline-only detail remains available in benchmark.json
+	// and the HTML report's per-case "Baseline" section.
+	for _, cr := range in.PrimaryCaseResults() {
 		tc := junitTestCase{
 			Name:      cr.CaseID,
 			ClassName: in.SkillName,
@@ -157,7 +164,7 @@ func (r *JUnitReporter) buildTestSuite(in Input) junitTestSuites {
 
 	suite := junitTestSuite{
 		Name:      in.SkillName,
-		Tests:     len(in.CaseResults),
+		Tests:     len(cases),
 		Failures:  failures,
 		Errors:    errors,
 		Skipped:   skipped,
