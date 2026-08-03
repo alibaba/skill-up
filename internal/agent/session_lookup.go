@@ -121,8 +121,8 @@ func findAgentSessionJSONL(ctx context.Context, rt Runtime, lookup agentSessionL
 
 // workspaceKeyForRuntime computes the projects-tree subdirectory name for the
 // runtime's workspace path. Claude derives Windows keys from the cwd spelling
-// it receives, so preserve short-path components such as RUNNER~1 instead of
-// resolving them to their long form.
+// it receives, so avoid expanding 8.3 short names to their long form before
+// sanitizing them.
 func workspaceKeyForRuntime(rt Runtime) string {
 	workspace := rt.Workspace()
 	if rt.Shell().GOOS == platform.GOOSWindows {
