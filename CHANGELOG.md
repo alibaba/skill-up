@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   append-and-deduplicate semantics for list checks and case-level overrides for
   `exit_code` and `golden_file`.
 
+### Fixed
+- Claude Code session lookup now normalizes Windows workspace paths to the
+  project-directory key used by the CLI, restoring token usage in reports.
+
 ## [0.7.0] - 2026-07-16
 
 ### Added
