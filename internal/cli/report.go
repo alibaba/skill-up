@@ -25,13 +25,14 @@ evaluation has completed, or generating additional report formats.
 Examples:
   skill-up report my-skill-workspace/iteration-1/result.json
   skill-up report my-skill-workspace/iteration-1/result.json --format junit --format html
+  skill-up report my-skill-workspace/iteration-1/result.json --format markdown
   skill-up report my-skill-workspace/iteration-1/result.json --format json --output-dir ./reports`,
 	Args: cobra.ExactArgs(1),
 	RunE: runReport,
 }
 
 func init() {
-	reportCmd.Flags().StringArray("format", nil, "Report format (json, junit, html). Can be specified multiple times. Default: json")
+	reportCmd.Flags().StringArray("format", nil, "Report format (json, junit, html, markdown). Can be specified multiple times. Default: json")
 	reportCmd.Flags().String("output-dir", "", "Directory for report outputs. Default: same directory as result.json")
 }
 
@@ -69,7 +70,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
 	for _, format := range formats {
-		reporter, outputPath, err := buildReporter(format, outputDir)
+		reporter, outputPath, err := buildReportCommandReporter(format, outputDir)
 		if err != nil {
 			return err
 		}
@@ -88,6 +89,20 @@ func runReport(cmd *cobra.Command, args []string) error {
 		len(input.CaseResults))
 
 	return nil
+}
+
+// buildReportCommandReporter creates a Reporter for formats accepted by the
+// offline report command.
+func buildReportCommandReporter(format, outputDir string) (report.Reporter, string, error) {
+	if format == "markdown" {
+		path := filepath.Join(outputDir, "report.md")
+		return &report.MarkdownReporter{OutputPath: path}, path, nil
+	}
+	reporter, path, err := buildReporter(format, outputDir)
+	if err != nil {
+		return nil, "", fmt.Errorf("unsupported report format %q (supported: json, junit, html, markdown)", format)
+	}
+	return reporter, path, nil
 }
 
 // buildReporter creates a Reporter for the given format string.

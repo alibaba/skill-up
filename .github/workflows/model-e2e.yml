@@ -14,6 +14,7 @@ on:
         options:
           - all
           - none-runtime
+          - windows-none-runtime
           - opensandbox
           - docker
 
@@ -265,6 +266,88 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  e2e-windows:
+    name: E2E (none runtime, Windows, live Claude)
+    if: inputs.suite == 'all' || inputs.suite == 'windows-none-runtime'
+    runs-on: windows-2025
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check secret availability
+        id: secrets
+        shell: bash
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DASHSCOPE_API_KEY" ]; then
+            echo "::error::DASHSCOPE_API_KEY is required for Windows Claude e2e."
+            exit 1
+          fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        if: steps.secrets.outputs.available == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      - name: Set up Node.js
+        if: steps.secrets.outputs.available == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Install claude-code CLI
+        if: steps.secrets.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .github/model-e2e
+          npm ci --include=optional
+          ./node_modules/.bin/claude --version
+          cygpath -w "$(pwd)/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: Verify Windows Claude token usage
+        if: steps.secrets.outputs.available == 'true'
+        shell: bash
+        run: go test -tags e2e -timeout 600s -count=1 -v -run '^TestAgent_ClaudeCode_WindowsTokenUsage$' ./e2e
+        env:
+          SKILL_UP_FULL_E2E: "1"
+          SKILL_UP_E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-windows-live-artifacts
+          ANTHROPIC_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          ANTHROPIC_BASE_URL: https://dashscope.aliyuncs.com/apps/anthropic
+          ANTHROPIC_MODEL: qwen3.6-plus
+
+      - name: List Claude project directories on failure
+        if: failure() && steps.secrets.outputs.available == 'true'
+        shell: pwsh
+        run: |
+          $projects = Join-Path $HOME ".claude\projects"
+          if (-not (Test-Path $projects)) {
+            Write-Host "Claude projects directory does not exist"
+            exit 0
+          }
+          Get-ChildItem $projects -Directory | ForEach-Object {
+            Write-Host "Claude project directory: $($_.Name)"
+          }
+
+      - name: Upload Windows Claude workspace artifacts
+        if: always() && steps.secrets.outputs.available == 'true' && hashFiles('e2e-windows-live-artifacts/**') != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: model-e2e-windows-claude-workspaces
+          path: e2e-windows-live-artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
+
   e2e-docker:
     name: E2E (Docker runtime, live model)
     if: inputs.suite == 'all' || inputs.suite == 'docker'
@@ -323,7 +406,7 @@ jobs:
   summary:
     name: Model E2E Summary
     if: always()
-    needs: [e2e, e2e-opensandbox, e2e-docker]
+    needs: [e2e, e2e-opensandbox, e2e-docker, e2e-windows]
     runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 5
     permissions: {}
@@ -331,6 +414,7 @@ jobs:
       - name: Write job summary
         env:
           NONE_RESULT: ${{ needs.e2e.result }}
+          WINDOWS_RESULT: ${{ needs.e2e-windows.result }}
           OPENSANDBOX_RESULT: ${{ needs.e2e-opensandbox.result }}
           DOCKER_RESULT: ${{ needs.e2e-docker.result }}
           SELECTED_SUITE: ${{ inputs.suite }}
@@ -344,10 +428,11 @@ jobs:
             echo "| Runtime | Result |"
             echo "|---|---|"
             echo "| none | ${NONE_RESULT} |"
+            echo "| none (Windows, Claude) | ${WINDOWS_RESULT} |"
             echo "| OpenSandbox | ${OPENSANDBOX_RESULT} |"
             echo "| Docker | ${DOCKER_RESULT} |"
           } >> "$GITHUB_STEP_SUMMARY"
-          for result in "$NONE_RESULT" "$OPENSANDBOX_RESULT" "$DOCKER_RESULT"; do
+          for result in "$NONE_RESULT" "$WINDOWS_RESULT" "$OPENSANDBOX_RESULT" "$DOCKER_RESULT"; do
             if [ "$result" != success ] && [ "$result" != skipped ]; then
               echo "::error::One or more selected live-model suites failed"
               exit 1

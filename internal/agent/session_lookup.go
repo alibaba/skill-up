@@ -4,8 +4,12 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
+
+	"github.com/alibaba/skill-up/internal/logging"
+	"github.com/alibaba/skill-up/internal/platform"
 )
 
 // sessionCleanupTimeout caps how long the post-run session-file lookup,
@@ -16,6 +20,8 @@ import (
 // against a dead ctx and logs misleading "command exited with code -1"
 // noise that hides the real timeout.
 const sessionCleanupTimeout = 30 * time.Second
+
+var windowsWorkspaceKeyInvalidChars = regexp.MustCompile(`[^A-Za-z0-9_-]`)
 
 // sessionCleanupContext derives a context for post-run session-file
 // persistence, lookup and download. It detaches from cancellation of the
@@ -91,25 +97,37 @@ func findAgentSessionJSONL(ctx context.Context, rt Runtime, lookup agentSessionL
 	if workspaceKey == "" {
 		return ""
 	}
+	logging.DebugContextf(ctx, "agent session lookup: workspace=%q key=%q", rt.Workspace(), workspaceKey)
 
 	script := buildSessionLookupScript(lookup)
+	if rt.Shell().GOOS == platform.GOOSWindows {
+		script = buildWindowsSessionLookupScript(lookup)
+	}
 	result, err := rt.Exec(ctx, script, ExecOptions{
 		Env: map[string]string{lookup.envVar: workspaceKey},
 	})
 	if err != nil || result.ExitCode != 0 {
+		logging.DebugContextf(ctx, "agent session lookup failed: err=%v exit_code=%d", err, result.ExitCode)
 		return ""
 	}
 	sessionPath := strings.TrimSpace(result.Stdout)
 	if sessionPath == "" || !strings.HasSuffix(sessionPath, ".jsonl") {
+		logging.DebugContextf(ctx, "agent session lookup returned no JSONL path")
 		return ""
 	}
+	logging.DebugContextf(ctx, "agent session lookup found %q", sessionPath)
 	return sessionPath
 }
 
 // workspaceKeyForRuntime computes the projects-tree subdirectory name for the
-// runtime's workspace path (slashes replaced with hyphens, symlinks resolved).
+// runtime's workspace path. Claude derives Windows keys from the cwd spelling
+// it receives, so avoid expanding 8.3 short names to their long form before
+// sanitizing them.
 func workspaceKeyForRuntime(rt Runtime) string {
 	workspace := rt.Workspace()
+	if rt.Shell().GOOS == platform.GOOSWindows {
+		return windowsWorkspaceKeyInvalidChars.ReplaceAllString(workspace, "-")
+	}
 	if realPath, err := filepath.EvalSymlinks(workspace); err == nil {
 		workspace = realPath
 	}
@@ -130,6 +148,20 @@ func extractSessionIDFromPath(sessionPath string) string {
 // buildSessionLookupScript renders the shared shell snippet that picks the
 // newest *.jsonl under the configured root.
 func buildSessionLookupScript(lookup agentSessionLookup) string {
+	return buildSessionLookupScriptWithPrinter(lookup, `printf %s "$best"`)
+}
+
+func buildWindowsSessionLookupScript(lookup agentSessionLookup) string {
+	// Git Bash reports /c/... paths, which Windows filepath handling does
+	// not consider absolute. Convert the selected session path before it is
+	// passed to Runtime.DownloadFile.
+	return buildSessionLookupScriptWithPrinter(
+		lookup,
+		`if [ -n "$best" ]; then cygpath -w "$best" 2>/dev/null || printf %s "$best"; fi`,
+	)
+}
+
+func buildSessionLookupScriptWithPrinter(lookup agentSessionLookup, printBest string) string {
 	extra := ""
 	if lookup.findExtra != "" {
 		extra = " " + lookup.findExtra
@@ -145,5 +177,5 @@ while IFS= read -r p || [ -n "$p" ]; do
   case $m in ''|*[!0-9]*) continue;; esac
   if [ "$ts" -eq -1 ] || [ "$m" -gt "$ts" ]; then ts=$m; best=$p; fi
 done <"$tmp"
-printf %%s "$best"`, lookup.rootTmpl, extra)
+%s`, lookup.rootTmpl, extra, printBest)
 }

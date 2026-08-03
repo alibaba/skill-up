@@ -302,6 +302,203 @@ func TestHTMLReporter_SynthesizedTurnFailurePassRateScript(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// MarkdownReporter
+// ---------------------------------------------------------------------------
+
+func TestMarkdownReporter_Write(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.md")
+	r := &MarkdownReporter{OutputPath: path}
+
+	err := r.Write(context.Background(), sampleInput())
+	if err != nil {
+		t.Fatalf("MarkdownReporter.Write failed: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read markdown file: %v", err)
+	}
+	content := string(data)
+
+	for _, want := range []string{
+		"# Skill Report: code-review",
+		"## Summary",
+		"| Total Cases | 4 |",
+		"| Passed | 1 |",
+		"| Failed | 1 |",
+		"| Errors | 1 |",
+		"| Skipped | 1 |",
+		"| Pass Rate | 25.0% |",
+		"## Cases",
+		"| basic-success | Agent should identify a missing null check | PASS | 45.2s | 5 |",
+		"## Failure and Error Details",
+		"### edge-case-null",
+		"output_contains: &#39;graceful&#39;",
+		"output does not contain &#39;graceful&#39;",
+		"### error-case",
+		"engine process killed after 300s",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("markdown missing %q\ncontent:\n%s", want, content)
+		}
+	}
+}
+
+func TestMarkdownReporter_EscapesTableCells(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.md")
+	input := sampleInput()
+	input.CaseResults = []CaseResult{
+		{
+			CaseID:     "case|pipe",
+			Title:      "Title with | pipe\nand newline",
+			Status:     judge.StatusPass,
+			DurationMs: 1200,
+			Turns:      2,
+		},
+	}
+
+	r := &MarkdownReporter{OutputPath: path}
+	if err := r.Write(context.Background(), input); err != nil {
+		t.Fatalf("MarkdownReporter.Write failed: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read markdown file: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, `case\|pipe`) {
+		t.Fatalf("case id pipe was not escaped:\n%s", content)
+	}
+	if !strings.Contains(content, `Title with \| pipe and newline`) {
+		t.Fatalf("title was not normalized and escaped:\n%s", content)
+	}
+}
+
+func TestMarkdownReporter_OmitsEmptyMetadataLines(t *testing.T) {
+	tests := []struct {
+		name    string
+		engine  string
+		model   string
+		want    string
+		notWant string
+	}{
+		{
+			name:    "engine only",
+			engine:  "codex",
+			want:    "- **Engine**: codex",
+			notWant: "- **Model**:",
+		},
+		{
+			name:    "model only",
+			model:   "gpt-5",
+			want:    "- **Model**: gpt-5",
+			notWant: "- **Engine**:",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "report.md")
+			input := sampleInput()
+			input.EngineName = tc.engine
+			input.ModelName = tc.model
+
+			r := &MarkdownReporter{OutputPath: path}
+			if err := r.Write(context.Background(), input); err != nil {
+				t.Fatalf("MarkdownReporter.Write failed: %v", err)
+			}
+
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read markdown file: %v", err)
+			}
+			content := string(data)
+			if !strings.Contains(content, tc.want) {
+				t.Fatalf("markdown missing %q:\n%s", tc.want, content)
+			}
+			if strings.Contains(content, tc.notWant) {
+				t.Fatalf("markdown should omit empty metadata line %q:\n%s", tc.notWant, content)
+			}
+		})
+	}
+}
+
+func TestMarkdownReporter_EscapesHTML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.md")
+	input := sampleInput()
+	input.SkillName = "<details>hidden</details>"
+	input.CaseResults = []CaseResult{
+		{
+			CaseID:     "case-html",
+			Title:      "<summary>toggle</summary>",
+			Status:     judge.StatusFail,
+			DurationMs: 1200,
+			Turns:      1,
+			Grading: &judge.Result{
+				Status: judge.StatusFail,
+				AssertionResults: []judge.AssertionResult{
+					{Text: "<script>alert(1)</script>", Passed: false, Evidence: "<!-- hide report -->"},
+				},
+			},
+		},
+	}
+
+	r := &MarkdownReporter{OutputPath: path}
+	if err := r.Write(context.Background(), input); err != nil {
+		t.Fatalf("MarkdownReporter.Write failed: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read markdown file: %v", err)
+	}
+	content := string(data)
+	for _, bad := range []string{"<details>", "<summary>", "<script>", "<!--"} {
+		if strings.Contains(content, bad) {
+			t.Fatalf("markdown should not contain raw HTML marker %q:\n%s", bad, content)
+		}
+	}
+	for _, want := range []string{"&lt;details&gt;hidden&lt;/details&gt;", "&lt;script&gt;alert(1)&lt;/script&gt;", "&lt;!-- hide report --&gt;"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("markdown missing escaped HTML %q:\n%s", want, content)
+		}
+	}
+}
+
+func TestMarkdownReporter_OmitsEmptyFailureDetails(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.md")
+	input := sampleInput()
+	input.CaseResults = []CaseResult{
+		{
+			CaseID:     "pass-only",
+			Title:      "Passing case",
+			Status:     judge.StatusPass,
+			DurationMs: 500,
+			Turns:      1,
+		},
+	}
+
+	r := &MarkdownReporter{OutputPath: path}
+	if err := r.Write(context.Background(), input); err != nil {
+		t.Fatalf("MarkdownReporter.Write failed: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read markdown file: %v", err)
+	}
+	if strings.Contains(string(data), "Failure and Error Details") {
+		t.Fatalf("all-pass markdown should omit failure details:\n%s", string(data))
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Input helpers
 // ---------------------------------------------------------------------------
 

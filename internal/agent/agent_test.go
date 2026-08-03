@@ -317,6 +317,7 @@ type probeMergeTestRuntime struct {
 	probeErr    error
 	merged      map[string]string
 	shell       platform.Shell
+	workspace   string
 }
 
 func (r *probeMergeTestRuntime) Create(context.Context) error                     { return nil }
@@ -329,7 +330,7 @@ func (r *probeMergeTestRuntime) DownloadFile(context.Context, string, string) er
 	return nil
 }
 func (r *probeMergeTestRuntime) DownloadDir(context.Context, string, string) error { return nil }
-func (r *probeMergeTestRuntime) Workspace() string                                 { return "" }
+func (r *probeMergeTestRuntime) Workspace() string                                 { return r.workspace }
 func (r *probeMergeTestRuntime) RequiresProcessSandbox() bool                      { return false }
 func (r *probeMergeTestRuntime) Exec(_ context.Context, cmd string, _ ExecOptions) (ExecResult, error) {
 	r.probeCmd = cmd
@@ -591,6 +592,77 @@ func TestExtractSessionIDFromPath(t *testing.T) {
 			got := extractSessionIDFromPath(tt.path)
 			if got != tt.want {
 				t.Fatalf("extractSessionIDFromPath(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWorkspaceKeyForRuntime(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		workspace string
+		shell     platform.Shell
+		want      string
+	}{
+		{
+			name:      "windows backslashes",
+			workspace: `C:\Users\tester\AppData\Local\Temp\skill-up-123`,
+			shell:     platform.Shell{GOOS: platform.GOOSWindows, Family: platform.ShellPOSIX, BashPath: `C:\Git\bin\bash.exe`},
+			want:      "C--Users-tester-AppData-Local-Temp-skill-up-123",
+		},
+		{
+			name:      "windows forward slashes",
+			workspace: "C:/Users/tester/AppData/Local/Temp/skill-up-123",
+			shell:     platform.Shell{GOOS: platform.GOOSWindows, Family: platform.ShellPOSIX, BashPath: `C:\Git\bin\bash.exe`},
+			want:      "C--Users-tester-AppData-Local-Temp-skill-up-123",
+		},
+		{
+			name:      "windows short path",
+			workspace: `C:\Users\RUNNER~1\AppData\Local\Temp\skill-up-123`,
+			shell:     platform.Shell{GOOS: platform.GOOSWindows, Family: platform.ShellPOSIX, BashPath: `C:\Git\bin\bash.exe`},
+			want:      "C--Users-RUNNER-1-AppData-Local-Temp-skill-up-123",
+		},
+		{
+			name:      "posix colon remains valid",
+			workspace: "/tmp/skill-up:123",
+			shell:     platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX},
+			want:      "-tmp-skill-up:123",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rt := &probeMergeTestRuntime{workspace: tt.workspace, shell: tt.shell}
+			if got := workspaceKeyForRuntime(rt); got != tt.want {
+				t.Fatalf("workspaceKeyForRuntime() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildSessionLookupScriptPathFormat(t *testing.T) {
+	t.Parallel()
+
+	lookup := agentSessionLookup{
+		envVar:   "SKILL_UP_CLAUDE_WSKEY",
+		rootTmpl: "$home/.claude/projects/$SKILL_UP_CLAUDE_WSKEY",
+	}
+	tests := []struct {
+		name        string
+		build       func(agentSessionLookup) string
+		wantCygpath bool
+	}{
+		{name: "posix path", build: buildSessionLookupScript, wantCygpath: false},
+		{name: "windows native path", build: buildWindowsSessionLookupScript, wantCygpath: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			script := tt.build(lookup)
+			if got := strings.Contains(script, `cygpath -w "$best"`); got != tt.wantCygpath {
+				t.Fatalf("cygpath conversion present = %v, want %v\n%s", got, tt.wantCygpath, script)
 			}
 		})
 	}
