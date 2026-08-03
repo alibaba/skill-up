@@ -61,16 +61,16 @@ func (in Input) OverallPassRate() float64 {
 	return float64(passed) / float64(len(primary))
 }
 
-// PrimaryCaseResults returns one CaseResult per case ID, preferring the
-// "with_skill" result over the "without_skill" baseline when benchmark mode
-// produced both for the same case. Order follows first-seen case ID order in
-// CaseResults. Use this instead of iterating CaseResults directly whenever
-// computing an aggregate (pass rate, counts, CI failure signal) that should
-// reflect one outcome per case rather than one outcome per configuration.
+// PrimaryCaseResults returns one CaseResult per case ID. It gives an exact
+// "with_skill" result priority, otherwise uses a non-baseline result and
+// falls back to the "without_skill" baseline when that is all that is
+// available. Order follows first-seen case ID order in CaseResults. Use this
+// instead of iterating CaseResults directly whenever computing an aggregate
+// (pass rate, counts, CI failure signal) that should reflect one outcome per
+// case rather than one outcome per configuration.
 func (in Input) PrimaryCaseResults() []CaseResult {
 	type slot struct {
 		result   CaseResult
-		hasWith  bool
 		occupied bool
 	}
 	order := make([]string, 0, len(in.CaseResults))
@@ -81,12 +81,12 @@ func (in Input) PrimaryCaseResults() []CaseResult {
 		if !ok {
 			order = append(order, cr.CaseID)
 		}
-		if cr.Configuration != "without_skill" {
-			byID[cr.CaseID] = slot{result: cr, hasWith: true, occupied: true}
+		if cr.Configuration == "with_skill" {
+			byID[cr.CaseID] = slot{result: cr, occupied: true}
 			continue
 		}
-		if !s.occupied {
-			byID[cr.CaseID] = slot{result: cr, hasWith: false, occupied: true}
+		if !s.occupied || s.result.Configuration == "without_skill" {
+			byID[cr.CaseID] = slot{result: cr, occupied: true}
 		}
 	}
 

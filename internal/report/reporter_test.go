@@ -3,6 +3,7 @@ package report
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"os"
 	"path/filepath"
 	"strings"
@@ -360,6 +361,24 @@ func TestInput_PrimaryCaseResults_PrefersWithSkill(t *testing.T) {
 	}
 }
 
+func TestInput_PrimaryCaseResults_PrefersExactWithSkill(t *testing.T) {
+	in := Input{
+		CaseResults: []CaseResult{
+			{CaseID: "case-1", Status: judge.StatusFail, Configuration: "unexpected"},
+			{CaseID: "case-1", Status: judge.StatusPass, Configuration: "with_skill"},
+			{CaseID: "case-1", Status: judge.StatusError, Configuration: "another-unexpected"},
+		},
+	}
+
+	primary := in.PrimaryCaseResults()
+	if len(primary) != 1 {
+		t.Fatalf("expected 1 de-duplicated case, got %d", len(primary))
+	}
+	if primary[0].Configuration != "with_skill" {
+		t.Fatalf("expected exact with_skill result to take priority, got %q", primary[0].Configuration)
+	}
+}
+
 func TestInput_PrimaryCaseResults_FallsBackToBaselineWhenNoWithSkill(t *testing.T) {
 	in := Input{
 		CaseResults: []CaseResult{
@@ -385,15 +404,22 @@ func TestJUnitReporter_BenchmarkMode_ExcludesBaselineFromFailures(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read junit file: %v", err)
 	}
-	content := string(data)
+	var suites junitTestSuites
+	if err := xml.Unmarshal(data, &suites); err != nil {
+		t.Fatalf("unmarshal junit XML: %v", err)
+	}
+	if len(suites.Suites) != 1 {
+		t.Fatalf("expected 1 test suite, got %d", len(suites.Suites))
+	}
+	suite := suites.Suites[0]
 
 	// 2 cases, both with_skill passing; without_skill baseline failures must
 	// not inflate tests/failures counts.
-	if !strings.Contains(content, `tests="2"`) {
-		t.Fatalf("expected tests=2 (de-duplicated per case), got: %s", content)
+	if suite.Tests != 2 {
+		t.Fatalf("expected tests=2 (de-duplicated per case), got %d", suite.Tests)
 	}
-	if !strings.Contains(content, `failures="0"`) {
-		t.Fatalf("expected failures=0 (baseline failures excluded), got: %s", content)
+	if suite.Failures != 0 {
+		t.Fatalf("expected failures=0 (baseline failures excluded), got %d", suite.Failures)
 	}
 }
 
