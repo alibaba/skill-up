@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-07
+
 ### Added
 - Eval-level default expect checks under `cases.defaults.expect`, with
   append-and-deduplicate semantics for list checks and case-level overrides for
@@ -15,10 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stability summary to highlight flaky PASS/FAIL/ERROR/SKIP outcomes.
 - Skill references now support explicit doublestar `include` and `exclude`
   patterns for both run-agent and judge Skill installation.
+- Markdown report generation through `skill-up report --format markdown`,
+  producing a concise `report.md` suitable for CI logs and pull request
+  comments.
+- A `--baseline` flag for `skill-up run` that enables benchmark comparison for
+  an individual invocation without changing `eval.yaml`.
 
 ### Fixed
 - Claude Code session lookup now normalizes Windows workspace paths to the
   project-directory key used by the CLI, restoring token usage in reports.
+- Aggregate report statistics now exclude `without_skill` baseline runs, so
+  pass rates and status totals describe the evaluated Skill rather than mixing
+  benchmark control results into the headline metrics.
 
 ## [0.7.0] - 2026-07-16
 
@@ -429,6 +439,8 @@ The `v0.5.0` release tag is available at
   project and delivers the end-to-end capability to declare eval environments,
   run cases and emit structured reports as described in [README.md](README.md).
 
+[0.8.0]: https://github.com/alibaba/skill-up/releases/tag/v0.8.0
+[0.7.0]: https://github.com/alibaba/skill-up/releases/tag/v0.7.0
 [0.6.0]: https://github.com/alibaba/skill-up/releases/tag/v0.6.0
 [0.5.0]: https://github.com/alibaba/skill-up/releases/tag/v0.5.0
 [0.4.0]: https://github.com/alibaba/skill-up/releases/tag/v0.4.0
