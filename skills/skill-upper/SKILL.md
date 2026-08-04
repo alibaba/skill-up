@@ -167,11 +167,14 @@ skill-up run <skill-root>/evals/eval.yaml
 | Engine override                  | `--engine codex --model openai/gpt-4` |
 | Parallelism                      | `--parallelism 4` (1–256)             |
 | Anthropic JSON                   | `--auto`                              |
-| N rounds                         | `--iteration 3`                       |
+| Stability/flakiness sampling     | `--iteration 3`                       |
 | Auto-append after last iteration | `--iteration 0` (default behavior)    |
 | Verbose                          | `-v`, `-vv`                           |
 
-Exit `0` = all passed; `1` = failure or error — suitable for CI.
+Exit `0` = all passed; `1` = failure or error — suitable for CI. When
+an explicit positive `--iteration N` runs more than one sample, inspect the
+terminal's simple current-command summary for lines like
+`case_a: 3 trials, 2 PASS, 1 FAIL -> flaky`.
 
 ### Step 7: Interpret the report
 
@@ -219,7 +222,10 @@ Full flags: `references/cli.md`.
 - Abusing `agent_judge`.
 - Anthropic `evals.json` expectations → default `agent_judge`; use `import` + hand edits for deterministic checks.
 - Paths relative to Skill root (`SKILL.md` directory).
-- `--iteration 0` appends after the latest existing iteration; positive `--iteration N` runs N rounds.
+- `--iteration 0` appends one run after the latest existing iteration without
+  summarizing history; positive `--iteration N` runs N samples of the selected
+  cases and, when N > 1, prints a simple stability/flakiness summary covering
+  only samples from the current command.
 
 ## References
 

@@ -1,12 +1,16 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	_ "unsafe"
 
 	"github.com/alibaba/skill-up/internal/agent"
 	"github.com/alibaba/skill-up/internal/config"
@@ -16,6 +20,9 @@ import (
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
+
+//go:linkname uiOutput github.com/alibaba/skill-up/internal/ui.Output
+var uiOutput io.Writer
 
 func TestRunner_InitWorkspace_UsesExplicitRunNumber(t *testing.T) {
 	t.Parallel()
@@ -179,6 +186,182 @@ func TestRunner_Evaluate_RunsMultipleIterations(t *testing.T) {
 	if got := r.workspace.IterationNum; got != 2 {
 		t.Fatalf("IterationNum = %d, want 2 after final run", got)
 	}
+}
+
+func TestFormatIterationStabilitySummary(t *testing.T) {
+	t.Parallel()
+
+	summary := stabilityCaseSummary{
+		caseID: "case_a",
+		trials: 3,
+		counts: map[string]int{
+			"PASS": 2,
+			"FAIL": 1,
+		},
+	}
+
+	if got, want := formatIterationStabilitySummary(summary), "case_a: 3 trials, 2 PASS, 1 FAIL -> flaky"; got != want {
+		t.Fatalf("formatIterationStabilitySummary() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatIterationStabilitySummaryIncludesUnknownStatuses(t *testing.T) {
+	t.Parallel()
+
+	summary := stabilityCaseSummary{
+		caseID: "case_b",
+		trials: 3,
+		counts: map[string]int{
+			"PASS":    1,
+			"UNKNOWN": 1,
+			"Z_OTHER": 1,
+		},
+	}
+
+	want := "case_b: 3 trials, 1 PASS, 1 UNKNOWN, 1 Z_OTHER -> flaky"
+	if got := formatIterationStabilitySummary(summary); got != want {
+		t.Fatalf("formatIterationStabilitySummary() = %q, want %q", got, want)
+	}
+}
+
+func TestRunner_Evaluate_MultipleIterationsPrintStabilitySummaryAndDoNotWriteFiles(t *testing.T) {
+	evalDir := t.TempDir()
+	evalsDir := filepath.Join(evalDir, "evals")
+	if err := os.MkdirAll(evalsDir, 0o755); err != nil {
+		t.Fatalf("mkdir evals: %v", err)
+	}
+
+	loader := config.NewLoader(filepath.Join(evalsDir, "eval.yaml"))
+	r := NewRunner(&config.EvalConfig{
+		Environment: config.Environment{Type: "none"},
+		Cases:       config.CasesConfig{Parallelism: 1},
+	}, loader, nil, credential.AgentInitParams{})
+
+	origNewEvaluator := newEvaluator
+	t.Cleanup(func() { newEvaluator = origNewEvaluator })
+
+	statuses := []judge.Status{judge.StatusPass, judge.StatusFail, judge.StatusPass}
+	callCount := 0
+	newEvaluator = func(opts evaluator.EvalOptions) evaluator.Evaluator {
+		status := statuses[callCount]
+		callCount++
+		return evaluatorStub{
+			evaluateAll: func(context.Context, []*config.CaseConfig) ([]evaluator.EvalResult, error) {
+				return []evaluator.EvalResult{
+					{
+						CaseID:        "case_a",
+						CaseName:      "Case A",
+						Status:        status,
+						Configuration: "with_skill",
+						SessionResult: &agent.SessionResult{FinalMessage: "ok", ExitCode: 0},
+						Grading:       &judge.Result{Status: status},
+					},
+					{
+						CaseID:        "case_a",
+						CaseName:      "Case A baseline",
+						Status:        judge.StatusError,
+						Configuration: "without_skill",
+						SessionResult: &agent.SessionResult{FinalMessage: "baseline", ExitCode: 0},
+						Grading:       &judge.Result{Status: judge.StatusError},
+					},
+				}, nil
+			},
+		}
+	}
+
+	var output bytes.Buffer
+	captureUIOutput(t, &output)
+
+	workspaceRoot := filepath.Join(evalDir, "workspace")
+	if _, err := r.Evaluate(context.Background(), []*config.CaseConfig{{ID: "case_a", Title: "Case A"}}, &runnerTestAgent{}, EvaluateOptions{
+		OutputDir:       workspaceRoot,
+		Iteration:       3,
+		DeleteWorkspace: false,
+	}); err != nil {
+		t.Fatalf("Evaluate failed: %v", err)
+	}
+
+	rendered := output.String()
+	if !strings.Contains(rendered, "case_a: 3 trials, 2 PASS, 1 FAIL -> flaky") {
+		t.Fatalf("stability summary missing with_skill results, output:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "ERROR") {
+		t.Fatalf("stability summary should exclude baseline ERROR result, output:\n%s", rendered)
+	}
+
+	for _, filename := range []string{"stability.json", "stability.md"} {
+		if err := assertFileAbsentUnder(t, workspaceRoot, filename); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestRunner_Evaluate_AutoIterationAppendsWithoutStabilitySummary(t *testing.T) {
+	evalDir := t.TempDir()
+	evalsDir := filepath.Join(evalDir, "evals")
+	if err := os.MkdirAll(evalsDir, 0o755); err != nil {
+		t.Fatalf("mkdir evals: %v", err)
+	}
+	workspaceRoot := filepath.Join(evalDir, "workspace")
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, "iteration-1"), 0o755); err != nil {
+		t.Fatalf("mkdir existing iteration: %v", err)
+	}
+
+	loader := config.NewLoader(filepath.Join(evalsDir, "eval.yaml"))
+	r := NewRunner(&config.EvalConfig{
+		Environment: config.Environment{Type: "none"},
+		Cases:       config.CasesConfig{Parallelism: 1},
+	}, loader, nil, credential.AgentInitParams{})
+
+	var output bytes.Buffer
+	captureUIOutput(t, &output)
+
+	if _, err := r.Evaluate(context.Background(), []*config.CaseConfig{{ID: "case_a", Title: "Case A"}}, &runnerTestAgent{}, EvaluateOptions{
+		OutputDir:       workspaceRoot,
+		Iteration:       0,
+		DeleteWorkspace: false,
+	}); err != nil {
+		t.Fatalf("Evaluate failed: %v", err)
+	}
+
+	if got := r.workspace.IterationNum; got != 2 {
+		t.Fatalf("IterationNum = %d, want 2", got)
+	}
+	if _, err := os.Stat(filepath.Join(workspaceRoot, "iteration-2", "result.json")); err != nil {
+		t.Fatalf("auto iteration should append result.json under iteration-2: %v", err)
+	}
+	if strings.Contains(output.String(), "Iteration stability summary") {
+		t.Fatalf("auto iteration should not print historical stability summary, output:\n%s", output.String())
+	}
+}
+
+func captureUIOutput(t *testing.T, output *bytes.Buffer) {
+	t.Helper()
+
+	origOutput := uiOutput
+	uiOutput = output
+	t.Cleanup(func() { uiOutput = origOutput })
+}
+
+func assertFileAbsentUnder(t *testing.T, root, filename string) error {
+	t.Helper()
+
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || entry.Name() != filename {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			rel = path
+		}
+		if strings.Contains(rel, string(filepath.Separator)) {
+			return fmt.Errorf("%s should not be written under workspace, found at %s", filename, rel)
+		}
+		return fmt.Errorf("%s should not be written at workspace root", filename)
+	})
 }
 
 func TestRunner_Evaluate_ReturnsPartialResultsWhenLaterRunFails(t *testing.T) {

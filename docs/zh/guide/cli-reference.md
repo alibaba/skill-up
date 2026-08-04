@@ -27,7 +27,7 @@ skill-up run [path] [flags]
 | `--exclude-case-name` | —                            | 排除匹配的用例（支持 glob，可多次指定）                                                                                                                    |
 | `--format`            | —                            | 附加报告格式：`junit` / `html`（可多次指定）。`result.json` 始终写入；`--format junit` 生成 `report.xml`，`--format html` 生成 `report.html`；`--format json` 为空操作 |
 | `--output-dir`        | 与 skill 目录同级的 `<skill-name>-workspace/` | 报告和产物的输出目录                                                                                                                       |
-| `--iteration`         | `1`                          | 总运行次数。每轮运行的产物分别写入 `iteration-1/` 到 `iteration-N/`                                                                                         |
+| `--iteration`         | `0`（auto）                  | 重复运行已选用例，用于稳定性/flaky 采样。`0` 表示在最新 `iteration-N/` 后自动追加一轮，但不汇总历史结果；正整数 `N` 表示运行 N 次采样，产物写入 `iteration-1/` 到 `iteration-N/`；当 `N > 1` 时，终端摘要只覆盖本次命令执行的采样 |
 | `--engine`            | 配置文件中的值                | 覆盖 Engine 名称                                                                                                                                          |
 | `--model`             | 配置文件中的值                | 覆盖模型（格式：`provider/name`）                                                                                                                          |
 | `--parallelism`       | 配置文件中的值                | 覆盖 `cases.parallelism`，用于临时调整用例并行数，取值范围为 1 到 256                                                                                       |
@@ -59,7 +59,7 @@ skill-up run ./evals/eval.yaml --baseline
 # 生成多种格式报告
 skill-up run ./evals/eval.yaml --format json --format html --format junit
 
-# 连续运行 3 轮，产物分别写入 iteration-1/ 到 iteration-3/
+# 本次命令连续运行 3 次采样，产物分别写入 iteration-1/ 到 iteration-3/，终端打印简单 flaky 摘要
 skill-up run ./evals/eval.yaml --iteration 3
 
 # 自动检测模式（直接消费 Anthropic evals.json）
