@@ -27,7 +27,7 @@ skill-up run [path] [flags]
 | `--exclude-case-name` | —                  | 排除匹配的用例（glob，可多次）                                                                                                                                                    |
 | `--format`            | —                  | 附加报告格式：`junit` / `html`（可多次）。`result.json` 始终写入；`--format junit` 生成 `report.xml`；`--format html` 生成 `report.html`；`--format json` 对 `result.json` 为冗余 |
 | `--output-dir`        | eval.yaml 同级目录 | 报告和产物的输出目录                                                                                                                                                              |
-| `--iteration`         | `0`（auto）        | 总运行次数。`0` = 自动：在最后一个已有 `iteration-N/` 之后追加一轮；正整数 = 显式运行 N 轮，产物写入 `iteration-1/` … `iteration-N/`                                              |
+| `--iteration`         | `0`（auto）        | 重复运行已选用例，用于稳定性/flaky 采样。`0` = 自动：在最后一个已有 `iteration-N/` 之后追加一轮，但不汇总历史结果；正整数 = 显式运行 N 次采样，产物写入 `iteration-1/` … `iteration-N/`；当 N > 1 时，终端摘要只覆盖本次命令执行的采样 |
 | `--engine`            | 配置中的值         | 覆盖 Engine 名称                                                                                                                                                                  |
 | `--runtime`           | 配置中的值         | 覆盖 `environment.type`（`none`、`opensandbox`、`docker`）                                                                                                                        |
 | `--model`             | 配置中的值         | 覆盖模型（格式：`provider/name`）                                                                                                                                                 |
@@ -54,6 +54,7 @@ skill-up run ./evals/eval.yaml --parallelism 4
 skill-up run ./evals/eval.yaml --baseline
 skill-up run ./evals/eval.yaml --format html --format junit
 skill-up run ./evals/eval.yaml --iteration 3
+# example terminal summary: case_a: 3 trials, 2 PASS, 1 FAIL -> flaky
 skill-up run ./evals/eval.yaml
 skill-up run --auto
 skill-up run ./my-skill/ --auto --engine codex

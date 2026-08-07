@@ -27,7 +27,7 @@ skill-up run [path] [flags]
 | `--exclude-case-name`  | —                             | Exclude matching cases (glob; can be repeated)                                                                                                             |
 | `--format`             | —                             | Extra report formats: `junit` / `html` (repeatable). `result.json` is always written; `--format junit` produces `report.xml`, `--format html` produces `report.html`; `--format json` is a no-op |
 | `--output-dir`         | `<skill-name>-workspace/` next to the skill dir | Output directory for reports and artifacts                                                                                                 |
-| `--iteration`          | `1`                           | Total run count. Each iteration writes to `iteration-1/` … `iteration-N/`                                                                                  |
+| `--iteration`          | `0` (auto)                    | Repeat selected cases for stability/flakiness sampling. `0` auto-appends one run after the latest `iteration-N/` without summarizing history; positive `N` runs N samples and writes `iteration-1/` … `iteration-N/`; when `N > 1`, the terminal summary covers only samples from the current command |
 | `--engine`             | From config                   | Override engine name                                                                                                                                       |
 | `--model`              | From config                   | Override model (format: `provider/name`)                                                                                                                   |
 | `--parallelism`        | From config                   | Override `cases.parallelism`. Allowed range: 1–256                                                                                                          |
@@ -66,7 +66,7 @@ skill-up run ./evals/eval.yaml --baseline
 # Multiple report formats
 skill-up run ./evals/eval.yaml --format json --format html --format junit
 
-# Three iterations, one folder per run
+# Three samples in this command, one folder per run, plus a simple flaky summary
 skill-up run ./evals/eval.yaml --iteration 3
 
 # Auto-detect mode (consumes Anthropic evals.json directly)

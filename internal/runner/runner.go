@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -176,7 +178,91 @@ func (r *Runner) Evaluate(ctx context.Context, cases []*config.CaseConfig, ag ag
 			logging.WarnContextf(ctx, "Runner: failed to write results for run %d: %v", runNumber, err)
 		}
 	}
+	if runCount > 1 {
+		printIterationStabilitySummary(allResults)
+	}
 	return allResults, nil
+}
+
+type stabilityCaseSummary struct {
+	caseID string
+	trials int
+	counts map[string]int
+}
+
+func printIterationStabilitySummary(results []evaluator.EvalResult) {
+	summaries := buildIterationStabilitySummaries(results)
+	if len(summaries) == 0 {
+		return
+	}
+
+	ui.Blank()
+	ui.Status("INFO", "Iteration stability summary:")
+	for _, summary := range summaries {
+		ui.Status("", "  "+formatIterationStabilitySummary(summary))
+	}
+}
+
+func buildIterationStabilitySummaries(results []evaluator.EvalResult) []stabilityCaseSummary {
+	byCase := make(map[string]*stabilityCaseSummary)
+	order := make([]string, 0)
+	for _, result := range results {
+		if result.Configuration != "" && result.Configuration != "with_skill" {
+			continue
+		}
+		summary, ok := byCase[result.CaseID]
+		if !ok {
+			summary = &stabilityCaseSummary{
+				caseID: result.CaseID,
+				counts: make(map[string]int),
+			}
+			byCase[result.CaseID] = summary
+			order = append(order, result.CaseID)
+		}
+		summary.trials++
+		summary.counts[string(result.Status)]++
+	}
+
+	summaries := make([]stabilityCaseSummary, 0, len(order))
+	for _, caseID := range order {
+		summaries = append(summaries, *byCase[caseID])
+	}
+	return summaries
+}
+
+func formatIterationStabilitySummary(summary stabilityCaseSummary) string {
+	parts := []string{fmt.Sprintf("%s: %d trials", summary.caseID, summary.trials)}
+	seen := make(map[string]struct{})
+	for _, status := range []string{"PASS", "FAIL", "ERROR", "SKIP"} {
+		seen[status] = struct{}{}
+		if count := summary.counts[status]; count > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", count, status))
+		}
+	}
+	for _, status := range remainingStatuses(summary.counts, seen) {
+		parts = append(parts, fmt.Sprintf("%d %s", summary.counts[status], status))
+	}
+
+	line := strings.Join(parts, ", ")
+	if len(summary.counts) > 1 {
+		line += " -> flaky"
+	}
+	return line
+}
+
+func remainingStatuses(counts map[string]int, seen map[string]struct{}) []string {
+	statuses := make([]string, 0)
+	for status, count := range counts {
+		if count == 0 {
+			continue
+		}
+		if _, ok := seen[status]; ok {
+			continue
+		}
+		statuses = append(statuses, status)
+	}
+	sort.Strings(statuses)
+	return statuses
 }
 
 // caseResults groups with_skill and without_skill results for a single case.

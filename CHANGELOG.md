@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Eval-level default expect checks under `cases.defaults.expect`, with
   append-and-deduplicate semantics for list checks and case-level overrides for
   `exit_code` and `golden_file`.
+- Multi-iteration `skill-up run --iteration N` now prints a per-case
+  stability summary to highlight flaky PASS/FAIL/ERROR/SKIP outcomes.
 - Skill references now support explicit doublestar `include` and `exclude`
   patterns for both run-agent and judge Skill installation.
 
