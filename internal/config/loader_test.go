@@ -135,9 +135,34 @@ report:
 	if len(cfg.Cases.Files) != 2 {
 		t.Errorf("expected 2 case files, got %d", len(cfg.Cases.Files))
 	}
-
 	if cfg.Judge.Type != "script" {
 		t.Errorf("expected judge.type 'script', got '%s'", cfg.Judge.Type)
+	}
+}
+
+func TestLoader_LoadEvalConfig_SkillFilters(t *testing.T) {
+	t.Parallel()
+
+	evalPath := filepath.Join(t.TempDir(), "eval.yaml")
+	content := `schema_version: v1alpha1
+skills:
+  - source: local_path
+    path: .
+    include: [SKILL.md, "resources/**"]
+    exclude: ["resources/private/**"]
+`
+	if err := os.WriteFile(evalPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := NewLoader(evalPath).LoadEvalConfig()
+	if err != nil {
+		t.Fatalf("LoadEvalConfig failed: %v", err)
+	}
+	if len(cfg.Skills) != 1 || !slices.Equal(cfg.Skills[0].Include, []string{"SKILL.md", "resources/**"}) {
+		t.Fatalf("skills[0].include = %v", cfg.Skills)
+	}
+	if !slices.Equal(cfg.Skills[0].Exclude, []string{"resources/private/**"}) {
+		t.Fatalf("skills[0].exclude = %v", cfg.Skills[0].Exclude)
 	}
 }
 
@@ -291,6 +316,8 @@ judge:
   skills:
     - source: local_path
       path: evals/fixtures/default-judge
+      include: [SKILL.md, "references/**"]
+      exclude: ["references/drafts/**"]
     - source: local_path
       path: evals/fixtures/security-judge
       target: ~/.claude/skills/security-judge
@@ -310,6 +337,12 @@ judge:
 	}
 	if got := cfg.Judge.Skills[0].Path; got != "evals/fixtures/default-judge" {
 		t.Fatalf("Judge.Skills[0].Path = %q", got)
+	}
+	if !slices.Equal(cfg.Judge.Skills[0].Include, []string{"SKILL.md", "references/**"}) {
+		t.Fatalf("Judge.Skills[0].Include = %v", cfg.Judge.Skills[0].Include)
+	}
+	if !slices.Equal(cfg.Judge.Skills[0].Exclude, []string{"references/drafts/**"}) {
+		t.Fatalf("Judge.Skills[0].Exclude = %v", cfg.Judge.Skills[0].Exclude)
 	}
 	if got := cfg.Judge.Skills[1].Target; got != "~/.claude/skills/security-judge" {
 		t.Fatalf("Judge.Skills[1].Target = %q", got)

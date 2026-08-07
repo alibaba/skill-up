@@ -87,9 +87,11 @@ type MCPServer struct {
 
 // SkillRef describes a skill to install.
 type SkillRef struct {
-	Source string `yaml:"source"` // local_path, registry
-	Path   string `yaml:"path,omitempty"`
-	Target string `yaml:"target,omitempty"`
+	Source  string   `yaml:"source"` // local_path, registry
+	Path    string   `yaml:"path,omitempty"`
+	Target  string   `yaml:"target,omitempty"`
+	Include []string `yaml:"include,omitempty"`
+	Exclude []string `yaml:"exclude,omitempty"`
 }
 
 // EngineConfig defines the Agent Engine configuration.

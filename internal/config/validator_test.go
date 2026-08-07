@@ -1211,6 +1211,78 @@ func TestValidator_JudgeSkills(t *testing.T) {
 	}
 }
 
+func TestValidator_JudgeSkillPatterns(t *testing.T) {
+	t.Parallel()
+
+	cfg := &EvalConfig{
+		SchemaVersion: "v1alpha1",
+		Environment:   Environment{Type: "none"},
+		Engine:        EngineConfig{Name: "claude_code"},
+		Cases:         CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+		Judge: JudgeConfig{
+			Type:     "agent_judge",
+			Model:    "test-model",
+			Criteria: []string{"criterion"},
+			Skills: []SkillRef{{
+				Source:  "local_path",
+				Path:    "evals/fixtures/judge-skill",
+				Exclude: []string{"["},
+			}},
+		},
+	}
+	err := NewValidator().ValidateEvalConfig(cfg)
+	want := "judge.skills[0].exclude[0] is not a valid glob pattern"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("ValidateEvalConfig() error = %v, want containing %q", err, want)
+	}
+}
+
+func TestValidator_SkillPatterns(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		include []string
+		exclude []string
+		errMsg  string
+	}{
+		{name: "valid", include: []string{"SKILL.md", "references/**"}, exclude: []string{"references/drafts/**"}},
+		{name: "empty", include: []string{""}, errMsg: "skills[0].include[0] must not be empty"},
+		{name: "invalid glob", exclude: []string{"["}, errMsg: "skills[0].exclude[0] is not a valid glob pattern"},
+		{name: "absolute", exclude: []string{"/tmp/**"}, errMsg: "skills[0].exclude[0] must be relative to the skill path"},
+		{name: "backslash", exclude: []string{`.qoder\repowiki\**`}, errMsg: "skills[0].exclude[0] must use '/' as the path separator"},
+		{name: "parent segment", include: []string{"../SKILL.md"}, errMsg: "skills[0].include[0] must not contain a parent-directory segment"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine:        EngineConfig{Name: "claude_code"},
+				Cases:         CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+				Skills: []SkillRef{{
+					Source:  "local_path",
+					Path:    ".",
+					Include: tt.include,
+					Exclude: tt.exclude,
+				}},
+			}
+			err := NewValidator().ValidateEvalConfig(cfg)
+			if tt.errMsg == "" {
+				if err != nil {
+					t.Fatalf("ValidateEvalConfig() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.errMsg) {
+				t.Fatalf("ValidateEvalConfig() error = %v, want containing %q", err, tt.errMsg)
+			}
+		})
+	}
+}
+
 // caseIDSrc pairs an effective case ID with the cases.files entry it was
 // loaded from, as the loader populates CaseConfig.ID / CaseConfig.SourceFile.
 type caseIDSrc struct {

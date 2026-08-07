@@ -186,6 +186,8 @@ func buildJudgeSkillProperties(cr CaseResult) *junitProperties {
 			junitProperty{Name: prefix + "source", Value: skill.Source},
 			junitProperty{Name: prefix + "path", Value: skill.Path},
 			junitProperty{Name: prefix + "target", Value: skill.Target},
+			junitProperty{Name: prefix + "include", Value: strings.Join(skill.Include, ",")},
+			junitProperty{Name: prefix + "exclude", Value: strings.Join(skill.Exclude, ",")},
 			junitProperty{Name: prefix + "name", Value: skill.Name},
 		)
 	}

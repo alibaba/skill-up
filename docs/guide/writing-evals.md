@@ -77,6 +77,13 @@ mcp:
 skills:
   - source: local_path            # local_path (a directory on disk)
     path: .                       # Path to the Skill
+    include:                      # Optional doublestar globs relative to path; empty means all files
+      - SKILL.md
+      - references/**
+      - scripts/**
+    exclude:                      # Optional; applied after include, so exclude wins
+      - references/drafts/**
+      - .qoder/repowiki/**
 
 # ========== 5. Agent Engine ==========
 engine:
@@ -117,6 +124,15 @@ report:
   formats: [json, html]           # json / junit / html
   artifacts: [transcript]
 ```
+
+`skills[].include` and `skills[].exclude` use
+[doublestar](https://github.com/bmatcuk/doublestar) syntax (`*` matches one
+path segment and `**` crosses directories). Patterns are relative to
+`skills[].path`, use `/` separators, and `exclude` takes precedence over
+`include`. When `include` is omitted, every file is selected by default.
+The evaluation harness directory `evals/` is always excluded. If an include
+list is provided, include `SKILL.md` explicitly so the installed directory
+remains a valid Skill. The same fields are supported by `judge.skills`.
 
 `cases.parallelism` is the file-level default. To override it for a single run, use `skill-up run --parallelism N` without modifying `eval.yaml`. Allowed range: **1 to 256**.
 

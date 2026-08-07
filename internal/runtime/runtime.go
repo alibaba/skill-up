@@ -208,8 +208,10 @@ type MCPConfig struct {
 
 // SkillConfig identifies a skill source and its target install location.
 type SkillConfig struct {
-	Source string
-	Target string
+	Source  string
+	Target  string
+	Include []string
+	Exclude []string
 }
 
 // NewRuntime creates a Runtime based on the config type.

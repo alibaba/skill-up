@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"strings"
 	"testing"
 
 	"github.com/alibaba/skill-up/internal/platform"
@@ -221,6 +222,22 @@ func TestCLIAgent_InstallSkillWithCmd(t *testing.T) {
 	}
 	if string(data) != "installed\n" {
 		t.Errorf("marker content: got %q, want %q", string(data), "installed\n")
+	}
+}
+
+func TestCLIAgent_InstallSkillWithCmdRejectsFilters(t *testing.T) {
+	t.Parallel()
+
+	ag := &CLIAgent{BaseAgent: BaseAgent{Cfg: Config{
+		Name:            "test-agent",
+		InstallSkillCmd: "echo install",
+	}}}
+	err := ag.InstallSkill(context.Background(), nil, runtime.SkillConfig{
+		Source:  "my-skill",
+		Exclude: []string{".qoder/repowiki/**"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "not supported with a custom InstallSkillCmd") {
+		t.Fatalf("InstallSkill error = %v, want unsupported filters", err)
 	}
 }
 
