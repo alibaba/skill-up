@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `exit_code` and `golden_file`.
 - Multi-iteration `skill-up run --iteration N` now prints a per-case
   stability summary to highlight flaky PASS/FAIL/ERROR/SKIP outcomes.
+- Skill references now support explicit doublestar `include` and `exclude`
+  patterns for both run-agent and judge Skill installation.
 
 ### Fixed
 - Claude Code session lookup now normalizes Windows workspace paths to the

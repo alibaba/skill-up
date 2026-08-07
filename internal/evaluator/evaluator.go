@@ -12,6 +12,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -1142,8 +1143,10 @@ func resolveSkillConfig(skillDir string, ref config.SkillRef) runtime.SkillConfi
 		source = filepath.Join(skillDir, source)
 	}
 	return runtime.SkillConfig{
-		Source: source,
-		Target: ref.Target,
+		Source:  source,
+		Target:  ref.Target,
+		Include: slices.Clone(ref.Include),
+		Exclude: slices.Clone(ref.Exclude),
 	}
 }
 

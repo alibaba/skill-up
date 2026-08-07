@@ -48,6 +48,8 @@ judge:
   skills:
     - source: local_path
       path: evals/fixtures/judge-rubric
+      include: [SKILL.md, "references/**"]
+      exclude: ["references/drafts/**"]
   criteria:
     - "输出中识别了真实存在的 bug，并符合 judge-rubric 中的评分细则"
     - "没有将正确代码误报为 bug"
@@ -62,6 +64,7 @@ judge:
 - 能拆出确定性条件时先用 `rule_based` / `expect` 挡一道
 - 需要长 Rubric、领域规则、复用评分规范时，把它们放进 `judge.skills`
 - `judge.skills` 只会安装给 judge agent，不会污染被测 run agent；安装依赖具体 Agent adapter 的 Skill 支持，不会回退为 prompt 拼接
+- `judge.skills[].include` / `exclude` 与顶层 `skills` 语义一致：相对 `path` 的 doublestar glob，且 exclude 优先
 
 ## script — 自定义脚本
 

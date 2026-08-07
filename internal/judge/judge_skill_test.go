@@ -1,6 +1,7 @@
 package judge
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/alibaba/skill-up/internal/config"
@@ -12,7 +13,12 @@ func TestSkillInfosFromRefs_OmitsDotName(t *testing.T) {
 	infos := SkillInfosFromRefs([]config.SkillRef{
 		{Source: "local_path"},
 		{Source: "local_path", Path: "."},
-		{Source: "local_path", Path: "evals/fixtures/judge-skill"},
+		{
+			Source:  "local_path",
+			Path:    "evals/fixtures/judge-skill",
+			Include: []string{"SKILL.md", "references/**"},
+			Exclude: []string{"references/drafts/**"},
+		},
 	})
 
 	if len(infos) != 3 {
@@ -23,5 +29,9 @@ func TestSkillInfosFromRefs_OmitsDotName(t *testing.T) {
 	}
 	if infos[2].Name != "judge-skill" {
 		t.Fatalf("third Name = %q, want judge-skill", infos[2].Name)
+	}
+	if !slices.Equal(infos[2].Include, []string{"SKILL.md", "references/**"}) ||
+		!slices.Equal(infos[2].Exclude, []string{"references/drafts/**"}) {
+		t.Fatalf("third filters = include %v exclude %v", infos[2].Include, infos[2].Exclude)
 	}
 }

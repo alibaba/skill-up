@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -82,6 +83,9 @@ func (a *CLIAgent) InstallMCP(ctx context.Context, rt Runtime, mcpCfg runtime.MC
 func (a *CLIAgent) InstallSkill(ctx context.Context, rt Runtime, skillCfg runtime.SkillConfig) error {
 	if a.Cfg.InstallSkillCmd == "" {
 		return a.installSkillDefault(ctx, rt, skillCfg)
+	}
+	if len(skillCfg.Include) > 0 || len(skillCfg.Exclude) > 0 {
+		return errors.New("skill include/exclude filters are not supported with a custom InstallSkillCmd")
 	}
 
 	tmpl, err := template.New("installSkill").Parse(a.Cfg.InstallSkillCmd)

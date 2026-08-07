@@ -33,7 +33,14 @@ func sampleInput() Input {
 				DurationMs: 45200,
 				Turns:      5,
 				JudgeSkills: []judge.SkillInfo{
-					{Source: "local_path", Path: "evals/fixtures/judge-skill", Target: "~/.claude/skills/judge-skill", Name: "judge-skill"},
+					{
+						Source:  "local_path",
+						Path:    "evals/fixtures/judge-skill",
+						Target:  "~/.claude/skills/judge-skill",
+						Include: []string{"SKILL.md", "references/**"},
+						Exclude: []string{"references/drafts/**"},
+						Name:    "judge-skill",
+					},
 				},
 				Grading: &judge.Result{
 					Status:        judge.StatusPass,
@@ -122,6 +129,11 @@ func TestJSONReporter_Write(t *testing.T) {
 	if len(parsed.CaseResults[0].JudgeSkills) != 1 || parsed.CaseResults[0].JudgeSkills[0].Path != "evals/fixtures/judge-skill" {
 		t.Fatalf("judge_skills not preserved in JSON: %#v", parsed.CaseResults[0].JudgeSkills)
 	}
+	parsedSkill := parsed.CaseResults[0].JudgeSkills[0]
+	if len(parsedSkill.Include) != 2 || parsedSkill.Include[1] != "references/**" ||
+		len(parsedSkill.Exclude) != 1 || parsedSkill.Exclude[0] != "references/drafts/**" {
+		t.Fatalf("judge skill filters not preserved in JSON: %#v", parsedSkill)
+	}
 }
 
 func TestJSONReporter_ContainsAssertions(t *testing.T) {
@@ -186,6 +198,12 @@ func TestJUnitReporter_Write(t *testing.T) {
 	}
 	if !strings.Contains(content, `name="judge.skills.0.path" value="evals/fixtures/judge-skill"`) {
 		t.Fatal("junit should include judge skill path property")
+	}
+	if !strings.Contains(content, `name="judge.skills.0.include" value="SKILL.md,references/**"`) {
+		t.Fatal("junit should include judge skill include property")
+	}
+	if !strings.Contains(content, `name="judge.skills.0.exclude" value="references/drafts/**"`) {
+		t.Fatal("junit should include judge skill exclude property")
 	}
 }
 

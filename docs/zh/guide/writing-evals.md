@@ -77,6 +77,13 @@ mcp:
 skills:
   - source: local_path            # local_path（本地目录）
     path: .                       # Skill 所在路径
+    include:                      # 可选：相对 path 的 doublestar glob；不配置表示包含全部文件
+      - SKILL.md
+      - references/**
+      - scripts/**
+    exclude:                      # 可选：在 include 后应用，因此 exclude 优先
+      - references/drafts/**
+      - .qoder/repowiki/**
 
 # ========== 5. Agent Engine ==========
 engine:
@@ -116,6 +123,13 @@ report:
   formats: [json, html]           # json / junit / html
   artifacts: [transcript]         # 报告中包含的产物
 ```
+
+`skills[].include` 和 `skills[].exclude` 使用
+[doublestar](https://github.com/bmatcuk/doublestar) 语法（`*` 匹配单层路径，
+`**` 可跨目录）。pattern 相对 `skills[].path`，统一使用 `/` 分隔；
+`exclude` 优先于 `include`。未配置 `include` 时默认选择全部文件。
+评测框架目录 `evals/` 始终排除。配置 include 列表时，应显式包含
+`SKILL.md`，确保安装后的目录仍是有效 Skill。`judge.skills` 同样支持这两个字段。
 
 `cases.parallelism` 是配置文件中的默认用例并行数；临时运行时可以用 `skill-up run --parallelism N` 覆盖它，不需要修改 `eval.yaml`。命令行覆盖值必须在 1 到 256 之间。
 

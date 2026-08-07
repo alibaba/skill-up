@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -97,6 +98,7 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 
 	errs = append(errs, validateCollectArtifacts("cases.defaults.collect_artifacts", cfg.Cases.Defaults.CollectArtifacts)...)
 	errs = append(errs, validateExpect("cases.defaults.expect", cfg.Cases.Defaults.Expect)...)
+	errs = append(errs, validateSkillRefs("skills", cfg.Skills)...)
 	errs = append(errs, validateJudgeTypeAndLocalFields(cfg.Judge)...)
 
 	if len(errs) > 0 {
@@ -280,6 +282,33 @@ func validateSkillRefs(field string, refs []SkillRef) []string {
 		}
 		if strings.TrimSpace(ref.Path) == "" {
 			errs = append(errs, fmt.Sprintf("%s[%d].path is required", field, i))
+		}
+		errs = append(errs, validateSkillPatterns(fmt.Sprintf("%s[%d].include", field, i), ref.Include)...)
+		errs = append(errs, validateSkillPatterns(fmt.Sprintf("%s[%d].exclude", field, i), ref.Exclude)...)
+	}
+	return errs
+}
+
+func validateSkillPatterns(field string, patterns []string) []string {
+	var errs []string
+	for i, pattern := range patterns {
+		if strings.TrimSpace(pattern) == "" {
+			errs = append(errs, fmt.Sprintf("%s[%d] must not be empty", field, i))
+			continue
+		}
+		if path.IsAbs(pattern) {
+			errs = append(errs, fmt.Sprintf("%s[%d] must be relative to the skill path", field, i))
+			continue
+		}
+		if strings.Contains(pattern, `\`) {
+			errs = append(errs, fmt.Sprintf("%s[%d] must use '/' as the path separator", field, i))
+			continue
+		}
+		if slices.Contains(strings.Split(pattern, "/"), "..") {
+			errs = append(errs, fmt.Sprintf("%s[%d] must not contain a parent-directory segment", field, i))
+		}
+		if !doublestar.ValidatePattern(pattern) {
+			errs = append(errs, fmt.Sprintf("%s[%d] is not a valid glob pattern: %q", field, i, pattern))
 		}
 	}
 	return errs

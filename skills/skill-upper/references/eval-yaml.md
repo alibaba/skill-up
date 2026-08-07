@@ -20,6 +20,8 @@ mcp:
 skills:
   - source: local_path
     path: .
+    include: [SKILL.md, "references/**", "scripts/**"]  # 可选；不配置表示全部文件
+    exclude: [".qoder/repowiki/**"]                     # 可选；exclude 优先
 
 engine:
   name: claude_code               # claude_code | codex | qodercli（也兼容 qoder-cli）
@@ -68,6 +70,11 @@ report:
 临时启用基线对比时，可以使用 `skill-up run --baseline`，等价于为本次运行设置 `benchmark.enabled: true`。
 
 `collect_artifacts`（`cases.defaults` 级，或单个 `case.yaml` 内追加）用 [doublestar](https://github.com/bmatcuk/doublestar) glob（`*` 单层、`**` 跨目录）声明要采集的 workspace 文件。无论 Agent 成功/失败/超时，命中文件都会保留相对路径下载到 `<output-dir>/<case>/<config>/outputs/workspace/`。两层按并集去重合并。它与 `report.artifacts`（产物*类型*）、`agent_judge` 的 git diff（字符串）正交。
+
+`skills[].include` / `skills[].exclude` 同样使用 doublestar glob，路径相对
+`skills[].path` 且使用 `/` 分隔。`include` 为空时默认包含全部文件；
+`exclude` 后应用并优先。`evals/` 始终不会安装。显式配置 include 时要包含
+`SKILL.md`。`judge.skills` 也支持同样的过滤字段。
 
 `judge.skills` 仅支持 `judge.type: agent_judge`，用于给 judge agent 安装可复用的评分 Rubric Skill。它不会安装到主运行 agent；顶层 `skills` 也不会自动安装到 judge。benchmark 下 `with_skill` / `without_skill` 都会安装 judge Skills，因为它们属于评分工具。路径相对 Skill 根目录解析，安装依赖具体 Agent adapter 的原生 Skill 支持；不要把 Skill 文件内容复制进 `criteria`。
 
