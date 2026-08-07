@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -541,7 +542,12 @@ func TestSetupCaseEnvironmentRunsSetupAndInstallsAgentMCPAndSkill(t *testing.T) 
 				Type:       "opensandbox",
 				SetupSteps: []config.SetupStep{{Run: "printf setup > marker.txt"}},
 			},
-			Skills: []config.SkillRef{{Path: ".", Target: "custom-target"}},
+			Skills: []config.SkillRef{{
+				Path:    ".",
+				Target:  "custom-target",
+				Include: []string{"SKILL.md", "references/**"},
+				Exclude: []string{"references/drafts/**"},
+			}},
 		},
 	})
 
@@ -560,6 +566,10 @@ func TestSetupCaseEnvironmentRunsSetupAndInstallsAgentMCPAndSkill(t *testing.T) 
 	ag.mu.Unlock()
 	if lastSkill.Source != skillDir || lastSkill.Target != "custom-target" {
 		t.Fatalf("last skill config = %+v, want source skill dir and custom target", lastSkill)
+	}
+	if !slices.Equal(lastSkill.Include, []string{"SKILL.md", "references/**"}) ||
+		!slices.Equal(lastSkill.Exclude, []string{"references/drafts/**"}) {
+		t.Fatalf("last skill filters = include %v exclude %v", lastSkill.Include, lastSkill.Exclude)
 	}
 
 	withoutSkillAgent := &mockAgent{name: "agent"}
@@ -1152,7 +1162,13 @@ func TestExecuteCase_InstallsJudgeSkillsOnJudgeAgentOnly(t *testing.T) {
 				Model:    "judge-model",
 				Criteria: []string{"uses rubric"},
 				Skills: []config.SkillRef{
-					{Source: "local_path", Path: "evals/fixtures/judge-skill", Target: "~/.claude/skills/judge-skill"},
+					{
+						Source:  "local_path",
+						Path:    "evals/fixtures/judge-skill",
+						Target:  "~/.claude/skills/judge-skill",
+						Include: []string{"SKILL.md", "references/**"},
+						Exclude: []string{"references/drafts/**"},
+					},
 					{Source: "local_path", Path: "evals/fixtures/security-judge"},
 				},
 			},
@@ -1185,6 +1201,10 @@ func TestExecuteCase_InstallsJudgeSkillsOnJudgeAgentOnly(t *testing.T) {
 	}
 	if judgeAgent.skills[0].Target != "~/.claude/skills/judge-skill" {
 		t.Fatalf("first judge skill target = %q", judgeAgent.skills[0].Target)
+	}
+	if !slices.Equal(judgeAgent.skills[0].Include, []string{"SKILL.md", "references/**"}) ||
+		!slices.Equal(judgeAgent.skills[0].Exclude, []string{"references/drafts/**"}) {
+		t.Fatalf("first judge skill filters = include %v exclude %v", judgeAgent.skills[0].Include, judgeAgent.skills[0].Exclude)
 	}
 	if len(result.JudgeSkills) != 2 || result.JudgeSkills[0].Path != "evals/fixtures/judge-skill" {
 		t.Fatalf("result JudgeSkills = %#v", result.JudgeSkills)

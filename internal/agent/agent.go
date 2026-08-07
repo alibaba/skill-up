@@ -259,7 +259,7 @@ func (a *BaseAgent) installSkillDefault(ctx context.Context, rt Runtime, skillCf
 	if target == "" && a.Cfg.SkillPath != "" {
 		target = filepath.Join(a.Cfg.SkillPath, filepath.Base(skillCfg.Source))
 	}
-	return installSkill(ctx, rt, skillCfg.Source, target)
+	return installSkill(ctx, rt, skillCfg.Source, target, skillCfg.Include, skillCfg.Exclude)
 }
 
 func persistRuntimeArtifact(ctx context.Context, rt Runtime, targetPath, content string) error {
