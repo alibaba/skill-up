@@ -5,12 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	_ "unsafe"
 
 	"github.com/alibaba/skill-up/internal/agent"
 	"github.com/alibaba/skill-up/internal/config"
@@ -18,11 +16,9 @@ import (
 	"github.com/alibaba/skill-up/internal/evaluator"
 	"github.com/alibaba/skill-up/internal/judge"
 	"github.com/alibaba/skill-up/internal/runtime"
+	"github.com/alibaba/skill-up/internal/ui"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
-
-//go:linkname uiOutput github.com/alibaba/skill-up/internal/ui.Output
-var uiOutput io.Writer
 
 func TestRunner_InitWorkspace_UsesExplicitRunNumber(t *testing.T) {
 	t.Parallel()
@@ -338,9 +334,9 @@ func TestRunner_Evaluate_AutoIterationAppendsWithoutStabilitySummary(t *testing.
 func captureUIOutput(t *testing.T, output *bytes.Buffer) {
 	t.Helper()
 
-	origOutput := uiOutput
-	uiOutput = output
-	t.Cleanup(func() { uiOutput = origOutput })
+	origOutput := ui.Output
+	ui.Output = output
+	t.Cleanup(func() { ui.Output = origOutput })
 }
 
 func assertFileAbsentUnder(t *testing.T, root, filename string) error {

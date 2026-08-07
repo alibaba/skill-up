@@ -19,6 +19,10 @@ linters:
           - depguard
         path: ^internal/runner/runner\.go$
         text: internal/runner should report progress through callbacks or events
+      - linters:
+          - depguard
+        path: ^internal/runner/workspace_options_test\.go$
+        text: internal/runner should report progress through callbacks or events
   disable:
     # tagliatelle: JSON/YAML struct tags must use snake_case to match external API
     # response formats (GitLab and other upstream services); changing them would
