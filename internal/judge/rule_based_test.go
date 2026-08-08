@@ -93,6 +93,102 @@ func TestRuleBased_OutputContains_Combined(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// output_matches
+// ---------------------------------------------------------------------------
+
+func TestRuleBased_OutputMatches_All_Pass(t *testing.T) {
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			OutputMatches: &config.OutputMatchesRule{All: []string{`(?m)^## Status$`, `(?m)^## Evidence$`}},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "## Status\npass\n## Evidence\nverified"})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusPass)
+}
+
+func TestRuleBased_OutputMatches_All_Fail(t *testing.T) {
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			OutputMatches: &config.OutputMatchesRule{All: []string{`(?m)^## Status$`, `(?m)^## Evidence$`}},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "## Status\npass"})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusFail)
+}
+
+func TestRuleBased_OutputMatches_Any_Pass(t *testing.T) {
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			OutputMatches: &config.OutputMatchesRule{Any: []string{`(?i)pass`, `(?i)success`}},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "The check ended in SUCCESS"})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusPass)
+}
+
+func TestRuleBased_OutputMatches_Any_Fail(t *testing.T) {
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			OutputMatches: &config.OutputMatchesRule{Any: []string{`(?i)pass`, `(?i)success`}},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "The check failed"})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusFail)
+}
+
+func TestRuleBased_OutputMatches_Not_Pass(t *testing.T) {
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			OutputMatches: &config.OutputMatchesRule{Not: []string{`(?i)api[_-]?key\s*=`, `BEGIN PRIVATE KEY`}},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "No secrets here"})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusPass)
+}
+
+func TestRuleBased_OutputMatches_Not_Fail(t *testing.T) {
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			OutputMatches: &config.OutputMatchesRule{Not: []string{`(?i)api[_-]?key\s*=`}},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "api_key = leaked"})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusFail)
+}
+
+func TestRuleBased_OutputMatches_Combined(t *testing.T) {
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			OutputMatches: &config.OutputMatchesRule{
+				All: []string{`(?m)^## Status$`},
+				Any: []string{`(?i)pass`, `(?i)success`},
+				Not: []string{`(?i)api[_-]?key\s*=`},
+			},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "## Status\nPASS"})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusPass)
+}
+
+func TestRuleBased_OutputMatches_EmptyGroups_Pass(t *testing.T) {
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			OutputMatches: &config.OutputMatchesRule{},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "anything"})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusPass)
+}
+
+// ---------------------------------------------------------------------------
 // exit_code
 // ---------------------------------------------------------------------------
 
@@ -307,6 +403,20 @@ func TestRuleBased_FailureRules_TakePriority(t *testing.T) {
 	})
 	// Message contains both "review" (success) and "LGTM" (failure).
 	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "LGTM, review passed"})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusFail)
+}
+
+func TestRuleBased_FailureRules_OutputMatches_TakePriority(t *testing.T) {
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			OutputMatches: &config.OutputMatchesRule{All: []string{`(?i)pass`}},
+		}},
+		Failure: []config.Rule{{
+			OutputMatches: &config.OutputMatchesRule{Any: []string{`(?i)api[_-]?key\s*=`}},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "PASS\napi_key = leaked"})
 	assertNoError(t, err)
 	assertStatus(t, r, StatusFail)
 }
