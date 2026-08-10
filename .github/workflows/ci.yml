@@ -5,12 +5,6 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - '.github/workflows/docs.yml'
-  # Maintainers can run required CI explicitly for documentation-only PRs.
-  workflow_dispatch:
   # Required checks must also run for commits synthesized by Merge Queue.
   merge_group:
 
@@ -23,8 +17,51 @@ concurrency:
 permissions: {}
 
 jobs:
+  classify:
+    name: Classify changes
+    runs-on: [self-hosted, linux, x64, trusted]
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      run_full: ${{ steps.changes.outputs.run_full }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect documentation-only pull request
+        id: changes
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          run_full=true
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            run_full=false
+            while IFS= read -r -d '' path; do
+              if [[ "$path" == docs/* || "$path" == ".github/workflows/docs.yml" ]]; then
+                continue
+              fi
+              if [[ "$path" != */* && "$path" == *.md ]]; then
+                continue
+              fi
+              run_full=true
+              break
+            done < <(git diff --name-only -z "$BASE_SHA...$HEAD_SHA")
+          fi
+
+          echo "run_full=$run_full" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build & Test
+    needs: classify
+    if: needs.classify.outputs.run_full == 'true'
     # Workflows from external contributors require maintainer approval before
     # they can execute on the trusted self-hosted runner fleet.
     runs-on: [self-hosted, linux, x64, trusted]
@@ -64,6 +101,8 @@ jobs:
 
   e2e-smoke:
     name: E2E Smoke
+    needs: classify
+    if: needs.classify.outputs.run_full == 'true'
     runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 15
     permissions:
@@ -96,6 +135,8 @@ jobs:
 
   lint:
     name: Lint
+    needs: classify
+    if: needs.classify.outputs.run_full == 'true'
     runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 10
     permissions:
@@ -132,3 +173,44 @@ jobs:
 
       - name: Run revive
         run: revive -config revive.toml ./...
+
+  gate:
+    name: CI Gate
+    if: ${{ !cancelled() }}
+    needs: [classify, build, e2e-smoke, lint]
+    runs-on: [self-hosted, linux, x64, trusted]
+    timeout-minutes: 5
+    env:
+      RUN_FULL: ${{ needs.classify.outputs.run_full }}
+      CLASSIFY_RESULT: ${{ needs.classify.result }}
+      BUILD_RESULT: ${{ needs.build.result }}
+      E2E_RESULT: ${{ needs.e2e-smoke.result }}
+      LINT_RESULT: ${{ needs.lint.result }}
+    steps:
+      - name: Verify required jobs
+        run: |
+          set -euo pipefail
+
+          if [ "$CLASSIFY_RESULT" != "success" ]; then
+            echo "Change classification failed: $CLASSIFY_RESULT" >&2
+            exit 1
+          fi
+
+          if [ "$RUN_FULL" = "false" ]; then
+            echo "Documentation-only pull request; full CI is deferred to main."
+            exit 0
+          fi
+
+          failed=false
+          for result in "$BUILD_RESULT" "$E2E_RESULT" "$LINT_RESULT"; do
+            if [ "$result" != "success" ]; then
+              failed=true
+            fi
+          done
+          if [ "$failed" = "true" ]; then
+            echo "Required CI jobs did not all succeed:" >&2
+            echo "  Build & Test: $BUILD_RESULT" >&2
+            echo "  E2E Smoke: $E2E_RESULT" >&2
+            echo "  Lint: $LINT_RESULT" >&2
+            exit 1
+          fi
