@@ -3,16 +3,14 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - '.github/workflows/docs.yml'
   pull_request:
     branches: [main]
     paths-ignore:
       - 'docs/**'
       - '*.md'
       - '.github/workflows/docs.yml'
+  # Maintainers can run required CI explicitly for documentation-only PRs.
+  workflow_dispatch:
   # Required checks must also run for commits synthesized by Merge Queue.
   merge_group:
 
