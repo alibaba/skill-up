@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Session lookup no longer mistakes a sub-agent transcript for the main session.
   A Skill or Task call writes `<sessionID>/subagents/agent-*.jsonl` into the same
   project tree, and those file names are not resumable session ids.
+- Session lookup no longer resumes or grades a transcript belonging to another
+  workspace. The CLIs collapse punctuation when naming a project directory, so
+  workspaces whose paths differ only in punctuation share one directory;
+  candidates are now ranked by the working directory they record and a transcript
+  recording a different one is never used.
 - Per-turn responses in multi-turn evaluation are now the answer that closed each
   turn. Turn boundaries are derived from the transcript each turn appends instead
   of from session-file turn numbers, which count tool results and injected Skill

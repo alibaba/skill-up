@@ -130,6 +130,69 @@ func TestFindQoderSessionFileIgnoresOtherWorkspaces(t *testing.T) {
 	}
 }
 
+// TestFindQoderSessionFileDisambiguatesCollidingWorkspaces covers workspaces whose
+// paths differ only in punctuation, such as /w/ws_x and /w/ws-x. The CLIs replace
+// every non-alphanumeric character, so both workspaces are stored under the *same*
+// project directory and the directory name alone cannot tell them apart. Picking
+// the newest transcript there would resume another workspace's session, which is
+// how concurrent cases would silently grade each other's conversations.
+func TestFindQoderSessionFileDisambiguatesCollidingWorkspaces(t *testing.T) {
+	skipIfNoLocalBash(t)
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// ourFixture builds the transcript of the workspace under test; the other
+		// workspace's transcript always records its own working directory.
+		ourFixture func(workspace string) string
+	}{
+		{
+			name:       "transcripts record their working directory",
+			ourFixture: qoderSessionFixture,
+		},
+		{
+			name: "our transcript records none, the other one does",
+			ourFixture: func(string) string {
+				return `{"type":"user","message":{"content":"hi","role":"user"}}`
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			home := t.TempDir()
+			parent := t.TempDir()
+			workspace := filepath.Join(parent, "ws_x")
+			otherWorkspace := filepath.Join(parent, "ws-x")
+			for _, dir := range []string{workspace, otherWorkspace} {
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatalf("create %s: %v", dir, err)
+				}
+			}
+			projectDir := cliProjectDirKey(t, workspace)
+			if other := cliProjectDirKey(t, otherWorkspace); other != projectDir {
+				t.Fatalf("fixture no longer collides: %q vs %q", projectDir, other)
+			}
+
+			root := filepath.Join(home, ".qoder", "projects", projectDir)
+			oursSession := filepath.Join(root, "11111111-1111-1111-1111-111111111111.jsonl")
+			otherSession := filepath.Join(root, "22222222-2222-2222-2222-222222222222.jsonl")
+			writeSessionFixture(t, oursSession, tt.ourFixture(resolvePath(t, workspace)))
+			writeSessionFixture(t, otherSession, qoderSessionFixture(resolvePath(t, otherWorkspace)))
+
+			// The other workspace ran last, so modification time alone would pick it.
+			touch(t, oursSession, time.Now().Add(-2*time.Minute))
+			touch(t, otherSession, time.Now())
+
+			rt := newShellSessionRuntime(workspace, home)
+			if got := findQoderSessionFile(context.Background(), rt); got != oursSession {
+				t.Fatalf("findQoderSessionFile() = %q, want this workspace's session %q", got, oursSession)
+			}
+		})
+	}
+}
+
 // qoderSessionFixture returns a minimal transcript in the shape qodercli writes,
 // including the recorded working directory the lookup can fall back to.
 func qoderSessionFixture(workspace string) string {

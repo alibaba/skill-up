@@ -204,9 +204,16 @@ func buildWindowsSessionLookupScript(lookup agentSessionLookup) string {
 //     that cannot be derived from the path at all, such as the truncated and
 //     hashed names the CLIs fall back to for very long paths.
 //
-// Both steps identify the workspace explicitly, so concurrent cases writing into
-// the same projects tree cannot be confused for one another. The depth bound
-// keeps nested transcripts (e.g. qodercli's <sessionID>/subagents/) out.
+// Canonicalisation is lossy in both directions: because the CLIs collapse
+// punctuation too, workspaces whose paths differ only in punctuation (say
+// /w/a_b and /w/a-b) share one project directory. Candidates are therefore
+// ranked by how well they identify the workspace: transcripts recording it as
+// their working directory first, then transcripts recording none at all (formats
+// that omit it). A transcript recording a *different* directory is never used,
+// so a colliding workspace's session cannot be resumed or graded by mistake.
+//
+// The depth bound keeps nested transcripts (e.g. qodercli's
+// <sessionID>/subagents/) out.
 //
 // Shell constraints (some runtimes provide a minimal POSIX shell): no process
 // substitution, and no pipeline whose body is shell code — such a body runs in a
@@ -227,17 +234,30 @@ func buildSessionLookupScriptWithPrinter(lookup agentSessionLookup, printBest st
 root="%s"; [ -d "$root" ] || exit 0
 ws=$(printenv %s); wskey=$(printenv %s); [ -n "$wskey" ] || exit 0
 tmp=$(mktemp) || exit 0; list=$(mktemp) || exit 0; trap 'rm -f "$tmp" "$list"' 0
+keep_recording_ws() {
+  : >"$tmp"
+  while IFS= read -r c || [ -n "$c" ]; do
+    if head -c 65536 "$c" 2>/dev/null | grep -qF "\"$ws\""; then printf '%%s\n' "$c" >>"$tmp"; fi
+  done <"$1"
+}
+add_recording_no_cwd() {
+  while IFS= read -r c || [ -n "$c" ]; do
+    if ! head -c 65536 "$c" 2>/dev/null | grep -qE '"cwd"[[:space:]]*:|"workspace-directories"'; then printf '%%s\n' "$c" >>"$tmp"; fi
+  done <"$1"
+}
 find "$root" -mindepth 1 -maxdepth 1 -type d 2>/dev/null >"$tmp" || true
 awk -v key="$wskey" '{n=$0; sub(/.*\//,"",n); gsub(/[^a-zA-Z0-9]/,"-",n); if (n==key) print}' "$tmp" >"$list" || true
 : >"$tmp"
 while IFS= read -r d || [ -n "$d" ]; do
   find "$d" -maxdepth %d -type f -name "*.jsonl"%s 2>/dev/null >>"$tmp" || true
 done <"$list"
-if [ ! -s "$tmp" ] && [ -n "$ws" ]; then
+if [ -s "$tmp" ]; then
+  cp "$tmp" "$list"
+  keep_recording_ws "$list"
+  [ -s "$tmp" ] || add_recording_no_cwd "$list"
+elif [ -n "$ws" ]; then
   find "$root" -maxdepth %d -type f -name "*.jsonl"%s 2>/dev/null >"$list" || true
-  while IFS= read -r c || [ -n "$c" ]; do
-    if head -c 65536 "$c" 2>/dev/null | grep -qF "\"$ws\""; then printf '%%s\n' "$c" >>"$tmp"; fi
-  done <"$list"
+  keep_recording_ws "$list"
 fi
 best=; ts=-1
 while IFS= read -r p || [ -n "$p" ]; do
