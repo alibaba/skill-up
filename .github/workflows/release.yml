@@ -4,18 +4,48 @@ on:
   push:
     tags:
       - "v*"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/scripts/install-gh.sh"
+      - ".github/workflows/release.yml"
 
 permissions: {}
 
 concurrency:
   # Release tags share one publication lane. Different tags must not mutate
   # GitHub Releases concurrently.
-  group: release
-  cancel-in-progress: false
+  group: release-${{ github.event_name == 'push' && 'publish' || github.event.pull_request.number }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  verify-tooling:
+    name: Verify release tooling
+    if: github.event_name == 'pull_request'
+    runs-on: [self-hosted, linux, x64, trusted]
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install GitHub CLI
+        run: .github/scripts/install-gh.sh
+
+      - name: Verify GitHub API access
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh --version
+          gh api "repos/${GITHUB_REPOSITORY}" --jq .full_name
+
   build:
     name: Build release artifacts
+    if: github.event_name == 'push'
     runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 30
     permissions:
@@ -99,6 +129,14 @@ jobs:
       attestations: write
       id-token: write
     steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install GitHub CLI
+        run: .github/scripts/install-gh.sh
+
       - name: Download approved release candidate
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
