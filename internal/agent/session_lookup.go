@@ -21,7 +21,14 @@ import (
 // noise that hides the real timeout.
 const sessionCleanupTimeout = 30 * time.Second
 
-var windowsWorkspaceKeyInvalidChars = regexp.MustCompile(`[^A-Za-z0-9_-]`)
+var nonAlphanumeric = regexp.MustCompile(`[^A-Za-z0-9]`)
+
+const (
+	// envSessionWorkspace carries the workspace path as the CLI sees it.
+	envSessionWorkspace = "SKILL_UP_SESSION_WS"
+	// envSessionWorkspaceKey carries the canonical comparison form of that path.
+	envSessionWorkspaceKey = "SKILL_UP_SESSION_WSKEY"
+)
 
 // sessionCleanupContext derives a context for post-run session-file
 // persistence, lookup and download. It detaches from cancellation of the
@@ -72,39 +79,46 @@ func withDownloadedSession(
 }
 
 // agentSessionLookup parametrises the per-agent project-tree lookup so that
-// claude-code / qoder / future CLIs can share the same shell script.
+// claude-code / qoder / qwen / future CLIs can share the same shell script.
 type agentSessionLookup struct {
-	// envVar is the environment variable name used inside the runtime to pass
-	// the workspace key (e.g. SKILL_UP_CLAUDE_WSKEY).
-	envVar string
-	// rootTmpl is the shell-expanded root directory expression, referencing
-	// $home and the envVar (e.g. "$home/.claude/projects/$SKILL_UP_CLAUDE_WSKEY").
-	rootTmpl string
+	// projectsRootTmpl is the shell-expanded directory that holds one
+	// subdirectory per workspace (e.g. "$home/.claude/projects").
+	projectsRootTmpl string
+	// sessionDepth bounds how deep below a workspace directory a session file
+	// may live: 1 when session files sit directly inside it (claude, qoder), 2
+	// for layouts with one intermediate directory (qwen's "chats"). It keeps
+	// unrelated transcripts out of the result — qodercli stores sub-agent
+	// transcripts in <sessionID>/subagents/, which are neither resumable
+	// sessions nor this run's conversation.
+	sessionDepth int
 	// findExtra appends extra `find` predicates such as exclusion patterns.
 	// Empty string means no extra predicates.
 	findExtra string
 }
 
-// findAgentSessionJSONL resolves the newest *.jsonl session file under the
-// agent-specific projects tree for the runtime's workspace. HOME and the tree
-// are read only inside the runtime via Exec to preserve runtime isolation.
+// findAgentSessionJSONL resolves the newest *.jsonl session file that belongs to
+// the runtime's workspace. HOME and the tree are read only inside the runtime via
+// Exec to preserve runtime isolation.
 //
-// Shell logic (cannot use process substitution / set -e in some runtimes):
-//
-//	tmp=$(mktemp); find ... >"$tmp"; while read -r p; do pick newest mtime; done <"$tmp"
+// The workspace directory is identified without reproducing any CLI's naming
+// rule: see buildSessionLookupScriptWithPrinter.
 func findAgentSessionJSONL(ctx context.Context, rt Runtime, lookup agentSessionLookup) string {
-	workspaceKey := workspaceKeyForRuntime(rt)
+	workspace := workspaceForRuntime(rt)
+	workspaceKey := canonicalWorkspaceKey(workspace)
 	if workspaceKey == "" {
 		return ""
 	}
-	logging.DebugContextf(ctx, "agent session lookup: workspace=%q key=%q", rt.Workspace(), workspaceKey)
+	logging.DebugContextf(ctx, "agent session lookup: workspace=%q key=%q", workspace, workspaceKey)
 
 	script := buildSessionLookupScript(lookup)
 	if rt.Shell().GOOS == platform.GOOSWindows {
 		script = buildWindowsSessionLookupScript(lookup)
 	}
 	result, err := rt.Exec(ctx, script, ExecOptions{
-		Env: map[string]string{lookup.envVar: workspaceKey},
+		Env: map[string]string{
+			envSessionWorkspace:    workspace,
+			envSessionWorkspaceKey: workspaceKey,
+		},
 	})
 	if err != nil || result.ExitCode != 0 {
 		logging.DebugContextf(ctx, "agent session lookup failed: err=%v exit_code=%d", err, result.ExitCode)
@@ -119,19 +133,33 @@ func findAgentSessionJSONL(ctx context.Context, rt Runtime, lookup agentSessionL
 	return sessionPath
 }
 
-// workspaceKeyForRuntime computes the projects-tree subdirectory name for the
-// runtime's workspace path. Claude derives Windows keys from the cwd spelling
-// it receives, so avoid expanding 8.3 short names to their long form before
-// sanitizing them.
-func workspaceKeyForRuntime(rt Runtime) string {
+// workspaceForRuntime returns the workspace path as the agent CLI sees it.
+// POSIX CLIs learn their cwd from getcwd, which reports the physical path, so
+// symlinks are resolved first. On Windows the spelling the CLI receives is kept
+// as-is (8.3 short names are not expanded).
+func workspaceForRuntime(rt Runtime) string {
 	workspace := rt.Workspace()
 	if rt.Shell().GOOS == platform.GOOSWindows {
-		return windowsWorkspaceKeyInvalidChars.ReplaceAllString(workspace, "-")
+		return workspace
 	}
 	if realPath, err := filepath.EvalSymlinks(workspace); err == nil {
 		workspace = realPath
 	}
-	return strings.ReplaceAll(workspace, "/", "-")
+	return workspace
+}
+
+// canonicalWorkspaceKey maps a workspace path to a comparison form: every
+// non-alphanumeric character becomes "-".
+//
+// This is deliberately *not* an attempt to reproduce how a CLI names the
+// directory it stores sessions in. Those rules are unversioned implementation
+// details that differ per CLI and have changed between releases (qodercli once
+// preserved spaces, today it replaces them). Instead, the same canonical form is
+// applied to both sides of the comparison in the lookup script, so any rule that
+// derives the directory name by substituting separators and special characters —
+// with "-", "_", or anything else non-alphanumeric — still matches.
+func canonicalWorkspaceKey(workspace string) string {
+	return nonAlphanumeric.ReplaceAllString(workspace, "-")
 }
 
 // extractSessionIDFromPath extracts a session identifier from a session JSONL
@@ -161,15 +189,56 @@ func buildWindowsSessionLookupScript(lookup agentSessionLookup) string {
 	)
 }
 
+// buildSessionLookupScriptWithPrinter renders the shared lookup script.
+//
+// The workspace directory is located without reproducing any CLI's naming rule:
+//
+//  1. Canonical name match: each directory name under the projects root and the
+//     workspace path are both reduced to the same form (every non-alphanumeric
+//     character becomes "-") before comparing, in a single awk pass. Any rule
+//     that substitutes separators and special characters matches, whatever it
+//     substitutes them with, so a CLI release changing its rule cannot silently
+//     break resume.
+//  2. Recorded-cwd match, used only when step 1 finds nothing: pick transcripts
+//     that record this workspace as their working directory. This covers names
+//     that cannot be derived from the path at all, such as the truncated and
+//     hashed names the CLIs fall back to for very long paths.
+//
+// Both steps identify the workspace explicitly, so concurrent cases writing into
+// the same projects tree cannot be confused for one another. The depth bound
+// keeps nested transcripts (e.g. qodercli's <sessionID>/subagents/) out.
+//
+// Shell constraints (some runtimes provide a minimal POSIX shell): no process
+// substitution, and no pipeline whose body is shell code — such a body runs in a
+// subshell, and a subshell exiting can fire the EXIT trap and delete the temp
+// files the outer script still needs. Candidate lists therefore go through temp
+// files that plain `while ... done <file` loops read back.
 func buildSessionLookupScriptWithPrinter(lookup agentSessionLookup, printBest string) string {
 	extra := ""
 	if lookup.findExtra != "" {
 		extra = " " + lookup.findExtra
 	}
+	sessionDepth := lookup.sessionDepth
+	if sessionDepth <= 0 {
+		sessionDepth = 1
+	}
+
 	return fmt.Sprintf(`home=$(printenv HOME); [ -n "$home" ] || exit 0
 root="%s"; [ -d "$root" ] || exit 0
-tmp=$(mktemp) || exit 0; trap 'rm -f "$tmp"' 0
-find "$root" -type f -name "*.jsonl"%s 2>/dev/null >"$tmp" || true
+ws=$(printenv %s); wskey=$(printenv %s); [ -n "$wskey" ] || exit 0
+tmp=$(mktemp) || exit 0; list=$(mktemp) || exit 0; trap 'rm -f "$tmp" "$list"' 0
+find "$root" -mindepth 1 -maxdepth 1 -type d 2>/dev/null >"$tmp" || true
+awk -v key="$wskey" '{n=$0; sub(/.*\//,"",n); gsub(/[^a-zA-Z0-9]/,"-",n); if (n==key) print}' "$tmp" >"$list" || true
+: >"$tmp"
+while IFS= read -r d || [ -n "$d" ]; do
+  find "$d" -maxdepth %d -type f -name "*.jsonl"%s 2>/dev/null >>"$tmp" || true
+done <"$list"
+if [ ! -s "$tmp" ] && [ -n "$ws" ]; then
+  find "$root" -maxdepth %d -type f -name "*.jsonl"%s 2>/dev/null >"$list" || true
+  while IFS= read -r c || [ -n "$c" ]; do
+    if head -c 65536 "$c" 2>/dev/null | grep -qF "\"$ws\""; then printf '%%s\n' "$c" >>"$tmp"; fi
+  done <"$list"
+fi
 best=; ts=-1
 while IFS= read -r p || [ -n "$p" ]; do
   [ -f "$p" ] || continue
@@ -177,5 +246,10 @@ while IFS= read -r p || [ -n "$p" ]; do
   case $m in ''|*[!0-9]*) continue;; esac
   if [ "$ts" -eq -1 ] || [ "$m" -gt "$ts" ]; then ts=$m; best=$p; fi
 done <"$tmp"
-%s`, lookup.rootTmpl, extra, printBest)
+%s`,
+		lookup.projectsRootTmpl,
+		envSessionWorkspace, envSessionWorkspaceKey,
+		sessionDepth, extra,
+		sessionDepth+1, extra,
+		printBest)
 }

@@ -569,9 +569,9 @@ func buildClaudeTextSessionResult(engine, instruction string, start time.Time, r
 // projects tree (~/.claude/projects/<workspace-key>/) for this workspace.
 func findClaudeSessionFile(ctx context.Context, rt Runtime) string {
 	return findAgentSessionJSONL(ctx, rt, agentSessionLookup{
-		envVar:    "SKILL_UP_CLAUDE_WSKEY",
-		rootTmpl:  "$home/.claude/projects/$SKILL_UP_CLAUDE_WSKEY",
-		findExtra: "",
+		projectsRootTmpl: "$home/.claude/projects",
+		sessionDepth:     1,
+		findExtra:        "",
 	})
 }
 
@@ -975,13 +975,20 @@ func processClaudeAssistantEvent(event claudeEvent, turn int) ([]transcript.Mess
 		role = transcript.RoleError
 	}
 	messages := extractToolMessagesFromContent(event.Message.Content, turn)
-	if text := extractTextFromContent(event.Message.Content); text != "" {
+	// Only real prose becomes an assistant message: tool_use blocks are already
+	// recorded as their own tool_call messages above, and letting their
+	// "[tool: Name]" rendering stand in as assistant text makes a placeholder
+	// eligible as the answer under evaluation.
+	if text := extractAssistantTextFromContent(event.Message.Content); text != "" {
 		messages = append(messages, transcript.Message{Role: role, Content: text, Turn: turn})
 	}
 	return messages, "", turn
 }
 
 // extractTextFromContent extracts text content from Claude message content block.
+// Tool calls are rendered as "[tool: Name]" so that a caller inspecting raw
+// content still sees that a tool ran; use extractAssistantTextFromContent when
+// the result stands in for what the assistant actually said.
 func extractTextFromContent(content any) string {
 	if content == nil {
 		return ""
@@ -1007,6 +1014,36 @@ func extractTextFromContent(content any) string {
 				if name, ok := blockMap["name"].(string); ok {
 					textParts = append(textParts, "[tool: "+name+"]")
 				}
+			}
+		}
+		if len(textParts) > 0 {
+			return strings.Join(textParts, "\n\n")
+		}
+	}
+
+	return ""
+}
+
+// extractAssistantTextFromContent returns only the prose an assistant emitted,
+// ignoring tool_use blocks. An assistant event that carries nothing but tool
+// calls therefore yields "", which keeps it out of the running when the final
+// answer of a turn is selected.
+func extractAssistantTextFromContent(content any) string {
+	switch c := content.(type) {
+	case string:
+		return c
+	case []any:
+		var textParts []string
+		for _, block := range c {
+			blockMap, ok := block.(map[string]any)
+			if !ok {
+				continue
+			}
+			if blockType, _ := blockMap["type"].(string); blockType != "text" {
+				continue
+			}
+			if text, ok := blockMap["text"].(string); ok {
+				textParts = append(textParts, text)
 			}
 		}
 		if len(textParts) > 0 {

@@ -291,8 +291,10 @@ func (a *QwenCodeAgent) buildSessionResult(ctx context.Context, rt Runtime, opts
 // shared project-tree lookup (HOME + tree are read only inside the runtime).
 func findQwenCodeSessionFile(ctx context.Context, rt Runtime) string {
 	return findAgentSessionJSONL(ctx, rt, agentSessionLookup{
-		envVar:   "SKILL_UP_QWEN_WSKEY",
-		rootTmpl: "$home/.qwen/projects/$SKILL_UP_QWEN_WSKEY/chats",
+		projectsRootTmpl: "$home/.qwen/projects",
+		// qwen keeps chats one level below the workspace directory:
+		// <workspace-key>/chats/<session>.jsonl.
+		sessionDepth: 2,
 	})
 }
 

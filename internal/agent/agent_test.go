@@ -720,7 +720,11 @@ func TestExtractSessionIDFromPath(t *testing.T) {
 	}
 }
 
-func TestWorkspaceKeyForRuntime(t *testing.T) {
+// TestCanonicalWorkspaceKey covers the comparison form both sides of the session
+// lookup are reduced to. Windows spellings must survive unexpanded (an 8.3 short
+// name stays short), because the CLI derives its directory name from the cwd it
+// was handed.
+func TestCanonicalWorkspaceKey(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -748,18 +752,24 @@ func TestWorkspaceKeyForRuntime(t *testing.T) {
 			want:      "C--Users-RUNNER-1-AppData-Local-Temp-skill-up-123",
 		},
 		{
-			name:      "posix colon remains valid",
-			workspace: "/tmp/skill-up:123",
+			name:      "posix underscores dots and colons",
+			workspace: "/tmp/skill_up.eval:123",
 			shell:     platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX},
-			want:      "-tmp-skill-up:123",
+			want:      "-tmp-skill-up-eval-123",
+		},
+		{
+			name:      "posix spaces and non-ascii",
+			workspace: "/tmp/eval space/中文",
+			shell:     platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX},
+			want:      "-tmp-eval-space---",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			rt := &probeMergeTestRuntime{workspace: tt.workspace, shell: tt.shell}
-			if got := workspaceKeyForRuntime(rt); got != tt.want {
-				t.Fatalf("workspaceKeyForRuntime() = %q, want %q", got, tt.want)
+			if got := canonicalWorkspaceKey(workspaceForRuntime(rt)); got != tt.want {
+				t.Fatalf("canonicalWorkspaceKey() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -769,8 +779,8 @@ func TestBuildSessionLookupScriptPathFormat(t *testing.T) {
 	t.Parallel()
 
 	lookup := agentSessionLookup{
-		envVar:   "SKILL_UP_CLAUDE_WSKEY",
-		rootTmpl: "$home/.claude/projects/$SKILL_UP_CLAUDE_WSKEY",
+		projectsRootTmpl: "$home/.claude/projects",
+		sessionDepth:     1,
 	}
 	tests := []struct {
 		name        string

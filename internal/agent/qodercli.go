@@ -275,14 +275,19 @@ func (a *QoderCLIAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOption
 	return sessionResult, nil
 }
 
-// findQoderSessionFile resolves the newest matching session JSONL under the Qoder
-// projects tree for this workspace. Per runtime isolation, HOME and the tree
-// are read only inside the runtime via Exec (not os.Getenv / host os.Stat).
+// findQoderSessionFile resolves the newest session JSONL that belongs to this
+// workspace under the Qoder projects tree. Per runtime isolation, HOME and the
+// tree are read only inside the runtime via Exec (not os.Getenv / host os.Stat).
+//
+// sessionDepth of 1 matters beyond performance: a Skill or Task call spawns a
+// sub-agent whose transcript is written to <sessionID>/subagents/agent-*.jsonl
+// inside this same tree. Those are often the newest files, and their names are
+// not resumable session ids.
 func findQoderSessionFile(ctx context.Context, rt Runtime) string {
 	return findAgentSessionJSONL(ctx, rt, agentSessionLookup{
-		envVar:    "SKILL_UP_QODER_WSKEY",
-		rootTmpl:  "$home/.qoder/projects/$SKILL_UP_QODER_WSKEY",
-		findExtra: `! -name "*-session.json"`,
+		projectsRootTmpl: "$home/.qoder/projects",
+		sessionDepth:     1,
+		findExtra:        `! -name "*-session.json"`,
 	})
 }
 
