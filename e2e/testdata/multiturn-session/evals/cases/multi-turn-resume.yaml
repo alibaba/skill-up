@@ -1,0 +1,35 @@
+id: multi-turn-resume
+title: Multi-turn evaluation resumes the same CLI session
+description: >
+  Turn 1 is answered through a Skill (tool call first, prose afterwards), so its
+  response must be the final text rather than a tool placeholder. Turn 2 depends
+  on turn 1's context, which is only available when the framework resumes the
+  session the first turn created.
+tag: functional_test
+input:
+  turns:
+    - role: user
+      content: Explain GRADING-POLICY tiering.
+      post_condition:
+        must_contain_any: ["alidocs.dingtalk.com"]
+        must_not_contain: ["[tool:"]
+        on_fail: fail
+    - role: user
+      content: You did not answer my question.
+
+constraints:
+  timeout_seconds: 60
+  max_turns: 5
+
+judge:
+  type: rule_based
+  success:
+    - turn_response_contains:
+        turn: 1
+        contains_all: ["alidocs.dingtalk.com"]
+    - turn_response_not_contains:
+        turn: 1
+        not_contains: ["[tool:"]
+    - turn_response_contains:
+        turn: 2
+        contains_all: ["context-recall: Explain GRADING-POLICY tiering."]
