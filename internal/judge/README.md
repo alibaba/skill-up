@@ -10,7 +10,7 @@ All grading implementations share a unified `Judge` interface that takes an `Inp
 | `judge.go` | Core interface (`Judge`) and shared data types (`Input`, `Result`, `AssertionResult`, `Status`); path safety validation (`safePath`); shared file-check helper (`fileExistsInWorkspace`) |
 | `expect.go` | **Expect pre-check** — 7 lightweight checks; on failure short-circuits and skips the subsequent Judge to save tokens |
 | `factory.go` | **Factory function** — creates concrete Judge instances from `JudgeConfig`; configuration merge logic |
-| `rule_based.go` | **RuleBasedJudge** — declarative rule evaluation with 5 rule types and failure-priority semantics |
+| `rule_based.go` | **RuleBasedJudge** — declarative rule evaluation with failure-priority semantics |
 | `script.go` | **ScriptJudge** — runs an external script (exit 0 = PASS), supports timeout control |
 | `agent_judge.go` | **AgentJudge** — LLM-as-Judge; uses `agent.Agent` + `runtime.Runtime`; supports `pass_threshold` |
 
@@ -169,11 +169,12 @@ Runner entry point
 
 ### RuleBasedJudge (`rule_based.go`)
 
-5 rule assertions:
+Rule assertions:
 
 | Rule | Description |
 |---|---|
 | `output_contains` | Check the final output (supports `all` / `any` / `not` modes) |
+| `output_matches` | Check the final output with Go regular expressions (supports `all` / `any` / `not` modes) |
 | `exit_code` | Check the exit code |
 | `tool_called` | Check whether a tool was invoked (supports partial argument matching) |
 | `turn_response_contains` | *(merged into `output_contains.all`)* |

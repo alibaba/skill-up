@@ -235,7 +235,7 @@ func validateCaseMCP(mcpCfg MCPConfig) []string {
 }
 
 func judgeNeedsLocalValidation(judge JudgeConfig) bool {
-	return judge.Type != "" || len(judge.Skills) > 0 || judge.Context != nil
+	return judge.Type != "" || len(judge.Skills) > 0 || judge.Context != nil || len(judge.Success) > 0 || len(judge.Failure) > 0
 }
 
 // validateJudgeTypeAndLocalFields validates judge fields that do not depend on inheritance.
@@ -256,7 +256,33 @@ func validateJudgeTypeAndLocalFields(judge JudgeConfig) []string {
 	if judge.TimeoutSeconds != nil && *judge.TimeoutSeconds < 0 {
 		errs = append(errs, "judge.timeout_seconds must be non-negative")
 	}
+	errs = append(errs, validateOutputMatchesRules("judge.success", judge.Success)...)
+	errs = append(errs, validateOutputMatchesRules("judge.failure", judge.Failure)...)
 
+	return errs
+}
+
+func validateOutputMatchesRules(field string, rules []Rule) []string {
+	var errs []string
+	for i, rule := range rules {
+		if rule.OutputMatches == nil {
+			continue
+		}
+		prefix := fmt.Sprintf("%s[%d].output_matches", field, i)
+		errs = append(errs, validateRegexList(prefix+".all", rule.OutputMatches.All)...)
+		errs = append(errs, validateRegexList(prefix+".any", rule.OutputMatches.Any)...)
+		errs = append(errs, validateRegexList(prefix+".not", rule.OutputMatches.Not)...)
+	}
+	return errs
+}
+
+func validateRegexList(field string, patterns []string) []string {
+	var errs []string
+	for i, pattern := range patterns {
+		if _, err := regexp.Compile(pattern); err != nil {
+			errs = append(errs, fmt.Sprintf("%s[%d] is invalid regex %q: %v", field, i, pattern, err))
+		}
+	}
 	return errs
 }
 

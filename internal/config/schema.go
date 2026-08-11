@@ -196,6 +196,7 @@ type JudgeContextAttachment struct {
 // Rule is a single assertion rule for rule_based evaluation.
 type Rule struct {
 	OutputContains          *OutputContainsRule          `json:"output_contains,omitempty"            yaml:"output_contains,omitempty"`
+	OutputMatches           *OutputMatchesRule           `json:"output_matches,omitempty"             yaml:"output_matches,omitempty"`
 	ExitCode                *int                         `json:"exit_code,omitempty"                  yaml:"exit_code,omitempty"`
 	ToolCalled              *ToolCalledRule              `json:"tool_called,omitempty"                yaml:"tool_called,omitempty"`
 	FilesExist              []string                     `json:"files_exist,omitempty"                yaml:"files_exist,omitempty"`
@@ -234,6 +235,13 @@ type ToolNotCalledInTurnRule struct {
 
 // OutputContainsRule checks if output contains specific text.
 type OutputContainsRule struct {
+	All []string `json:"all,omitempty" yaml:"all,omitempty"`
+	Any []string `json:"any,omitempty" yaml:"any,omitempty"`
+	Not []string `json:"not,omitempty" yaml:"not,omitempty"`
+}
+
+// OutputMatchesRule checks if output matches regular expressions.
+type OutputMatchesRule struct {
 	All []string `json:"all,omitempty" yaml:"all,omitempty"`
 	Any []string `json:"any,omitempty" yaml:"any,omitempty"`
 	Not []string `json:"not,omitempty" yaml:"not,omitempty"`

@@ -712,6 +712,10 @@ judge:
         all: ["bug", "null"]                  # Must contain ALL
         any: ["suggest fix", "recommend"]     # Must contain at least one
         not: ["LGTM"]                         # Must NOT contain
+    - output_matches:                         # Go regexp patterns against final output
+        all: ["(?m)^## Status$", "(?m)^## Evidence$"]
+        any: ["(?i)pass", "(?i)success"]
+        not: ["(?i)api[_-]?key\\s*="]
     - exit_code: 0
     - tool_called:                            # Agent must invoke this tool
         name: "github::create_pull_request"
@@ -720,9 +724,13 @@ judge:
   failure:                                    # If ANY rule matches → immediate fail
     - output_contains:
         any: ["no changes needed", "code is correct"]
+    - output_matches:
+        any: ["BEGIN PRIVATE KEY"]
 ```
 
 > **Evaluation order:** `failure` outranks `success`. If any `failure` rule matches, the case fails immediately. Otherwise every `success` rule must pass.
+
+`output_contains` performs literal substring checks. Use `output_matches` when you need regular expressions; patterns use Go `regexp` syntax and invalid patterns fail config validation.
 
 ### judge: script — custom script
 
