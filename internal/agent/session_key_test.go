@@ -276,6 +276,79 @@ func TestFindClaudeSessionFileMatchesJSONEscapedWindowsCwd(t *testing.T) {
 	}
 }
 
+// TestFindQoderSessionFileWithHTMLSensitiveWorkspace covers workspace paths
+// containing characters a JSON encoder may escape at its own discretion. Go
+// escapes "&", "<" and ">" by default while the Node-based CLIs write them
+// literally, so a marker built from the default encoding matches nothing and the
+// transcript is discarded. Nothing about this is Windows-specific.
+func TestFindQoderSessionFileWithHTMLSensitiveWorkspace(t *testing.T) {
+	skipIfNoLocalBash(t)
+	t.Parallel()
+
+	home := t.TempDir()
+	workspace := filepath.Join(t.TempDir(), "ws&a<b>c")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	resolved := resolvePath(t, workspace)
+
+	session := filepath.Join(home, ".qoder", "projects", cliProjectDirKey(t, workspace),
+		"55555555-5555-5555-5555-555555555555.jsonl")
+	writeSessionFixture(t, session, qoderSessionFixture(resolved))
+
+	rt := newShellSessionRuntime(workspace, home)
+	if got := findQoderSessionFile(context.Background(), rt); got != session {
+		t.Fatalf("findQoderSessionFile() = %q, want %q", got, session)
+	}
+}
+
+// TestFindClaudeSessionFileFoldsWindowsPathCase covers Windows path equivalence:
+// the spelling skill-up receives and the spelling the CLI recorded may differ in
+// case for the same directory, so both the project-directory comparison and the
+// recorded working directory have to be compared case-insensitively there.
+func TestFindClaudeSessionFileFoldsWindowsPathCase(t *testing.T) {
+	skipIfNoLocalBash(t)
+	t.Parallel()
+
+	home := t.TempDir()
+	const (
+		workspace = `C:\Users\RunnerAdmin\AppData\Local\Temp\skill_up-1`
+		recorded  = `C:\Users\RUNNERADMIN\AppData\Local\Temp\skill_up-1`
+	)
+	root := filepath.Join(home, ".claude", "projects", canonicalWorkspaceKey(recorded))
+	session := filepath.Join(root, "66666666-6666-6666-6666-666666666666.jsonl")
+	writeSessionFixture(t, session,
+		`{"type":"user","cwd":"C:\\Users\\RUNNERADMIN\\AppData\\Local\\Temp\\skill_up-1","message":{"content":"hi","role":"user"}}`)
+
+	rt := newShellSessionRuntime(workspace, home)
+	rt.shell = platform.Shell{GOOS: platform.GOOSWindows, Family: platform.ShellPOSIX, BashPath: "bash"}
+	if got := findClaudeSessionFile(context.Background(), rt); got != session {
+		t.Fatalf("findClaudeSessionFile() = %q, want %q", got, session)
+	}
+}
+
+// TestFindQoderSessionFileKeepsPOSIXPathCase is the counterpart guard: POSIX paths
+// are case-sensitive, so /w/ws_a and /w/WS_A are different workspaces and the
+// Windows folding must not leak into that comparison.
+func TestFindQoderSessionFileKeepsPOSIXPathCase(t *testing.T) {
+	skipIfNoLocalBash(t)
+	t.Parallel()
+
+	home := t.TempDir()
+	parent := t.TempDir()
+	workspace := filepath.Join(parent, "ws_a")
+	otherWorkspace := filepath.Join(parent, "WS_A")
+
+	session := filepath.Join(home, ".qoder", "projects", canonicalWorkspaceKey(otherWorkspace),
+		"77777777-7777-7777-7777-777777777777.jsonl")
+	writeSessionFixture(t, session, qoderSessionFixture(otherWorkspace))
+
+	rt := newShellSessionRuntime(workspace, home)
+	if got := findQoderSessionFile(context.Background(), rt); got != "" {
+		t.Fatalf("findQoderSessionFile() = %q, want no result for a case-different workspace", got)
+	}
+}
+
 // qoderSessionFixture returns a minimal transcript in the shape qodercli writes,
 // including the recorded working directory the lookup can fall back to.
 func qoderSessionFixture(workspace string) string {
@@ -394,6 +467,7 @@ func skipIfNoLocalBash(t *testing.T) {
 type shellSessionRuntime struct {
 	workspace string
 	home      string
+	shell     platform.Shell
 	merged    map[string]string
 }
 
@@ -453,6 +527,9 @@ func (r *shellSessionRuntime) MergeEnv(env map[string]string) {
 }
 
 func (r *shellSessionRuntime) Shell() platform.Shell {
+	if r.shell.GOOS != "" {
+		return r.shell
+	}
 	return platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX, BashPath: "bash"}
 }
 

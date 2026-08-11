@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -172,12 +173,20 @@ func canonicalWorkspaceKey(workspace string) string {
 // matched in the escaped form it is actually written in ("C:\\Users\\..."), and
 // the key is part of the fragment, so a path that merely appears somewhere in the
 // conversation — a tool argument, say — is not mistaken for recorded identity.
+//
+// HTML escaping is disabled to match the producer: the CLIs are JavaScript
+// programs, and JSON.stringify writes "&", "<" and ">" literally where Go's
+// default encoder emits \u0026, \u003c and \u003e. A path containing any of them
+// would otherwise never match. (Go still escapes U+2028/U+2029 where JavaScript
+// does not; those are line separators and not a realistic path character.)
 func workspaceCwdMarkers(workspace string) []string {
-	encoded, err := json.Marshal(workspace)
-	if err != nil {
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(workspace); err != nil {
 		return nil
 	}
-	quoted := string(encoded)
+	quoted := strings.TrimRight(buf.String(), "\n")
 
 	markers := make([]string, 0, 4)
 	for _, key := range []string{`"cwd":`, `"directories":[`} {
@@ -197,10 +206,26 @@ func extractSessionIDFromPath(sessionPath string) string {
 	return base
 }
 
+// pathComparison captures how paths are compared on the target platform: POSIX
+// paths are case-sensitive, Windows paths are not, and the same directory may
+// reach us spelled differently from how the CLI recorded it.
+type pathComparison struct {
+	// awkNameMatch is the awk condition comparing a canonicalised directory name
+	// (n) against the workspace key (key).
+	awkNameMatch string
+	// grepFlags selects fixed-string matching of the recorded-cwd markers.
+	grepFlags string
+}
+
+var (
+	caseSensitivePaths   = pathComparison{awkNameMatch: "n==key", grepFlags: "-qFf"}
+	caseInsensitivePaths = pathComparison{awkNameMatch: "tolower(n)==tolower(key)", grepFlags: "-qiFf"}
+)
+
 // buildSessionLookupScript renders the shared shell snippet that picks the
 // newest *.jsonl under the configured root.
 func buildSessionLookupScript(lookup agentSessionLookup) string {
-	return buildSessionLookupScriptWithPrinter(lookup, `printf %s "$best"`)
+	return buildSessionLookupScriptWithPrinter(lookup, `printf %s "$best"`, caseSensitivePaths)
 }
 
 func buildWindowsSessionLookupScript(lookup agentSessionLookup) string {
@@ -210,6 +235,7 @@ func buildWindowsSessionLookupScript(lookup agentSessionLookup) string {
 	return buildSessionLookupScriptWithPrinter(
 		lookup,
 		`if [ -n "$best" ]; then cygpath -w "$best" 2>/dev/null || printf %s "$best"; fi`,
+		caseInsensitivePaths,
 	)
 }
 
@@ -246,6 +272,11 @@ func buildWindowsSessionLookupScript(lookup agentSessionLookup) string {
 // `--session-id`, and a session_id field under `--output-format json`), which is a
 // change to how every engine is invoked and is tracked separately.
 //
+// Path comparison follows the platform: POSIX paths are case-sensitive, while on
+// Windows the same directory may be spelled with different case by the runtime
+// and by the CLI, so both the directory match and the recorded working directory
+// are folded there.
+//
 // The depth bound keeps nested transcripts (e.g. qodercli's
 // <sessionID>/subagents/) out.
 //
@@ -254,7 +285,7 @@ func buildWindowsSessionLookupScript(lookup agentSessionLookup) string {
 // subshell, and a subshell exiting can fire the EXIT trap and delete the temp
 // files the outer script still needs. Candidate lists therefore go through temp
 // files that plain `while ... done <file` loops read back.
-func buildSessionLookupScriptWithPrinter(lookup agentSessionLookup, printBest string) string {
+func buildSessionLookupScriptWithPrinter(lookup agentSessionLookup, printBest string, paths pathComparison) string {
 	extra := ""
 	if lookup.findExtra != "" {
 		extra = " " + lookup.findExtra
@@ -277,7 +308,7 @@ keep_recording_ws() {
   : >"$tmp"
   [ -s "$marks" ] || return 0
   while IFS= read -r c || [ -n "$c" ]; do
-    if head -c 65536 "$c" 2>/dev/null | grep -qFf "$marks"; then printf '%%s\n' "$c" >>"$tmp"; fi
+    if head -c 65536 "$c" 2>/dev/null | grep %s "$marks"; then printf '%%s\n' "$c" >>"$tmp"; fi
   done <"$1"
 }
 any_records_cwd() {
@@ -287,7 +318,7 @@ any_records_cwd() {
   return 1
 }
 find "$root" -mindepth 1 -maxdepth 1 -type d 2>/dev/null >"$tmp" || true
-awk -v key="$wskey" '{n=$0; sub(/.*\//,"",n); gsub(/[^a-zA-Z0-9]/,"-",n); if (n==key) print}' "$tmp" >"$list" || true
+awk -v key="$wskey" '{n=$0; sub(/.*\//,"",n); gsub(/[^a-zA-Z0-9]/,"-",n); if (%s) print}' "$tmp" >"$list" || true
 : >"$tmp"
 while IFS= read -r d || [ -n "$d" ]; do
   find "$d" -maxdepth %d -type f -name "*.jsonl"%s 2>/dev/null >>"$tmp" || true
@@ -311,6 +342,8 @@ done <"$tmp"
 		lookup.projectsRootTmpl,
 		envSessionWorkspace, envSessionWorkspaceKey,
 		envSessionCwdMarkers,
+		paths.grepFlags,
+		paths.awkNameMatch,
 		sessionDepth, extra,
 		sessionDepth+1, extra,
 		printBest)

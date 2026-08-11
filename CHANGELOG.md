@@ -26,7 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`C:\\Users\\...`) is recognised and a path that merely appears in the
   conversation is not mistaken for identity. When a neighbouring transcript proves
   the directory is shared and none can be attributed to this workspace, the lookup
-  reports no session instead of guessing.
+  reports no session instead of guessing. Markers are encoded the way the CLIs
+  write them (no HTML escaping, so a path containing `&`, `<` or `>` matches), and
+  Windows comparisons fold case because the same directory may reach skill-up
+  spelled differently from how the CLI recorded it.
 - Per-turn responses in multi-turn evaluation are now the answer that closed each
   turn. Turn boundaries are derived from the transcript each turn appends instead
   of from session-file turn numbers, which count tool results and injected Skill
