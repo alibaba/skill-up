@@ -3,6 +3,7 @@ package judge
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/alibaba/skill-up/internal/config"
@@ -76,6 +77,8 @@ func evaluateAssertion(rule config.Rule, in Input) AssertionResult {
 	switch {
 	case rule.OutputContains != nil:
 		return evalOutputContains(rule.OutputContains, in.FinalMessage)
+	case rule.OutputMatches != nil:
+		return evalOutputMatches(rule.OutputMatches, in.FinalMessage)
 	case rule.ExitCode != nil:
 		return evalExitCode(*rule.ExitCode, in.ExitCode)
 	case rule.ToolCalled != nil:
@@ -171,6 +174,119 @@ func evalOutputContains(rule *config.OutputContainsRule, finalMessage string) As
 		Text:     desc,
 		Passed:   true,
 		Evidence: fmt.Sprintf("output satisfies all contains checks (%s)", strings.Join(descParts, ", ")),
+	}
+}
+
+// evalOutputMatches checks the final output for regular expressions (all/any/not).
+func evalOutputMatches(rule *config.OutputMatchesRule, finalMessage string) AssertionResult {
+	missing, invalid := missingRegexMatches("output_matches.all", rule.All, finalMessage)
+	if invalid != nil {
+		return *invalid
+	}
+	if len(missing) > 0 {
+		return AssertionResult{
+			Text:     fmt.Sprintf("output_matches.all: missing %v", missing),
+			Passed:   false,
+			Evidence: fmt.Sprintf("output does not match required regex patterns: %v", missing),
+		}
+	}
+
+	if len(rule.Any) > 0 {
+		found, invalid := anyRegexMatches("output_matches.any", rule.Any, finalMessage)
+		if invalid != nil {
+			return *invalid
+		}
+		if !found {
+			return AssertionResult{
+				Text:     fmt.Sprintf("output_matches.any: %v", rule.Any),
+				Passed:   false,
+				Evidence: fmt.Sprintf("output does not match any of %v", rule.Any),
+			}
+		}
+	}
+
+	forbiddenPattern, matched, invalid := firstMatchingRegex("output_matches.not", rule.Not, finalMessage)
+	if invalid != nil {
+		return *invalid
+	}
+	if matched {
+		return AssertionResult{
+			Text:     fmt.Sprintf("output_matches.not: %q", forbiddenPattern),
+			Passed:   false,
+			Evidence: fmt.Sprintf("output matches forbidden regex pattern %q", forbiddenPattern),
+		}
+	}
+
+	var descParts []string
+	if len(rule.All) > 0 {
+		descParts = append(descParts, fmt.Sprintf("all:%v", rule.All))
+	}
+	if len(rule.Any) > 0 {
+		descParts = append(descParts, fmt.Sprintf("any:%v", rule.Any))
+	}
+	if len(rule.Not) > 0 {
+		descParts = append(descParts, fmt.Sprintf("not:%v", rule.Not))
+	}
+	desc := "output_matches"
+	if len(descParts) > 0 {
+		desc = fmt.Sprintf("output_matches{%s}", strings.Join(descParts, ", "))
+	}
+
+	return AssertionResult{
+		Text:     desc,
+		Passed:   true,
+		Evidence: fmt.Sprintf("output satisfies all regex checks (%s)", strings.Join(descParts, ", ")),
+	}
+}
+
+func missingRegexMatches(field string, patterns []string, finalMessage string) ([]string, *AssertionResult) {
+	var missing []string
+	for _, pattern := range patterns {
+		matched, err := regexp.MatchString(pattern, finalMessage)
+		if err != nil {
+			invalid := invalidRegexResult(field, pattern, err)
+			return nil, &invalid
+		}
+		if !matched {
+			missing = append(missing, pattern)
+		}
+	}
+	return missing, nil
+}
+
+func anyRegexMatches(field string, patterns []string, finalMessage string) (bool, *AssertionResult) {
+	for _, pattern := range patterns {
+		matched, err := regexp.MatchString(pattern, finalMessage)
+		if err != nil {
+			invalid := invalidRegexResult(field, pattern, err)
+			return false, &invalid
+		}
+		if matched {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func firstMatchingRegex(field string, patterns []string, finalMessage string) (string, bool, *AssertionResult) {
+	for _, pattern := range patterns {
+		matched, err := regexp.MatchString(pattern, finalMessage)
+		if err != nil {
+			invalid := invalidRegexResult(field, pattern, err)
+			return "", false, &invalid
+		}
+		if matched {
+			return pattern, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+func invalidRegexResult(field, pattern string, err error) AssertionResult {
+	return AssertionResult{
+		Text:     fmt.Sprintf("%s: invalid %q", field, pattern),
+		Passed:   false,
+		Evidence: fmt.Sprintf("invalid regex pattern %q: %v", pattern, err),
 	}
 }
 

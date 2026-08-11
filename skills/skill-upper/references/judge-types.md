@@ -20,6 +20,10 @@ judge:
         all: ["bug", "null"]
         any: ["建议修复", "推荐更改"]
         not: ["LGTM"]
+    - output_matches:
+        all: ["(?m)^## Status$", "(?m)^## Evidence$"]
+        any: ["(?i)pass", "(?i)success"]
+        not: ["(?i)api[_-]?key\\s*="]
     - exit_code: 0
     - tool_called:
         name: "github::create_pull_request"
@@ -35,6 +39,7 @@ judge:
 **支持的匹配器**：
 
 - `output_contains`
+- `output_matches`（Go regexp，支持 `all` / `any` / `not`）
 - `exit_code`
 - `tool_called`
 - `files_exist` / `files_not_exist`

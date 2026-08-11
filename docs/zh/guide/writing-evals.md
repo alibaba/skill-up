@@ -685,6 +685,10 @@ judge:
         all: ["bug", "null"]                  # 输出必须同时包含
         any: ["建议修复", "推荐更改"]          # 输出至少包含一个
         not: ["LGTM"]                         # 输出不能包含
+    - output_matches:                         # 使用 Go regexp 匹配最终输出
+        all: ["(?m)^## Status$", "(?m)^## Evidence$"]
+        any: ["(?i)pass", "(?i)success"]
+        not: ["(?i)api[_-]?key\\s*="]
     - exit_code: 0                            # 退出码必须为 0
     - tool_called:                            # Agent 必须调用了某个工具
         name: "github::create_pull_request"
@@ -693,9 +697,13 @@ judge:
   failure:                                    # 任一条件匹配则立即失败
     - output_contains:
         any: ["无需修改", "代码正确"]
+    - output_matches:
+        any: ["BEGIN PRIVATE KEY"]
 ```
 
 > **评估逻辑**：`failure` 优先于 `success`。任何一条 `failure` 规则匹配即立即失败；否则所有 `success` 规则必须全部满足才算通过。
+
+`output_contains` 执行字面 substring 检查。需要正则表达式时使用 `output_matches`；pattern 使用 Go `regexp` 语法，非法 pattern 会在配置校验阶段失败。
 
 ### judge: script — 自定义脚本评估
 
