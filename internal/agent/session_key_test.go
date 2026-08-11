@@ -140,56 +140,139 @@ func TestFindQoderSessionFileDisambiguatesCollidingWorkspaces(t *testing.T) {
 	skipIfNoLocalBash(t)
 	t.Parallel()
 
-	tests := []struct {
-		name string
-		// ourFixture builds the transcript of the workspace under test; the other
-		// workspace's transcript always records its own working directory.
-		ourFixture func(workspace string) string
-	}{
-		{
-			name:       "transcripts record their working directory",
-			ourFixture: qoderSessionFixture,
-		},
-		{
-			name: "our transcript records none, the other one does",
-			ourFixture: func(string) string {
-				return `{"type":"user","message":{"content":"hi","role":"user"}}`
-			},
-		},
+	home := t.TempDir()
+	parent := t.TempDir()
+	workspace := filepath.Join(parent, "ws_x")
+	otherWorkspace := filepath.Join(parent, "ws-x")
+	for _, dir := range []string{workspace, otherWorkspace} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create %s: %v", dir, err)
+		}
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+	projectDir := cliProjectDirKey(t, workspace)
+	if other := cliProjectDirKey(t, otherWorkspace); other != projectDir {
+		t.Fatalf("fixture no longer collides: %q vs %q", projectDir, other)
+	}
 
-			home := t.TempDir()
-			parent := t.TempDir()
-			workspace := filepath.Join(parent, "ws_x")
-			otherWorkspace := filepath.Join(parent, "ws-x")
-			for _, dir := range []string{workspace, otherWorkspace} {
-				if err := os.MkdirAll(dir, 0o755); err != nil {
-					t.Fatalf("create %s: %v", dir, err)
-				}
-			}
-			projectDir := cliProjectDirKey(t, workspace)
-			if other := cliProjectDirKey(t, otherWorkspace); other != projectDir {
-				t.Fatalf("fixture no longer collides: %q vs %q", projectDir, other)
-			}
+	root := filepath.Join(home, ".qoder", "projects", projectDir)
+	oursSession := filepath.Join(root, "11111111-1111-1111-1111-111111111111.jsonl")
+	otherSession := filepath.Join(root, "22222222-2222-2222-2222-222222222222.jsonl")
+	writeSessionFixture(t, oursSession, qoderSessionFixture(resolvePath(t, workspace)))
+	writeSessionFixture(t, otherSession, qoderSessionFixture(resolvePath(t, otherWorkspace)))
 
-			root := filepath.Join(home, ".qoder", "projects", projectDir)
-			oursSession := filepath.Join(root, "11111111-1111-1111-1111-111111111111.jsonl")
-			otherSession := filepath.Join(root, "22222222-2222-2222-2222-222222222222.jsonl")
-			writeSessionFixture(t, oursSession, tt.ourFixture(resolvePath(t, workspace)))
-			writeSessionFixture(t, otherSession, qoderSessionFixture(resolvePath(t, otherWorkspace)))
+	// The other workspace ran last, so modification time alone would pick it.
+	touch(t, oursSession, time.Now().Add(-2*time.Minute))
+	touch(t, otherSession, time.Now())
 
-			// The other workspace ran last, so modification time alone would pick it.
-			touch(t, oursSession, time.Now().Add(-2*time.Minute))
-			touch(t, otherSession, time.Now())
+	rt := newShellSessionRuntime(workspace, home)
+	if got := findQoderSessionFile(context.Background(), rt); got != oursSession {
+		t.Fatalf("findQoderSessionFile() = %q, want this workspace's session %q", got, oursSession)
+	}
+}
 
-			rt := newShellSessionRuntime(workspace, home)
-			if got := findQoderSessionFile(context.Background(), rt); got != oursSession {
-				t.Fatalf("findQoderSessionFile() = %q, want this workspace's session %q", got, oursSession)
-			}
-		})
+// TestFindQoderSessionFileIgnoresPathMentionedInContent guards the workspace
+// predicate against false positives: a transcript belonging to a colliding
+// workspace may quote our workspace path in a prompt or tool output (agents print
+// paths routinely), which must not be read as "this transcript is ours". Only
+// recorded working-directory metadata identifies a workspace.
+func TestFindQoderSessionFileIgnoresPathMentionedInContent(t *testing.T) {
+	skipIfNoLocalBash(t)
+	t.Parallel()
+
+	home := t.TempDir()
+	parent := t.TempDir()
+	workspace := filepath.Join(parent, "ws_x")
+	otherWorkspace := filepath.Join(parent, "ws-x")
+	for _, dir := range []string{workspace, otherWorkspace} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create %s: %v", dir, err)
+		}
+	}
+	resolved := resolvePath(t, workspace)
+	root := filepath.Join(home, ".qoder", "projects", cliProjectDirKey(t, workspace))
+
+	oursSession := filepath.Join(root, "11111111-1111-1111-1111-111111111111.jsonl")
+	writeSessionFixture(t, oursSession, qoderSessionFixture(resolved))
+
+	// The other workspace's transcript passes our directory to a tool, so the path
+	// appears there as a plain JSON string just like a recorded cwd would.
+	otherSession := filepath.Join(root, "22222222-2222-2222-2222-222222222222.jsonl")
+	writeSessionFixture(t, otherSession, qoderSessionFixture(resolvePath(t, otherWorkspace))+"\n"+
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Read","input":{"path":"`+resolved+`"}}],"role":"assistant"}}`)
+
+	touch(t, oursSession, time.Now().Add(-2*time.Minute))
+	touch(t, otherSession, time.Now())
+
+	rt := newShellSessionRuntime(workspace, home)
+	if got := findQoderSessionFile(context.Background(), rt); got != oursSession {
+		t.Fatalf("findQoderSessionFile() = %q, want this workspace's session %q", got, oursSession)
+	}
+}
+
+// TestFindQoderSessionFileFailsSafeWhenIdentityUnknown covers a collision where
+// our own transcript carries no working directory but a neighbour's does. The
+// recorded directory proves the project directory is shared, so nothing here can
+// be attributed to this workspace: returning no result (which the evaluator
+// reports as a lost session) beats grading another workspace's conversation.
+//
+// Transcripts that record no directory at all are still usable when nothing
+// contradicts them — qwen's format never records one, and neither did older CLI
+// releases; TestFindQoderSessionFile_SelectsNewestByModTime covers that path.
+func TestFindQoderSessionFileFailsSafeWhenIdentityUnknown(t *testing.T) {
+	skipIfNoLocalBash(t)
+	t.Parallel()
+
+	home := t.TempDir()
+	parent := t.TempDir()
+	workspace := filepath.Join(parent, "ws_x")
+	otherWorkspace := filepath.Join(parent, "ws-x")
+	for _, dir := range []string{workspace, otherWorkspace} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create %s: %v", dir, err)
+		}
+	}
+	root := filepath.Join(home, ".qoder", "projects", cliProjectDirKey(t, workspace))
+
+	oursSession := filepath.Join(root, "11111111-1111-1111-1111-111111111111.jsonl")
+	otherSession := filepath.Join(root, "22222222-2222-2222-2222-222222222222.jsonl")
+	writeSessionFixture(t, oursSession, `{"type":"user","message":{"content":"hi","role":"user"}}`)
+	writeSessionFixture(t, otherSession, qoderSessionFixture(resolvePath(t, otherWorkspace)))
+	touch(t, oursSession, time.Now().Add(-2*time.Minute))
+	touch(t, otherSession, time.Now())
+
+	rt := newShellSessionRuntime(workspace, home)
+	if got := findQoderSessionFile(context.Background(), rt); got != "" {
+		t.Fatalf("findQoderSessionFile() = %q, want no result rather than an unattributable transcript", got)
+	}
+}
+
+// TestFindClaudeSessionFileMatchesJSONEscapedWindowsCwd pins the predicate to the
+// JSON encoding a transcript actually uses: a Windows working directory appears
+// as "C:\\Users\\...", so a raw comparison against the path never matches and the
+// correct transcript would be discarded. The script itself runs under a POSIX
+// shell here; only the workspace spelling and the recorded cwd are Windows-like,
+// which is what the predicate is being tested on.
+func TestFindClaudeSessionFileMatchesJSONEscapedWindowsCwd(t *testing.T) {
+	skipIfNoLocalBash(t)
+	t.Parallel()
+
+	home := t.TempDir()
+	const workspace = `C:\Users\tester\AppData\Local\Temp\skill_up-1`
+	root := filepath.Join(home, ".claude", "projects", canonicalWorkspaceKey(workspace))
+	session := filepath.Join(root, "33333333-3333-3333-3333-333333333333.jsonl")
+	writeSessionFixture(t, session,
+		`{"type":"user","cwd":"C:\\Users\\tester\\AppData\\Local\\Temp\\skill_up-1","message":{"content":"hi","role":"user"}}`)
+
+	// A colliding workspace (skill-up-1 vs skill_up-1) shares the directory and ran later.
+	other := filepath.Join(root, "44444444-4444-4444-4444-444444444444.jsonl")
+	writeSessionFixture(t, other,
+		`{"type":"user","cwd":"C:\\Users\\tester\\AppData\\Local\\Temp\\skill-up-1","message":{"content":"hi","role":"user"}}`)
+	touch(t, session, time.Now().Add(-2*time.Minute))
+	touch(t, other, time.Now())
+
+	rt := newShellSessionRuntime(workspace, home)
+	if got := findClaudeSessionFile(context.Background(), rt); got != session {
+		t.Fatalf("findClaudeSessionFile() = %q, want %q", got, session)
 	}
 }
 

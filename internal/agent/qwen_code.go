@@ -294,6 +294,8 @@ func findQwenCodeSessionFile(ctx context.Context, rt Runtime) string {
 		projectsRootTmpl: "$home/.qwen/projects",
 		// qwen keeps chats one level below the workspace directory:
 		// <workspace-key>/chats/<session>.jsonl.
+		// qwen chat events carry no working directory, so the directory match is
+		// the only signal available for this format.
 		sessionDepth: 2,
 	})
 }
