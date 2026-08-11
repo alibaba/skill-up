@@ -83,6 +83,9 @@ type agentSessionLookup struct {
 	// findExtra appends extra `find` predicates such as exclusion patterns.
 	// Empty string means no extra predicates.
 	findExtra string
+	// workspaceKeyTransform applies agent-specific path encoding after the
+	// shared runtime workspace key has been normalized.
+	workspaceKeyTransform func(string) string
 }
 
 // findAgentSessionJSONL resolves the newest *.jsonl session file under the
@@ -96,6 +99,9 @@ func findAgentSessionJSONL(ctx context.Context, rt Runtime, lookup agentSessionL
 	workspaceKey := workspaceKeyForRuntime(rt)
 	if workspaceKey == "" {
 		return ""
+	}
+	if lookup.workspaceKeyTransform != nil {
+		workspaceKey = lookup.workspaceKeyTransform(workspaceKey)
 	}
 	logging.DebugContextf(ctx, "agent session lookup: workspace=%q key=%q", rt.Workspace(), workspaceKey)
 

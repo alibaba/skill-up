@@ -430,7 +430,7 @@ func TestFindQoderSessionFile_SelectsNewestByModTime(t *testing.T) {
 	if err == nil {
 		workspace = realPath
 	}
-	workspaceKey := strings.ReplaceAll(workspace, "/", "-")
+	workspaceKey := qoderWorkspaceKey(strings.ReplaceAll(workspace, "/", "-"))
 	projectDir := filepath.Join(tmpHome, ".qoder", "projects", workspaceKey)
 	if err := os.MkdirAll(projectDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -456,6 +456,15 @@ func TestFindQoderSessionFile_SelectsNewestByModTime(t *testing.T) {
 	got := findQoderSessionFile(context.Background(), rt)
 	if got != newFile {
 		t.Fatalf("expected newest by mtime %q, got %q", newFile, got)
+	}
+}
+
+func TestQoderWorkspaceKey(t *testing.T) {
+	t.Parallel()
+
+	got := qoderWorkspaceKey("-private-var-folders-b_-skill-up")
+	if got != "-private-var-folders-b--skill-up" {
+		t.Fatalf("qoderWorkspaceKey() = %q", got)
 	}
 }
 

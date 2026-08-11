@@ -280,10 +280,17 @@ func (a *QoderCLIAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOption
 // are read only inside the runtime via Exec (not os.Getenv / host os.Stat).
 func findQoderSessionFile(ctx context.Context, rt Runtime) string {
 	return findAgentSessionJSONL(ctx, rt, agentSessionLookup{
-		envVar:    "SKILL_UP_QODER_WSKEY",
-		rootTmpl:  "$home/.qoder/projects/$SKILL_UP_QODER_WSKEY",
-		findExtra: `! -name "*-session.json"`,
+		envVar:                "SKILL_UP_QODER_WSKEY",
+		rootTmpl:              "$home/.qoder/projects/$SKILL_UP_QODER_WSKEY",
+		findExtra:             `! -name "*-session.json"`,
+		workspaceKeyTransform: qoderWorkspaceKey,
 	})
+}
+
+// qoderWorkspaceKey mirrors Qoder's projects-directory encoding. Unlike
+// Claude Code, Qoder replaces underscores as well as path separators.
+func qoderWorkspaceKey(key string) string {
+	return strings.ReplaceAll(key, "_", "-")
 }
 
 // Install installs qoder CLI via official install script.
