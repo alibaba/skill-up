@@ -649,6 +649,55 @@ func TestParseSessionFile_ToolCalls(t *testing.T) {
 	}
 }
 
+// TestParseSessionFile_ToolUseOnlyAssistantEventKeepsFinalTextAnswer uses the
+// shape a real qodercli session takes when the model answers by delegating to a
+// Skill: the first assistant event carries nothing but a tool_use block, the
+// tool result and the injected Skill body arrive as "user" events, and the
+// actual answer is the last assistant text. qodercli writes no "result" event,
+// so the final message has to come from the transcript.
+//
+// A tool_use block is already represented by its own tool_call message, so it
+// must not additionally masquerade as assistant prose — otherwise a placeholder
+// like "[tool: Skill]" can be selected as the answer under evaluation.
+func TestParseSessionFile_ToolUseOnlyAssistantEventKeepsFinalTextAnswer(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	sessionFile := filepath.Join(tmpDir, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl")
+
+	content := `{"type":"user","message":{"content":"How is data tiering defined?","role":"user"}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Skill","input":{"skill":"kb"}}],"role":"assistant"}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"Launching skill: kb"}],"role":"user"}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Tier 1.1 applies. See alidocs.dingtalk.com/i/p/tiering"}],"role":"assistant"}}
+`
+	if err := os.WriteFile(sessionFile, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write session file: %v", err)
+	}
+
+	trans, finalMsg, _, _ := parseSessionFile(sessionFile)
+
+	const wantAnswer = "Tier 1.1 applies. See alidocs.dingtalk.com/i/p/tiering"
+	if finalMsg != wantAnswer {
+		t.Errorf("final message = %q, want %q", finalMsg, wantAnswer)
+	}
+	if got := trans.FinalAssistantMessage(); got != wantAnswer {
+		t.Errorf("FinalAssistantMessage() = %q, want %q", got, wantAnswer)
+	}
+	for i, msg := range trans {
+		if msg.Role == transcript.RoleAssistant && strings.Contains(msg.Content, "[tool:") {
+			t.Errorf("message %d: assistant text must not be a tool placeholder, got %q", i, msg.Content)
+		}
+	}
+
+	calls := trans.ToolCalls()
+	if len(calls) != 1 {
+		t.Fatalf("expected the Skill tool call to stay visible, got %d tool calls", len(calls))
+	}
+	if calls[0].ToolCall.Name != "Skill" {
+		t.Errorf("tool call name = %q, want Skill", calls[0].ToolCall.Name)
+	}
+}
+
 func TestParseSessionFile_EmptyFile(t *testing.T) {
 	t.Parallel()
 
