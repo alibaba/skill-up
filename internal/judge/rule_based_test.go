@@ -162,6 +162,17 @@ func TestRuleBased_OutputMatches_Not_Fail(t *testing.T) {
 	assertStatus(t, r, StatusFail)
 }
 
+func TestRuleBased_OutputMatches_Not_EmptyRegexFails(t *testing.T) {
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			OutputMatches: &config.OutputMatchesRule{Not: []string{""}},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "anything"})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusFail)
+}
+
 func TestRuleBased_OutputMatches_Combined(t *testing.T) {
 	j := NewRuleBasedJudge(config.JudgeConfig{
 		Success: []config.Rule{{

@@ -205,11 +205,11 @@ func evalOutputMatches(rule *config.OutputMatchesRule, finalMessage string) Asse
 		}
 	}
 
-	forbiddenPattern, invalid := firstMatchingRegex("output_matches.not", rule.Not, finalMessage)
+	forbiddenPattern, matched, invalid := firstMatchingRegex("output_matches.not", rule.Not, finalMessage)
 	if invalid != nil {
 		return *invalid
 	}
-	if forbiddenPattern != "" {
+	if matched {
 		return AssertionResult{
 			Text:     fmt.Sprintf("output_matches.not: %q", forbiddenPattern),
 			Passed:   false,
@@ -268,18 +268,18 @@ func anyRegexMatches(field string, patterns []string, finalMessage string) (bool
 	return false, nil
 }
 
-func firstMatchingRegex(field string, patterns []string, finalMessage string) (string, *AssertionResult) {
+func firstMatchingRegex(field string, patterns []string, finalMessage string) (string, bool, *AssertionResult) {
 	for _, pattern := range patterns {
 		matched, err := regexp.MatchString(pattern, finalMessage)
 		if err != nil {
 			invalid := invalidRegexResult(field, pattern, err)
-			return "", &invalid
+			return "", false, &invalid
 		}
 		if matched {
-			return pattern, nil
+			return pattern, true, nil
 		}
 	}
-	return "", nil
+	return "", false, nil
 }
 
 func invalidRegexResult(field, pattern string, err error) AssertionResult {
