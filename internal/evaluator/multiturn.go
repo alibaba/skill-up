@@ -59,11 +59,15 @@ type multiTurnState struct {
 	sessionID    string
 	turnResults  []TurnResult
 	transcript   transcript.Transcript
-	inputTokens  int
-	outputTokens int
-	tokenBaseIn  int
-	tokenBaseOut int
-	durationMs   int64
+	// sessionTranscript is the transcript the previous turn returned. Engines
+	// that re-read the whole session file every turn return it again with the
+	// new turn appended, so this is what marks the boundary of the next turn.
+	sessionTranscript transcript.Transcript
+	inputTokens       int
+	outputTokens      int
+	tokenBaseIn       int
+	tokenBaseOut      int
+	durationMs        int64
 }
 
 // executeMultiTurn orchestrates multi-turn evaluation for cases with
@@ -109,16 +113,13 @@ func (e *defaultEvaluator) executeMultiTurn(
 		}
 
 		// Update state from the successful turn.
-		if sessionResult != nil && sessionResult.SessionID != "" {
-			state.sessionID = sessionResult.SessionID
-		}
 		lastSessionResult = sessionResult
-		sessionResult, cumulativeUsage := normalizeTurnSessionResult(sessionResult, turnNum)
-		if cumulativeUsage {
-			accumulateCumulativeMetrics(state, sessionResult)
-		} else {
-			accumulatePerTurnMetrics(state, sessionResult)
-		}
+		sessionResult = absorbTurnSession(ctx, state, sessionResult, turnSessionMeta{
+			caseID:     caseCfg.ID,
+			agentName:  runAgent.Name(),
+			turnNum:    turnNum,
+			totalTurns: len(turns),
+		})
 
 		// Build turn result.
 		tr := buildTurnResult(turnNum, content, sessionResult)
@@ -192,12 +193,60 @@ func buildTurnResult(turnNum int, content string, sessionResult *agent.SessionRe
 	return tr
 }
 
-func normalizeTurnSessionResult(sessionResult *agent.SessionResult, turnNum int) (*agent.SessionResult, bool) {
+// turnSessionMeta carries the identifiers needed to report on a turn's session.
+type turnSessionMeta struct {
+	caseID     string
+	agentName  string
+	turnNum    int
+	totalTurns int
+}
+
+// absorbTurnSession folds a completed turn's session result into the running
+// state: it tracks the resumable session id, isolates the transcript this turn
+// contributed, and accumulates duration and token usage. It returns the
+// turn-scoped session result.
+func absorbTurnSession(
+	ctx context.Context,
+	state *multiTurnState,
+	sessionResult *agent.SessionResult,
+	meta turnSessionMeta,
+) *agent.SessionResult {
+	switch {
+	case sessionResult != nil && sessionResult.SessionID != "":
+		state.sessionID = sessionResult.SessionID
+	case meta.turnNum < meta.totalTurns:
+		// Without a session id the next turn cannot resume this conversation and
+		// silently starts a fresh one, losing every earlier turn. The only visible
+		// symptom would be "the agent forgot the previous turn", which reads like a
+		// Skill or model problem rather than a broken session lookup.
+		logging.WarnContextf(
+			ctx,
+			"Evaluator: case %s turn %d: agent %s reported no session id; turn %d cannot resume and will start a new session, losing earlier context",
+			meta.caseID, meta.turnNum, meta.agentName, meta.turnNum+1,
+		)
+	}
+
+	var sessionTranscript transcript.Transcript
+	if sessionResult != nil {
+		sessionTranscript = sessionResult.Transcript
+	}
+	normalized, cumulativeUsage := normalizeTurnSessionResult(sessionResult, meta.turnNum, state.sessionTranscript)
+	state.sessionTranscript = sessionTranscript
+	if cumulativeUsage {
+		accumulateCumulativeMetrics(state, normalized)
+	} else {
+		accumulatePerTurnMetrics(state, normalized)
+	}
+
+	return normalized
+}
+
+func normalizeTurnSessionResult(sessionResult *agent.SessionResult, turnNum int, previous transcript.Transcript) (*agent.SessionResult, bool) {
 	if sessionResult == nil {
 		return nil, false
 	}
 	normalized := *sessionResult
-	turnTranscript, cumulative := transcriptForLogicalTurn(sessionResult.Transcript, turnNum)
+	turnTranscript, cumulative := transcriptForLogicalTurn(sessionResult.Transcript, previous, turnNum)
 	normalized.Transcript = turnTranscript
 	if len(turnTranscript) > 0 {
 		normalized.Turns = 1
@@ -205,25 +254,52 @@ func normalizeTurnSessionResult(sessionResult *agent.SessionResult, turnNum int)
 			normalized.FinalMessage = final
 		}
 	}
-	return &normalized, cumulative || sessionResult.Turns > 1
+	return &normalized, cumulative
 }
 
-func transcriptForLogicalTurn(trans transcript.Transcript, turnNum int) (transcript.Transcript, bool) {
-	if len(trans) == 0 {
+// transcriptForLogicalTurn isolates the messages one logical turn contributed.
+//
+// The built-in CLI engines re-read the whole session file after every turn, so a
+// turn is the tail appended after the transcript the previous turn returned;
+// engines that already scope their transcript to a single turn (custom engines,
+// stubs) return it unchanged. Parsed turn numbers cannot be used for this: a
+// session file records tool results and injected Skill bodies as "user" events,
+// so those numbers advance several times inside one logical turn.
+//
+// The returned messages are re-stamped with the logical turn number, which is
+// what per-turn judge rules and reports address.
+func transcriptForLogicalTurn(current, previous transcript.Transcript, turnNum int) (transcript.Transcript, bool) {
+	if len(current) == 0 {
 		return nil, false
 	}
 
-	matching := trans.MessagesForTurn(turnNum)
-	if len(matching) > 0 {
-		return matching, len(matching) < len(trans)
+	tail := current
+	cumulative := false
+	if len(previous) > 0 && len(current) >= len(previous) && transcriptHasPrefix(current, previous) {
+		tail = current[len(previous):]
+		cumulative = true
 	}
 
-	normalized := make(transcript.Transcript, len(trans))
-	copy(normalized, trans)
-	for i := range normalized {
-		normalized[i].Turn = turnNum
+	stamped := make(transcript.Transcript, len(tail))
+	copy(stamped, tail)
+	for i := range stamped {
+		stamped[i].Turn = turnNum
 	}
-	return normalized, false
+	return stamped, cumulative
+}
+
+// transcriptHasPrefix reports whether t starts with prefix, comparing the fields
+// that survive a session-file round trip.
+func transcriptHasPrefix(t, prefix transcript.Transcript) bool {
+	if len(prefix) > len(t) {
+		return false
+	}
+	for i := range prefix {
+		if t[i].Role != prefix[i].Role || t[i].Content != prefix[i].Content {
+			return false
+		}
+	}
+	return true
 }
 
 // substituteTemplate replaces {{variable}} placeholders in content with captured values.

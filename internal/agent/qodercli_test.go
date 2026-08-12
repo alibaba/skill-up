@@ -383,8 +383,11 @@ func TestQoderSessionJSONL_ParseMCPToolCalls(t *testing.T) {
 	if finalMsg != "done" {
 		t.Fatalf("finalMsg = %q, want done", finalMsg)
 	}
-	if len(trans) != 5 {
-		t.Fatalf("expected 5 transcript messages, got %d: %#v", len(trans), trans)
+	// user prompt, tool call, tool result, assistant text. The tool_use block is
+	// represented by the tool_call message only; it does not also appear as
+	// assistant prose.
+	if len(trans) != 4 {
+		t.Fatalf("expected 4 transcript messages, got %d: %#v", len(trans), trans)
 	}
 	if trans[1].Role != transcript.RoleToolCall || trans[1].ToolCall == nil {
 		t.Fatalf("expected tool call message, got %#v", trans[1])
@@ -392,11 +395,11 @@ func TestQoderSessionJSONL_ParseMCPToolCalls(t *testing.T) {
 	if trans[1].ToolCall.Name != "mcp__agent-sandbox__create_sandbox" {
 		t.Fatalf("tool call name = %q", trans[1].ToolCall.Name)
 	}
-	if trans[3].Role != transcript.RoleToolResult || trans[3].ToolResult == nil {
-		t.Fatalf("expected tool result message, got %#v", trans[3])
+	if trans[2].Role != transcript.RoleToolResult || trans[2].ToolResult == nil {
+		t.Fatalf("expected tool result message, got %#v", trans[2])
 	}
-	if trans[3].ToolResult.CallID != "call_1" || trans[3].ToolResult.Status != "success" {
-		t.Fatalf("unexpected tool result: %#v", trans[3].ToolResult)
+	if trans[2].ToolResult.CallID != "call_1" || trans[2].ToolResult.Status != "success" {
+		t.Fatalf("unexpected tool result: %#v", trans[2].ToolResult)
 	}
 }
 

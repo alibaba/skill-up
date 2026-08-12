@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Multi-turn evaluation now resumes the CLI session it started. Session
+  transcripts are located without reconstructing a CLI's project-directory
+  naming rule: directory names and the workspace path are compared in a shared
+  canonical form, falling back to the working directory a transcript records.
+  Workspace paths containing underscores, dots, spaces or non-ASCII characters
+  no longer break resume — previously such paths (macOS default `TMPDIR` among
+  them) made every turn start a brand-new session and lose all earlier context.
+- Session lookup no longer mistakes a sub-agent transcript for the main session.
+  A Skill or Task call writes `<sessionID>/subagents/agent-*.jsonl` into the same
+  project tree, and those file names are not resumable session ids.
+- Session lookup no longer resumes or grades a transcript belonging to another
+  workspace. The CLIs collapse punctuation when naming a project directory, so
+  workspaces whose paths differ only in punctuation share one directory.
+  Candidates are resolved against the working directory a transcript records,
+  matched as the JSON fragment it is written as, so a Windows path
+  (`C:\\Users\\...`) is recognised and a path that merely appears in the
+  conversation is not mistaken for identity. When a neighbouring transcript proves
+  the directory is shared and none can be attributed to this workspace, the lookup
+  reports no session instead of guessing. Markers are encoded the way the CLIs
+  write them (no HTML escaping, so a path containing `&`, `<` or `>` matches), and
+  Windows comparisons fold case because the same directory may reach skill-up
+  spelled differently from how the CLI recorded it.
+- Per-turn responses in multi-turn evaluation are now the answer that closed each
+  turn. Turn boundaries are derived from the transcript each turn appends instead
+  of from session-file turn numbers, which count tool results and injected Skill
+  bodies as user events and therefore advance several times within one turn.
+- Multi-turn evaluation warns when an engine reports no session id and later
+  turns cannot resume, instead of silently degrading to independent sessions.
+
+### Changed
+- Assistant messages in a parsed transcript carry only the text the assistant
+  produced. A tool call is represented by its own `tool_call` entry and no longer
+  also appears as a `[tool: Name]` placeholder in assistant content, so such a
+  placeholder can no longer be graded as a turn's answer.
+
 ## [0.8.0] - 2026-08-07
 
 ### Added

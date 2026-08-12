@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/alibaba/skill-up/internal/agent"
@@ -579,6 +580,180 @@ func TestExecuteMultiTurn_NormalizesCumulativeSessionResults(t *testing.T) {
 	calls := turnResults[1].Transcript.ToolCalls()
 	if len(calls) != 1 || calls[0].ToolCall.Name != "second_tool" {
 		t.Fatalf("turn 2 tool calls = %#v, want only second_tool", calls)
+	}
+}
+
+const (
+	realisticFirstAnswer  = "tier 1.1 applies, see alidocs.dingtalk.com/i/p/tiering"
+	realisticSecondAnswer = "sorry for the confusion, escalating to the support desk"
+)
+
+// realisticSessionTranscripts returns the transcripts a built-in CLI engine hands
+// back after turn 1 and after turn 2: the whole session file each time, with turn
+// numbers that count transcript events rather than logical turns.
+func realisticSessionTranscripts() (afterTurn1, afterTurn2 transcript.Transcript) {
+	afterTurn1 = transcript.Transcript{
+		{Role: transcript.RoleUser, Content: "explain data tiering", Turn: 1},
+		{Role: transcript.RoleAssistant, Content: "let me look it up", Turn: 1},
+		{Role: transcript.RoleToolCall, ToolCall: &transcript.ToolCallInfo{Name: "Skill"}, Turn: 1},
+		// The tool result is a "user" event in the session file, so the parsed turn
+		// counter increments here even though the turn is not over.
+		{Role: transcript.RoleToolResult, ToolResult: &transcript.ToolResultInfo{CallID: "t1"}, Turn: 2},
+		{Role: transcript.RoleAssistant, Content: realisticFirstAnswer, Turn: 2},
+	}
+	afterTurn2 = make(transcript.Transcript, 0, len(afterTurn1)+2)
+	afterTurn2 = append(afterTurn2, afterTurn1...)
+	afterTurn2 = append(afterTurn2,
+		transcript.Message{Role: transcript.RoleUser, Content: "you did not answer my question", Turn: 3},
+		transcript.Message{Role: transcript.RoleAssistant, Content: realisticSecondAnswer, Turn: 3},
+	)
+
+	return afterTurn1, afterTurn2
+}
+
+func assertTurnStamps(t *testing.T, msgs transcript.Transcript, wantTurn int) {
+	t.Helper()
+	for i, msg := range msgs {
+		if msg.Turn != wantTurn {
+			t.Errorf("message %d carries turn %d, want logical turn %d", i, msg.Turn, wantTurn)
+		}
+	}
+}
+
+// TestExecuteMultiTurn_SplitsRealisticCumulativeTranscript models what the
+// built-in CLI engines actually hand back: every turn re-reads the whole
+// session file, and the parsed turn numbers count transcript *events* rather
+// than logical turns — tool results and injected Skill bodies arrive as "user"
+// events and bump the counter mid-answer. A logical turn therefore cannot be
+// recovered by filtering on those numbers; it is the tail appended since the
+// previous turn.
+//
+// With event-numbered turns, filtering yields turn 1's preamble ("let me look
+// it up") as turn 1's answer, and turn 1's real answer as turn 2's answer.
+func TestExecuteMultiTurn_SplitsRealisticCumulativeTranscript(t *testing.T) {
+	t.Parallel()
+
+	rt := &mockRuntime{workspace: t.TempDir()}
+	afterTurn1, afterTurn2 := realisticSessionTranscripts()
+	firstAnswer, secondAnswer := realisticFirstAnswer, realisticSecondAnswer
+
+	results := []*agent.SessionResult{
+		{
+			FinalMessage: firstAnswer,
+			SessionID:    "sess-1",
+			Turns:        2,
+			InputTokens:  100,
+			OutputTokens: 10,
+			Transcript:   afterTurn1,
+		},
+		{
+			FinalMessage: secondAnswer,
+			SessionID:    "sess-1",
+			Turns:        3,
+			InputTokens:  260,
+			OutputTokens: 24,
+			Transcript:   afterTurn2,
+		},
+	}
+	call := 0
+	ag := &mockResumerAgent{
+		mockAgent: mockAgent{name: "test-resumer"},
+		runTurnFunc: func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ transcript.Message, _ string) (*agent.SessionResult, error) {
+			result := results[call]
+			call++
+			return result, nil
+		},
+	}
+
+	caseCfg := &config.CaseConfig{
+		ID: "realistic-cumulative",
+		Input: config.Input{
+			Turns: []config.Turn{
+				{Role: "user", Content: "explain data tiering"},
+				{Role: "user", Content: "you did not answer my question"},
+			},
+		},
+	}
+
+	e := newTestEvaluator(EvalOptions{Agent: ag, EvalCfg: &config.EvalConfig{}})
+	turnResults, aggResult, err := e.executeMultiTurn(context.Background(), rt, caseCfg, ag, agent.ExecOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(turnResults) != 2 {
+		t.Fatalf("turn results = %d, want 2", len(turnResults))
+	}
+	if got := turnResults[0].Response; got != firstAnswer {
+		t.Errorf("turn 1 response = %q, want the answer that closed turn 1 (%q)", got, firstAnswer)
+	}
+	if got := turnResults[1].Response; got != secondAnswer {
+		t.Errorf("turn 2 response = %q, want the answer that closed turn 2 (%q)", got, secondAnswer)
+	}
+	if got := len(turnResults[0].Transcript); got != len(afterTurn1) {
+		t.Errorf("turn 1 transcript length = %d, want %d", got, len(afterTurn1))
+	}
+	if got := len(turnResults[1].Transcript); got != 2 {
+		t.Errorf("turn 2 transcript length = %d, want only the 2 messages appended by turn 2", got)
+	}
+	assertTurnStamps(t, turnResults[0].Transcript, 1)
+	assertTurnStamps(t, turnResults[1].Transcript, 2)
+	if got := aggResult.InputTokens; got != 260 {
+		t.Errorf("aggregate input tokens = %d, want cumulative high-water 260", got)
+	}
+	if got := aggResult.OutputTokens; got != 24 {
+		t.Errorf("aggregate output tokens = %d, want cumulative high-water 24", got)
+	}
+	if got := aggResult.FinalMessage; got != secondAnswer {
+		t.Errorf("aggregate final message = %q, want %q", got, secondAnswer)
+	}
+}
+
+// TestExecuteMultiTurn_WarnsWhenSessionResumeUnavailable pins the observability
+// contract for the degradation itself: when an engine cannot report a session
+// ID, later turns silently start brand-new sessions and lose all context. That
+// must be surfaced, otherwise the only visible symptom is "the model forgot the
+// previous turn", which reads like a Skill or model problem.
+func TestExecuteMultiTurn_WarnsWhenSessionResumeUnavailable(t *testing.T) {
+	var seenSessionIDs []string
+	ag := &mockResumerAgent{
+		mockAgent: mockAgent{name: "test-resumer"},
+		runTurnFunc: func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, msg transcript.Message, sessionID string) (*agent.SessionResult, error) {
+			seenSessionIDs = append(seenSessionIDs, sessionID)
+			return &agent.SessionResult{
+				FinalMessage: fmt.Sprintf("answer %d", msg.Turn),
+				SessionID:    "", // engine could not resolve its own session
+				Turns:        1,
+			}, nil
+		},
+	}
+
+	caseCfg := &config.CaseConfig{
+		ID: "resume-unavailable",
+		Input: config.Input{
+			Turns: []config.Turn{
+				{Role: "user", Content: "first"},
+				{Role: "user", Content: "second"},
+			},
+		},
+	}
+
+	e := newTestEvaluator(EvalOptions{Agent: ag, EvalCfg: &config.EvalConfig{}})
+	rt := &mockRuntime{workspace: t.TempDir()}
+
+	logs := captureStdout(t, func() {
+		if _, _, err := e.executeMultiTurn(context.Background(), rt, caseCfg, ag, agent.ExecOptions{}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if len(seenSessionIDs) != 2 || seenSessionIDs[1] != "" {
+		t.Fatalf("session IDs handed to RunTurn = %#v, want turn 2 to receive an empty ID", seenSessionIDs)
+	}
+	if !strings.Contains(logs, "WARNING") {
+		t.Errorf("expected a warning about the lost session, got logs:\n%s", logs)
+	}
+	if !strings.Contains(logs, "resume-unavailable") || !strings.Contains(strings.ToLower(logs), "session") {
+		t.Errorf("expected the warning to name the case and the session problem, got logs:\n%s", logs)
 	}
 }
 

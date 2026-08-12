@@ -52,7 +52,11 @@ func mergeEnvMaps(persistentEnv, callEnv map[string]string) map[string]string {
 	if len(persistentEnv) == 0 && len(callEnv) == 0 {
 		return nil
 	}
-	env := make(map[string]string, len(persistentEnv)+len(callEnv))
+	// The capacity hint deliberately avoids summing both lengths: the sum is an
+	// unbounded arithmetic expression feeding an allocation, which static analysis
+	// flags as a possible overflow. Keys overlap anyway, so the larger input is a
+	// sound lower bound and the map grows from there if needed.
+	env := make(map[string]string, max(len(persistentEnv), len(callEnv)))
 	maps.Copy(env, persistentEnv)
 	maps.Copy(env, callEnv)
 	return env

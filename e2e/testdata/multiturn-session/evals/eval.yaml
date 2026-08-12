@@ -1,0 +1,24 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+
+skills:
+  - source: local_path
+    path: .
+
+engine:
+  name: qoder-cli
+  model:
+    provider: qoder
+    name: auto
+
+cases:
+  files:
+    - evals/cases/multi-turn-resume.yaml
+  defaults:
+    timeout_seconds: 60
+  parallelism: 1
+
+report:
+  formats: [json]
