@@ -154,6 +154,7 @@ Windows 的安装方式与已知限制请参阅
 | `skill-up validate [path]`           | 校验 `eval.yaml` 和用例文件                |
 | `skill-up list-cases [path]`         | 列出配置引用的所有用例                     |
 | `skill-up report <result.json>`      | 从已有结果生成报告                         |
+| `skill-up compare <old> <new>`        | 对比两个离线评测结果                       |
 | `skill-up import <evals.json>`       | 将 Anthropic `evals.json` 导入为 YAML 用例 |
 | `skill-up debug judge <input.json>`  | 使用 JSON 输入调试 judge 模块              |
 | `skill-up debug report <input.json>` | 使用 JSON 输入调试 report 模块             |

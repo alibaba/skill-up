@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `skill-up compare <old-result.json> <new-result.json>` compares offline
+  evaluation results, including case transitions and optional regression and
+  total-token growth gates for CI.
+
 ## [0.9.0] - 2026-08-12
 
 ### Fixed
