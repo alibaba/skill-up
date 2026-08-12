@@ -235,6 +235,7 @@ skill-up import ./evals/evals.json --output ./evals
 | `skill-up validate [path]`           | Validate `eval.yaml` and case files         |
 | `skill-up list-cases [path]`         | List all cases referenced by the config     |
 | `skill-up report <result.json>`      | Generate reports from a previous run        |
+| `skill-up compare <old> <new>`        | Compare two offline evaluation results      |
 | `skill-up import <evals.json>`       | Import Anthropic `evals.json` to YAML cases |
 | `skill-up debug judge <input.json>`  | Debug judge module with a JSON input        |
 | `skill-up debug report <input.json>` | Debug report module with a JSON input       |

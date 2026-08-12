@@ -33,6 +33,7 @@ import (
 const (
 	modelFormatParts       = 2
 	maxParallelismOverride = 256
+	jsonFormat             = "json"
 	runtimeKwargFlagName   = "runtime-kwarg"
 	runtimeKwargAlias      = "rk"
 	runtimeFlagName        = "runtime"
@@ -103,7 +104,7 @@ func init() {
 	runCmd.Flags().Bool("auto", false, "Auto-detect evals/ directory, preferring eval.yaml over evals.json")
 	runCmd.Flags().StringArray("include-case-name", nil, "Include cases matching glob pattern (can be specified multiple times)")
 	runCmd.Flags().StringArray("exclude-case-name", nil, "Exclude cases matching glob pattern (can be specified multiple times)")
-	runCmd.Flags().StringArray("format", nil, "Report format (json, junit, html). Can be specified multiple times. Default: json")
+	runCmd.Flags().StringArray("format", nil, "Report format ("+jsonFormat+", junit, html). Can be specified multiple times. Default: "+jsonFormat)
 	runCmd.Flags().String("output-dir", "", "Directory for report/artifact outputs. Default: <skill-name>-workspace alongside the skill directory")
 	runCmd.Flags().String("engine", "", "Override engine name")
 	runCmd.Flags().String(runtimeFlagName, "", "Override environment.type (none, opensandbox, docker)")
@@ -421,9 +422,9 @@ func evaluateOptionsFromFlags(cmd *cobra.Command) (runner.EvaluateOptions, error
 	}
 	for _, f := range formats {
 		switch f {
-		case "json", "junit", "html":
+		case jsonFormat, "junit", "html":
 		default:
-			return runner.EvaluateOptions{}, fmt.Errorf("unsupported --format %q (supported: json, junit, html)", f)
+			return runner.EvaluateOptions{}, fmt.Errorf("unsupported --format %q (supported: %s, junit, html)", f, jsonFormat)
 		}
 	}
 

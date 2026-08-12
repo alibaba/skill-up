@@ -47,6 +47,16 @@ func TestExecuteArgsVersionInitializesRoot(t *testing.T) {
 	}
 }
 
+func TestRootCommandIncludesCompare(t *testing.T) {
+	command, _, err := rootCmd.Find([]string{"compare"})
+	if err != nil {
+		t.Fatalf("find compare command: %v", err)
+	}
+	if command != compareCmd {
+		t.Fatalf("compare command = %p, want registered compare command %p", command, compareCmd)
+	}
+}
+
 func TestIsInitInvocation(t *testing.T) {
 	cases := []struct {
 		name string
