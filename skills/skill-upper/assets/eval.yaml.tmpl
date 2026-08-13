@@ -1,31 +1,45 @@
+# Evaluation config schema version used by skill-up. Do not change this value.
 schema_version: v1alpha1
 
 environment:
-  type: none                      # none | opensandbox
-  # kwargs:                        # For opensandbox: base_url, extensions, etc. See references/eval-yaml.md
+  # Runtime environment used for each case; use none when no sandbox is needed.
+  # Options: none | opensandbox | docker.
+  type: none
+  # Extra runtime settings for opensandbox or other selected environments.
+  # kwargs:
   #   base_url: https://agent-sandbox.example.com
+  # Container image used by sandboxed environments when a custom image is needed.
   # image: registry.example.com/your-org/sandbox-base:latest
+  # Workspace mount path inside the execution environment.
   # workspace_mount: /workspace
+  # Environment variables injected before setup steps and agent execution.
   # env:
   #   TZ: UTC
+  # Commands to prepare the workspace before each case starts.
   # setup_steps:
   #   - run: git config --global user.name "eval"
 
 skills:
+  # Skills installed into the Agent Engine before running cases.
+  # source options: local_path.
   - source: local_path
-    path: .                       # Directory of the Skill under test
+    # Path to the Skill under test, relative to this Skill root unless absolute.
+    path: .
   # - source: local_path
-  #   path: ../dependency_skill   # Path to other SKILL.md directory
+  #   path: ../dependency_skill
 
 engine:
-  name: claude_code               # claude_code | codex | qodercli (also compatible with qoder-cli)
-  # model is optional; omit to use engine's default model
+  # Agent Engine used to execute prompts and produce outputs for grading.
+  # Options: claude_code | codex | qodercli.
+  name: claude_code
+  # Optional model override; omit this block to use the engine default model.
   # model:
   #   provider: anthropic
   #   name: claude-sonnet-4-6
   #   base_url: ""
-  # kwargs:                         # agent-specific switches; see references/eval-yaml.md
-  #   bypass_sandbox: "true"        # codex: skip its own process sandbox (host kernel lacks Landlock)
+  # Agent-specific switches passed through to the selected engine.
+  # kwargs:
+  #   bypass_sandbox: "true"
 
 # mcp:
 #   servers:
@@ -35,27 +49,41 @@ engine:
 #       config_ref: evals/fixtures/mcp/github.json
 
 cases:
+  # Case YAML files included in this eval suite, relative to the Skill root.
   files:
     - evals/cases/basic.yaml
+  # Default constraints inherited by every case unless the case overrides them.
   defaults:
     timeout_seconds: 120
     max_turns: 5
-    # expect:                     # Optional checks inherited by every case
+    # Default checks inherited by every case unless the case overrides them.
+    # expect:
     #   exit_code: 0
     #   must_not_contain:
     #     - "TODO"
-  # parallelism: 4                # Stateless cases can run in parallel; or use skill-up run --parallelism N to override
+  # Maximum number of cases to run at the same time when cases are stateless.
+  # parallelism: 4
 
 # benchmark:
 #   enabled: true
 
+# Cheap pre-judge checks; when these fail, the configured judge is skipped.
+# expect:
+#   must_contain:
+#     - "Required keyword"
+
+# Default judge used when a case does not define its own judge block.
 # judge:
+#   # Grading strategy for case results.
+#   # Options: rule_based | agent_judge | script.
 #   type: agent_judge
 #   model: anthropic/claude-sonnet-4-6
 #   context:
-#     profile: standard          # standard = file refs for transcript/diff; minimal = omit them
+#     profile: standard
 #   criteria:
 #     - "The response satisfies the case-specific success criteria."
 
 report:
+  # Report formats written after each run.
+  # Options: json | junit | html | grading | benchmark.
   formats: [json]

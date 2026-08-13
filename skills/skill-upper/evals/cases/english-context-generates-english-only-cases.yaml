@@ -3,7 +3,7 @@ title: Respond in English and generate English-only case files in English contex
 description: |
   Verifies that skill-upper follows an English user prompt by replying in
   English and by generating eval case YAML files that do not contain Chinese
-  or CJK characters.
+  or CJK characters, while preserving short field comments near key YAML fields.
 
 context:
   repo_fixture: evals/fixtures/skills/sample-no-evals

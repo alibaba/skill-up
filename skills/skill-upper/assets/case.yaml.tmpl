@@ -1,28 +1,34 @@
-id: basic                         # Must match the filename
+# Stable case ID used in reports. Keep it the same as the filename without .yaml.
+id: basic
+# Human-readable summary shown in case lists and reports.
 title: Brief description of what this case validates
+# Optional background explaining the behavior or regression this case covers.
 description: |
-  More detailed background (optional).
+  More detailed background.
 
 input:
+  # User prompt sent to the Agent for a single-turn case.
   prompt: |
     Write the actual prompt to send to the Agent here.
     Use a tone close to real users; avoid being too mechanical.
 
 # For multi-turn conversations, use turns instead of prompt:
 # input:
+#   # Ordered conversation turns; use this instead of prompt for multi-turn cases.
 #   turns:
 #     - role: user
 #       content: "First request"
 #       post_condition:
 #         must_contain_any: ["keywordA", "keywordB"]
-#         on_fail: skip_remaining    # or fail
+#         on_fail: skip_remaining
 #       capture:
 #         - variable: var_name
 #           pattern: "(?P<value>pattern)"
 #     - role: user
 #       content: "Follow-up using {{var_name}}"
 
-# context:                            # Optional: initialize workspace
+# Optional workspace setup copied or created before the Agent runs.
+# context:
 #   repo_fixture: fixtures/repos/sample-project
 #   git:
 #     init: true
@@ -32,11 +38,13 @@ input:
 #     "src/main.py": |
 #       def hello(): ...
 
+# Per-case limits that override values from eval.yaml cases.defaults.
 # constraints:
 #   timeout_seconds: 180
 #   max_turns: 8
 
-expect:                              # Zero-cost gate checks; judge is skipped if these fail
+# Cheap pre-judge checks; when these fail, the judge block is skipped.
+expect:
   must_contain:
     - "Required keyword"
   must_not_contain:
@@ -46,7 +54,10 @@ expect:                              # Zero-cost gate checks; judge is skipped i
   #   - "output.json"
 
 judge:
-  type: rule_based                   # rule_based | agent_judge | script
+  # Grading strategy used to decide whether this case passes.
+  # Options: rule_based | agent_judge | script.
+  type: rule_based
+  # Assertions that must pass when judge.type is rule_based.
   success:
     - output_contains:
         all: ["keyword1", "keyword2"]
@@ -54,7 +65,7 @@ judge:
   #   - output_contains:
   #       any: ["LGTM", "No changes needed"]
 
-# Example for agent_judge (use when LLM semantic evaluation is needed):
+# Example for agent_judge, useful when semantic evaluation is needed:
 # judge:
 #   type: agent_judge
 #   model: anthropic/claude-sonnet-4-6
@@ -63,7 +74,7 @@ judge:
 #     - "Does not fabricate non-existent fields"
 #   pass_threshold: 0.7
 
-# Per-turn assertions (use with input.turns):
+# Per-turn assertions, used with input.turns:
 # judge:
 #   type: rule_based
 #   success:
