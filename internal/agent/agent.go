@@ -315,11 +315,16 @@ func writeLocalArtifact(artifactDir, fileName, content string) (string, error) {
 func downloadSessionArtifact(ctx context.Context, rt Runtime, artifactDir, sessionFilePath string) (artifactPath, registeredPath string, cleanup func(), ok bool) {
 	cleanup = func() {}
 	if artifactDir == "" {
-		artifactPath = filepath.Join(os.TempDir(), "session-"+filepath.Base(sessionFilePath))
-		if err := rt.DownloadFile(ctx, sessionFilePath, artifactPath); err != nil {
+		tempDir, err := os.MkdirTemp("", "skill-up-session-*")
+		if err != nil {
 			return "", "", cleanup, false
 		}
-		cleanup = func() { _ = os.Remove(artifactPath) }
+		cleanup = func() { _ = os.RemoveAll(tempDir) }
+		artifactPath = filepath.Join(tempDir, filepath.Base(sessionFilePath))
+		if err := rt.DownloadFile(ctx, sessionFilePath, artifactPath); err != nil {
+			cleanup()
+			return "", "", cleanup, false
+		}
 		return artifactPath, sessionFilePath, cleanup, true
 	}
 	artifactPath = filepath.Join(artifactDir, filepath.Base(sessionFilePath))

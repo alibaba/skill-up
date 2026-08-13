@@ -2,12 +2,16 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -16,6 +20,7 @@ import (
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/observability"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
@@ -45,7 +50,36 @@ const (
 	codexFnCall                 = "function_call"
 	codexFnCallOut              = "function_call_output"
 	codexTokenCount             = "token_count"
+	codexStdoutArtifactPath     = "stdout.json"
+	codexRunArtifactPrefix      = "skill-up-codex."
+	codexDefaultRecordBytes     = 16 << 20
+	codexDefaultOutputBytes     = 256 << 20
 )
+
+type codexJSONLLimits struct {
+	recordBytes int
+	outputBytes int64
+}
+
+func (a *CodexAgent) jsonlLimits(ctx context.Context) codexJSONLLimits {
+	return codexJSONLLimits{
+		recordBytes: positiveCodexByteKwarg(ctx, a.Cfg.Kwargs, KwargMaxJSONLRecordBytes, codexDefaultRecordBytes),
+		outputBytes: int64(positiveCodexByteKwarg(ctx, a.Cfg.Kwargs, KwargMaxJSONLOutputBytes, codexDefaultOutputBytes)),
+	}
+}
+
+func positiveCodexByteKwarg(ctx context.Context, kwargs map[string]string, key string, fallback int) int {
+	raw, ok := kwargs[key]
+	if !ok {
+		return fallback
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value <= 0 {
+		logging.WarnContextf(ctx, "CodexAgent: engine kwarg %s=%q must be a positive integer; using %d", key, raw, fallback)
+		return fallback
+	}
+	return value
+}
 
 // codexExecPathProbeCmd resolves $HOME/.local/bin (the codex binary, installed
 // via `npm install -g` under the bootstrap's npm_config_prefix) and
@@ -248,8 +282,6 @@ func (a *CodexAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, 
 	start := time.Now()
 
 	instruction := message.Content
-	lastMessagePath := filepath.Join(rt.Workspace(), ".skill-up", "codex-last-message.txt")
-
 	envVars := a.credentialEnvVars(credential.EnvOpenAIAPIKey, credential.EnvOpenAIBaseURL)
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(map[string]string{
 		"codex.session_id": sessionID,
@@ -265,11 +297,15 @@ func (a *CodexAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, 
 			Artifacts:  &SessionArtifacts{},
 		}, err
 	}
-	cmd := "mkdir -p " + shellQuote(filepath.Dir(lastMessagePath)) + "\n" +
-		buildCodexResumeCmdWithLastMessage(sessionID, instruction, a.effectiveModelName(ctx), a.runProviderConfig(ctx), lastMessagePath)
+	runArtifactDir, lastMessagePath, stdoutPath, err := prepareCodexRunArtifacts(ctx, rt)
+	if err != nil {
+		return nil, err
+	}
+	cmd := buildCodexResumeCmdWithLastMessage(sessionID, instruction, a.effectiveModelName(ctx), a.runProviderConfig(ctx), lastMessagePath) +
+		" >" + shellQuote(stdoutPath)
 
 	result, err := rt.Exec(ctx, cmd, opts)
-	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result, lastMessagePath)
+	sessionResult, parseErr := a.buildSessionResult(ctx, rt, opts, instruction, start, result, runArtifactDir, lastMessagePath, stdoutPath)
 	if sessionResult != nil {
 		sessionResult.SessionID = sessionID
 	}
@@ -284,11 +320,14 @@ func (a *CodexAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, 
 				Artifacts:  &SessionArtifacts{},
 			}
 		}
-		return sessionResult, fmt.Errorf("codex resume failed: %w", err)
+		return sessionResult, errors.Join(fmt.Errorf("codex resume failed: %w", err), parseErr)
 	}
 
 	if result.ExitCode != 0 {
-		return sessionResult, fmt.Errorf("codex resume failed (exit %d): %s", result.ExitCode, result.Stderr)
+		return sessionResult, errors.Join(fmt.Errorf("codex resume failed (exit %d): %s", result.ExitCode, result.Stderr), parseErr)
+	}
+	if parseErr != nil {
+		return sessionResult, fmt.Errorf("codex output parsing failed: %w", parseErr)
 	}
 
 	return sessionResult, nil
@@ -311,8 +350,6 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 	if rt.RequiresProcessSandbox() && !EngineKwargBool(a.Cfg.Kwargs, KwargBypassSandbox) {
 		sandboxFlag = codexProcessSandbox
 	}
-	lastMessagePath := filepath.Join(rt.Workspace(), ".skill-up", "codex-last-message.txt")
-
 	envVars := a.credentialEnvVars(credential.EnvOpenAIAPIKey, credential.EnvOpenAIBaseURL)
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))
 	ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, opts.Env)
@@ -325,6 +362,10 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 			Artifacts:  &SessionArtifacts{},
 		}, err
 	}
+	runArtifactDir, lastMessagePath, stdoutPath, err := prepareCodexRunArtifacts(ctx, rt)
+	if err != nil {
+		return nil, err
+	}
 	runCmd, promptDelivery, err := deliverPrompt(ctx, rt, opts, instruction, promptCommandBuilder{
 		Inline: func(prompt string) string {
 			return buildCodexRunCmdWithLastMessage(prompt, a.effectiveModelName(ctx), a.runProviderConfig(ctx), sandboxFlag, lastMessagePath)
@@ -334,6 +375,7 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 		},
 	})
 	if err != nil {
+		cleanupCodexRunArtifacts(ctx, rt, runArtifactDir)
 		return &SessionResult{
 			Engine:     a.Name(),
 			ExitCode:   1,
@@ -341,10 +383,10 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 			Artifacts:  &SessionArtifacts{},
 		}, err
 	}
-	cmd := "mkdir -p " + shellQuote(filepath.Dir(lastMessagePath)) + "\n" + runCmd
+	cmd := runCmd + " >" + shellQuote(stdoutPath)
 
 	result, err := rt.Exec(ctx, cmd, opts)
-	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result, lastMessagePath)
+	sessionResult, parseErr := a.buildSessionResult(ctx, rt, opts, instruction, start, result, runArtifactDir, lastMessagePath, stdoutPath)
 	if sessionResult != nil {
 		sessionResult.PromptDelivery = promptDelivery
 	}
@@ -358,11 +400,14 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 				Artifacts:  &SessionArtifacts{},
 			}
 		}
-		return sessionResult, fmt.Errorf("codex run failed: %w", err)
+		return sessionResult, errors.Join(fmt.Errorf("codex run failed: %w", err), parseErr)
 	}
 
 	if result.ExitCode != 0 {
-		return sessionResult, fmt.Errorf("codex run failed (exit %d): %s", result.ExitCode, result.Stderr)
+		return sessionResult, errors.Join(fmt.Errorf("codex run failed (exit %d): %s", result.ExitCode, result.Stderr), parseErr)
+	}
+	if parseErr != nil {
+		return sessionResult, fmt.Errorf("codex output parsing failed: %w", parseErr)
 	}
 
 	return sessionResult, nil
@@ -438,54 +483,64 @@ func (a *CodexAgent) runProviderConfig(ctx context.Context) codexProviderConfig 
 }
 
 func (a *CodexAgent) buildSessionResult(
-	ctx context.Context,
-	rt Runtime,
-	opts ExecOptions,
-	instruction string,
-	start time.Time,
-	result ExecResult,
-	lastMessagePath string,
-) *SessionResult {
-	cleanupCtx, cleanupCancel := sessionCleanupContext(ctx)
-	defer cleanupCancel()
+	ctx context.Context, rt Runtime, opts ExecOptions,
+	instruction string, start time.Time, result ExecResult,
+	runArtifactDir, lastMessagePath, stdoutPath string,
+) (*SessionResult, error) {
+	defer cleanupCodexRunArtifacts(ctx, rt, runArtifactDir)
 
+	limits := a.jsonlLimits(ctx)
 	generatedFiles := []string{}
-	if result.Stdout != "" {
-		if artifactPath, err := persistSessionArtifact(cleanupCtx, rt, opts.ArtifactDir, "stdout.json", result.Stdout); err == nil {
-			if opts.ArtifactDir == "" {
-				generatedFiles = append(generatedFiles, artifactPath)
-			}
+	streamParsed := codexOutputParseResult{}
+	artifactPath, stdoutCleanup, streamParseErr := downloadCodexJSONL(
+		ctx, rt, opts.ArtifactDir, stdoutPath, "Codex stdout", limits.outputBytes,
+	)
+	if streamParseErr == nil {
+		streamParsed = parseCodexOutputFile(ctx, artifactPath, limits.recordBytes)
+		streamParseErr = streamParsed.err
+		registeredPath, persistErr := persistCodexStdoutArtifact(ctx, rt, opts.ArtifactDir, artifactPath, limits.outputBytes)
+		streamParseErr = errors.Join(streamParseErr, persistErr)
+		if registeredPath != "" {
+			generatedFiles = append(generatedFiles, registeredPath)
 		}
 	}
-	streamParsed := parseCodexOutput(ctx, result.Stdout)
+	defer stdoutCleanup()
 	trans, finalMsg := streamParsed.transcript, streamParsed.finalMsg
 	inputTokens, outputTokens := streamParsed.inputTokens, streamParsed.outputTokens
 
 	var cleanupSession func()
-	generatedFiles, cleanupSession = withDownloadedSession(
-		cleanupCtx, rt, opts.ArtifactDir, findCodexSessionPath(cleanupCtx, rt, streamParsed.threadID), generatedFiles,
-		func(artifactPath string) {
-			sessionParsed := parseCodexSessionFile(artifactPath)
-			if len(sessionParsed.transcript) > len(streamParsed.transcript) &&
-				(sessionParsed.finalMsg != "" || result.ExitCode != 0 || finalMsg == "") {
-				trans, finalMsg = sessionParsed.transcript, sessionParsed.finalMsg
-				inputTokens = sessionParsed.inputTokens
-				outputTokens = sessionParsed.outputTokens
-			}
-		},
-	)
+	var sessionParseErr error
+	lookupCtx, lookupCancel := sessionCleanupContext(ctx)
+	sessionPath := findCodexSessionPath(lookupCtx, rt, streamParsed.threadID)
+	if sessionPath != "" {
+		sessionParseErr = checkCodexRemoteJSONLSize(lookupCtx, rt, sessionPath, "Codex session", limits.outputBytes)
+	}
+	lookupCancel()
+	if sessionParseErr == nil {
+		transferCtx, transferCancel := codexArtifactTransferContext(ctx, limits.outputBytes)
+		generatedFiles, cleanupSession = withDownloadedSession(
+			transferCtx, rt, opts.ArtifactDir, sessionPath, generatedFiles,
+			func(artifactPath string) {
+				sessionParsed := parseCodexSessionFileWithLimit(artifactPath, limits.recordBytes)
+				sessionParseErr = sessionParsed.err
+				if len(sessionParsed.transcript) > len(streamParsed.transcript) &&
+					(sessionParsed.finalMsg != "" || result.ExitCode != 0 || finalMsg == "") {
+					trans, finalMsg = sessionParsed.transcript, sessionParsed.finalMsg
+					inputTokens = sessionParsed.inputTokens
+					outputTokens = sessionParsed.outputTokens
+				}
+			},
+		)
+		transferCancel()
+	}
+	if cleanupSession == nil {
+		cleanupSession = func() {}
+	}
 	defer cleanupSession()
 
-	if trans == nil && instruction != "" {
-		trans = transcript.Transcript{
-			{Role: transcript.RoleUser, Content: instruction, Turn: 1},
-		}
-	}
-	if finalMsg == "" {
-		finalMsg = trans.FinalAssistantMessage()
-	}
-	var lastMsgCleanup func()
-	finalMsg, trans, generatedFiles, lastMsgCleanup = resolveCodexLastMessage(cleanupCtx, rt, opts.ArtifactDir, lastMessagePath, finalMsg, trans, generatedFiles)
+	trans, finalMsg, generatedFiles, lastMsgCleanup := finalizeCodexTranscript(
+		ctx, rt, opts.ArtifactDir, lastMessagePath, instruction, trans, finalMsg, generatedFiles,
+	)
 	defer lastMsgCleanup()
 
 	return &SessionResult{
@@ -502,26 +557,177 @@ func (a *CodexAgent) buildSessionResult(
 		Artifacts: &SessionArtifacts{
 			GeneratedFiles: generatedFiles,
 		},
+	}, errors.Join(streamParseErr, sessionParseErr)
+}
+
+func finalizeCodexTranscript(
+	ctx context.Context,
+	rt Runtime,
+	artifactDir, lastMessagePath, instruction string,
+	trans transcript.Transcript,
+	finalMsg string,
+	generatedFiles []string,
+) (transcript.Transcript, string, []string, func()) {
+	if trans == nil && instruction != "" {
+		trans = transcript.Transcript{{Role: transcript.RoleUser, Content: instruction, Turn: 1}}
+	}
+	if finalMsg == "" {
+		finalMsg = trans.FinalAssistantMessage()
+	}
+	lastMessageCtx, lastMessageCancel := sessionCleanupContext(ctx)
+	defer lastMessageCancel()
+	finalMsg, trans, generatedFiles, cleanup := resolveCodexLastMessage(
+		lastMessageCtx, rt, artifactDir, lastMessagePath, finalMsg, trans, generatedFiles,
+	)
+	return trans, finalMsg, generatedFiles, cleanup
+}
+
+func persistCodexStdoutArtifact(ctx context.Context, rt Runtime, artifactDir, artifactPath string, maxOutputBytes int64) (string, error) {
+	if artifactDir != "" {
+		return artifactPath, nil
+	}
+	registeredPath := filepath.Join(rt.Workspace(), ".skill-up", codexStdoutArtifactPath)
+	transferCtx, transferCancel := codexArtifactTransferContext(ctx, maxOutputBytes)
+	defer transferCancel()
+	if err := rt.UploadFile(transferCtx, artifactPath, registeredPath); err != nil {
+		return "", fmt.Errorf("persist Codex stdout artifact: %w", err)
+	}
+	return registeredPath, nil
+}
+
+func downloadCodexJSONL(
+	ctx context.Context,
+	rt Runtime,
+	artifactDir, remotePath, source string,
+	maxOutputBytes int64,
+) (artifactPath string, cleanup func(), err error) {
+	cleanup = func() {}
+	measureCtx, measureCancel := sessionCleanupContext(ctx)
+	err = checkCodexRemoteJSONLSize(measureCtx, rt, remotePath, source, maxOutputBytes)
+	measureCancel()
+	if err != nil {
+		return "", cleanup, err
+	}
+	transferCtx, transferCancel := codexArtifactTransferContext(ctx, maxOutputBytes)
+	defer transferCancel()
+	artifactPath, _, cleanup, ok := downloadSessionArtifact(transferCtx, rt, artifactDir, remotePath)
+	if !ok {
+		return "", cleanup, fmt.Errorf("download %s JSONL artifact %s", source, remotePath)
+	}
+	return artifactPath, cleanup, nil
+}
+
+func prepareCodexRunArtifacts(ctx context.Context, rt Runtime) (dir, lastMessagePath, stdoutPath string, err error) {
+	var suffix [8]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return "", "", "", fmt.Errorf("create Codex run artifact directory name: %w", err)
+	}
+	dirName := codexRunArtifactPrefix + hex.EncodeToString(suffix[:])
+	if rt.Shell().GOOS == platform.GOOSWindows {
+		dir = filepath.Join(filepath.Dir(rt.Workspace()), dirName)
+	} else {
+		dir = path.Join("/tmp", dirName)
+	}
+	result, execErr := rt.Exec(ctx, "mkdir -p "+shellQuote(dir), ExecOptions{})
+	if execErr != nil {
+		return "", "", "", fmt.Errorf("create Codex run artifact directory: %w", execErr)
+	}
+	if result.ExitCode != 0 {
+		return "", "", "", fmt.Errorf("create Codex run artifact directory: exit %d: %s", result.ExitCode, strings.TrimSpace(result.Stderr))
+	}
+	return dir, targetPathJoin(rt.Shell().GOOS, dir, "last-message.txt"), targetPathJoin(rt.Shell().GOOS, dir, codexStdoutArtifactPath), nil
+}
+
+func cleanupCodexRunArtifacts(ctx context.Context, rt Runtime, dir string) {
+	if !validCodexRunArtifactDir(rt.Shell().GOOS, dir) {
+		return
+	}
+	cleanupCtx, cleanupCancel := sessionCleanupContext(ctx)
+	defer cleanupCancel()
+	if result, err := rt.Exec(cleanupCtx, "rm -rf -- "+shellQuote(dir), ExecOptions{}); err != nil || result.ExitCode != 0 {
+		logging.WarnContextf(cleanupCtx, "CodexAgent: failed to remove run artifact directory %s: err=%v exit_code=%d", dir, err, result.ExitCode)
 	}
 }
 
+func targetPathJoin(goos, dir, name string) string {
+	if goos == platform.GOOSWindows {
+		return filepath.Join(dir, name)
+	}
+	return path.Join(dir, name)
+}
+
+func validCodexRunArtifactDir(goos, dir string) bool {
+	if goos == platform.GOOSWindows {
+		dir = filepath.Clean(dir)
+		return filepath.IsAbs(dir) && strings.HasPrefix(filepath.Base(dir), codexRunArtifactPrefix)
+	}
+	dir = path.Clean(dir)
+	return path.IsAbs(dir) && strings.HasPrefix(path.Base(dir), codexRunArtifactPrefix)
+}
+
+func codexArtifactTransferContext(ctx context.Context, maxOutputBytes int64) (context.Context, context.CancelFunc) {
+	const (
+		minimumTimeout = 2 * time.Minute
+		maximumTimeout = 30 * time.Minute
+	)
+	megabytes := maxOutputBytes/(1<<20) + 1
+	maximumSeconds := int64((maximumTimeout - sessionCleanupTimeout) / time.Second)
+	if megabytes > maximumSeconds {
+		megabytes = maximumSeconds
+	}
+	timeout := sessionCleanupTimeout + time.Duration(megabytes)*time.Second
+	timeout = max(timeout, minimumTimeout)
+	return context.WithTimeout(context.WithoutCancel(ctx), timeout)
+}
+
+func checkCodexRemoteJSONLSize(ctx context.Context, rt Runtime, remotePath, source string, maxOutputBytes int64) error {
+	if maxOutputBytes <= 0 {
+		return fmt.Errorf("%s JSONL output limit must be positive", source)
+	}
+	script := "wc -c <" + shellQuote(remotePath)
+	result, err := rt.Exec(ctx, script, ExecOptions{})
+	if err != nil {
+		return fmt.Errorf("measure %s JSONL artifact %s: %w", source, remotePath, err)
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("measure %s JSONL artifact %s: exit %d: %s", source, remotePath, result.ExitCode, strings.TrimSpace(result.Stderr))
+	}
+	size, err := strconv.ParseInt(strings.TrimSpace(result.Stdout), 10, 64)
+	if err != nil || size < 0 {
+		return fmt.Errorf("measure %s JSONL artifact %s: invalid byte count %q", source, remotePath, strings.TrimSpace(result.Stdout))
+	}
+	if size > maxOutputBytes {
+		return fmt.Errorf("%s JSONL output is %d bytes, exceeding maximum size of %d bytes", source, size, maxOutputBytes)
+	}
+	return nil
+}
+
 func resolveCodexLastMessage(ctx context.Context, rt Runtime, artifactDir, lastMessagePath, finalMsg string, trans transcript.Transcript, generatedFiles []string) (string, transcript.Transcript, []string, func()) {
-	if finalMsg != "" || lastMessagePath == "" {
+	if lastMessagePath == "" {
 		return finalMsg, trans, generatedFiles, func() {}
 	}
-	artifactPath, registeredPath, cleanup, ok := downloadSessionArtifact(ctx, rt, artifactDir, lastMessagePath)
+	artifactPath, _, cleanup, ok := downloadSessionArtifact(ctx, rt, artifactDir, lastMessagePath)
 	if !ok {
 		return finalMsg, trans, generatedFiles, func() {}
+	}
+	registeredPath := artifactPath
+	if artifactDir == "" {
+		registeredPath = filepath.Join(rt.Workspace(), ".skill-up", "codex-last-message.txt")
+		if err := rt.UploadFile(ctx, artifactPath, registeredPath); err != nil {
+			logging.WarnContextf(ctx, "CodexAgent: failed to persist last-message artifact: %v", err)
+			registeredPath = ""
+		}
 	}
 	if registeredPath != "" {
 		generatedFiles = append(generatedFiles, registeredPath)
 	}
 	if data, err := os.ReadFile(artifactPath); err == nil {
-		finalMsg = strings.TrimSpace(string(data))
-		if finalMsg != "" {
+		lastMsg := strings.TrimSpace(string(data))
+		if lastMsg != "" && lastMsg != finalMsg {
+			finalMsg = lastMsg
 			trans = append(trans, transcript.Message{
 				Role:    transcript.RoleAssistant,
-				Content: finalMsg,
+				Content: lastMsg,
 				Turn:    max(codexTurns(trans), 1),
 			})
 		}
@@ -678,27 +884,36 @@ type codexOutputParseResult struct {
 	finalMsg     string
 	inputTokens  int
 	outputTokens int
+	err          error
 }
 
 func parseCodexOutput(ctx context.Context, output string) codexOutputParseResult {
+	return parseCodexOutputWithLimit(ctx, strings.NewReader(output), codexDefaultRecordBytes)
+}
+
+func parseCodexOutputFile(ctx context.Context, outputPath string, maxRecordBytes int) codexOutputParseResult {
+	file, err := os.Open(outputPath)
+	if err != nil {
+		return codexOutputParseResult{err: fmt.Errorf("open Codex stdout JSONL: %w", err)}
+	}
+	defer file.Close() //nolint:errcheck
+	return parseCodexOutputWithLimit(ctx, file, maxRecordBytes)
+}
+
+func parseCodexOutputWithLimit(ctx context.Context, reader io.Reader, maxRecordBytes int) codexOutputParseResult {
 	state := codexParseState{
 		commandExecutions: make(map[string]codexCommandState),
 		mcpToolCalls:      make(map[string]int),
 	}
 
-	scanner := bufio.NewScanner(strings.NewReader(output))
-	const maxTokenLen = 1024 * 1024
-	buf := make([]byte, maxTokenLen)
-	scanner.Buffer(buf, maxTokenLen)
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	err := readCodexJSONLRecords(reader, "Codex stdout", maxRecordBytes, func(rawLine []byte) {
+		line := strings.TrimSpace(string(rawLine))
 		if line == "" || !strings.HasPrefix(line, "{") {
-			continue
+			return
 		}
 
 		applyCodexEventsFromLine(ctx, &state, line)
-	}
+	})
 
 	return codexOutputParseResult{
 		transcript:   state.messages,
@@ -706,6 +921,45 @@ func parseCodexOutput(ctx context.Context, output string) codexOutputParseResult
 		finalMsg:     state.finalMsg,
 		inputTokens:  state.inputTokens,
 		outputTokens: state.outputTokens,
+		err:          err,
+	}
+}
+
+func readCodexJSONLRecords(reader io.Reader, source string, maxRecordBytes int, apply func([]byte)) error {
+	if maxRecordBytes <= 0 {
+		return fmt.Errorf("%s JSONL record limit must be positive", source)
+	}
+
+	buffered := bufio.NewReader(reader)
+	record := make([]byte, 0, min(maxRecordBytes, bufio.MaxScanTokenSize))
+	recordNumber := 1
+	for {
+		fragment, err := buffered.ReadSlice('\n')
+		hasNewline := len(fragment) > 0 && fragment[len(fragment)-1] == '\n'
+		payload := fragment
+		if hasNewline {
+			payload = fragment[:len(fragment)-1]
+		}
+		if len(record) > maxRecordBytes-len(payload) {
+			return fmt.Errorf("%s JSONL record %d exceeds maximum size of %d bytes", source, recordNumber, maxRecordBytes)
+		}
+		record = append(record, payload...)
+
+		switch {
+		case errors.Is(err, bufio.ErrBufferFull):
+			continue
+		case err == nil:
+			apply(record)
+			record = record[:0]
+			recordNumber++
+		case errors.Is(err, io.EOF):
+			if len(record) > 0 {
+				apply(record)
+			}
+			return nil
+		default:
+			return fmt.Errorf("read %s JSONL record %d: %w", source, recordNumber, err)
+		}
 	}
 }
 
@@ -924,71 +1178,59 @@ type codexSessionParseResult struct {
 	finalMsg     string
 	inputTokens  int
 	outputTokens int
+	err          error
 }
 
 func parseCodexSessionFile(sessionFile string) codexSessionParseResult {
+	return parseCodexSessionFileWithLimit(sessionFile, codexDefaultRecordBytes)
+}
+
+func parseCodexSessionFileWithLimit(sessionFile string, maxRecordBytes int) codexSessionParseResult {
 	file, err := os.Open(sessionFile)
 	if err != nil {
-		return codexSessionParseResult{}
+		return codexSessionParseResult{err: fmt.Errorf("open Codex session file: %w", err)}
 	}
 	defer file.Close() //nolint:errcheck
 
-	var messages transcript.Transcript
-	var finalMsg string
-	var inputTokens, outputTokens int
+	parsed := codexSessionParseResult{}
 	currentTurn := 0
 
-	scanner := bufio.NewScanner(file)
-	const maxTokenLen = 1024 * 1024
-	buf := make([]byte, maxTokenLen)
-	scanner.Buffer(buf, maxTokenLen)
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || line == "[]" || line == "{}" {
-			continue
+	readErr := readCodexJSONLRecords(file, "Codex session", maxRecordBytes, func(rawLine []byte) {
+		line := bytes.TrimSpace(rawLine)
+		if len(line) == 0 || bytes.Equal(line, []byte("[]")) || bytes.Equal(line, []byte("{}")) {
+			return
 		}
 
 		var event codexSessionEvent
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			continue
+		if err := json.Unmarshal(line, &event); err == nil && event.Payload != nil {
+			applyCodexSessionFileEvent(&parsed, &currentTurn, event)
 		}
-		if event.Payload == nil {
-			continue
-		}
+	})
 
-		switch event.Type {
-		case "response_item":
-			turnMsgs, final, turn := parseCodexSessionResponseItem(*event.Payload, currentTurn)
-			if turnMsgs != nil {
-				messages = append(messages, turnMsgs...)
-			}
-			if final != "" {
-				finalMsg = final
-			}
-			currentTurn = turn
-		case "event_msg":
-			msgs, final, in, out := applyCodexSessionEventMsg(*event.Payload, currentTurn)
-			if msgs != nil {
-				messages = append(messages, msgs...)
-			}
-			if final != "" {
-				finalMsg = final
-			}
-			inputTokens = max(inputTokens, in)
-			outputTokens = max(outputTokens, out)
-		}
+	if parsed.finalMsg == "" {
+		parsed.finalMsg = parsed.transcript.FinalAssistantMessage()
 	}
+	parsed.err = readErr
+	return parsed
+}
 
-	if finalMsg == "" {
-		finalMsg = messages.FinalAssistantMessage()
-	}
-
-	return codexSessionParseResult{
-		transcript:   messages,
-		finalMsg:     finalMsg,
-		inputTokens:  inputTokens,
-		outputTokens: outputTokens,
+func applyCodexSessionFileEvent(parsed *codexSessionParseResult, currentTurn *int, event codexSessionEvent) {
+	switch event.Type {
+	case "response_item":
+		messages, finalMsg, turn := parseCodexSessionResponseItem(*event.Payload, *currentTurn)
+		parsed.transcript = append(parsed.transcript, messages...)
+		if finalMsg != "" {
+			parsed.finalMsg = finalMsg
+		}
+		*currentTurn = turn
+	case "event_msg":
+		messages, finalMsg, inputTokens, outputTokens := applyCodexSessionEventMsg(*event.Payload, *currentTurn)
+		parsed.transcript = append(parsed.transcript, messages...)
+		if finalMsg != "" {
+			parsed.finalMsg = finalMsg
+		}
+		parsed.inputTokens = max(parsed.inputTokens, inputTokens)
+		parsed.outputTokens = max(parsed.outputTokens, outputTokens)
 	}
 }
 
