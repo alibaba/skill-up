@@ -67,6 +67,8 @@ package "internal/report" {
     EndTime : time.Time
     CaseResults : []CaseResult
     TotalTokens : int
+    JudgeTokens : int
+    OverallTokens : int
     Benchmark : *BenchmarkResult
     +TotalDuration() time.Duration
     +OverallPassRate() float64
@@ -78,6 +80,11 @@ package "internal/report" {
     Status : judge.Status
     DurationMs : int64
     Turns : int
+    InputTokens : int
+    OutputTokens : int
+    JudgeDurationMs : int64
+    JudgeInputTokens : int
+    JudgeOutputTokens : int
     Error : string
     Grading : *judge.Result
   }
@@ -160,9 +167,25 @@ end note
 
 - Rendered with the standard library's `html/template`; the template is loaded via `go:embed` from `templates/report.html`
 - Bundles responsive CSS styles
-- Displays: skill name, engine, model, start time, execution time, pass rate
+- Displays: skill name, engine, model, start time, evaluation wall time, pass rate, and separated tested-agent / judge / overall token totals
 - Summary cards: Total / Passed / Failed / Skipped / Errors / Pass Rate
-- Per-case detail table: status icons, assertion results, evidence
+- Per-case details: compact tested-agent and optional agent-judge metrics beside the case heading, plus status icons, assertion results, and evidence; input/output token counts remain available as hover details
+- Benchmark cases show compact with-Skill, without-Skill, and delta metrics beside the case heading so execution cost remains secondary to the response and grading content
+
+### Metric semantics
+
+- `Input.TotalDuration()` is **evaluation wall time** (`EndTime - StartTime`). It
+  includes orchestration, tested-agent execution, judging, and other framework
+  overhead, so it is not expected to equal the sum of visible case execution
+  times, especially when cases run concurrently.
+- `CaseResult.DurationMs` is **tested-agent execution time** for that case and
+  configuration. It is the primary duration for comparing Skill behavior.
+- `CaseResult.InputTokens` and `OutputTokens` are tested-agent token usage.
+  `Input.TotalTokens` retains its existing JSON name for compatibility and is
+  the sum of those tested-agent tokens across all configurations.
+- `JudgeDurationMs`, `JudgeInputTokens`, and `JudgeOutputTokens` are populated
+  when the judge runs a separate agent session. `Input.JudgeTokens` aggregates
+  those tokens, and `Input.OverallTokens` is tested-agent plus judge tokens.
 
 ### JUnitReporter (`junit.go`)
 

@@ -25,13 +25,21 @@ func sampleInput() Input {
 		ModelName:     "openai/gpt-5.4",
 		StartTime:     start,
 		EndTime:       end,
+		TotalTokens:   1200,
+		JudgeTokens:   340,
+		OverallTokens: 1540,
 		CaseResults: []CaseResult{
 			{
-				CaseID:     "basic-success",
-				Title:      "Agent should identify a missing null check",
-				Status:     judge.StatusPass,
-				DurationMs: 45200,
-				Turns:      5,
+				CaseID:            "basic-success",
+				Title:             "Agent should identify a missing null check",
+				Status:            judge.StatusPass,
+				DurationMs:        45200,
+				Turns:             5,
+				InputTokens:       1000,
+				OutputTokens:      200,
+				JudgeDurationMs:   12000,
+				JudgeInputTokens:  300,
+				JudgeOutputTokens: 40,
 				JudgeSkills: []judge.SkillInfo{
 					{
 						Source:  "local_path",
@@ -133,6 +141,34 @@ func TestJSONReporter_Write(t *testing.T) {
 	if len(parsedSkill.Include) != 2 || parsedSkill.Include[1] != "references/**" ||
 		len(parsedSkill.Exclude) != 1 || parsedSkill.Exclude[0] != "references/drafts/**" {
 		t.Fatalf("judge skill filters not preserved in JSON: %#v", parsedSkill)
+	}
+}
+
+func TestJSONReporter_PreservesExecutionMetrics(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "result.json")
+	input := sampleInput()
+	input.OverallTokens = 0 // JSONReporter must derive this value, including for older input files.
+	if err := (&JSONReporter{OutputPath: path}).Write(context.Background(), input); err != nil {
+		t.Fatalf("JSONReporter.Write failed: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read json file: %v", err)
+	}
+	var parsed Input
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if parsed.TotalTokens != 1200 || parsed.JudgeTokens != 340 || parsed.OverallTokens != 1540 {
+		t.Fatalf("token summary not preserved in JSON: agent=%d judge=%d overall=%d",
+			parsed.TotalTokens, parsed.JudgeTokens, parsed.OverallTokens)
+	}
+	first := parsed.CaseResults[0]
+	if first.InputTokens != 1000 || first.OutputTokens != 200 ||
+		first.JudgeInputTokens != 300 || first.JudgeOutputTokens != 40 || first.JudgeDurationMs != 12000 {
+		t.Fatalf("case metrics not preserved in JSON: %#v", first)
 	}
 }
 
@@ -266,6 +302,62 @@ func TestHTMLReporter_Write(t *testing.T) {
 	if !strings.Contains(content, "evals/fixtures/judge-skill") {
 		t.Fatal("missing judge skill path in embedded report data")
 	}
+	for _, want := range []string{
+		"Evaluation wall time",
+		"Tested agent tokens",
+		"case-header-metrics",
+		"renderCompactMetrics",
+		"Agent ",
+		"Judge ",
+		"<strong>Delta</strong>",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("HTML missing metric label %q", want)
+		}
+	}
+	if strings.Contains(content, ">Execution Metrics<") {
+		t.Fatal("HTML should keep execution metrics inline instead of rendering a standalone section")
+	}
+}
+
+func TestHTMLReporter_EmbedsPerConfigurationMetrics(t *testing.T) {
+	input := sampleInput()
+	input.CaseResults = []CaseResult{
+		{
+			CaseID: "benchmark-case", Configuration: "with_skill", Status: judge.StatusPass,
+			DurationMs: 47618, InputTokens: 247863, OutputTokens: 2482,
+			JudgeDurationMs: 10000, JudgeInputTokens: 5000, JudgeOutputTokens: 200,
+		},
+		{
+			CaseID: "benchmark-case", Configuration: "without_skill", Status: judge.StatusPass,
+			DurationMs: 14911, InputTokens: 59113, OutputTokens: 525,
+			JudgeDurationMs: 8000, JudgeInputTokens: 4000, JudgeOutputTokens: 100,
+		},
+	}
+
+	r := &HTMLReporter{}
+	data, err := r.buildTemplateData(input)
+	if err != nil {
+		t.Fatalf("buildTemplateData failed: %v", err)
+	}
+	var embedded embeddedReportData
+	if err := json.Unmarshal([]byte(data.EmbeddedDataJSON), &embedded); err != nil {
+		t.Fatalf("unmarshal embedded report data: %v", err)
+	}
+	if len(embedded.Cases) != 1 || embedded.Cases[0].Baseline == nil {
+		t.Fatalf("expected one case with baseline, got %#v", embedded.Cases)
+	}
+	withSkill := embedded.Cases[0]
+	withoutSkill := *withSkill.Baseline
+	if withSkill.AgentDurationMs != 47618 || withSkill.AgentTokens != 250345 {
+		t.Fatalf("with-skill metrics = %#v", withSkill)
+	}
+	if withoutSkill.AgentDurationMs != 14911 || withoutSkill.AgentTokens != 59638 {
+		t.Fatalf("without-skill metrics = %#v", withoutSkill)
+	}
+	if withSkill.JudgeDurationMs != 10000 || withSkill.JudgeTokens != 5200 {
+		t.Fatalf("with-skill judge metrics = %#v", withSkill)
+	}
 }
 
 func TestHTMLReporter_ContainsAssertionDetails(t *testing.T) {
@@ -349,7 +441,11 @@ func TestMarkdownReporter_Write(t *testing.T) {
 		"| Skipped | 1 |",
 		"| Pass Rate | 25.0% |",
 		"## Cases",
-		"| basic-success | Agent should identify a missing null check | PASS | 45.2s | 5 |",
+		"| Evaluation Wall Time | 245.0s |",
+		"| Tested Agent Tokens | 1200 |",
+		"| Judge Tokens | 340 |",
+		"| Overall Tokens | 1540 |",
+		"| basic-success | Agent should identify a missing null check | - | PASS | 45.2s | 1000 | 200 | 1200 | 12.0s | 340 | 5 |",
 		"## Failure and Error Details",
 		"### edge-case-null",
 		"output_contains: &#39;graceful&#39;",

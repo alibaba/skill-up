@@ -83,6 +83,12 @@
     .case-info { display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap; font-size: 0.875rem; }
     .case-info .info-item { display: flex; align-items: center; gap: 0.25rem; }
     .case-info .info-label { color: var(--text-muted); font-size: 0.75rem; }
+    .case-header { flex-wrap: wrap; }
+    .case-header-metrics { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; font-family: 'Inter', system-ui, -apple-system, sans-serif; font-size: 0.7rem; font-weight: 400; text-transform: none; letter-spacing: normal; color: var(--text-muted); }
+    .compact-metrics { display: inline-flex; align-items: center; gap: 0.3rem; white-space: nowrap; }
+    .compact-metrics strong { color: var(--text); font-size: 0.7rem; font-weight: 600; }
+    .compact-metrics.delta { opacity: 0.8; }
+    .metrics-divider { opacity: 0.6; }
 
     .error-box { background: var(--error-bg); border: 1px solid var(--error-color); border-radius: 4px; padding: 0.75rem; color: var(--error-color); font-size: 0.875rem; white-space: pre-wrap; }
 
@@ -197,7 +203,7 @@
         <div class="cases-main">
       <div class="main">
         <div class="section">
-          <div class="section-header">Case <span class="status-badge" id="case-badge"></span></div>
+          <div class="section-header case-header">Case <span class="status-badge" id="case-badge"></span><span class="case-header-metrics" id="case-header-metrics"></span></div>
           <div class="section-body"><div class="case-info" id="case-info"></div></div>
         </div>
         <div class="section" id="prompt-section" style="display:none;">
@@ -263,8 +269,10 @@
     function init() {
       document.getElementById("skill-name").textContent = DATA.skill_name;
       var meta = "Engine: " + DATA.engine_name + " | Model: " + DATA.model_name +
-        " | Started: " + DATA.start_time + " | Duration: " + DATA.duration;
-      if (DATA.total_tokens) meta += " | Tokens: " + DATA.total_tokens;
+        " | Started: " + DATA.start_time + " | Evaluation wall time: " + DATA.evaluation_wall_time;
+      meta += " | Tested agent tokens: " + fmtInteger(DATA.agent_tokens);
+      meta += " | Judge tokens: " + fmtInteger(DATA.judge_tokens);
+      meta += " | Overall tokens: " + fmtInteger(DATA.overall_tokens);
       document.getElementById("header-meta").textContent = meta;
 
       var sb = document.getElementById("summary-bar");
@@ -356,9 +364,9 @@
 
       var info = '<div class="info-item"><span class="info-label">Case:</span> <strong>' + esc(c.id) + '</strong></div>';
       if (c.title) info += '<div class="info-item"><span class="info-label">Title:</span> ' + esc(c.title) + '</div>';
-      info += '<div class="info-item"><span class="info-label">Duration:</span> ' + c.duration + '</div>';
       info += '<div class="info-item"><span class="info-label">Turns:</span> ' + c.turns + '</div>';
       document.getElementById("case-info").innerHTML = info;
+      document.getElementById("case-header-metrics").innerHTML = renderCompactMetrics(c);
 
       var promptSec = document.getElementById("prompt-section");
       if (c.turn_results && c.turn_results.length > 0) {
@@ -389,6 +397,45 @@
 
       var main = document.querySelector(".main");
       if (main) main.scrollTop = 0;
+    }
+
+    function renderCompactMetrics(c) {
+      var baseline = c.baseline || null;
+      var primaryLabel = c.configuration === "without_skill" ? "Without Skill" : (baseline ? "With Skill" : "Result");
+      var html = compactMetric(primaryLabel, c);
+      if (baseline) {
+        html += compactMetric("Without Skill", baseline);
+        html += '<span class="compact-metrics delta"><strong>Delta</strong>' +
+          '<span>Agent ' + formatDurationDelta(c.agent_duration_ms - baseline.agent_duration_ms) +
+          ' / ' + formatIntegerDelta(c.agent_tokens - baseline.agent_tokens) + ' tokens</span></span>';
+      }
+      return html;
+    }
+
+    function compactMetric(label, c) {
+      var agentTitle = "Input: " + fmtInteger(c.input_tokens) + ", Output: " + fmtInteger(c.output_tokens);
+      var html = '<span class="compact-metrics"><strong>' + label + '</strong>' +
+        '<span class="metrics-divider">·</span><span title="' + agentTitle + '">Agent ' +
+        c.agent_duration + ' / ' + fmtInteger(c.agent_tokens) + ' tokens</span>';
+      if (c.judge_duration_ms || c.judge_tokens) {
+        var judgeTitle = "Input: " + fmtInteger(c.judge_input_tokens) + ", Output: " + fmtInteger(c.judge_output_tokens);
+        html += '<span class="metrics-divider">·</span><span title="' + judgeTitle + '">Judge ' +
+          c.judge_duration + ' / ' + fmtInteger(c.judge_tokens) + ' tokens</span>';
+      }
+      return html + '</span>';
+    }
+
+    function fmtInteger(value) {
+      return Number(value || 0).toLocaleString("en-US");
+    }
+
+    function formatIntegerDelta(value) {
+      return (value > 0 ? "+" : "") + fmtInteger(value);
+    }
+
+    function formatDurationDelta(valueMs) {
+      var seconds = valueMs / 1000.0;
+      return (seconds > 0 ? "+" : "") + seconds.toFixed(1) + "s";
     }
 
     function renderResponse(c) {

@@ -433,10 +433,16 @@ func TestBuildReportInput_TokenAccumulation(t *testing.T) {
 			withSkill: &evaluator.EvalResult{
 				CaseID: "c1", Status: judge.StatusPass, Configuration: "with_skill",
 				SessionResult: &agent.SessionResult{InputTokens: 100, OutputTokens: 50},
+				Grading: &judge.Result{JudgeSession: &agent.SessionResult{
+					DurationMs: 2000, InputTokens: 30, OutputTokens: 10,
+				}},
 			},
 			withoutSkill: &evaluator.EvalResult{
 				CaseID: "c1", Status: judge.StatusPass, Configuration: "without_skill",
 				SessionResult: &agent.SessionResult{InputTokens: 80, OutputTokens: 40},
+				Grading: &judge.Result{JudgeSession: &agent.SessionResult{
+					DurationMs: 1500, InputTokens: 20, OutputTokens: 5,
+				}},
 			},
 		},
 		"c2": {
@@ -453,8 +459,17 @@ func TestBuildReportInput_TokenAccumulation(t *testing.T) {
 	if input.TotalTokens != 570 {
 		t.Errorf("TotalTokens = %d, want 570", input.TotalTokens)
 	}
+	if input.JudgeTokens != 65 {
+		t.Errorf("JudgeTokens = %d, want 65", input.JudgeTokens)
+	}
+	if input.OverallTokens != 635 {
+		t.Errorf("OverallTokens = %d, want 635", input.OverallTokens)
+	}
 	if len(input.CaseResults) != 3 {
 		t.Errorf("CaseResults count = %d, want 3", len(input.CaseResults))
+	}
+	if got := input.CaseResults[0]; got.JudgeDurationMs != 2000 || got.JudgeInputTokens != 30 || got.JudgeOutputTokens != 10 {
+		t.Errorf("with-skill judge metrics = %#v", got)
 	}
 }
 

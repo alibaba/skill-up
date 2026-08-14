@@ -60,24 +60,64 @@ func writeMarkdownSummary(sb *strings.Builder, in Input) {
 	fmt.Fprintf(sb, "| Errors | %d |\n", markdownCountByStatus(in, judge.StatusError))
 	fmt.Fprintf(sb, "| Skipped | %d |\n", markdownCountByStatus(in, judge.StatusSkip))
 	fmt.Fprintf(sb, "| Pass Rate | %.1f%% |\n", in.OverallPassRate()*100)
-	fmt.Fprintf(sb, "| Duration | %s |\n", markdownDuration(in.TotalDuration().Milliseconds()))
-	fmt.Fprintf(sb, "| Total Tokens | %d |\n\n", in.TotalTokens)
+	fmt.Fprintf(sb, "| Evaluation Wall Time | %s |\n", markdownDuration(in.TotalDuration().Milliseconds()))
+	fmt.Fprintf(sb, "| Tested Agent Tokens | %d |\n", in.TotalTokens)
+	fmt.Fprintf(sb, "| Judge Tokens | %d |\n", in.JudgeTokens)
+	fmt.Fprintf(sb, "| Overall Tokens | %d |\n\n", in.TotalTokens+in.JudgeTokens)
 }
 
 func writeMarkdownCases(sb *strings.Builder, in Input) {
 	sb.WriteString("## Cases\n\n")
-	sb.WriteString("| Case | Title | Status | Duration | Turns |\n")
-	sb.WriteString("|---|---|---|---:|---:|\n")
+	if markdownHasJudgeMetrics(in) {
+		writeMarkdownCasesWithJudgeMetrics(sb, in)
+		return
+	}
+	sb.WriteString("| Case | Title | Configuration | Status | Agent Time | Input Tokens | Output Tokens | Agent Tokens | Turns |\n")
+	sb.WriteString("|---|---|---|---|---:|---:|---:|---:|---:|\n")
 	for _, cr := range in.CaseResults {
-		fmt.Fprintf(sb, "| %s | %s | %s | %s | %d |\n",
+		fmt.Fprintf(sb, "| %s | %s | %s | %s | %s | %d | %d | %d | %d |\n",
 			markdownTableCell(cr.CaseID),
 			markdownTableCell(cr.Title),
+			markdownTableCell(cr.Configuration),
 			markdownTableCell(string(cr.Status)),
 			markdownDuration(cr.DurationMs),
+			cr.InputTokens,
+			cr.OutputTokens,
+			cr.InputTokens+cr.OutputTokens,
 			cr.Turns,
 		)
 	}
 	sb.WriteString("\n")
+}
+
+func writeMarkdownCasesWithJudgeMetrics(sb *strings.Builder, in Input) {
+	sb.WriteString("| Case | Title | Configuration | Status | Agent Time | Input Tokens | Output Tokens | Agent Tokens | Judge Time | Judge Tokens | Turns |\n")
+	sb.WriteString("|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|\n")
+	for _, cr := range in.CaseResults {
+		fmt.Fprintf(sb, "| %s | %s | %s | %s | %s | %d | %d | %d | %s | %d | %d |\n",
+			markdownTableCell(cr.CaseID),
+			markdownTableCell(cr.Title),
+			markdownTableCell(cr.Configuration),
+			markdownTableCell(string(cr.Status)),
+			markdownDuration(cr.DurationMs),
+			cr.InputTokens,
+			cr.OutputTokens,
+			cr.InputTokens+cr.OutputTokens,
+			markdownDuration(cr.JudgeDurationMs),
+			cr.JudgeInputTokens+cr.JudgeOutputTokens,
+			cr.Turns,
+		)
+	}
+	sb.WriteString("\n")
+}
+
+func markdownHasJudgeMetrics(in Input) bool {
+	for _, cr := range in.CaseResults {
+		if cr.JudgeDurationMs != 0 || cr.JudgeInputTokens != 0 || cr.JudgeOutputTokens != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func writeMarkdownFailureDetails(sb *strings.Builder, in Input) {
