@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   append-and-deduplicate semantics for list checks and case-level overrides for
   `exit_code` and `golden_file`.
 
+### Fixed
+- QoderCLI runs now enable token-usage exposure and parse usage from JSON
+  stdout, allowing `input_tokens` and `output_tokens` to be populated even when
+  the runtime cannot read Qoder's private session directory.
+
 ## [0.7.0] - 2026-07-16
 
 ### Added

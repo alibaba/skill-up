@@ -182,6 +182,71 @@ func TestQoderCLIRun_MergesConfiguredEnvVars(t *testing.T) {
 	if rt.lastExecEnv["EXTRA_FLAG"] != "1" {
 		t.Fatalf("expected EXTRA_FLAG to be preserved, got %q", rt.lastExecEnv["EXTRA_FLAG"])
 	}
+	if rt.lastExecEnv[qoderExposeTokenUsageEnv] != qoderExposeTokenUsageEnabled {
+		t.Fatalf("expected %s to default to true, got %q", qoderExposeTokenUsageEnv, rt.lastExecEnv[qoderExposeTokenUsageEnv])
+	}
+}
+
+func TestQoderCLIRun_PreservesExplicitTokenUsageSetting(t *testing.T) {
+	t.Parallel()
+
+	rt := &qoderTestRuntime{
+		workspace: t.TempDir(),
+		execResult: runtime.ExecResult{
+			Stdout:   "hello\n",
+			ExitCode: 0,
+		},
+	}
+	ag := NewQoderCLIAgent(Config{
+		EnvVars: map[string]string{
+			qoderExposeTokenUsageEnv: "false",
+		},
+	})
+
+	_, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{
+		Role:    transcript.RoleUser,
+		Content: "hello",
+		Turn:    1,
+	}})
+	if err != nil {
+		t.Fatalf("run qodercli: %v", err)
+	}
+	if rt.lastExecEnv[qoderExposeTokenUsageEnv] != "false" {
+		t.Fatalf("expected explicit %s setting to be preserved, got %q", qoderExposeTokenUsageEnv, rt.lastExecEnv[qoderExposeTokenUsageEnv])
+	}
+}
+
+func TestQoderCLIRun_ParsesJSONUsage(t *testing.T) {
+	t.Parallel()
+
+	rt := &qoderTestRuntime{
+		workspace: t.TempDir(),
+		execResult: runtime.ExecResult{
+			Stdout: `{"type":"result","subtype":"success","result":"OK.","usage":{"input_tokens":100,"cache_read_input_tokens":20,"cache_creation_input_tokens":3,"output_tokens":7},"session_id":"qoder-session-json"}`,
+		},
+	}
+	ag := NewQoderCLIAgent(Config{})
+
+	result, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{
+		Role:    transcript.RoleUser,
+		Content: "hello",
+		Turn:    1,
+	}})
+	if err != nil {
+		t.Fatalf("run qodercli: %v", err)
+	}
+	if result.InputTokens != 123 || result.OutputTokens != 7 {
+		t.Fatalf("tokens = %d/%d, want 123/7", result.InputTokens, result.OutputTokens)
+	}
+	if result.FinalMessage != "OK." {
+		t.Fatalf("FinalMessage = %q, want OK.", result.FinalMessage)
+	}
+	if result.SessionID != "qoder-session-json" {
+		t.Fatalf("SessionID = %q, want qoder-session-json", result.SessionID)
+	}
+	if got := result.Transcript.FinalAssistantMessage(); got != "OK." {
+		t.Fatalf("final transcript message = %q, want OK.", got)
+	}
 }
 
 func TestBuildQoderRunCmd_WithModel(t *testing.T) {
@@ -189,7 +254,7 @@ func TestBuildQoderRunCmd_WithModel(t *testing.T) {
 
 	cmd := buildQoderRunCmd("hello", "auto")
 
-	if !strings.Contains(cmd, "qodercli --permission-mode=bypass_permissions --model 'auto' -p 'hello'") {
+	if !strings.Contains(cmd, "qodercli --permission-mode=bypass_permissions --output-format json --model 'auto' -p 'hello'") {
 		t.Fatalf("expected qoder command to include model flag, got %q", cmd)
 	}
 }
@@ -198,6 +263,9 @@ func TestBuildQoderRunCmd_WithoutModel(t *testing.T) {
 	t.Parallel()
 
 	cmd := buildQoderRunCmd("hello", "")
+	if !strings.Contains(cmd, "--output-format json") {
+		t.Fatalf("expected qoder command to request JSON output, got %q", cmd)
+	}
 	if strings.Contains(cmd, "--model") {
 		t.Fatalf("expected qoder command to omit model flag, got %q", cmd)
 	}
@@ -219,7 +287,7 @@ func TestBuildQoderResumeCmd(t *testing.T) {
 			instruction: "continue",
 			model:       modelAuto,
 			sessionID:   "session-abc",
-			wantParts:   []string{"--permission-mode=bypass_permissions", "--model 'auto'", "-r 'session-abc'", "-p 'continue'"},
+			wantParts:   []string{"--permission-mode=bypass_permissions", "--output-format json", "--model 'auto'", "-r 'session-abc'", "-p 'continue'"},
 		},
 		{
 			name:        "without model",
@@ -305,6 +373,9 @@ func TestQoderCLIRunTurn_ResumeUsesCorrectFlag(t *testing.T) {
 	}
 	if !strings.Contains(rt.agentCommand, "-p 'follow up'") {
 		t.Fatalf("expected -p flag with instruction, got %q", rt.agentCommand)
+	}
+	if rt.lastExecEnv[qoderExposeTokenUsageEnv] != qoderExposeTokenUsageEnabled {
+		t.Fatalf("expected %s to default to true, got %q", qoderExposeTokenUsageEnv, rt.lastExecEnv[qoderExposeTokenUsageEnv])
 	}
 }
 
