@@ -280,7 +280,7 @@ jobs:
           persist-credentials: false
 
       - name: Verify self-hosted Windows prerequisites
-        shell: pwsh
+        shell: powershell
         run: |
           git --version
           bash --version
@@ -334,7 +334,7 @@ jobs:
 
       - name: List Claude project directories on failure
         if: failure() && steps.secrets.outputs.available == 'true'
-        shell: pwsh
+        shell: powershell
         run: |
           $projects = Join-Path $HOME ".claude\projects"
           if (-not (Test-Path $projects)) {
