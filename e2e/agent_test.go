@@ -1482,10 +1482,39 @@ expect:
 	resultPath := filepath.Join(workspaceDir, "iteration-1", "result.json")
 	resultData, err := os.ReadFile(resultPath)
 	if err != nil {
+		if result.ExitCode == 0 {
+			t.Fatalf("result.json not found after successful qodercli run at %s: %v", resultPath, err)
+		}
 		t.Logf("result.json not found at %s (may be expected if agent errored): %v", resultPath, err)
 		return
 	}
 	t.Logf("result.json: %s", string(resultData))
+
+	if result.ExitCode != 0 {
+		return
+	}
+
+	var report struct {
+		CaseResults []struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"case_results"`
+	}
+	if err := json.Unmarshal(resultData, &report); err != nil {
+		t.Fatalf("decode result.json after successful qodercli run: %v", err)
+	}
+	if len(report.CaseResults) == 0 {
+		t.Fatal("result.json contains no case results after successful qodercli run")
+	}
+
+	var inputTokens, outputTokens int
+	for _, caseResult := range report.CaseResults {
+		inputTokens += caseResult.InputTokens
+		outputTokens += caseResult.OutputTokens
+	}
+	if inputTokens <= 0 || outputTokens <= 0 {
+		t.Fatalf("expected non-zero qodercli token usage after successful run, got input_tokens=%d output_tokens=%d", inputTokens, outputTokens)
+	}
 }
 
 // TestAgent_QwenCode_NoneRuntime_FullRun drives the real qwen CLI against a
