@@ -9,7 +9,7 @@ The Agent module is responsible for installing and running Agent Engines (qoder-
 | Agent | Runtime output file | Description |
 |-------|---------------------|-------------|
 | Claude Code | `outputs/stdout.json` | Standard output, JSONL format |
-| QoderCLI | `outputs/stdout.txt` | Standard output, plain text format |
+| QoderCLI | `outputs/stdout.json` | Terminal result in JSON format |
 
 When the agent runs, `tee` writes stdout directly into the runtime's `outputs/` directory.
 
@@ -37,9 +37,9 @@ Both are parsed by **`parseSessionFile`** in `internal/agent/claude_code.go` (`c
 - **On-disk trace file**: `*.jsonl` files in the directory above, **excluding** any whose name matches `*-session.json`.
 - **Lookup** (`findQoderSessionFile`): inside the runtime, `find` writes candidate paths into a temp file that is then read line by line (avoiding both the issue of `read` failing when no file matches under `set -e`, and the lack of process substitution in minimal environments); `stat` is used to get mtime (GNU `stat -c %Y` / BSD `stat -f %m`), and the **most recently modified** path is selected; an empty string is returned when nothing is found.
 - **JSONL line semantics (session file)**: same as Claude Code; uses **`parseSessionFile`**.
-- **Current state of `message.usage` (tokens) in Qoder on-disk files**: sampling `~/.qoder/projects/**/*.jsonl` shows that although `assistant` lines do contain a `message.usage` structure, **`input_tokens` / `output_tokens` / `cache_read_input_tokens` / `cache_creation_input_tokens` are commonly all 0** (i.e. the client does not write real usage into the local session). As a result, **tokens parsed out of the session for `SessionResult` are usually 0 on the Qoder side**; this is independent of the parsing implementation and depends on whether Qoder later starts writing nonzero `usage` into the session. Qoder's **`stdout.txt` is plain text**, unlike Claude's stream-json, so tokens cannot be merged in from stdout either.
+- **Token usage**: QoderCLI hides token usage by default unless `QODER_EXPOSE_TOKEN_USAGE` is enabled. skill-up sets this environment variable to `true` and requests `--output-format json`, then reads the terminal result's `usage` directly from `stdout.json`. This keeps token reporting available even when the runtime cannot read Qoder's private session directory. If the session JSONL is available, it remains the richer transcript source and its token high-water marks are merged without replacing nonzero stdout usage.
 - **Concurrency limit**: QoderCLI currently uses a fixed `/tmp/qodercli-natives-<version>-<platform>` native directory at runtime. When several `qodercli` processes start concurrently within the same runtime environment, they may race to extract/rename the natives directory; if a root-owned remnant of that directory is left in the image, this directly triggers `EPERM`. `skill-up` does **not** silently add a lock at the agent layer, because doing so would implicitly invalidate user-configured per-case parallelism for qodercli. To run qodercli evaluations stably, set `cases.parallelism` to `1` in the eval config, or fix the image / upstream qodercli's native-directory isolation first.
-- **Artifacts**: `GeneratedFiles` includes the workspace `stdout.txt`; when a session is found, its **absolute path** is appended. If no session is parsed, a minimal `Transcript` can still be constructed from the plain-text `stdout.txt`.
+- **Artifacts**: `GeneratedFiles` includes the workspace `stdout.json`; when a session is found, its **absolute path** is appended. If no session is parsed, a minimal transcript is constructed from the JSON result's final message.
 
 ## Architecture
 

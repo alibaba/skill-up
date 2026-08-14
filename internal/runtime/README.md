@@ -13,8 +13,7 @@ The Runtime module is responsible for creating and managing the evaluation execu
 ```
 {workspace}/                    # Runtime workspace root
 ├── outputs/                    # Agent execution artifacts
-│   ├── stdout.json             # Claude Code standard output (JSONL format)
-│   ├── stdout.txt              # QoderCLI standard output (plain text format)
+│   ├── stdout.json             # Claude Code JSONL / QoderCLI terminal result JSON
 │   └── transcript.jsonl        # Claude session trace file (if any)
 └── ...                         # Agent working files
 

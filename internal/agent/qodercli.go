@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"slices"
@@ -26,6 +27,12 @@ var supportedQoderModels = []string{"lite", "efficient", "auto", "performance", 
 // self-contained binary placed there by the official installer, not a node
 // script, so the nvm path is unneeded.
 const qoderExecPathProbeCmd = `printf '%s' "$HOME/.local/bin:$PATH"`
+
+const (
+	qoderExposeTokenUsageEnv     = "QODER_EXPOSE_TOKEN_USAGE" //nolint:gosec // environment variable name, not a credential
+	qoderExposeTokenUsageEnabled = "true"
+	qoderJSONOutputFlag          = " --output-format json"
+)
 
 // NewQoderCLIAgent creates a new QoderCLIAgent.
 func NewQoderCLIAgent(cfg Config) *QoderCLIAgent {
@@ -93,7 +100,7 @@ func (a *QoderCLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 		}, err
 	}
 
-	envVars := a.credentialEnvVars("", "")
+	envVars := a.qoderRunEnvVars()
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))
 	ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, opts.Env)
 
@@ -137,8 +144,16 @@ func (a *QoderCLIAgent) effectiveModelName(ctx context.Context) string {
 	return ""
 }
 
+func (a *QoderCLIAgent) qoderRunEnvVars() map[string]string {
+	envVars := a.credentialEnvVars("", "")
+	if _, configured := envVars[qoderExposeTokenUsageEnv]; !configured {
+		envVars[qoderExposeTokenUsageEnv] = qoderExposeTokenUsageEnabled
+	}
+	return envVars
+}
+
 func buildQoderRunCmd(instruction, model string) string {
-	cmd := "qodercli --permission-mode=bypass_permissions"
+	cmd := "qodercli --permission-mode=bypass_permissions" + qoderJSONOutputFlag
 	if model != "" {
 		cmd += " --model " + shellQuote(model)
 	}
@@ -148,7 +163,7 @@ func buildQoderRunCmd(instruction, model string) string {
 }
 
 func buildQoderRunStdinCmd(promptPath, model string) string {
-	cmd := "cat " + shellQuote(promptPath) + " | qodercli --permission-mode=bypass_permissions"
+	cmd := "cat " + shellQuote(promptPath) + " | qodercli --permission-mode=bypass_permissions" + qoderJSONOutputFlag
 	if model != "" {
 		cmd += " --model " + shellQuote(model)
 	}
@@ -160,7 +175,7 @@ func buildQoderRunStdinCmd(promptPath, model string) string {
 // buildQoderResumeCmd constructs a qodercli command that resumes an existing
 // session identified by sessionID and sends a new user prompt.
 func buildQoderResumeCmd(instruction, model, sessionID string) string {
-	cmd := "qodercli --permission-mode=bypass_permissions"
+	cmd := "qodercli --permission-mode=bypass_permissions" + qoderJSONOutputFlag
 	if model != "" {
 		cmd += " --model " + shellQuote(model)
 	}
@@ -170,23 +185,21 @@ func buildQoderResumeCmd(instruction, model, sessionID string) string {
 }
 
 func (a *QoderCLIAgent) buildSessionResult(ctx context.Context, rt Runtime, opts ExecOptions, instruction string, start time.Time, result ExecResult) *SessionResult {
-	var trans transcript.Transcript
-	var finalMsg string
-	var inputTokens, outputTokens int
-	var sessionID string
+	trans, finalMsg, inputTokens, outputTokens := parseStreamOutput(result.Stdout)
+	sessionID := parseQoderSessionID(result.Stdout)
 
 	cleanupCtx, cleanupCancel := sessionCleanupContext(ctx)
 	defer cleanupCancel()
 
 	generatedFiles := []string{}
-	if artifactPath, err := persistSessionArtifact(cleanupCtx, rt, opts.ArtifactDir, "stdout.txt", result.Stdout); err == nil {
+	if artifactPath, err := persistSessionArtifact(cleanupCtx, rt, opts.ArtifactDir, "stdout.json", result.Stdout); err == nil {
 		if opts.ArtifactDir == "" {
 			generatedFiles = append(generatedFiles, artifactPath)
 		}
 	}
 
 	sessionFilePath := findQoderSessionFile(cleanupCtx, rt)
-	if sessionFilePath != "" {
+	if sessionID == "" && sessionFilePath != "" {
 		sessionID = extractSessionIDFromPath(sessionFilePath)
 	}
 
@@ -197,19 +210,28 @@ func (a *QoderCLIAgent) buildSessionResult(ctx context.Context, rt Runtime, opts
 			t, f, inTok, outTok := parseSessionFile(artifactPath)
 			if len(t) > 0 {
 				trans = t
-				finalMsg = f
+				if f != "" {
+					finalMsg = f
+				}
 			}
-			inputTokens, outputTokens = inTok, outTok
+			inputTokens = max(inputTokens, inTok)
+			outputTokens = max(outputTokens, outTok)
 		},
 	)
 	defer cleanupSession()
 
-	if trans == nil && result.Stdout != "" {
-		trans = transcript.Transcript{
-			{Role: transcript.RoleUser, Content: instruction, Turn: 1},
-			{Role: transcript.RoleAssistant, Content: result.Stdout, Turn: 2},
+	if trans == nil {
+		assistantMessage := finalMsg
+		if assistantMessage == "" {
+			assistantMessage = strings.TrimSpace(result.Stdout)
 		}
-		finalMsg = result.Stdout
+		if assistantMessage != "" {
+			trans = transcript.Transcript{
+				{Role: transcript.RoleUser, Content: instruction, Turn: 1},
+				{Role: transcript.RoleAssistant, Content: assistantMessage, Turn: 1},
+			}
+			finalMsg = assistantMessage
+		}
 	}
 	return &SessionResult{
 		Engine:       a.Name(),
@@ -226,6 +248,16 @@ func (a *QoderCLIAgent) buildSessionResult(ctx context.Context, rt Runtime, opts
 			GeneratedFiles: generatedFiles,
 		},
 	}
+}
+
+func parseQoderSessionID(output string) string {
+	var envelope struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &envelope); err != nil {
+		return ""
+	}
+	return envelope.SessionID
 }
 
 // RunTurn resumes an existing QoderCLI session and sends a single user
@@ -245,7 +277,7 @@ func (a *QoderCLIAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOption
 	instruction := message.Content
 	cmd := buildQoderResumeCmd(instruction, a.effectiveModelName(ctx), sessionID)
 
-	envVars := a.credentialEnvVars("", "")
+	envVars := a.qoderRunEnvVars()
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))
 	ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, opts.Env)
 
