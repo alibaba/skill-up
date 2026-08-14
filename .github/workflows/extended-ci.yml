@@ -15,9 +15,10 @@ permissions: {}
 jobs:
   e2e-windows:
     name: E2E (none runtime, Windows)
-    # No trusted Windows self-hosted runner is provisioned. Use a clean,
-    # explicitly versioned GitHub-hosted Windows image.
-    runs-on: windows-2025
+    # Merge-group code stays on an ephemeral runner so it cannot persist hooks
+    # or tools for a later secret-bearing job. Maintainer dispatches exercise
+    # the trusted self-hosted Windows runner.
+    runs-on: ${{ fromJSON(github.event_name == 'merge_group' && '["windows-2025"]' || '["self-hosted","Windows","X64","trusted"]') }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -26,6 +27,20 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Verify self-hosted Windows prerequisites
+        shell: pwsh
+        run: |
+          git --version
+          bash --version
+          $probe = Join-Path $env:RUNNER_TEMP "skill-up-symlink-probe"
+          Remove-Item $probe -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $probe | Out-Null
+          New-Item -ItemType File -Path (Join-Path $probe "target") | Out-Null
+          New-Item -ItemType SymbolicLink `
+            -Path (Join-Path $probe "link") `
+            -Target (Join-Path $probe "target") | Out-Null
+          Remove-Item $probe -Recurse -Force
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0

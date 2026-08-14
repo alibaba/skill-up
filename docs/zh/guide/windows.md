@@ -7,7 +7,8 @@ skill-up 原生支持 Windows。本页说明哪些功能可用、当前的限制
 ## 已支持
 
 - **构建与单元测试** —— `go build ./...` 和 `go test ./...` 在 Windows 上通过。
-  CI 在 Linux 之外额外运行 `windows-latest` runner。
+  维护者手动触发的 Extended CI 会使用可信自托管 Windows Runner；
+  Pull Request 和 Merge Group 代码仍仅在干净的 GitHub 托管 Runner 上运行。
 - **`none` runtime** —— 命令通过 `cmd.exe` 在宿主机上执行。
 - **`opensandbox` runtime** —— 不受宿主机 OS 影响，始终在 Linux 沙箱内执行。
 - **script judge** —— 按文件扩展名（或 shebang）分派解释器：

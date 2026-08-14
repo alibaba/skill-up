@@ -10,9 +10,22 @@ Pull Request 代码只在 GitHub 托管 Runner 上运行。持久化的自托管
 | --- | --- | --- |
 | 可信 Linux | `self-hosted`、`linux`、`x64`、`trusted` | 可信集成测试和模型测试 |
 | 支持 Docker 的可信 Linux | `self-hosted`、`linux`、`x64`、`docker`、`trusted` | 可信容器 E2E 测试 |
-| 不可信 PR 校验 | `ubuntu-24.04` 或 `windows-2025` | 构建、Lint、冒烟测试、文档和 CodeQL |
+| 可信 Windows | `self-hosted`、`Windows`、`X64`、`trusted` | 手动触发的 Windows E2E 与模型测试 |
+| 不可信 PR 与 Merge Group 校验 | `ubuntu-24.04` 或 `windows-2025` | 构建、Lint、冒烟测试、文档、CodeQL 与 Merge Group Windows E2E |
 
 不要给会检出或执行 PR 代码的工作流添加 `pull_request_target`，不要让 PR Job 使用自托管 Runner。Runner 主机是持久化环境，应定期打补丁、移除无用软件和凭据、限制 Docker 权限；怀疑被入侵后必须重建。
+
+可信 Windows Runner 必须安装 Git for Windows，并将
+`C:\Program Files\Git\cmd` 与 `C:\Program Files\Git\bin` 都加入机器级
+`PATH`；修改 `PATH` 后需重启 Runner 服务。工作流通过固定版本的 setup
+action 安装所需 Go 与 Node.js。Runner 服务账号、工作目录、工具缓存和 agent
+HOME 都会持久化，不能把它当作每次全新的 GitHub 托管环境。
+Windows 还必须开启开发者模式，使服务账号可以创建 E2E fixture
+所需的符号链接；workflow 会在安装 Go 工具链之前验证这项能力。
+
+Merge Group 代码不得与后续会接收模型凭据的持久 Windows Runner 共用环境。
+因此 Extended CI 的 `merge_group` 使用 `windows-2025`，只有维护者
+`workflow_dispatch` 才会选中可信自托管标签。
 
 ## 稳定检查与 Merge Queue
 
@@ -23,7 +36,7 @@ Ruleset 必须使用下表的 Job 展示名称。`build` 等 Job ID 只是实现
 | CI | `push`、`pull_request`、`merge_group` | `Build & Test`、`E2E Smoke`、`Lint` | — |
 | CodeQL | `push`、`pull_request`、`merge_group`、定时任务 | `Analyze (actions)`、`Analyze (go)`、`Analyze (python)` | — |
 | Extended CI | `merge_group`、手动触发 | `Extended CI Summary` | 其余组件 Job 由 Summary 汇总 |
-| Model E2E | 手动触发 | 不得设为必需检查 | `E2E (none runtime, live models)`、`E2E (OpenSandbox, live model)`、`E2E (Docker runtime, live model)` |
+| Model E2E | 手动触发 | 不得设为必需检查 | `E2E (none runtime, live models)`、`E2E (OpenSandbox, live model)`、`E2E (none runtime, Windows, live Claude)`、`E2E (Docker runtime, live model)` |
 | Docs | 文档相关的 `push` 和 `pull_request` | 不要设为全局必需；路径过滤会使非文档 PR 没有该检查 | `Build` |
 | Workflow Security | 工作流相关的 `push`、`pull_request`、`merge_group` | 初始基线完成处置前保持可选 | `Zizmor` |
 

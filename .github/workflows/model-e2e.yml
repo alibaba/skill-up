@@ -269,7 +269,7 @@ jobs:
   e2e-windows:
     name: E2E (none runtime, Windows, live Claude)
     if: inputs.suite == 'all' || inputs.suite == 'windows-none-runtime'
-    runs-on: windows-2025
+    runs-on: [self-hosted, Windows, X64, trusted]
     timeout-minutes: 20
     permissions:
       contents: read
@@ -278,6 +278,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Verify self-hosted Windows prerequisites
+        shell: pwsh
+        run: |
+          git --version
+          bash --version
 
       - name: Check secret availability
         id: secrets
