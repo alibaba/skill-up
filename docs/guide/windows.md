@@ -72,14 +72,17 @@ under `scripts/windows/` instead:
 
 ```powershell
 # Install git hooks (equivalent to `make hooks`)
-pwsh scripts/windows/hooks.ps1
+powershell -NoProfile -File scripts/windows/hooks.ps1
 
 # Install pinned lint tools into .tools/bin (equivalent to `make lint-tools`)
-pwsh scripts/windows/lint-tools.ps1
+powershell -NoProfile -File scripts/windows/lint-tools.ps1
 
 # fmt-check + vet + revive + golangci-lint (equivalent to `make verify`)
-pwsh scripts/windows/verify.ps1
+powershell -NoProfile -File scripts/windows/verify.ps1
 ```
+
+These scripts support the Windows PowerShell 5.1 included with Windows Server.
+PowerShell 7 is optional; if installed, `pwsh -NoProfile -File ...` works too.
 
 Build and test use the standard Go toolchain, which is cross-platform:
 

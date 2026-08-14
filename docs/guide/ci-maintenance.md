@@ -21,9 +21,12 @@ The trusted Windows runner must have Git for Windows installed, with both
 their required Go and Node.js versions through pinned setup actions. The
 runner service account, work directory, tool cache, and agent home are
 persistent and must not be treated as a clean GitHub-hosted environment.
-Windows Developer Mode must be enabled so the service account can create the
-symbolic links used by the E2E fixtures; the workflow verifies this capability
-before installing the Go toolchain.
+Windows Developer Mode must be enabled. A non-administrative runner service
+account, such as `NETWORK SERVICE`, must also hold
+`SeCreateSymbolicLinkPrivilege`; restart the runner service after changing the
+local security policy so its new logon token includes the privilege. The
+workflow verifies actual symbolic-link creation before installing the Go
+toolchain.
 
 Merge-group code must not run on the same persistent Windows runner that later
 receives model credentials. Extended CI therefore uses `windows-2025` for

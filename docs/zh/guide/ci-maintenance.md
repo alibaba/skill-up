@@ -20,8 +20,10 @@ Pull Request 代码只在 GitHub 托管 Runner 上运行。持久化的自托管
 `PATH`；修改 `PATH` 后需重启 Runner 服务。工作流通过固定版本的 setup
 action 安装所需 Go 与 Node.js。Runner 服务账号、工作目录、工具缓存和 agent
 HOME 都会持久化，不能把它当作每次全新的 GitHub 托管环境。
-Windows 还必须开启开发者模式，使服务账号可以创建 E2E fixture
-所需的符号链接；workflow 会在安装 Go 工具链之前验证这项能力。
+Windows 还必须开启开发者模式。对于 `NETWORK SERVICE` 等非管理员 Runner
+服务账号，还需授予 `SeCreateSymbolicLinkPrivilege`，并在修改本地安全策略后
+重启 Runner 服务，使新登录令牌带上该权限。workflow 会在安装 Go 工具链之前
+实际创建符号链接来验证这项能力。
 
 Merge Group 代码不得与后续会接收模型凭据的持久 Windows Runner 共用环境。
 因此 Extended CI 的 `merge_group` 使用 `windows-2025`，只有维护者

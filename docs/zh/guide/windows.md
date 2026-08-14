@@ -62,14 +62,17 @@ Windows 默认没有 `make`。请改用 `scripts/windows/` 下的 PowerShell 脚
 
 ```powershell
 # 安装 git hooks（等价于 `make hooks`）
-pwsh scripts/windows/hooks.ps1
+powershell -NoProfile -File scripts/windows/hooks.ps1
 
 # 将固定版本的 lint 工具装入 .tools/bin（等价于 `make lint-tools`）
-pwsh scripts/windows/lint-tools.ps1
+powershell -NoProfile -File scripts/windows/lint-tools.ps1
 
 # fmt-check + vet + revive + golangci-lint（等价于 `make verify`）
-pwsh scripts/windows/verify.ps1
+powershell -NoProfile -File scripts/windows/verify.ps1
 ```
+
+这些脚本兼容 Windows Server 自带的 Windows PowerShell 5.1。PowerShell 7
+不是必需依赖；如果已安装，也可以使用 `pwsh -NoProfile -File ...`。
 
 构建和测试使用标准的 Go 工具链，本身就是跨平台的：
 
