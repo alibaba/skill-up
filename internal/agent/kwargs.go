@@ -14,13 +14,21 @@ const (
 	// (e.g. codex's Landlock wrapper). Useful when the host runtime lacks
 	// the kernel features the agent's sandbox depends on.
 	KwargBypassSandbox = "bypass_sandbox"
+	// KwargMaxJSONLRecordBytes caps one physical JSONL record emitted by an
+	// agent. Codex uses it for both its stdout event stream and session file.
+	KwargMaxJSONLRecordBytes = "max_jsonl_record_bytes"
+	// KwargMaxJSONLOutputBytes caps a complete JSONL artifact before skill-up
+	// downloads it from the runtime.
+	KwargMaxJSONLOutputBytes = "max_jsonl_output_bytes"
 )
 
 // knownEngineKwargs is the project-wide set of recognised engine kwarg keys.
 // At least one agent in the project must honour or knowingly no-op on each
 // key listed here. Keys not in this set are likely typos.
 var knownEngineKwargs = map[string]struct{}{
-	KwargBypassSandbox: {},
+	KwargBypassSandbox:       {},
+	KwargMaxJSONLRecordBytes: {},
+	KwargMaxJSONLOutputBytes: {},
 }
 
 // EngineKwargBool reads a boolean engine kwarg. Returns false when the key

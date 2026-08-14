@@ -147,6 +147,16 @@ remains a valid Skill. The same fields are supported by `judge.skills`.
 | `bypass_sandbox` | `qodercli` | No-op — no equivalent flag | No-op |
 | `bypass_sandbox` | `qwen_code` | No-op — `qwen_code` never imposes its own sandbox (`--yolo` only auto-approves tool calls; it does **not** isolate). Like `claude_code`/`qodercli`, isolation is the runtime's job | No-op |
 
+Codex also accepts byte limits for its JSONL artifacts:
+
+| key | default | behaviour |
+| :--- | ---: | :--- |
+| `max_jsonl_record_bytes` | `16777216` (16 MiB) | Maximum size of one physical stdout or session JSONL record. An oversized record returns an explicit parsing error. |
+| `max_jsonl_output_bytes` | `268435456` (256 MiB) | Maximum size of a complete stdout or session JSONL artifact before it is downloaded from the runtime. |
+
+Both values must be positive decimal integers. Invalid values fall back to the
+defaults with a warning.
+
 ```bash
 # One-off override at the call site
 skill-up run evals/eval.yaml --engine-kwarg bypass_sandbox=true

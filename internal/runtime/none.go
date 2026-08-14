@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -153,16 +154,28 @@ func (r *NoneRuntime) UploadDir(ctx context.Context, sourceDir, targetDir string
 // DownloadFile copies a single file from the runtime workspace to the host.
 func (r *NoneRuntime) DownloadFile(ctx context.Context, sourcePath, targetPath string) error {
 	source := r.pathInWorkspaceOrAbs(sourcePath)
-	data, err := os.ReadFile(source)
+	sourceFile, err := os.Open(source)
 	if err != nil {
-		return fmt.Errorf("failed to read source file %s: %w", source, err)
+		return fmt.Errorf("failed to open source file %s: %w", source, err)
 	}
+	defer sourceFile.Close() //nolint:errcheck
 	if err := os.MkdirAll(filepath.Dir(targetPath), noneDirMode); err != nil {
 		return fmt.Errorf("failed to create target directory: %w", err)
 	}
 
 	//nolint:gosec // targetPath is user-specified download destination
-	return os.WriteFile(targetPath, data, noneFileMode)
+	targetFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, noneFileMode)
+	if err != nil {
+		return fmt.Errorf("failed to open target file %s: %w", targetPath, err)
+	}
+	if _, err := io.Copy(targetFile, sourceFile); err != nil {
+		_ = targetFile.Close()
+		return fmt.Errorf("failed to copy source file %s: %w", source, err)
+	}
+	if err := targetFile.Close(); err != nil {
+		return fmt.Errorf("failed to close target file %s: %w", targetPath, err)
+	}
+	return nil
 }
 
 // DownloadDir recursively copies a directory from the runtime workspace to the host.

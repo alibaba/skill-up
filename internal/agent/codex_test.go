@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel/trace"
 
@@ -18,11 +21,51 @@ import (
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
 
+func TestCodexArtifactTransferContextDetachesAndExceedsCleanupTimeout(t *testing.T) {
+	t.Parallel()
+
+	parent, parentCancel := context.WithCancel(context.Background())
+	parentCancel()
+	transferCtx, transferCancel := codexArtifactTransferContext(parent, codexDefaultOutputBytes)
+	defer transferCancel()
+
+	if err := transferCtx.Err(); err != nil {
+		t.Fatalf("transfer context inherited parent cancellation: %v", err)
+	}
+	deadline, ok := transferCtx.Deadline()
+	if !ok {
+		t.Fatal("transfer context has no deadline")
+	}
+	if remaining := time.Until(deadline); remaining <= sessionCleanupTimeout {
+		t.Fatalf("transfer timeout %s must exceed cleanup timeout %s", remaining, sessionCleanupTimeout)
+	}
+}
+
+func TestPrepareCodexRunArtifactsUsesTargetPathSemantics(t *testing.T) {
+	t.Parallel()
+
+	// Simulate a Windows host path paired with a Linux remote runtime. The
+	// generated path must follow the runtime shell, not host filepath rules.
+	rt := &codexTestRuntime{workspace: `C:\host\workspace`}
+	dir, lastMessagePath, stdoutPath, err := prepareCodexRunArtifacts(context.Background(), rt)
+	if err != nil {
+		t.Fatalf("prepareCodexRunArtifacts: %v", err)
+	}
+	if !strings.HasPrefix(dir, "/tmp/"+codexRunArtifactPrefix) {
+		t.Fatalf("artifact dir = %q, want Linux runtime temp path", dir)
+	}
+	if lastMessagePath != path.Join(dir, "last-message.txt") || stdoutPath != path.Join(dir, codexStdoutArtifactPath) {
+		t.Fatalf("artifact paths = %q/%q, want children of %q", lastMessagePath, stdoutPath, dir)
+	}
+}
+
 const (
 	testAssistantRole = "assistant"
 	testToolCallRole  = "tool_call"
 	testToolResRole   = "tool_result"
 	testStatusError   = "error"
+	testJudgeJSON     = `{"results":[]}`
+	testThreadID      = "abc"
 )
 
 func TestNewCodexAgent(t *testing.T) {
@@ -461,7 +504,7 @@ Reading additional input from stdin...
 	if len(trans) != 4 {
 		t.Fatalf("expected 4 transcript messages, got %d", len(trans))
 	}
-	if threadID != "abc" {
+	if threadID != testThreadID {
 		t.Fatalf("expected thread id abc, got %q", threadID)
 	}
 	if trans[0].Role != testAssistantRole || trans[0].Content != "I’m checking the workspace first." {
@@ -550,7 +593,7 @@ func TestParseCodexOutput_ConcatenatedEvents(t *testing.T) {
 	output := `{"type":"thread.started","thread_id":"abc"}{"type":"turn.started"}{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"OK"}}{"type":"turn.completed","usage":{"input_tokens":0,"cached_input_tokens":0,"output_tokens":0}}`
 
 	parsed := parseCodexOutput(context.Background(), output)
-	if parsed.threadID != "abc" {
+	if parsed.threadID != testThreadID {
 		t.Fatalf("expected thread id abc, got %q", parsed.threadID)
 	}
 	if parsed.finalMsg != "OK" {
@@ -561,12 +604,65 @@ func TestParseCodexOutput_ConcatenatedEvents(t *testing.T) {
 	}
 }
 
+func TestParseCodexOutput_LargeJSONLRecordDoesNotTruncateFinalMessage(t *testing.T) {
+	t.Parallel()
+
+	largeOutput := strings.Repeat("x", 1024*1024)
+	output := strings.Join([]string{
+		`{"type":"thread.started","thread_id":"abc"}`,
+		`{"type":"turn.started"}`,
+		`{"type":"item.completed","item":{"id":"progress","type":"agent_message","text":"still checking"}}`,
+		fmt.Sprintf(`{"type":"item.completed","item":{"id":"command","type":"command_execution","command":"rg .","aggregated_output":%q,"exit_code":0,"status":"completed"}}`, largeOutput),
+		`{"type":"item.completed","item":{"id":"final","type":"agent_message","text":"{\"results\":[]}"}}`,
+		`{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}`,
+	}, "\n")
+
+	parsed := parseCodexOutput(context.Background(), output)
+	if parsed.finalMsg != testJudgeJSON {
+		t.Fatalf("final message = %q, want Judge JSON", parsed.finalMsg)
+	}
+	if got := parsed.transcript.FinalAssistantMessage(); got != testJudgeJSON {
+		t.Fatalf("transcript final = %q, want Judge JSON", got)
+	}
+}
+
+func TestParseCodexOutput_JSONLRecordLimit(t *testing.T) {
+	t.Parallel()
+
+	line := `{"type":"thread.started","thread_id":"abc"}`
+	for _, tc := range []struct {
+		name    string
+		limit   int
+		wantErr bool
+	}{
+		{name: "record at limit", limit: len(line)},
+		{name: "record over limit", limit: len(line) - 1, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			parsed := parseCodexOutputWithLimit(context.Background(), strings.NewReader(line), tc.limit)
+			if tc.wantErr {
+				if parsed.err == nil || !strings.Contains(parsed.err.Error(), "record 1 exceeds maximum size") {
+					t.Fatalf("error = %v, want explicit record limit error", parsed.err)
+				}
+				return
+			}
+			if parsed.err != nil {
+				t.Fatalf("parse record at limit: %v", parsed.err)
+			}
+			if parsed.threadID != testThreadID {
+				t.Fatalf("thread id = %q, want abc", parsed.threadID)
+			}
+		})
+	}
+}
+
 func TestParseCodexOutput_WarnsOnMalformedConcatenatedEvents(t *testing.T) {
 	output := `{"type":"thread.started","thread_id":"abc"}{"type":`
 
 	logOutput := captureStdout(t, func() {
 		parsed := parseCodexOutput(context.Background(), output)
-		if parsed.threadID != "abc" {
+		if parsed.threadID != testThreadID {
 			t.Fatalf("expected thread id abc before malformed event, got %q", parsed.threadID)
 		}
 	})
@@ -667,6 +763,54 @@ func TestParseCodexSessionFile_ToolErrorStatus(t *testing.T) {
 	}
 }
 
+func TestParseCodexSessionFile_LargeJSONLRecordDoesNotTruncateFinalMessage(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "large-session.jsonl")
+	content := strings.Join([]string{
+		`{"type":"event_msg","payload":{"type":"agent_message","message":"still checking","phase":"commentary"}}`,
+		fmt.Sprintf(`{"type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":%q}}`, strings.Repeat("x", 1024*1024)),
+		`{"type":"event_msg","payload":{"type":"agent_message","message":"{\"results\":[]}","phase":"final_answer"}}`,
+	}, "\n")
+	if err := os.WriteFile(sessionPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	parsed := parseCodexSessionFile(sessionPath)
+	if parsed.err != nil {
+		t.Fatalf("parse large session file: %v", parsed.err)
+	}
+	if parsed.finalMsg != testJudgeJSON {
+		t.Fatalf("final message = %q, want Judge JSON", parsed.finalMsg)
+	}
+}
+
+func TestParseCodexSessionFile_JSONLRecordLimit(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "bounded-session.jsonl")
+	line := `{"type":"event_msg","payload":{"type":"agent_message","message":"done","phase":"final_answer"}}`
+	if err := os.WriteFile(sessionPath, []byte(line), 0o600); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	parsed := parseCodexSessionFileWithLimit(sessionPath, len(line)-1)
+	if parsed.err == nil || !strings.Contains(parsed.err.Error(), "Codex session JSONL record 1 exceeds maximum size") {
+		t.Fatalf("error = %v, want explicit session record limit error", parsed.err)
+	}
+}
+
+func TestParseCodexSessionFile_ReturnsReadError(t *testing.T) {
+	t.Parallel()
+
+	parsed := parseCodexSessionFile(t.TempDir())
+	if parsed.err == nil {
+		t.Fatal("expected directory read error")
+	}
+}
+
 func TestCodexToolResultStatus(t *testing.T) {
 	t.Parallel()
 
@@ -763,8 +907,9 @@ func TestCodexRun_PreservesArtifactsOnNonZeroExit(t *testing.T) {
 	if len(sessionResult.Artifacts.GeneratedFiles) != 2 {
 		t.Fatalf("expected 2 generated files, got %v", sessionResult.Artifacts.GeneratedFiles)
 	}
-	if sessionResult.Artifacts.GeneratedFiles[0] != "stdout.json" {
-		t.Fatalf("expected stdout.json artifact, got %v", sessionResult.Artifacts.GeneratedFiles)
+	stdoutPath := filepath.Join(dir, ".skill-up", codexStdoutArtifactPath)
+	if sessionResult.Artifacts.GeneratedFiles[0] != stdoutPath {
+		t.Fatalf("expected stdout artifact %q, got %v", stdoutPath, sessionResult.Artifacts.GeneratedFiles)
 	}
 	if sessionResult.Artifacts.GeneratedFiles[1] != sessionPath {
 		t.Fatalf("expected session artifact %q, got %v", sessionPath, sessionResult.Artifacts.GeneratedFiles)
@@ -913,7 +1058,8 @@ func TestCodexRun_KeepsStreamFinalMessageWhenSessionHasNoFinalMessage(t *testing
 	}
 	ag := NewCodexAgent(Config{})
 
-	sessionResult, err := ag.Run(context.Background(), rt, ExecOptions{ArtifactDir: t.TempDir()}, []transcript.Message{
+	artifactDir := t.TempDir()
+	sessionResult, err := ag.Run(context.Background(), rt, ExecOptions{ArtifactDir: artifactDir}, []transcript.Message{
 		{Role: transcript.RoleUser, Content: "Return exactly OK.", Turn: 1},
 	})
 	if err != nil {
@@ -928,22 +1074,25 @@ func TestCodexRun_KeepsStreamFinalMessageWhenSessionHasNoFinalMessage(t *testing
 	if sessionResult.InputTokens != 0 || sessionResult.OutputTokens != 0 {
 		t.Fatalf("expected stream token counts to be preserved, got %d/%d", sessionResult.InputTokens, sessionResult.OutputTokens)
 	}
+	wantStdoutPath := filepath.Join(artifactDir, codexStdoutArtifactPath)
+	if len(sessionResult.Artifacts.GeneratedFiles) == 0 || sessionResult.Artifacts.GeneratedFiles[0] != wantStdoutPath {
+		t.Fatalf("generated files = %v, want local stdout artifact %q", sessionResult.Artifacts.GeneratedFiles, wantStdoutPath)
+	}
 }
 
 func TestCodexRun_UsesOutputLastMessageWhenJSONLHasNoFinalMessage(t *testing.T) {
 	t.Parallel()
 
 	workspace := t.TempDir()
-	lastMessagePath := filepath.Join(workspace, ".skill-up", "codex-last-message.txt")
 	rt := &codexTestRuntime{
 		workspace:        workspace,
 		execResult:       runtime.ExecResult{Stdout: `{"type":"thread.started","thread_id":"abc"}` + "\n", ExitCode: 0},
-		lastMessagePath:  lastMessagePath,
 		lastMessageBytes: []byte("from last message file\n"),
 	}
 	ag := NewCodexAgent(Config{ModelName: "gpt-5.4"})
+	customCwd := t.TempDir()
 
-	sessionResult, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{
+	sessionResult, err := ag.Run(context.Background(), rt, ExecOptions{Cwd: customCwd}, []transcript.Message{{
 		Role:    transcript.RoleUser,
 		Content: "hello",
 		Turn:    1,
@@ -951,6 +1100,7 @@ func TestCodexRun_UsesOutputLastMessageWhenJSONLHasNoFinalMessage(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
+	lastMessagePath := filepath.Join(rt.runArtifactDir, "last-message.txt")
 	if !containsCommand(rt.commands, "--output-last-message "+shellQuote(lastMessagePath)) {
 		t.Fatalf("run command missing output-last-message path:\n%s", rt.lastCommand)
 	}
@@ -959,6 +1109,69 @@ func TestCodexRun_UsesOutputLastMessageWhenJSONLHasNoFinalMessage(t *testing.T) 
 	}
 	if got := sessionResult.Transcript.FinalAssistantMessage(); got != "from last message file" {
 		t.Fatalf("transcript final = %q, want last message file", got)
+	}
+	stdoutPath := filepath.Join(rt.runArtifactDir, codexStdoutArtifactPath)
+	if !containsCommand(rt.commands, ">"+shellQuote(stdoutPath)) {
+		t.Fatalf("run command does not use the isolated JSONL path with cwd %q:\n%s", customCwd, rt.lastCommand)
+	}
+	if strings.HasPrefix(stdoutPath, workspace+string(filepath.Separator)) {
+		t.Fatalf("stdout path %q must stay outside evaluated workspace %q", stdoutPath, workspace)
+	}
+}
+
+func TestCodexRun_OutputLastMessageOverridesProgressMessage(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	rt := &codexTestRuntime{
+		workspace: workspace,
+		execResult: runtime.ExecResult{
+			Stdout:   `{"type":"item.completed","item":{"id":"progress","type":"agent_message","text":"still checking"}}` + "\n",
+			ExitCode: 0,
+		},
+		lastMessageBytes: []byte("{\"results\":[]}\n"),
+	}
+	ag := NewCodexAgent(Config{ModelName: "gpt-5.4"})
+
+	sessionResult, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{
+		Role:    transcript.RoleUser,
+		Content: "grade this",
+		Turn:    1,
+	}})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if sessionResult.FinalMessage != testJudgeJSON {
+		t.Fatalf("FinalMessage = %q, want last-message artifact", sessionResult.FinalMessage)
+	}
+	if got := sessionResult.Transcript.FinalAssistantMessage(); got != testJudgeJSON {
+		t.Fatalf("transcript final = %q, want last-message artifact", got)
+	}
+	stdoutPath := filepath.Join(rt.runArtifactDir, codexStdoutArtifactPath)
+	if !containsCommand(rt.commands, ">"+shellQuote(stdoutPath)) {
+		t.Fatalf("run command does not redirect JSONL stdout to an artifact:\n%s", rt.lastCommand)
+	}
+}
+
+func TestCodexRun_RejectsOversizedJSONLOutputBeforeDownload(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	rt := &codexTestRuntime{
+		workspace:        workspace,
+		execResult:       runtime.ExecResult{Stdout: strings.Repeat("x", 65), ExitCode: 0},
+		lastMessageBytes: []byte("final answer\n"),
+	}
+	ag := NewCodexAgent(Config{Kwargs: map[string]string{KwargMaxJSONLOutputBytes: "64"}})
+
+	sessionResult, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{
+		Role: transcript.RoleUser, Content: "grade this", Turn: 1,
+	}})
+	if err == nil || !strings.Contains(err.Error(), "Codex stdout JSONL output is 65 bytes, exceeding maximum size of 64 bytes") {
+		t.Fatalf("error = %v, want explicit total output limit error", err)
+	}
+	if sessionResult == nil || sessionResult.FinalMessage != "final answer" {
+		t.Fatalf("last-message recovery = %+v, want final answer alongside parse error", sessionResult)
 	}
 }
 
@@ -991,6 +1204,41 @@ func TestDownloadSessionArtifact_WithArtifactDirDoesNotRegisterGeneratedFile(t *
 	}
 	if string(data) != sessionContent {
 		t.Fatalf("unexpected artifact content: %q", string(data))
+	}
+}
+
+func TestDownloadSessionArtifact_WithoutArtifactDirUsesUniqueTempPaths(t *testing.T) {
+	t.Parallel()
+
+	sessionPath := "/tmp/codex-last-message.txt"
+	rt := &codexTestRuntime{
+		lastMessagePath:  sessionPath,
+		lastMessageBytes: []byte("final answer"),
+	}
+
+	firstPath, firstRegistered, firstCleanup, firstOK := downloadSessionArtifact(context.Background(), rt, "", sessionPath)
+	if !firstOK {
+		t.Fatal("first downloadSessionArtifact call failed")
+	}
+	defer firstCleanup()
+	secondPath, secondRegistered, secondCleanup, secondOK := downloadSessionArtifact(context.Background(), rt, "", sessionPath)
+	if !secondOK {
+		t.Fatal("second downloadSessionArtifact call failed")
+	}
+	defer secondCleanup()
+
+	if firstPath == secondPath {
+		t.Fatalf("concurrent downloads share temp path %q", firstPath)
+	}
+	if firstRegistered != sessionPath || secondRegistered != sessionPath {
+		t.Fatalf("registered paths = %q/%q, want %q", firstRegistered, secondRegistered, sessionPath)
+	}
+	firstCleanup()
+	if _, err := os.Stat(firstPath); !os.IsNotExist(err) {
+		t.Fatalf("first cleanup left temp artifact at %q: %v", firstPath, err)
+	}
+	if data, err := os.ReadFile(secondPath); err != nil || string(data) != "final answer" {
+		t.Fatalf("first cleanup affected second artifact: data=%q err=%v", data, err)
 	}
 }
 
@@ -1064,6 +1312,7 @@ type codexTestRuntime struct {
 	commands            []string
 	lastCommand         string
 	lastExecEnv         map[string]string
+	runArtifactDir      string
 	probeResponseStdout string
 	mergedEnv           map[string]string
 }
@@ -1081,8 +1330,11 @@ func (r *codexTestRuntime) UploadDir(context.Context, string, string) error {
 }
 
 func (r *codexTestRuntime) DownloadFile(_ context.Context, sourcePath, targetPath string) error {
-	if sourcePath == r.lastMessagePath {
+	if sourcePath == r.lastMessagePath || filepath.Base(sourcePath) == "last-message.txt" && len(r.lastMessageBytes) > 0 {
 		return os.WriteFile(targetPath, r.lastMessageBytes, 0o600)
+	}
+	if filepath.Base(sourcePath) == codexStdoutArtifactPath {
+		return os.WriteFile(targetPath, []byte(r.execResult.Stdout), 0o600)
 	}
 	if sourcePath != r.sessionPath {
 		return fmt.Errorf("unexpected download path: %s", sourcePath)
@@ -1109,6 +1361,20 @@ func (r *codexTestRuntime) Exec(_ context.Context, command string, opts runtime.
 	// non-zero exit codes meant for the codex invocation.
 	if strings.Contains(command, "if command -v 'codex' >/dev/null 2>&1; then exit 0; fi") {
 		return runtime.ExecResult{ExitCode: 0}, nil
+	}
+	if dir, ok := strings.CutPrefix(command, "mkdir -p "); ok {
+		r.runArtifactDir = strings.Trim(dir, "'")
+		return runtime.ExecResult{ExitCode: 0}, nil
+	}
+	if strings.HasPrefix(command, "rm -rf -- ") {
+		return runtime.ExecResult{ExitCode: 0}, nil
+	}
+	if strings.HasPrefix(command, "wc -c <") {
+		size := len(r.execResult.Stdout)
+		if r.sessionPath != "" && strings.Contains(command, shellQuote(r.sessionPath)) {
+			size = len(r.sessionBytes)
+		}
+		return runtime.ExecResult{Stdout: strconv.Itoa(size), ExitCode: 0}, nil
 	}
 	r.commands = append(r.commands, command)
 	r.lastCommand = command

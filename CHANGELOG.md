@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Codex JSONL parsing now accepts records up to a configurable 16 MiB default
+  while rejecting oversized records explicitly. The stdout stream is written to
+  a bounded-download artifact instead of being buffered without limit in host
+  memory, and the `--output-last-message` artifact remains the authoritative
+  final response, so a large tool result cannot leave an earlier progress update
+  to be graded as the answer.
+
 ## [0.9.0] - 2026-08-12
 
 ### Fixed
