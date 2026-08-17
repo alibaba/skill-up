@@ -8,7 +8,8 @@ environment:
   # Extra runtime settings for opensandbox or other selected environments.
   # kwargs:
   #   base_url: https://agent-sandbox.example.com
-  # Container image used by sandboxed environments when a custom image is needed.
+  # Container image for the runtime; required when environment.type is docker.
+  # For other environments, set only when the runtime supports custom images.
   # image: registry.example.com/your-org/sandbox-base:latest
   # Workspace mount path inside the execution environment.
   # workspace_mount: /workspace
@@ -56,9 +57,11 @@ cases:
   defaults:
     timeout_seconds: 120
     max_turns: 5
-    # Default checks inherited by every case unless the case overrides them.
+    # Default pre-judge checks inherited by every case unless the case overrides them.
     # expect:
     #   exit_code: 0
+    #   must_contain:
+    #     - "Required keyword"
     #   must_not_contain:
     #     - "TODO"
   # Maximum number of cases to run at the same time when cases are stateless.
@@ -66,11 +69,6 @@ cases:
 
 # benchmark:
 #   enabled: true
-
-# Cheap pre-judge checks; when these fail, the configured judge is skipped.
-# expect:
-#   must_contain:
-#     - "Required keyword"
 
 # Default judge used when a case does not define its own judge block.
 # judge:
