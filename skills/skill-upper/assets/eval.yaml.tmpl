@@ -30,7 +30,7 @@ skills:
 
 engine:
   # Agent Engine used to execute prompts and produce outputs for grading.
-  # Options: claude_code | codex | qodercli.
+  # Built-in options: claude_code | codex | qodercli | qwen_code.
   name: claude_code
   # Optional model override; omit this block to use the engine default model.
   # model:
@@ -85,5 +85,6 @@ cases:
 
 report:
   # Report formats written after each run.
-  # Options: json | junit | html | grading | benchmark.
+  # Options: json | junit | html.
+  # grading.json and benchmark artifacts are generated automatically.
   formats: [json]
