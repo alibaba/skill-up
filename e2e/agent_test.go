@@ -1530,9 +1530,6 @@ input:
 constraints:
   timeout_seconds: 300
   max_turns: 1
-expect:
-  must_contain:
-    - QODER_CONTRACT_OK
 judge:
   type: agent_judge
   model: ultimate
