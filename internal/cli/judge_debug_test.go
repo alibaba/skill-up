@@ -388,6 +388,40 @@ func TestRunJudgeDebug_AgentJudge_WithMock(t *testing.T) {
 	}
 }
 
+func TestRunJudgeDebug_AgentJudge_ShippedFixture(t *testing.T) {
+	t.Parallel()
+	inputPath := filepath.Join("..", "..", "examples", "judge-debug-agent.json")
+	outputPath := filepath.Join(t.TempDir(), "grading.json")
+
+	cmd := newJudgeDebugCmd(outputPath)
+	cmd.SetErr(&bytes.Buffer{})
+
+	if err := runJudgeDebug(cmd, []string{inputPath}); err != nil {
+		t.Fatalf("run shipped agent_judge fixture: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read grading.json: %v", err)
+	}
+	var result judge.Result
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("parse grading.json: %v", err)
+	}
+	if result.Status != judge.StatusFail {
+		t.Errorf("expected FAIL at the fixture's 0.7 threshold, got %s", result.Status)
+	}
+	if result.Summary.Total != 3 || result.Summary.Passed != 2 || result.Summary.Failed != 1 {
+		t.Errorf("unexpected summary: %+v", result.Summary)
+	}
+	if len(result.AssertionResults) != 3 {
+		t.Fatalf("expected 3 assertion results, got %d", len(result.AssertionResults))
+	}
+	if got := result.AssertionResults[0].Text; got != "Whether the Agent correctly identified the bug in the code" {
+		t.Errorf("unexpected first criterion text: %q", got)
+	}
+}
+
 func TestRunJudgeDebug_MissingFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
