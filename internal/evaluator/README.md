@@ -79,7 +79,8 @@ type EvalResult struct {
     TurnsTotal    int                // Planned total number of turns
     InputTokens   int                // Number of input tokens
     OutputTokens  int                // Number of output tokens
-    Grading       *judge.Result      // Judge scoring result (nil means skipped)
+    Grading       *judge.Result      // Valid judge result (nil when skipped or failed)
+    JudgeSession  *agent.SessionResult // Separate agent_judge session, including failures
     ExpectResult  *judge.ExpectResult // Expect pre-check result (nil means no expect)
     Error         error              // Execution error
 }

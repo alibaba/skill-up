@@ -1820,6 +1820,9 @@ func TestExecuteCase_JudgeErrorDownloadsJudgeArtifacts(t *testing.T) {
 			}
 			session := &agent.SessionResult{
 				FinalMessage: "API Error: 400 rate limit",
+				DurationMs:   2300,
+				InputTokens:  120,
+				OutputTokens: 30,
 				Artifacts: &agent.SessionArtifacts{
 					GeneratedFiles: []string{"judge-stdout.json"},
 				},
@@ -1852,6 +1855,12 @@ func TestExecuteCase_JudgeErrorDownloadsJudgeArtifacts(t *testing.T) {
 	}
 	if result.Error == nil || !strings.Contains(result.Error.Error(), "judge evaluation failed") {
 		t.Fatalf("expected judge evaluation failure, got %v", result.Error)
+	}
+	if result.JudgeSession == nil {
+		t.Fatal("expected failed judge session to be preserved")
+	}
+	if result.JudgeSession.DurationMs != 2300 || result.JudgeSession.InputTokens != 120 || result.JudgeSession.OutputTokens != 30 {
+		t.Fatalf("unexpected failed judge metrics: %#v", result.JudgeSession)
 	}
 	if rt.downloadFileCall.Load() == 0 {
 		t.Fatal("expected judge artifacts to be downloaded on judge error")

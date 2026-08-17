@@ -58,15 +58,17 @@ type htmlReportData struct {
 // -- Embedded JSON types for JavaScript consumption --
 
 type embeddedReportData struct {
-	SkillName   string           `json:"skill_name"`
-	EngineName  string           `json:"engine_name"`
-	ModelName   string           `json:"model_name"`
-	StartTime   string           `json:"start_time"`
-	Duration    string           `json:"duration"`
-	TotalTokens int              `json:"total_tokens"`
-	Summary     embeddedSummary  `json:"summary"`
-	Cases       []embeddedCase   `json:"cases"`
-	Benchmark   *BenchmarkResult `json:"benchmark,omitempty"`
+	SkillName          string           `json:"skill_name"`
+	EngineName         string           `json:"engine_name"`
+	ModelName          string           `json:"model_name"`
+	StartTime          string           `json:"start_time"`
+	EvaluationWallTime string           `json:"evaluation_wall_time"`
+	AgentTokens        int              `json:"agent_tokens"`
+	JudgeTokens        int              `json:"judge_tokens"`
+	OverallTokens      int              `json:"overall_tokens"`
+	Summary            embeddedSummary  `json:"summary"`
+	Cases              []embeddedCase   `json:"cases"`
+	Benchmark          *BenchmarkResult `json:"benchmark,omitempty"`
 }
 
 type embeddedSummary struct {
@@ -79,20 +81,28 @@ type embeddedSummary struct {
 }
 
 type embeddedCase struct {
-	ID            string            `json:"id"`
-	Title         string            `json:"title,omitempty"`
-	Status        string            `json:"status"`
-	DurationMs    int64             `json:"duration_ms"`
-	Duration      string            `json:"duration"`
-	Turns         int               `json:"turns"`
-	Error         string            `json:"error,omitempty"`
-	Grading       *embeddedGrading  `json:"grading,omitempty"`
-	Configuration string            `json:"configuration,omitempty"`
-	Prompt        string            `json:"prompt,omitempty"`
-	Response      string            `json:"response,omitempty"`
-	Baseline      *embeddedCase     `json:"baseline,omitempty"`
-	TurnResults   []embeddedTurn    `json:"turn_results,omitempty"`
-	JudgeSkills   []judge.SkillInfo `json:"judge_skills,omitempty"`
+	ID                string            `json:"id"`
+	Title             string            `json:"title,omitempty"`
+	Status            string            `json:"status"`
+	AgentDurationMs   int64             `json:"agent_duration_ms"`
+	AgentDuration     string            `json:"agent_duration"`
+	InputTokens       int               `json:"input_tokens"`
+	OutputTokens      int               `json:"output_tokens"`
+	AgentTokens       int               `json:"agent_tokens"`
+	JudgeDurationMs   int64             `json:"judge_duration_ms"`
+	JudgeDuration     string            `json:"judge_duration"`
+	JudgeInputTokens  int               `json:"judge_input_tokens"`
+	JudgeOutputTokens int               `json:"judge_output_tokens"`
+	JudgeTokens       int               `json:"judge_tokens"`
+	Turns             int               `json:"turns"`
+	Error             string            `json:"error,omitempty"`
+	Grading           *embeddedGrading  `json:"grading,omitempty"`
+	Configuration     string            `json:"configuration,omitempty"`
+	Prompt            string            `json:"prompt,omitempty"`
+	Response          string            `json:"response,omitempty"`
+	Baseline          *embeddedCase     `json:"baseline,omitempty"`
+	TurnResults       []embeddedTurn    `json:"turn_results,omitempty"`
+	JudgeSkills       []judge.SkillInfo `json:"judge_skills,omitempty"`
 }
 
 // embeddedTurn holds per-turn data for the HTML report JavaScript.
@@ -136,18 +146,26 @@ type caseStatusCounts struct {
 
 func caseResultToEmbeddedCase(cr CaseResult) embeddedCase {
 	ec := embeddedCase{
-		ID:            cr.CaseID,
-		Title:         cr.Title,
-		Status:        string(cr.Status),
-		DurationMs:    cr.DurationMs,
-		Duration:      fmt.Sprintf("%.1fs", float64(cr.DurationMs)/1000.0),
-		Turns:         cr.Turns,
-		Error:         cr.Error,
-		Configuration: cr.Configuration,
-		Prompt:        cr.Prompt,
-		Response:      cr.Response,
-		TurnResults:   caseTurnResultsToEmbedded(cr.TurnResults),
-		JudgeSkills:   cr.JudgeSkills,
+		ID:                cr.CaseID,
+		Title:             cr.Title,
+		Status:            string(cr.Status),
+		AgentDurationMs:   cr.DurationMs,
+		AgentDuration:     fmt.Sprintf("%.1fs", float64(cr.DurationMs)/1000.0),
+		InputTokens:       cr.InputTokens,
+		OutputTokens:      cr.OutputTokens,
+		AgentTokens:       cr.InputTokens + cr.OutputTokens,
+		JudgeDurationMs:   cr.JudgeDurationMs,
+		JudgeDuration:     fmt.Sprintf("%.1fs", float64(cr.JudgeDurationMs)/1000.0),
+		JudgeInputTokens:  cr.JudgeInputTokens,
+		JudgeOutputTokens: cr.JudgeOutputTokens,
+		JudgeTokens:       cr.JudgeInputTokens + cr.JudgeOutputTokens,
+		Turns:             cr.Turns,
+		Error:             cr.Error,
+		Configuration:     cr.Configuration,
+		Prompt:            cr.Prompt,
+		Response:          cr.Response,
+		TurnResults:       caseTurnResultsToEmbedded(cr.TurnResults),
+		JudgeSkills:       cr.JudgeSkills,
 	}
 	if cr.Grading != nil {
 		eg := &embeddedGrading{
@@ -252,12 +270,14 @@ func (r *HTMLReporter) buildTemplateData(in Input) (htmlReportData, error) {
 	cases := buildEmbeddedCases(grouped, orderedIDs)
 
 	ed := embeddedReportData{
-		SkillName:   in.SkillName,
-		EngineName:  in.EngineName,
-		ModelName:   in.ModelName,
-		StartTime:   in.StartTime.Format(time.RFC3339),
-		Duration:    fmt.Sprintf("%.1fs", in.TotalDuration().Seconds()),
-		TotalTokens: in.TotalTokens,
+		SkillName:          in.SkillName,
+		EngineName:         in.EngineName,
+		ModelName:          in.ModelName,
+		StartTime:          in.StartTime.Format(time.RFC3339),
+		EvaluationWallTime: fmt.Sprintf("%.1fs", in.TotalDuration().Seconds()),
+		AgentTokens:        in.TotalTokens,
+		JudgeTokens:        in.JudgeTokens,
+		OverallTokens:      in.TotalTokens + in.JudgeTokens,
 		Summary: embeddedSummary{
 			Total:    len(cases),
 			Passed:   counts.passed,

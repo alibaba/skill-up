@@ -511,13 +511,16 @@ func buildReportInput(skillName string, grouped map[string]*caseResults, caseIDs
 			caseResult := evalResultToCaseResult(cr.withSkill)
 			input.CaseResults = append(input.CaseResults, caseResult)
 			input.TotalTokens += caseResult.InputTokens + caseResult.OutputTokens
+			input.JudgeTokens += caseResult.JudgeInputTokens + caseResult.JudgeOutputTokens
 		}
 		if cr.withoutSkill != nil {
 			caseResult := evalResultToCaseResult(cr.withoutSkill)
 			input.CaseResults = append(input.CaseResults, caseResult)
 			input.TotalTokens += caseResult.InputTokens + caseResult.OutputTokens
+			input.JudgeTokens += caseResult.JudgeInputTokens + caseResult.JudgeOutputTokens
 		}
 	}
+	input.OverallTokens = input.TotalTokens + input.JudgeTokens
 
 	return input
 }
@@ -537,6 +540,15 @@ func evalResultToCaseResult(res *evaluator.EvalResult) report.CaseResult {
 		Prompt:        res.Prompt,
 		Response:      responseContent(res),
 		TurnResults:   evalTurnResultsToReport(res.TurnResults),
+	}
+	judgeSession := res.JudgeSession
+	if judgeSession == nil && res.Grading != nil {
+		judgeSession = res.Grading.JudgeSession
+	}
+	if judgeSession != nil {
+		cr.JudgeDurationMs = judgeSession.DurationMs
+		cr.JudgeInputTokens = judgeSession.InputTokens
+		cr.JudgeOutputTokens = judgeSession.OutputTokens
 	}
 	if res.Error != nil {
 		cr.Error = res.Error.Error()

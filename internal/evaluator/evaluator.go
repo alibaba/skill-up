@@ -90,8 +90,12 @@ type EvalResult struct {
 	// Nil for single-turn cases.
 	TurnResults []TurnResult
 
-	// Grading is the judge evaluation result (nil if judge was skipped).
+	// Grading is the valid judge evaluation result (nil if judge was skipped or failed).
 	Grading *judge.Result
+
+	// JudgeSession is the separate agent session used by agent_judge. It is
+	// preserved even when the judge fails to produce a valid grading result.
+	JudgeSession *agent.SessionResult
 
 	// JudgeSkills records judge Skills configured for agent_judge.
 	JudgeSkills []judge.SkillInfo
@@ -650,6 +654,7 @@ func (e *defaultEvaluator) runJudgePhaseWithSpan(
 	grading, err := j.Evaluate(ctx, judgeInput)
 	if err != nil {
 		if judgeSession := judge.SessionResultFromError(err); judgeSession != nil {
+			result.JudgeSession = judgeSession
 			if judgeSession.Artifacts != nil {
 				e.ensureArtifactsInOutputDir(ctx, rt, configName, caseCfg.ID, "judge/run", judgeInput.ArtifactDir, judgeSession)
 			}
@@ -661,6 +666,7 @@ func (e *defaultEvaluator) runJudgePhaseWithSpan(
 	}
 
 	result.Grading = grading
+	result.JudgeSession = grading.JudgeSession
 	result.Status = grading.Status
 	result.Configuration = configName
 	span.SetAttributes(attribute.String("skill_up.case.status", string(result.Status)))

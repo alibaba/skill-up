@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- HTML and Markdown reports now identify the top-level duration as evaluation
+  wall time and show per-case tested-agent execution time plus input, output,
+  and total token usage. Benchmark cases include compact with-Skill,
+  without-Skill, and delta annotations beside the case heading. Agent-judge
+  time and tokens are reported separately and included in an explicit overall
+  token total.
 - Codex JSONL parsing now accepts records up to a configurable 16 MiB default
   while rejecting oversized records explicitly. The stdout stream is written to
   a bounded-download artifact instead of being buffered without limit in host

@@ -17,6 +17,9 @@ type JSONReporter struct {
 
 // Write implements the Reporter interface.
 func (r *JSONReporter) Write(_ context.Context, in Input) error {
+	// OverallTokens is derived so reports regenerated from an older result.json
+	// also receive a consistent explicit total.
+	in.OverallTokens = in.TotalTokens + in.JudgeTokens
 	data, err := json.MarshalIndent(in, "", "  ")
 	if err != nil {
 		return fmt.Errorf("json marshal: %w", err)
