@@ -6,7 +6,7 @@
 # Syntax notes:
 #   - Patterns follow .gitignore-style rules; the LAST matching pattern wins.
 #   - Owners must be real GitHub usernames (@user) or teams (@org/team)
-#     that have read access to the repository, otherwise the rule is ignored.
+#     with write access to the repository, otherwise the rule is ignored.
 #   - Multiple owners can be listed, separated by spaces.
 #
 # Recommended ruleset (Settings -> Rules -> Rulesets):
@@ -15,20 +15,20 @@
 #   - Require the stable checks documented in docs/guide/ci-maintenance.md
 
 # Global fallback: every file is owned by the maintainers by default.
-*                           @hittyt @libinfs
+*                           @zpzjzj @hittyt @JHWang-1997
 
 # Public API surface: changes here require extra care.
-/pkg/                       @hittyt @libinfs
+/pkg/                       @zpzjzj @hittyt @JHWang-1997
 
 # CI / release configuration.
-/.github/                   @hittyt @libinfs
-/.github/workflows/         @hittyt @libinfs
-/.github/dependabot.yml     @hittyt @libinfs
-/action.yml                 @hittyt @libinfs
-/action/                    @hittyt @libinfs
-/Makefile                   @hittyt @libinfs
-/.goreleaser.yaml           @hittyt @libinfs
+/.github/                   @zpzjzj @hittyt @JHWang-1997
+/.github/workflows/         @zpzjzj @hittyt @JHWang-1997
+/.github/dependabot.yml     @zpzjzj @hittyt @JHWang-1997
+/action.yml                 @zpzjzj @hittyt @JHWang-1997
+/action/                    @zpzjzj @hittyt @JHWang-1997
+/Makefile                   @zpzjzj @hittyt @JHWang-1997
+/.goreleaser.yaml           @zpzjzj @hittyt @JHWang-1997
 
 # Core runner & agent logic.
-/internal/runner/           @hittyt @libinfs
-/internal/agent/            @hittyt @libinfs
+/internal/runner/           @zpzjzj @hittyt @JHWang-1997
+/internal/agent/            @zpzjzj @hittyt @JHWang-1997
