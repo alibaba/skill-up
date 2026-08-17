@@ -43,7 +43,7 @@ jobs:
       # Advanced Security mode uploads SARIF without blocking on the initial
       # baseline. Promote Zizmor to a required check after findings are triaged.
       - name: Upload Zizmor SARIF
-        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         with:
           sarif_file: results.sarif
           category: zizmor
