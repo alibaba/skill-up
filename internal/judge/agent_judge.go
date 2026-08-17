@@ -308,7 +308,7 @@ func decodeAgentJudgeResponse(output string, v any) error {
 	if err != nil {
 		return err
 	}
-	if err := rejectDuplicateJSONKeys(candidate); err != nil {
+	if err := validateAgentJudgeJSONKeys(candidate); err != nil {
 		return fmt.Errorf("invalid JSON response: %w", err)
 	}
 
@@ -329,15 +329,25 @@ func decodeAgentJudgeResponse(output string, v any) error {
 	return nil
 }
 
-// rejectDuplicateJSONKeys scans the JSON token stream before decoding into a
-// struct because encoding/json otherwise accepts duplicate keys using the last
-// value. The strict agent_judge contract treats ambiguous objects as invalid.
-func rejectDuplicateJSONKeys(input string) error {
+type agentJudgeJSONContext uint8
+
+const (
+	agentJudgeJSONAny agentJudgeJSONContext = iota
+	agentJudgeJSONResponse
+	agentJudgeJSONResults
+	agentJudgeJSONResult
+)
+
+// validateAgentJudgeJSONKeys scans the JSON token stream before decoding into
+// structs because encoding/json accepts duplicate keys using the last value and
+// matches struct fields case-insensitively. The wire contract requires unique,
+// exactly spelled field names at both object levels.
+func validateAgentJudgeJSONKeys(input string) error {
 	decoder := json.NewDecoder(strings.NewReader(input))
-	return scanJSONValue(decoder)
+	return scanAgentJudgeJSONValue(decoder, agentJudgeJSONResponse)
 }
 
-func scanJSONValue(decoder *json.Decoder) error {
+func scanAgentJudgeJSONValue(decoder *json.Decoder, contractContext agentJudgeJSONContext) error {
 	token, err := decoder.Token()
 	if err != nil {
 		return err
@@ -363,13 +373,21 @@ func scanJSONValue(decoder *json.Decoder) error {
 				return fmt.Errorf("duplicate JSON object key %q", key)
 			}
 			seen[key] = struct{}{}
-			if err := scanJSONValue(decoder); err != nil {
+			childContext, allowed := agentJudgeJSONChildContext(contractContext, key)
+			if !allowed {
+				return fmt.Errorf("JSON object key %q is not allowed in the agent_judge contract", key)
+			}
+			if err := scanAgentJudgeJSONValue(decoder, childContext); err != nil {
 				return err
 			}
 		}
 	case '[':
+		childContext := agentJudgeJSONAny
+		if contractContext == agentJudgeJSONResults {
+			childContext = agentJudgeJSONResult
+		}
 		for decoder.More() {
-			if err := scanJSONValue(decoder); err != nil {
+			if err := scanAgentJudgeJSONValue(decoder, childContext); err != nil {
 				return err
 			}
 		}
@@ -379,6 +397,25 @@ func scanJSONValue(decoder *json.Decoder) error {
 
 	_, err = decoder.Token()
 	return err
+}
+
+func agentJudgeJSONChildContext(contractContext agentJudgeJSONContext, key string) (agentJudgeJSONContext, bool) {
+	switch contractContext {
+	case agentJudgeJSONResponse:
+		if key == "results" {
+			return agentJudgeJSONResults, true
+		}
+		return agentJudgeJSONAny, false
+	case agentJudgeJSONResult:
+		switch key {
+		case "criterion_id", "passed", "evidence", "failures":
+			return agentJudgeJSONAny, true
+		default:
+			return agentJudgeJSONAny, false
+		}
+	default:
+		return agentJudgeJSONAny, true
+	}
 }
 
 func agentJudgeJSONCandidate(output string) (string, error) {
