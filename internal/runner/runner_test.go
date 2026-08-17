@@ -78,7 +78,7 @@ func TestRunner_WriteResults_WithSkillOnly(t *testing.T) {
 		},
 	}
 
-	err = r.WriteResults(context.Background(), results, "test-skill", "/path/to/skill", 1, []string{"html"})
+	err = r.WriteResults(context.Background(), results, "test-skill", "/path/to/skill", 1, []string{"html"}, time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResults failed: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestRunner_WriteResults_WithBaseline(t *testing.T) {
 		},
 	}
 
-	err = r.WriteResults(context.Background(), results, "test-skill", "/path/to/skill", 1, nil)
+	err = r.WriteResults(context.Background(), results, "test-skill", "/path/to/skill", 1, nil, time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResults failed: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestRunner_WriteResults_UsesStderrWhenFinalMessageEmpty(t *testing.T) {
 		},
 	}
 
-	err = r.WriteResults(context.Background(), results, "test-skill", "/path/to/skill", 1, nil)
+	err = r.WriteResults(context.Background(), results, "test-skill", "/path/to/skill", 1, nil, time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResults failed: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestRunner_WriteResults_DoesNotUseStderrOnSuccessfulEmptyResponse(t *testin
 		},
 	}
 
-	err = r.WriteResults(context.Background(), results, "test-skill", "/path/to/skill", 1, nil)
+	err = r.WriteResults(context.Background(), results, "test-skill", "/path/to/skill", 1, nil, time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResults failed: %v", err)
 	}
@@ -515,7 +515,7 @@ func TestBuildReportInput_IncludesFailedJudgeSessionMetrics(t *testing.T) {
 
 func TestRunner_WriteResults_NoWorkspace(t *testing.T) {
 	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.AgentInitParams{})
-	err := r.WriteResults(context.Background(), nil, "", "", 1, nil)
+	err := r.WriteResults(context.Background(), nil, "", "", 1, nil, time.Time{}, time.Time{})
 	if err == nil {
 		t.Error("expected error when workspace not initialized")
 	}

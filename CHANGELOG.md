@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without-Skill, and delta annotations beside the case heading. Agent-judge
   time and tokens are reported separately and included in an explicit overall
   token total.
+- Multi-iteration reports now record each iteration's own start time and wall
+  time instead of reusing the command start time and accumulating the duration
+  of all preceding iterations.
 - Codex JSONL parsing now accepts records up to a configurable 16 MiB default
   while rejecting oversized records explicitly. The stdout stream is written to
   a bounded-download artifact instead of being buffered without limit in host

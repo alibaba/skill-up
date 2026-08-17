@@ -3,18 +3,21 @@ package runner
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alibaba/skill-up/internal/agent"
 	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/evaluator"
 	"github.com/alibaba/skill-up/internal/judge"
+	"github.com/alibaba/skill-up/internal/report"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/internal/ui"
 	"github.com/alibaba/skill-up/pkg/transcript"
@@ -159,6 +162,23 @@ func TestRunner_Evaluate_RunsMultipleIterations(t *testing.T) {
 		Environment: config.Environment{Type: "none"},
 		Cases:       config.CasesConfig{Parallelism: 1},
 	}, loader, nil, credential.AgentInitParams{})
+	baseTime := time.Date(2026, time.August, 17, 10, 0, 0, 0, time.UTC)
+	clockTimes := []time.Time{
+		baseTime,
+		baseTime.Add(100 * time.Second),
+		baseTime.Add(200 * time.Second),
+		baseTime.Add(300 * time.Second),
+	}
+	clockIndex := 0
+	r.now = func() time.Time {
+		if clockIndex >= len(clockTimes) {
+			t.Fatalf("clock called more than %d times", len(clockTimes))
+			return time.Time{}
+		}
+		now := clockTimes[clockIndex]
+		clockIndex++
+		return now
+	}
 
 	ag := &runnerTestAgent{}
 	workspaceRoot := filepath.Join(evalDir, "workspace")
@@ -175,9 +195,29 @@ func TestRunner_Evaluate_RunsMultipleIterations(t *testing.T) {
 	}
 	for _, runNumber := range []int{1, 2} {
 		resultPath := filepath.Join(workspaceRoot, fmt.Sprintf("iteration-%d", runNumber), "result.json")
-		if _, err := os.Stat(resultPath); err != nil {
-			t.Fatalf("missing result.json for run %d: %v", runNumber, err)
+		data, readErr := os.ReadFile(resultPath)
+		if readErr != nil {
+			t.Fatalf("read result.json for run %d: %v", runNumber, readErr)
 		}
+		var input report.Input
+		if unmarshalErr := json.Unmarshal(data, &input); unmarshalErr != nil {
+			t.Fatalf("unmarshal result.json for run %d: %v", runNumber, unmarshalErr)
+		}
+
+		wantStart := baseTime.Add(time.Duration(runNumber-1) * 200 * time.Second)
+		wantEnd := wantStart.Add(100 * time.Second)
+		if !input.StartTime.Equal(wantStart) {
+			t.Errorf("run %d StartTime = %v, want %v", runNumber, input.StartTime, wantStart)
+		}
+		if !input.EndTime.Equal(wantEnd) {
+			t.Errorf("run %d EndTime = %v, want %v", runNumber, input.EndTime, wantEnd)
+		}
+		if got := input.TotalDuration(); got != 100*time.Second {
+			t.Errorf("run %d TotalDuration = %v, want 100s", runNumber, got)
+		}
+	}
+	if clockIndex != len(clockTimes) {
+		t.Fatalf("clock called %d times, want %d", clockIndex, len(clockTimes))
 	}
 	if got := r.workspace.IterationNum; got != 2 {
 		t.Fatalf("IterationNum = %d, want 2 after final run", got)
