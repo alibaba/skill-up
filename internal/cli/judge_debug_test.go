@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,6 +35,22 @@ func writeJudgeDebugInput(t *testing.T, dir string, input judgeDebugInput) strin
 		t.Fatalf("write input.json: %v", err)
 	}
 	return path
+}
+
+type debugCriterionOutcome bool
+
+func debugCriterionResult(index int, outcome debugCriterionOutcome, evidence string) judge.CriterionResult {
+	passed := bool(outcome)
+	failures := []string{}
+	if !passed {
+		failures = []string{evidence}
+	}
+	return judge.CriterionResult{
+		CriterionID: fmt.Sprintf("criterion-%d", index+1),
+		Passed:      &passed,
+		Evidence:    []string{evidence},
+		Failures:    failures,
+	}
 }
 
 // newJudgeDebugCmd creates an isolated cobra command wired to runJudgeDebug for testing.
@@ -113,7 +130,7 @@ func TestBuildJudgeFromConfig_AgentJudge_WithMockResults(t *testing.T) {
 	t.Parallel()
 	cfg := config.JudgeConfig{Type: "agent_judge", Criteria: []string{"output is correct"}}
 	mockResults := []judge.CriterionResult{
-		{Criterion: "output is correct", Passed: true, Evidence: "looks good"},
+		debugCriterionResult(0, true, "looks good"),
 	}
 	j, err := buildJudgeFromConfig(cfg, mockResults, "")
 	if err != nil {
@@ -227,8 +244,8 @@ func TestMockJudgeAgent_NoOps(t *testing.T) {
 func TestMockJudgeAgent_Run(t *testing.T) {
 	t.Parallel()
 	mockResults := []judge.CriterionResult{
-		{Criterion: "criterion 1", Passed: true, Evidence: "it works"},
-		{Criterion: "criterion 2", Passed: false, Evidence: "nope"},
+		debugCriterionResult(0, true, "it works"),
+		debugCriterionResult(1, false, "nope"),
 	}
 	ag := &mockJudgeAgent{results: mockResults}
 
@@ -250,10 +267,10 @@ func TestMockJudgeAgent_Run(t *testing.T) {
 	if len(parsed.Results) != 2 {
 		t.Errorf("expected 2 results, got %d", len(parsed.Results))
 	}
-	if parsed.Results[0].Criterion != "criterion 1" {
-		t.Errorf("unexpected criterion: %s", parsed.Results[0].Criterion)
+	if parsed.Results[0].CriterionID != "criterion-1" {
+		t.Errorf("unexpected criterion ID: %s", parsed.Results[0].CriterionID)
 	}
-	if !parsed.Results[0].Passed {
+	if parsed.Results[0].Passed == nil || !*parsed.Results[0].Passed {
 		t.Error("expected first result to be passed")
 	}
 }
@@ -349,7 +366,7 @@ func TestRunJudgeDebug_AgentJudge_WithMock(t *testing.T) {
 			Criteria: []string{"output is correct"},
 		},
 		MockResults: []judge.CriterionResult{
-			{Criterion: "output is correct", Passed: true, Evidence: "all good"},
+			debugCriterionResult(0, true, "all good"),
 		},
 	}
 	inputPath := writeJudgeDebugInput(t, dir, input)

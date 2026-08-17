@@ -193,17 +193,18 @@ Rule assertions:
 ### AgentJudge (`agent_judge.go`)
 
 - Uses an `agent.Agent` + `runtime.Runtime` directly to execute the judge prompt
-- Evaluates against the `criteria` list; each criterion requires `passed` + `evidence`
+- Assigns stable IDs to configured criteria and keeps the configured text authoritative
+- Requires `criterion_id`, `passed`, non-empty `evidence`, and explicit `failures` arrays
 - `pass_threshold` (default 0.7): `pass_rate >= threshold` → PASS
 - Provides the internal helper `buildJudgePrompt()` to construct the evaluation prompt
-- The agent is expected to return a JSON response; `extractJSON()` handles braces and escapes inside JSON strings to extract it robustly
+- Accepts one strict JSON object, optionally wrapped in one complete JSON code fence; unknown fields and trailing content are rejected
 
 ## Security
 
 - Workspace file checks (`files_exist`, `files_not_exist`) and `golden_file` all go through `safePath()`.
   The first two are relative to the workspace; `golden_file` is relative to the skill root. Both prevent `../` path-traversal attacks.
 - File-existence checks share a single helper, `fileExistsInWorkspace()`, ensuring that the `expect` layer and the `rule_based` layer use the same path-safety validation and detection logic.
-- `extractJSON()` correctly handles braces and escapes inside JSON strings to avoid parsing errors.
+- Invalid agent judge responses remain errors and preserve the judge session for artifact collection.
 
 ## Testing
 

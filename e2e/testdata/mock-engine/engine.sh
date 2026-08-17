@@ -82,21 +82,19 @@ fi
 
 # Handle agent_judge evaluation prompts.
 # The judge prompt always contains "Required Response Format" and "## Criteria".
-# We parse the numbered criteria and return a valid JSON response so that
+# We parse the stable criterion IDs and return a valid JSON response so that
 # agent_judge can succeed in mock/CI scenarios without a real LLM.
 if echo "$PROMPT" | grep -q "Required Response Format" && echo "$PROMPT" | grep -q "## Criteria"; then
   # Build JSON using python3 for correct escaping of all special characters
   # (quotes, backslashes, control chars, Unicode, etc.).
-  JSON_RESULTS=$(echo "$PROMPT" | grep -E '^[[:space:]]*[0-9]+\.' | python3 -c '
+  JSON_RESULTS=$(echo "$PROMPT" | grep -E '^\[criterion-[0-9]+\][[:space:]]+' | python3 -c '
 import json, sys
 items = []
 for line in sys.stdin:
     text = line.strip()
-    # Strip leading "N. " prefix
-    dot = text.find(".")
-    if dot != -1:
-        text = text[dot+1:].strip()
-    items.append({"criterion": text, "passed": True, "evidence": "Mock engine: criterion satisfied based on agent output analysis"})
+    close = text.find("]")
+    criterion_id = text[1:close]
+    items.append({"criterion_id": criterion_id, "passed": True, "evidence": ["Mock engine: criterion satisfied based on agent output analysis"], "failures": []})
 print(json.dumps({"results": items}))
 ')
   echo "$JSON_RESULTS"

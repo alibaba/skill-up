@@ -37,6 +37,22 @@ func assertStatus(t *testing.T, r *Result, expected Status) {
 // intPtr returns a pointer to v.
 func intPtr(v int) *int { return &v }
 
+type testCriterionOutcome bool
+
+func testCriterionResult(index int, outcome testCriterionOutcome, evidence string) CriterionResult {
+	passed := bool(outcome)
+	failures := []string{}
+	if !passed {
+		failures = []string{evidence}
+	}
+	return CriterionResult{
+		CriterionID: criterionID(index),
+		Passed:      &passed,
+		Evidence:    []string{evidence},
+		Failures:    failures,
+	}
+}
+
 // writeScript creates a temporary executable script and returns its path.
 func writeScript(t *testing.T, dir, name, content string) string {
 	t.Helper()

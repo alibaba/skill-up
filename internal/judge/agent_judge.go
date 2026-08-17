@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -24,15 +25,18 @@ const DefaultPassThreshold = 0.7
 
 // CriterionResult is the agent's assessment of a single criterion.
 type CriterionResult struct {
-	// Criterion is the original criterion text.
-	Criterion string `json:"criterion"`
+	// CriterionID is the stable identifier assigned by skill-up.
+	CriterionID string `json:"criterion_id"`
 
-	// Passed indicates whether the criterion was met.
-	Passed bool `json:"passed"`
+	// Passed indicates whether the criterion was met. A pointer distinguishes a
+	// missing field from an explicit false value.
+	Passed *bool `json:"passed"`
 
-	// Evidence is the concrete reason for the pass/fail determination.
-	// Required: the agent must provide evidence (design doc: "evidence is required").
-	Evidence string `json:"evidence"`
+	// Evidence contains concrete observations supporting the judgment.
+	Evidence []string `json:"evidence"`
+
+	// Failures contains unmet requirements for a failed criterion.
+	Failures []string `json:"failures"`
 }
 
 // judgeResponse is the expected JSON structure from the agent judge output.
@@ -157,15 +161,14 @@ func (j *AgentJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 	}
 
 	var resp judgeResponse
-	if err := extractJSON(sessionResult.FinalMessage, &resp); err != nil {
+	if err := decodeAgentJudgeResponse(sessionResult.FinalMessage, &resp); err != nil {
 		return nil, &SessionResultError{
 			Err:     fmt.Errorf("agent_judge failed to parse agent output: %w", err),
 			Session: sessionResult,
 		}
 	}
-	criterionResults := resp.Results
-
-	if err := validateAgentJudgeResponse(j.Criteria, criterionResults); err != nil {
+	criterionResults, err := validateAgentJudgeResponse(j.Criteria, resp.Results)
+	if err != nil {
 		return nil, &SessionResultError{
 			Err:     err,
 			Session: sessionResult,
@@ -177,11 +180,11 @@ func (j *AgentJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 
 func (j *AgentJudge) buildResult(in Input, sessionResult *agent.SessionResult, materialized *MaterializedContext, prompt string, criterionResults []CriterionResult) *Result {
 	assertions := make([]AssertionResult, 0, len(criterionResults))
-	for _, cr := range criterionResults {
+	for i, cr := range criterionResults {
 		assertions = append(assertions, AssertionResult{
-			Text:     cr.Criterion,
-			Passed:   cr.Passed,
-			Evidence: cr.Evidence,
+			Text:     j.Criteria[i],
+			Passed:   *cr.Passed,
+			Evidence: formatCriterionEvidence(cr),
 		})
 	}
 
@@ -210,194 +213,142 @@ func buildContextMetadata(sessionResult *agent.SessionResult, materialized *Mate
 	return metadata
 }
 
-func validateAgentJudgeResponse(criteria []string, results []CriterionResult) error {
+func validateAgentJudgeResponse(criteria []string, results []CriterionResult) ([]CriterionResult, error) {
+	if results == nil {
+		return nil, errors.New("agent_judge: results is required and must be an array")
+	}
 	// A short response inflates pass_rate because NewResult uses the returned
 	// count as the denominator (e.g. 1-of-1 returned = 100% even if 3 were sent).
 	if len(results) != len(criteria) {
-		return fmt.Errorf("agent_judge: expected %d criterion results, got %d", len(criteria), len(results))
+		return nil, fmt.Errorf("agent_judge: expected %d criterion results, got %d", len(criteria), len(results))
 	}
+
+	expected := make(map[string]int, len(criteria))
+	for i := range criteria {
+		expected[criterionID(i)] = i
+	}
+	ordered := make([]CriterionResult, len(criteria))
+	seen := make(map[string]struct{}, len(results))
+
 	for i, cr := range results {
-		if strings.TrimSpace(cr.Evidence) == "" {
-			return fmt.Errorf("agent_judge: criterion %d %q has empty evidence", i+1, cr.Criterion)
+		if strings.TrimSpace(cr.CriterionID) == "" {
+			return nil, fmt.Errorf("agent_judge: result %d is missing criterion_id", i+1)
 		}
+		position, ok := expected[cr.CriterionID]
+		if !ok {
+			return nil, fmt.Errorf("agent_judge: result %d has unknown criterion_id %q", i+1, cr.CriterionID)
+		}
+		if _, duplicate := seen[cr.CriterionID]; duplicate {
+			return nil, fmt.Errorf("agent_judge: duplicate criterion_id %q", cr.CriterionID)
+		}
+		seen[cr.CriterionID] = struct{}{}
+
+		normalized, err := validateCriterionResultFields(cr)
+		if err != nil {
+			return nil, err
+		}
+
+		ordered[position] = normalized
+	}
+
+	for id := range expected {
+		if _, ok := seen[id]; !ok {
+			return nil, fmt.Errorf("agent_judge: missing criterion_id %q", id)
+		}
+	}
+	return ordered, nil
+}
+
+func validateCriterionResultFields(result CriterionResult) (CriterionResult, error) {
+	if result.Passed == nil {
+		return CriterionResult{}, fmt.Errorf("agent_judge: criterion %q is missing passed", result.CriterionID)
+	}
+	if result.Evidence == nil {
+		return CriterionResult{}, fmt.Errorf("agent_judge: criterion %q is missing evidence", result.CriterionID)
+	}
+	if len(result.Evidence) == 0 {
+		return CriterionResult{}, fmt.Errorf("agent_judge: criterion %q has empty evidence", result.CriterionID)
+	}
+	for evidenceIndex := range result.Evidence {
+		result.Evidence[evidenceIndex] = strings.TrimSpace(result.Evidence[evidenceIndex])
+		if result.Evidence[evidenceIndex] == "" {
+			return CriterionResult{}, fmt.Errorf("agent_judge: criterion %q evidence[%d] is empty", result.CriterionID, evidenceIndex)
+		}
+	}
+	if result.Failures == nil {
+		return CriterionResult{}, fmt.Errorf("agent_judge: criterion %q is missing failures", result.CriterionID)
+	}
+	for failureIndex := range result.Failures {
+		result.Failures[failureIndex] = strings.TrimSpace(result.Failures[failureIndex])
+		if result.Failures[failureIndex] == "" {
+			return CriterionResult{}, fmt.Errorf("agent_judge: criterion %q failures[%d] is empty", result.CriterionID, failureIndex)
+		}
+	}
+	if *result.Passed && len(result.Failures) != 0 {
+		return CriterionResult{}, fmt.Errorf("agent_judge: criterion %q passed but reported failures", result.CriterionID)
+	}
+	if !*result.Passed && len(result.Failures) == 0 {
+		return CriterionResult{}, fmt.Errorf("agent_judge: criterion %q failed but reported no failures", result.CriterionID)
+	}
+	return result, nil
+}
+
+func formatCriterionEvidence(result CriterionResult) string {
+	evidence := strings.Join(result.Evidence, "; ")
+	if !*result.Passed {
+		evidence += " | Failures: " + strings.Join(result.Failures, "; ")
+	}
+	return evidence
+}
+
+// decodeAgentJudgeResponse accepts one JSON object, optionally wrapped in one
+// complete JSON code fence, and rejects unknown fields or trailing values.
+func decodeAgentJudgeResponse(output string, v any) error {
+	candidate, err := agentJudgeJSONCandidate(output)
+	if err != nil {
+		return err
+	}
+
+	decoder := json.NewDecoder(strings.NewReader(candidate))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(v); err != nil {
+		return fmt.Errorf("invalid JSON response: %w", err)
+	}
+
+	var trailing any
+	err = decoder.Decode(&trailing)
+	if !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("agent_judge response contains multiple JSON values")
+		}
+		return fmt.Errorf("agent_judge response has trailing content: %w", err)
 	}
 	return nil
 }
 
-// extractJSON finds and parses a JSON object from agent output text.
-// The agent may wrap the JSON in markdown code blocks or other text.
-func extractJSON(output string, v any) error {
-	candidates := []string{output}
-	if fenced := extractFencedJSON(output); fenced != "" {
-		candidates = append(candidates, fenced)
+func agentJudgeJSONCandidate(output string) (string, error) {
+	trimmed := strings.TrimSpace(output)
+	if !strings.HasPrefix(trimmed, "```") {
+		return trimmed, nil
 	}
 
-	for _, candidate := range candidates {
-		if err := json.Unmarshal([]byte(candidate), v); err == nil {
-			return nil
-		}
+	lineEnd := strings.IndexByte(trimmed, '\n')
+	if lineEnd < 0 || !strings.EqualFold(strings.TrimSpace(trimmed[3:lineEnd]), "json") {
+		return "", errors.New("agent_judge response must be JSON or a single JSON code fence")
 	}
-
-	for _, candidate := range findJSONObjectCandidates(output) {
-		if err := json.Unmarshal([]byte(candidate), v); err == nil {
-			return nil
-		}
+	remainder := strings.TrimSpace(trimmed[lineEnd+1:])
+	if !strings.HasSuffix(remainder, "```") {
+		return "", errors.New("agent_judge JSON code fence is not closed")
 	}
-
-	// Last resort: LLMs sometimes emit unescaped double-quotes inside JSON
-	// string values (e.g. in evidence text). Try to repair and re-parse.
-	repaired := repairJSONQuotes(output)
-	if repaired != output {
-		for _, candidate := range findJSONObjectCandidates(repaired) {
-			if err := json.Unmarshal([]byte(candidate), v); err == nil {
-				return nil
-			}
-		}
+	candidate := strings.TrimSpace(strings.TrimSuffix(remainder, "```"))
+	if strings.Contains(candidate, "```") {
+		return "", errors.New("agent_judge response contains multiple or nested code fences")
 	}
-
-	return fmt.Errorf("no valid JSON found in agent output (length=%d)", len(output))
+	return candidate, nil
 }
 
-// repairJSONQuotes attempts to fix unescaped double-quotes inside JSON string
-// values. LLMs frequently produce evidence text like:
-//
-//	"evidence": "output contains \"hello\" which is wrong"
-//
-// but forget to escape the inner quotes, yielding invalid JSON. The heuristic:
-// while scanning inside a JSON string, a '"' that is NOT followed (after
-// optional whitespace) by a JSON structural character ( : , } ] ) is treated
-// as an inner quote and escaped with a backslash.
-func repairJSONQuotes(raw string) string {
-	var buf strings.Builder
-	buf.Grow(len(raw) + 64)
-
-	inString := false
-	for i := 0; i < len(raw); i++ {
-		ch := raw[i]
-
-		if !inString {
-			buf.WriteByte(ch)
-			if ch == '"' {
-				inString = true
-			}
-			continue
-		}
-
-		// Inside a JSON string value.
-		if ch == '\\' {
-			// Already-escaped sequence — pass through.
-			buf.WriteByte(ch)
-			i++
-			if i < len(raw) {
-				buf.WriteByte(raw[i])
-			}
-			continue
-		}
-
-		if ch == '"' {
-			// Decide whether this quote closes the string or is an
-			// unescaped inner quote.
-			rest := strings.TrimLeft(raw[i+1:], " \t\r\n")
-			if len(rest) == 0 || rest[0] == ':' || rest[0] == ',' || rest[0] == '}' || rest[0] == ']' {
-				// Looks like a structural boundary — close the string.
-				buf.WriteByte(ch)
-				inString = false
-			} else {
-				// Inner quote — escape it.
-				buf.WriteString(`\"`)
-			}
-			continue
-		}
-
-		buf.WriteByte(ch)
-	}
-
-	return buf.String()
-}
-
-func extractFencedJSON(output string) string {
-	idx := strings.Index(output, "```json")
-	if idx < 0 {
-		return ""
-	}
-
-	start := idx + len("```json")
-	end := strings.Index(output[start:], "```")
-	if end < 0 {
-		return ""
-	}
-
-	return strings.TrimSpace(output[start : start+end])
-}
-
-func findJSONObjectCandidates(output string) []string {
-	candidates := make([]string, 0)
-	start := strings.Index(output, "{")
-	for start >= 0 {
-		end, ok := findJSONObjectEnd(output, start)
-		if !ok {
-			break
-		}
-		candidates = append(candidates, output[start:end+1])
-
-		next := strings.Index(output[end+1:], "{")
-		if next < 0 {
-			break
-		}
-		start = end + 1 + next
-	}
-
-	return candidates
-}
-
-// findJSONObjectEnd finds the closing brace of a top-level JSON object embedded
-// in free-form model output.
-//
-// This is intentionally a small state machine instead of a regexp:
-// nested braces and escaped quotes make regexp matching brittle, and the
-// standard JSON decoder cannot help until we first isolate a candidate object.
-//
-// Single-quoted content is treated as "string-like" only for scanning. That
-// lets us skip over Python-style pseudo-JSON fragments while continuing to look
-// for a later valid JSON object. Single-quoted content is not accepted as valid
-// JSON by extractJSON; the final decode still uses encoding/json.
-func findJSONObjectEnd(output string, start int) (int, bool) {
-	depth := 0
-	inDoubleQuotedString := false
-	inSingleQuotedString := false
-
-	for i := start; i < len(output); i++ {
-		ch := output[i]
-		if inDoubleQuotedString || inSingleQuotedString {
-			if ch == '\\' {
-				i++
-				continue
-			}
-			if inDoubleQuotedString && ch == '"' {
-				inDoubleQuotedString = false
-			}
-			if inSingleQuotedString && ch == '\'' {
-				inSingleQuotedString = false
-			}
-			continue
-		}
-
-		switch ch {
-		case '"':
-			inDoubleQuotedString = true
-		case '\'':
-			inSingleQuotedString = true
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				return i, true
-			}
-		}
-	}
-
-	return 0, false
+func criterionID(index int) string {
+	return fmt.Sprintf("criterion-%d", index+1)
 }
 
 // annotateTimeoutError tags a context.DeadlineExceeded chain with the
@@ -449,17 +400,19 @@ func buildJudgePrompt(_ context.Context, criteria []string, materialized *Materi
 	sb.WriteString("You are an expert evaluator for an AI agent skill evaluation.\n")
 	sb.WriteString("You must assess the agent's output against the following criteria.\n")
 	sb.WriteString("For EACH criterion, you MUST provide:\n")
+	sb.WriteString("- \"criterion_id\": the exact stable ID shown below\n")
 	sb.WriteString("- \"passed\": true/false\n")
-	sb.WriteString("- \"evidence\": concrete evidence from the output supporting your judgment\n\n")
+	sb.WriteString("- \"evidence\": a non-empty JSON array of concrete observations supporting your judgment\n")
+	sb.WriteString("- \"failures\": an empty JSON array when passed is true, otherwise a non-empty array of unmet requirements\n\n")
 	sb.WriteString("You MUST NOT pass a criterion without specific evidence.\n\n")
-	sb.WriteString("IMPORTANT: Your response MUST be valid JSON. If any string value contains double quotes, ")
-	sb.WriteString("you MUST escape them with a backslash (e.g. \\\"example\\\"). Do NOT use unescaped double quotes inside string values.\n\n")
+	sb.WriteString("IMPORTANT: Return only the required JSON object, optionally wrapped in one JSON code fence. Do not add prose or extra fields. ")
+	sb.WriteString("Escape double quotes inside string values (e.g. \\\"example\\\").\n\n")
 
 	appendJudgeSkillInstructions(&sb, skills)
 
 	sb.WriteString("## Criteria\n")
 	for i, c := range criteria {
-		fmt.Fprintf(&sb, "%d. %s\n", i+1, c)
+		fmt.Fprintf(&sb, "[%s] %s\n", criterionID(i), c)
 	}
 
 	appendReviewMaterials(&sb, materialized)
@@ -518,11 +471,12 @@ func appendReviewMaterials(sb *strings.Builder, materialized *MaterializedContex
 
 func appendRequiredResponseFormat(sb *strings.Builder, criteria []string) {
 	sb.WriteString("\n## Required Response Format (JSON)\n")
+	sb.WriteString("Use each criterion_id exactly once. Set passed and the arrays according to your judgment.\n")
 	sb.WriteString("```json\n")
 	sb.WriteString("{\n")
 	sb.WriteString("  \"results\": [\n")
-	for i, c := range criteria {
-		fmt.Fprintf(sb, "    {\"criterion\": %q, \"passed\": true|false, \"evidence\": \"...\"}", c)
+	for i := range criteria {
+		fmt.Fprintf(sb, "    {\"criterion_id\": %q, \"passed\": true, \"evidence\": [\"concrete observation\"], \"failures\": []}", criterionID(i))
 		if i < len(criteria)-1 {
 			sb.WriteString(",")
 		}
