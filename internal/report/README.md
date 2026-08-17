@@ -184,8 +184,9 @@ end note
   `Input.TotalTokens` retains its existing JSON name for compatibility and is
   the sum of those tested-agent tokens across all configurations.
 - `JudgeDurationMs`, `JudgeInputTokens`, and `JudgeOutputTokens` are populated
-  when the judge runs a separate agent session. `Input.JudgeTokens` aggregates
-  those tokens, and `Input.OverallTokens` is tested-agent plus judge tokens.
+  when the judge runs a separate agent session, including sessions preserved
+  after the judge returns an error. `Input.JudgeTokens` aggregates those
+  tokens, and `Input.OverallTokens` is tested-agent plus judge tokens.
 
 ### JUnitReporter (`junit.go`)
 

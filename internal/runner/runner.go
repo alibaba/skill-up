@@ -541,10 +541,14 @@ func evalResultToCaseResult(res *evaluator.EvalResult) report.CaseResult {
 		Response:      responseContent(res),
 		TurnResults:   evalTurnResultsToReport(res.TurnResults),
 	}
-	if res.Grading != nil && res.Grading.JudgeSession != nil {
-		cr.JudgeDurationMs = res.Grading.JudgeSession.DurationMs
-		cr.JudgeInputTokens = res.Grading.JudgeSession.InputTokens
-		cr.JudgeOutputTokens = res.Grading.JudgeSession.OutputTokens
+	judgeSession := res.JudgeSession
+	if judgeSession == nil && res.Grading != nil {
+		judgeSession = res.Grading.JudgeSession
+	}
+	if judgeSession != nil {
+		cr.JudgeDurationMs = judgeSession.DurationMs
+		cr.JudgeInputTokens = judgeSession.InputTokens
+		cr.JudgeOutputTokens = judgeSession.OutputTokens
 	}
 	if res.Error != nil {
 		cr.Error = res.Error.Error()

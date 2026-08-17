@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -470,6 +471,45 @@ func TestBuildReportInput_TokenAccumulation(t *testing.T) {
 	}
 	if got := input.CaseResults[0]; got.JudgeDurationMs != 2000 || got.JudgeInputTokens != 30 || got.JudgeOutputTokens != 10 {
 		t.Errorf("with-skill judge metrics = %#v", got)
+	}
+}
+
+func TestBuildReportInput_IncludesFailedJudgeSessionMetrics(t *testing.T) {
+	evalCfg := &config.EvalConfig{Engine: config.EngineConfig{Name: "test"}}
+	grouped := map[string]*caseResults{
+		"judge-error": {
+			withSkill: &evaluator.EvalResult{
+				CaseID:        "judge-error",
+				Status:        judge.StatusError,
+				Configuration: "with_skill",
+				SessionResult: &agent.SessionResult{
+					InputTokens: 100, OutputTokens: 25,
+				},
+				JudgeSession: &agent.SessionResult{
+					DurationMs: 2300, InputTokens: 120, OutputTokens: 30,
+				},
+				Error: errors.New("judge evaluation failed"),
+			},
+		},
+	}
+
+	input := buildReportInput("s", grouped, []string{"judge-error"}, time.Time{}, time.Time{}, evalCfg)
+
+	if len(input.CaseResults) != 1 {
+		t.Fatalf("CaseResults count = %d, want 1", len(input.CaseResults))
+	}
+	got := input.CaseResults[0]
+	if got.Status != judge.StatusError {
+		t.Errorf("Status = %s, want ERROR", got.Status)
+	}
+	if got.JudgeDurationMs != 2300 || got.JudgeInputTokens != 120 || got.JudgeOutputTokens != 30 {
+		t.Errorf("failed judge metrics = %#v", got)
+	}
+	if input.JudgeTokens != 150 {
+		t.Errorf("JudgeTokens = %d, want 150", input.JudgeTokens)
+	}
+	if input.OverallTokens != 275 {
+		t.Errorf("OverallTokens = %d, want 275", input.OverallTokens)
 	}
 }
 
