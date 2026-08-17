@@ -341,9 +341,6 @@ func agentJudgeJSONCandidate(output string) (string, error) {
 		return "", errors.New("agent_judge JSON code fence is not closed")
 	}
 	candidate := strings.TrimSpace(strings.TrimSuffix(remainder, "```"))
-	if strings.Contains(candidate, "```") {
-		return "", errors.New("agent_judge response contains multiple or nested code fences")
-	}
 	return candidate, nil
 }
 

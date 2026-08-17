@@ -680,6 +680,7 @@ func assertEvaluatesWithDeadline(t *testing.T, j *AgentJudge, ag *mockJudgeTestA
 
 func TestDecodeAgentJudgeResponse(t *testing.T) {
 	valid := `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["ok"],"failures":[]}]}`
+	validWithFenceMarker := strings.Replace(valid, "\"ok\"", "\"observed ``` code ```\"", 1)
 	tests := []struct {
 		name    string
 		input   string
@@ -688,6 +689,7 @@ func TestDecodeAgentJudgeResponse(t *testing.T) {
 		{name: "plain JSON", input: valid},
 		{name: "single JSON fence", input: "  \n```json\n" + valid + "\n```\n"},
 		{name: "case insensitive fence tag", input: "```JSON\n" + valid + "\n```"},
+		{name: "fenced JSON with code fence marker in string", input: "```json\n" + validWithFenceMarker + "\n```"},
 		{name: "unknown root field", input: `{"results":[],"score":1}`, wantErr: true},
 		{name: "unknown result field", input: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["ok"],"failures":[],"score":1}]}`, wantErr: true},
 		{name: "wrong passed type", input: `{"results":[{"criterion_id":"criterion-1","passed":"true","evidence":["ok"],"failures":[]}]}`, wantErr: true},
