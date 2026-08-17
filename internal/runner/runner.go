@@ -55,8 +55,7 @@ type Runner struct {
 	runnerParams credential.AgentInitParams
 
 	workspace *report.IterationWorkspace
-	startTime time.Time
-	endTime   time.Time
+	now       func() time.Time
 }
 
 // NewRunner creates a new Runner with the given eval config and loader.
@@ -66,6 +65,7 @@ func NewRunner(evalCfg *config.EvalConfig, loader *config.Loader, resolver *cred
 		loader:       loader,
 		resolver:     resolver,
 		runnerParams: runnerParams,
+		now:          time.Now,
 	}
 }
 
@@ -138,8 +138,8 @@ func (r *Runner) Evaluate(ctx context.Context, cases []*config.CaseConfig, ag ag
 		attribute.Int("skill_up.iteration.count", runCount),
 	)
 	allResults := make([]evaluator.EvalResult, 0, len(cases)*runCount)
-	r.startTime = time.Now()
 	for i := range runCount {
+		iterationStartTime := r.now()
 		runNumber := startIteration + i
 		if err := r.setupWorkspace(ctx, workspaceDir, skillName, runNumber); err != nil {
 			return allResults, fmt.Errorf("failed to init workspace for run %d: %w", runNumber, err)
@@ -172,9 +172,9 @@ func (r *Runner) Evaluate(ctx context.Context, cases []*config.CaseConfig, ag ag
 			return allResults, err
 		}
 		allResults = append(allResults, results...)
-		r.endTime = time.Now()
+		iterationEndTime := r.now()
 
-		if err := r.WriteResults(ctx, results, reportName, skillDir, runNumber, opts.Formats); err != nil {
+		if err := r.WriteResults(ctx, results, reportName, skillDir, runNumber, opts.Formats, iterationStartTime, iterationEndTime); err != nil {
 			logging.WarnContextf(ctx, "Runner: failed to write results for run %d: %v", runNumber, err)
 		}
 	}
@@ -274,7 +274,7 @@ type caseResults struct {
 // WriteResults writes one run's evaluation results to the current iteration workspace.
 // formats specifies which report formats to generate in addition to result.json (always written).
 // Supported values: "json" (no-op, result.json suffices), "junit", "html".
-func (r *Runner) WriteResults(ctx context.Context, results []evaluator.EvalResult, skillName, skillPath string, runNumber int, formats []string) error {
+func (r *Runner) WriteResults(ctx context.Context, results []evaluator.EvalResult, skillName, skillPath string, runNumber int, formats []string, startTime, endTime time.Time) error {
 	if r.workspace == nil {
 		return errors.New("workspace not initialized; call InitWorkspace first")
 	}
@@ -301,7 +301,7 @@ func (r *Runner) WriteResults(ctx context.Context, results []evaluator.EvalResul
 		return fmt.Errorf("failed to write benchmark.md: %w", err)
 	}
 
-	input := buildReportInput(skillName, grouped, caseIDs, r.startTime, r.endTime, r.evalCfg)
+	input := buildReportInput(skillName, grouped, caseIDs, startTime, endTime, r.evalCfg)
 
 	// result.json is always written as the raw evaluation data source.
 	resultJSON, err := json.MarshalIndent(input, "", "  ")
