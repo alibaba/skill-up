@@ -26,7 +26,10 @@ judge:
   model: anthropic/claude-sonnet-4-6
   criteria:
     - "生成了 evals/eval.yaml 文件，且包含 schema_version、environment、engine、cases 等必要字段"
+    - "evals/eval.yaml 中 schema_version、environment.type、engine.name、cases.files、judge 等关键字段附近有简短中文字段注释"
     - "在 evals/cases/ 下生成了至少一个 case yaml 文件，且包含 id、title、input.prompt、judge 字段"
+    - "case yaml 中 id、input.prompt、expect、judge.type 等关键字段附近有简短中文字段注释"
+    - "YAML 字段名和枚举值保持英文，例如 schema_version、environment.type、rule_based、agent_judge、script"
     - "case 的 prompt 与 code-review-helper Skill 的功能相关（代码审查），而非无意义的占位符"
     - "eval.yaml 中 cases.files 列表正确引用了生成的 case 文件路径"
-  pass_threshold: 0.75
+  pass_threshold: 1.0
