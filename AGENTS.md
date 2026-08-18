@@ -59,7 +59,12 @@ go build -o bin/skill-up ./cmd/skill-up
 ```bash
 # Unit tests (race detector enabled — always use this)
 make test
+
 # equivalent: go test -race ./...
+go test -race ./...
+
+# GitHub Action adapter tests (requires Python 3)
+make test-action
 
 # Run a single test
 go test -race -run TestFoo ./internal/config/

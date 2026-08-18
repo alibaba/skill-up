@@ -1,4 +1,4 @@
-.PHONY: build test vet fmt fmt-check lint lint-new revive verify tidy clean install hooks e2e lint-tools coverage coverage-badge
+.PHONY: build test test-action vet fmt fmt-check lint lint-new revive verify tidy clean install hooks e2e lint-tools coverage coverage-badge
 
 CMD := ./cmd/skill-up
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -27,6 +27,9 @@ build: hooks
 
 test:
 	go test -race ./...
+
+test-action:
+	python3 -m unittest discover -s action -p '*_test.py'
 
 vet:
 	go vet ./...

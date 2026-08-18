@@ -89,6 +89,14 @@ jobs:
       - name: Test
         run: go test -race -timeout 120s -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
 
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Test GitHub Action adapter
+        run: make test-action
+
       - name: Report coverage
         run: |
           set -euo pipefail

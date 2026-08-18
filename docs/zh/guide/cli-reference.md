@@ -29,7 +29,7 @@ skill-up run [path] [flags]
 | `--output-dir`        | 与 skill 目录同级的 `<skill-name>-workspace/` | 报告和产物的输出目录                                                                                                                       |
 | `--iteration`         | `0`（auto）                  | 重复运行已选用例，用于稳定性/flaky 采样。`0` 表示在最新 `iteration-N/` 后自动追加一轮，但不汇总历史结果；正整数 `N` 表示运行 N 次采样，产物写入 `iteration-1/` 到 `iteration-N/`；当 `N > 1` 时，终端摘要只覆盖本次命令执行的采样 |
 | `--engine`            | 配置文件中的值                | 覆盖 Engine 名称                                                                                                                                          |
-| `--model`             | 配置文件中的值                | 覆盖模型（格式：`provider/name`）                                                                                                                          |
+| `--model`             | 配置文件中的值                | 覆盖模型。兼容历史 `provider/name` 写法：前缀是已配置 provider 时拆分，否则将完整值作为不透明模型 ID 透传。                                                |
 | `--parallelism`       | 配置文件中的值                | 覆盖 `cases.parallelism`，用于临时调整用例并行数，取值范围为 1 到 256                                                                                       |
 | `--baseline`          | 配置文件中的值                | 为本次运行覆盖 `benchmark.enabled` 为 `true`                                                                                                                |
 | `--api-key`           | —                            | 传入 API Key（优先级高于环境变量）                                                                                                                          |
@@ -49,6 +49,9 @@ skill-up run ./evals/eval.yaml --exclude-case-name "*-old" --exclude-case-name "
 
 # 指定 Engine 和模型
 skill-up run ./evals/eval.yaml --engine codex --model openai/gpt-4
+
+# 当前缀不是已配置 provider 时，保留包含斜杠的上游模型 ID
+skill-up run ./evals/eval.yaml --engine claude_code --model anthropic_modelscope/deepseek-v4-pro
 
 # 临时覆盖用例并行数
 skill-up run ./evals/eval.yaml --parallelism 4
