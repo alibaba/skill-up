@@ -3,7 +3,6 @@ package judge
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -23,9 +22,9 @@ var logCaptureMu sync.Mutex
 
 func TestAgentJudge_AllPass(t *testing.T) {
 	output := buildMockAgentOutput([]CriterionResult{
-		{Criterion: "output identifies the bug", Passed: true, Evidence: "output contains 'null pointer'"},
-		{Criterion: "no false positives", Passed: true, Evidence: "no false positives found"},
-		{Criterion: "actionable suggestion", Passed: true, Evidence: "suggests specific fix at line 42"},
+		testCriterionResult(0, true, "output contains 'null pointer'"),
+		testCriterionResult(1, true, "no false positives found"),
+		testCriterionResult(2, true, "suggests specific fix at line 42"),
 	})
 	ag := &mockJudgeTestAgent{output: output}
 	rt := &mockJudgeTestRuntime{}
@@ -60,9 +59,9 @@ func TestAgentJudge_AllPass(t *testing.T) {
 
 func TestAgentJudge_PartialPass_AboveThreshold(t *testing.T) {
 	output := buildMockAgentOutput([]CriterionResult{
-		{Criterion: "c1", Passed: true, Evidence: "yes"},
-		{Criterion: "c2", Passed: true, Evidence: "yes"},
-		{Criterion: "c3", Passed: false, Evidence: "not found"},
+		testCriterionResult(0, true, "yes"),
+		testCriterionResult(1, true, "yes"),
+		testCriterionResult(2, false, "not found"),
 	})
 	ag := &mockJudgeTestAgent{output: output}
 	rt := &mockJudgeTestRuntime{}
@@ -87,8 +86,8 @@ func TestAgentJudge_PartialPass_AboveThreshold(t *testing.T) {
 
 func TestAgentJudge_AllFail(t *testing.T) {
 	output := buildMockAgentOutput([]CriterionResult{
-		{Criterion: "c1", Passed: false, Evidence: "not found"},
-		{Criterion: "c2", Passed: false, Evidence: "missing"},
+		testCriterionResult(0, false, "not found"),
+		testCriterionResult(1, false, "missing"),
 	})
 	ag := &mockJudgeTestAgent{output: output}
 	rt := &mockJudgeTestRuntime{}
@@ -108,8 +107,8 @@ func TestAgentJudge_AllFail(t *testing.T) {
 
 func TestAgentJudge_ThresholdExactlyMet(t *testing.T) {
 	output := buildMockAgentOutput([]CriterionResult{
-		{Criterion: "c1", Passed: true, Evidence: "yes"},
-		{Criterion: "c2", Passed: false, Evidence: "no"},
+		testCriterionResult(0, true, "yes"),
+		testCriterionResult(1, false, "no"),
 	})
 	ag := &mockJudgeTestAgent{output: output}
 	rt := &mockJudgeTestRuntime{}
@@ -165,7 +164,7 @@ func TestAgentJudge_AgentError_PreservesSession(t *testing.T) {
 
 func TestAgentJudge_RecoversTimedOutSessionWithValidJSON(t *testing.T) {
 	output := buildMockAgentOutput([]CriterionResult{
-		{Criterion: "c1", Passed: true, Evidence: "yes"},
+		testCriterionResult(0, true, "yes"),
 	})
 	session := &agent.SessionResult{FinalMessage: output, ExitCode: -1}
 	ag := &mockJudgeTestAgent{
@@ -185,7 +184,7 @@ func TestAgentJudge_RecoversTimedOutSessionWithValidJSON(t *testing.T) {
 
 func TestAgentJudge_RecoveryLogsWarning(t *testing.T) {
 	output := buildMockAgentOutput([]CriterionResult{
-		{Criterion: "c1", Passed: true, Evidence: "yes"},
+		testCriterionResult(0, true, "yes"),
 	})
 	session := &agent.SessionResult{FinalMessage: output, ExitCode: -1}
 	ag := &mockJudgeTestAgent{
@@ -206,7 +205,7 @@ func TestAgentJudge_RecoveryLogsWarning(t *testing.T) {
 
 func TestAgentJudge_CanceledSessionDoesNotRecover(t *testing.T) {
 	output := buildMockAgentOutput([]CriterionResult{
-		{Criterion: "c1", Passed: true, Evidence: "yes"},
+		testCriterionResult(0, true, "yes"),
 	})
 	session := &agent.SessionResult{FinalMessage: output, ExitCode: -1}
 	ag := &mockJudgeTestAgent{
@@ -231,7 +230,7 @@ func TestAgentJudge_CanceledSessionDoesNotRecover(t *testing.T) {
 
 func TestAgentJudge_RecoversNonZeroExitWithValidJSON(t *testing.T) {
 	output := buildMockAgentOutput([]CriterionResult{
-		{Criterion: "c1", Passed: false, Evidence: "not found"},
+		testCriterionResult(0, false, "not found"),
 	})
 	session := &agent.SessionResult{FinalMessage: output, ExitCode: 1}
 	ag := &mockJudgeTestAgent{
@@ -269,7 +268,7 @@ func TestAgentJudge_EmptyCriteria(t *testing.T) {
 
 func TestAgentJudge_EvidencePreserved(t *testing.T) {
 	output := buildMockAgentOutput([]CriterionResult{
-		{Criterion: "identified the bug", Passed: true, Evidence: "final_message contains 'null pointer at line 42'"},
+		testCriterionResult(0, true, "final_message contains 'null pointer at line 42'"),
 	})
 	ag := &mockJudgeTestAgent{output: output}
 	rt := &mockJudgeTestRuntime{}
@@ -295,10 +294,10 @@ func TestAgentJudge_EvidencePreserved(t *testing.T) {
 
 func TestAgentJudge_CustomThreshold(t *testing.T) {
 	output := buildMockAgentOutput([]CriterionResult{
-		{Criterion: "c1", Passed: true, Evidence: "yes"},
-		{Criterion: "c2", Passed: true, Evidence: "yes"},
-		{Criterion: "c3", Passed: true, Evidence: "yes"},
-		{Criterion: "c4", Passed: false, Evidence: "no"},
+		testCriterionResult(0, true, "yes"),
+		testCriterionResult(1, true, "yes"),
+		testCriterionResult(2, true, "yes"),
+		testCriterionResult(3, false, "no"),
 	})
 	ag := &mockJudgeTestAgent{output: output}
 	rt := &mockJudgeTestRuntime{}
@@ -365,8 +364,12 @@ func TestBuildJudgePrompt_ContainsAllParts(t *testing.T) {
 		"Agent found a bug at line 42",
 		"/tmp/workspace.diff",
 		"/tmp/transcript.json",
+		"[criterion-1] criterion A",
+		"[criterion-2] criterion B",
+		"\"criterion_id\"",
 		"\"passed\"",
 		"\"evidence\"",
+		"\"failures\"",
 	}
 	for _, c := range checks {
 		if !strings.Contains(prompt, c) {
@@ -441,7 +444,7 @@ func TestSkillIdentifier_PrefersCallableName(t *testing.T) {
 
 func TestAgentJudge_EvaluatePassesJudgeSkillsInPrompt(t *testing.T) {
 	output := buildMockAgentOutput([]CriterionResult{
-		{Criterion: "criterion A", Passed: true, Evidence: "used rubric"},
+		testCriterionResult(0, true, "used rubric"),
 	})
 	ag := &mockJudgeTestAgent{output: output}
 	rt := &mockJudgeTestRuntime{}
@@ -524,7 +527,7 @@ func TestAgentJudge_PartialResults_ReturnsError(t *testing.T) {
 	// 3 criteria configured, agent only returns 1 with passed=true.
 	// Without the count check this would give pass_rate=1.0 → PASS (wrong).
 	output := buildMockAgentOutput([]CriterionResult{
-		{Criterion: "c1", Passed: true, Evidence: "found it"},
+		testCriterionResult(0, true, "found it"),
 	})
 	ag := &mockJudgeTestAgent{output: output}
 	rt := &mockJudgeTestRuntime{}
@@ -564,8 +567,8 @@ func TestAgentJudge_EmptyResults_ReturnsError(t *testing.T) {
 
 func TestAgentJudge_EmptyEvidence_ReturnsError(t *testing.T) {
 	output := buildMockAgentOutput([]CriterionResult{
-		{Criterion: "c1", Passed: true, Evidence: "ok"},
-		{Criterion: "c2", Passed: true, Evidence: ""},
+		testCriterionResult(0, true, "ok"),
+		testCriterionResult(1, true, ""),
 	})
 	ag := &mockJudgeTestAgent{output: output}
 	rt := &mockJudgeTestRuntime{}
@@ -575,7 +578,7 @@ func TestAgentJudge_EmptyEvidence_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty evidence")
 	}
-	if !strings.Contains(err.Error(), "empty evidence") {
+	if !strings.Contains(err.Error(), "evidence[0] is empty") {
 		t.Fatalf("unexpected error message: %v", err)
 	}
 }
@@ -586,7 +589,7 @@ func TestAgentJudge_EmptyEvidence_ReturnsError(t *testing.T) {
 
 func TestAgentJudge_TimeoutSeconds_AppliesDeadline(t *testing.T) {
 	ag := &mockJudgeTestAgent{
-		output:   buildMockAgentOutput([]CriterionResult{{Criterion: "c1", Passed: true, Evidence: "ok"}}),
+		output:   buildMockAgentOutput([]CriterionResult{testCriterionResult(0, true, "ok")}),
 		runDelay: 500 * time.Millisecond,
 	}
 	rt := &mockJudgeTestRuntime{}
@@ -602,7 +605,7 @@ func TestAgentJudge_TimeoutSeconds_AppliesDeadline(t *testing.T) {
 }
 
 func TestAgentJudge_TimeoutSeconds_ZeroDoesNotShortenParentCtx(t *testing.T) {
-	ag := &mockJudgeTestAgent{output: buildMockAgentOutput([]CriterionResult{{Criterion: "c1", Passed: true, Evidence: "ok"}})}
+	ag := &mockJudgeTestAgent{output: buildMockAgentOutput([]CriterionResult{testCriterionResult(0, true, "ok")})}
 	rt := &mockJudgeTestRuntime{}
 
 	j := NewAgentJudge(ag, rt, "test-model", []string{"c1"}, nil, 0)
@@ -616,7 +619,7 @@ func TestAgentJudge_TimeoutSeconds_ZeroDoesNotShortenParentCtx(t *testing.T) {
 
 func TestAgentJudge_TimeoutSeconds_DeadlineKillsSlowAgent(t *testing.T) {
 	ag := &mockJudgeTestAgent{
-		output:   buildMockAgentOutput([]CriterionResult{{Criterion: "c1", Passed: true, Evidence: "ok"}}),
+		output:   buildMockAgentOutput([]CriterionResult{testCriterionResult(0, true, "ok")}),
 		runDelay: 2 * time.Second,
 	}
 	rt := &mockJudgeTestRuntime{}
@@ -641,7 +644,7 @@ func TestAgentJudge_TimeoutSeconds_DeadlineKillsSlowAgent(t *testing.T) {
 
 func TestAgentJudge_TimeoutSeconds_ParentTimeoutNotAnnotatedAsJudgeTimeout(t *testing.T) {
 	ag := &mockJudgeTestAgent{
-		output:   buildMockAgentOutput([]CriterionResult{{Criterion: "c1", Passed: true, Evidence: "ok"}}),
+		output:   buildMockAgentOutput([]CriterionResult{testCriterionResult(0, true, "ok")}),
 		runDelay: 2 * time.Second,
 	}
 	rt := &mockJudgeTestRuntime{}
@@ -672,216 +675,233 @@ func assertEvaluatesWithDeadline(t *testing.T, j *AgentJudge, ag *mockJudgeTestA
 }
 
 // ---------------------------------------------------------------------------
-// extractJSON tests
+// Strict agent_judge response contract
 // ---------------------------------------------------------------------------
 
-func TestExtractJSON_DirectParse(t *testing.T) {
-	input := `{"results": [{"criterion": "c1", "passed": true, "evidence": "ok"}]}`
-	var resp judgeResponse
-	err := extractJSON(input, &resp)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestDecodeAgentJudgeResponse(t *testing.T) {
+	valid := `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["ok"],"failures":[]}]}`
+	validWithFenceMarker := strings.Replace(valid, "\"ok\"", "\"observed ``` code ```\"", 1)
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{name: "plain JSON", input: valid},
+		{name: "single JSON fence", input: "  \n```json\n" + valid + "\n```\n"},
+		{name: "case insensitive fence tag", input: "```JSON\n" + valid + "\n```"},
+		{name: "fenced JSON with code fence marker in string", input: "```json\n" + validWithFenceMarker + "\n```"},
+		{name: "unknown root field", input: `{"results":[],"score":1}`, wantErr: true},
+		{name: "unknown result field", input: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["ok"],"failures":[],"score":1}]}`, wantErr: true},
+		{name: "duplicate root field", input: `{"results":[],"results":[]}`, wantErr: true},
+		{name: "duplicate criterion ID", input: `{"results":[{"criterion_id":"criterion-1","criterion_id":"criterion-1","passed":true,"evidence":["ok"],"failures":[]}]}`, wantErr: true},
+		{name: "duplicate passed field", input: `{"results":[{"criterion_id":"criterion-1","passed":false,"passed":true,"evidence":["ok"],"failures":[]}]}`, wantErr: true},
+		{name: "case variant root field", input: `{"RESULTS":[]}`, wantErr: true},
+		{name: "case variant result field", input: `{"results":[{"CRITERION_ID":"criterion-1","passed":true,"evidence":["ok"],"failures":[]}]}`, wantErr: true},
+		{name: "conflicting case variant passed fields", input: `{"results":[{"criterion_id":"criterion-1","passed":false,"Passed":true,"evidence":["ok"],"failures":[]}]}`, wantErr: true},
+		{name: "wrong passed type", input: `{"results":[{"criterion_id":"criterion-1","passed":"true","evidence":["ok"],"failures":[]}]}`, wantErr: true},
+		{name: "wrong evidence type", input: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":"ok","failures":[]}]}`, wantErr: true},
+		{name: "wrong failures type", input: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["ok"],"failures":"none"}]}`, wantErr: true},
+		{name: "leading prose", input: "result: " + valid, wantErr: true},
+		{name: "fence with surrounding prose", input: "result:\n```json\n" + valid + "\n```", wantErr: true},
+		{name: "trailing prose", input: valid + " done", wantErr: true},
+		{name: "second JSON value", input: valid + ` {"extra":true}`, wantErr: true},
+		{name: "unclosed fence", input: "```json\n" + valid, wantErr: true},
+		{name: "non JSON fence", input: "```text\n" + valid + "\n```", wantErr: true},
+		{name: "nested fence", input: "```json\n" + valid + "\n```\n```json\n{}\n```", wantErr: true},
+		{name: "malformed quotes", input: `{"results":[{"criterion_id":"criterion-1","passed":false,"evidence":["output is "wrong""],"failures":["mismatch"]}]}`, wantErr: true},
+		{name: "no JSON", input: "no JSON here", wantErr: true},
 	}
-	if len(resp.Results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(resp.Results))
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var response judgeResponse
+			err := decodeAgentJudgeResponse(tt.input, &response)
+			if tt.wantErr && err == nil {
+				t.Fatal("expected error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
 	}
 }
 
-func TestExtractJSON_MarkdownCodeBlock(t *testing.T) {
-	input := "Here is the evaluation:\n```json\n{\"results\": [{\"criterion\": \"c1\", \"passed\": true, \"evidence\": \"ok\"}]}\n```\nDone."
-	var resp judgeResponse
-	err := extractJSON(input, &resp)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestAgentJudge_NullOrMissingContractFieldsReturnError(t *testing.T) {
+	tests := []struct {
+		name    string
+		output  string
+		wantErr string
+	}{
+		{name: "missing results", output: `{}`, wantErr: "results is required"},
+		{name: "null results", output: `{"results":null}`, wantErr: "results is required"},
+		{name: "null passed", output: `{"results":[{"criterion_id":"criterion-1","passed":null,"evidence":["ok"],"failures":[]}]}`, wantErr: "missing passed"},
+		{name: "null evidence", output: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":null,"failures":[]}]}`, wantErr: "missing evidence"},
+		{name: "null failures", output: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["ok"],"failures":null}]}`, wantErr: "missing failures"},
 	}
-	if len(resp.Results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(resp.Results))
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			judgeAgent := &mockJudgeTestAgent{output: tt.output}
+			j := NewAgentJudge(judgeAgent, &mockJudgeTestRuntime{}, "test-model", []string{"configured"}, nil, 0)
+			_, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 
-func TestExtractJSON_BraceFinding(t *testing.T) {
-	input := "Some text before {\"results\": [{\"criterion\": \"c1\", \"passed\": false, \"evidence\": \"no\"}]} and after"
-	var resp judgeResponse
-	err := extractJSON(input, &resp)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestValidateAgentJudgeResponse(t *testing.T) {
+	valid := func() []CriterionResult {
+		return []CriterionResult{
+			testCriterionResult(0, true, "first evidence"),
+			testCriterionResult(1, false, "second evidence"),
+		}
 	}
-	if len(resp.Results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(resp.Results))
+	tests := []struct {
+		name    string
+		results func() []CriterionResult
+		wantErr string
+	}{
+		{name: "nil results", results: func() []CriterionResult { return nil }, wantErr: "results is required"},
+		{name: "partial results", results: func() []CriterionResult { return valid()[:1] }, wantErr: "expected 2 criterion results"},
+		{name: "missing id", results: func() []CriterionResult {
+			results := valid()
+			results[0].CriterionID = ""
+			return results
+		}, wantErr: "missing criterion_id"},
+		{name: "unknown id", results: func() []CriterionResult {
+			results := valid()
+			results[0].CriterionID = "criterion-9"
+			return results
+		}, wantErr: "unknown criterion_id"},
+		{name: "duplicate id", results: func() []CriterionResult {
+			results := valid()
+			results[1].CriterionID = results[0].CriterionID
+			return results
+		}, wantErr: "duplicate criterion_id"},
+		{name: "missing passed", results: func() []CriterionResult {
+			results := valid()
+			results[0].Passed = nil
+			return results
+		}, wantErr: "missing passed"},
+		{name: "missing evidence", results: func() []CriterionResult {
+			results := valid()
+			results[0].Evidence = nil
+			return results
+		}, wantErr: "missing evidence"},
+		{name: "empty evidence", results: func() []CriterionResult {
+			results := valid()
+			results[0].Evidence = []string{}
+			return results
+		}, wantErr: "empty evidence"},
+		{name: "blank evidence item", results: func() []CriterionResult {
+			results := valid()
+			results[0].Evidence = []string{" "}
+			return results
+		}, wantErr: "evidence[0] is empty"},
+		{name: "missing failures", results: func() []CriterionResult {
+			results := valid()
+			results[0].Failures = nil
+			return results
+		}, wantErr: "missing failures"},
+		{name: "passing result with failures", results: func() []CriterionResult {
+			results := valid()
+			results[0].Failures = []string{"unexpected"}
+			return results
+		}, wantErr: "passed but reported failures"},
+		{name: "failed result without failures", results: func() []CriterionResult {
+			results := valid()
+			results[1].Failures = []string{}
+			return results
+		}, wantErr: "failed but reported no failures"},
+		{name: "blank failure item", results: func() []CriterionResult {
+			results := valid()
+			results[1].Failures = []string{" "}
+			return results
+		}, wantErr: "failures[0] is empty"},
 	}
-	if resp.Results[0].Passed {
-		t.Fatal("expected passed=false")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := validateAgentJudgeResponse([]string{"first", "second"}, tt.results())
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 
-func TestExtractJSON_BracesInsideStrings(t *testing.T) {
-	// JSON where evidence contains braces — should not break brace matching.
-	input := `Some text {"results": [{"criterion": "c1", "passed": true, "evidence": "expected { but got }"}]} after`
-	var resp judgeResponse
-	err := extractJSON(input, &resp)
-	if err != nil {
+func TestValidateAgentJudgeResponse_ExcessResults(t *testing.T) {
+	results := []CriterionResult{
+		testCriterionResult(0, true, "first"),
+		testCriterionResult(1, true, "second"),
+		testCriterionResult(2, true, "extra"),
+	}
+	_, err := validateAgentJudgeResponse([]string{"first", "second"}, results)
+	if err == nil || !strings.Contains(err.Error(), "expected 2 criterion results") {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(resp.Results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(resp.Results))
-	}
-	if resp.Results[0].Evidence != "expected { but got }" {
-		t.Fatalf("evidence mismatch: %q", resp.Results[0].Evidence)
 	}
 }
 
-func TestExtractJSON_EscapedQuotesInStrings(t *testing.T) {
-	// JSON with escaped quotes inside string values.
-	input := `{"results": [{"criterion": "c1", "passed": true, "evidence": "value with \"nested\" braces { }"}]}`
-	var resp judgeResponse
-	err := extractJSON(input, &resp)
+func TestValidateAgentJudgeResponse_ReordersAndNormalizes(t *testing.T) {
+	results := []CriterionResult{
+		testCriterionResult(1, false, "  second evidence  "),
+		testCriterionResult(0, true, "  first evidence  "),
+	}
+	results[0].Failures = []string{"  missing output  "}
+
+	ordered, err := validateAgentJudgeResponse([]string{"configured first", "configured second"}, results)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(resp.Results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(resp.Results))
+	if ordered[0].CriterionID != "criterion-1" || ordered[1].CriterionID != "criterion-2" {
+		t.Fatalf("unexpected order: %#v", ordered)
+	}
+	if ordered[0].Evidence[0] != "first evidence" || ordered[1].Failures[0] != "missing output" {
+		t.Fatalf("results were not normalized: %#v", ordered)
 	}
 }
 
-func TestExtractJSON_NestedObjectsInsideJSON(t *testing.T) {
-	input := `prefix {"results": [{"criterion": "c1", "passed": true, "evidence": "see nested object {\"path\":\"/tmp\",\"ok\":true}"}]} suffix`
-	var resp judgeResponse
-	err := extractJSON(input, &resp)
+func TestAgentJudge_ConfiguredCriteriaRemainAuthoritative(t *testing.T) {
+	results := []CriterionResult{
+		testCriterionResult(1, false, "second observation"),
+		testCriterionResult(0, true, "first observation"),
+	}
+	results[1].Evidence = []string{" first observation ", " additional detail "}
+	results[0].Failures = []string{" missing requirement ", " wrong value "}
+
+	session := &agent.SessionResult{FinalMessage: buildMockAgentOutput(results)}
+	judgeAgent := &mockJudgeTestAgent{runResult: session}
+	j := NewAgentJudge(judgeAgent, &mockJudgeTestRuntime{}, "test-model", []string{"configured first", "configured second"}, nil, 0)
+
+	result, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(resp.Results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(resp.Results))
+	if result.AssertionResults[0].Text != "configured first" || result.AssertionResults[1].Text != "configured second" {
+		t.Fatalf("configured criteria were not authoritative: %#v", result.AssertionResults)
 	}
-	if !strings.Contains(resp.Results[0].Evidence, `{"path":"/tmp","ok":true}`) {
-		t.Fatalf("unexpected evidence: %q", resp.Results[0].Evidence)
+	if result.AssertionResults[0].Evidence != "first observation; additional detail" {
+		t.Fatalf("unexpected passing evidence: %q", result.AssertionResults[0].Evidence)
+	}
+	if result.AssertionResults[1].Evidence != "second observation | Failures: missing requirement; wrong value" {
+		t.Fatalf("unexpected failing evidence: %q", result.AssertionResults[1].Evidence)
 	}
 }
 
-func TestExtractJSON_NoJSON(t *testing.T) {
-	input := "This output has no JSON at all"
-	var resp judgeResponse
-	err := extractJSON(input, &resp)
+func TestAgentJudge_InvalidContractPreservesSession(t *testing.T) {
+	session := &agent.SessionResult{
+		FinalMessage: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["ok"],"failures":[],"score":1}]}`,
+		Artifacts:    &agent.SessionArtifacts{GeneratedFiles: []string{"stdout.json"}},
+	}
+	j := NewAgentJudge(&mockJudgeTestAgent{runResult: session}, &mockJudgeTestRuntime{}, "test-model", []string{"configured"}, nil, 0)
+
+	_, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
 	if err == nil {
-		t.Fatal("expected error for no JSON")
+		t.Fatal("expected strict contract error")
 	}
-}
-
-func TestExtractJSON_SingleQuoteStrings(t *testing.T) {
-	// LLM sometimes outputs Python-style pseudo-JSON with single-quoted strings
-	// containing braces. The brace finder should skip content inside single quotes.
-	input := `Some text {'key': 'value with { and }'} then {"results": [{"criterion": "c1", "passed": true, "evidence": "ok"}]}`
-	var resp judgeResponse
-	err := extractJSON(input, &resp)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(resp.Results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(resp.Results))
-	}
-}
-
-func TestExtractJSON_SingleQuotedPseudoJSONWithEscapedQuote(t *testing.T) {
-	// Python-style pseudo-JSON is not valid JSON, but the scanner should still
-	// skip over it and find the later valid JSON payload.
-	input := "prefix {'note': 'it\\'s tricky { here }'} middle " +
-		`{"results": [{"criterion": "c1", "passed": true, "evidence": "ok"}]}`
-	var resp judgeResponse
-	err := extractJSON(input, &resp)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(resp.Results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(resp.Results))
-	}
-}
-
-func TestFindJSONObjectEnd_NestedObjectAndEscapedQuotes(t *testing.T) {
-	input := `prefix {"outer":{"inner":"value with \"quote\" and { brace }"},"ok":true} suffix`
-	start := strings.Index(input, "{")
-	if start < 0 {
-		t.Fatal("expected opening brace")
-	}
-
-	end, ok := findJSONObjectEnd(input, start)
-	if !ok {
-		t.Fatal("expected to find JSON object end")
-	}
-
-	got := input[start : end+1]
-	want := `{"outer":{"inner":"value with \"quote\" and { brace }"},"ok":true}`
-	if got != want {
-		t.Fatalf("unexpected JSON object: got %q want %q", got, want)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// repairJSONQuotes — fixes unescaped double-quotes inside string values
-// ---------------------------------------------------------------------------
-
-func TestRepairJSONQuotes_AlreadyValid(t *testing.T) {
-	input := `{"results": [{"criterion": "c1", "passed": true, "evidence": "ok"}]}`
-	got := repairJSONQuotes(input)
-	if got != input {
-		t.Fatalf("valid JSON should be unchanged, got %q", got)
-	}
-}
-
-func TestRepairJSONQuotes_UnescapedQuotesInEvidence(t *testing.T) {
-	// Simulate LLM output where evidence contains unescaped double-quotes:
-	// "evidence": "output is "hello world" which fails"
-	input := `{"results": [{"criterion": "c1", "passed": false, "evidence": "output is "hello world" which fails"}]}`
-	var resp judgeResponse
-	// Direct parse should fail on the malformed JSON.
-	if err := json.Unmarshal([]byte(input), &resp); err == nil {
-		t.Fatal("expected malformed JSON to fail direct parse")
-	}
-	// extractJSON should repair and succeed.
-	if err := extractJSON(input, &resp); err != nil {
-		t.Fatalf("extractJSON should repair malformed quotes: %v", err)
-	}
-	if len(resp.Results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(resp.Results))
-	}
-	if resp.Results[0].Passed {
-		t.Fatal("expected passed=false")
-	}
-	if !strings.Contains(resp.Results[0].Evidence, "hello world") {
-		t.Fatalf("expected evidence to contain 'hello world', got %q", resp.Results[0].Evidence)
-	}
-}
-
-func TestRepairJSONQuotes_ChineseTextWithQuotes(t *testing.T) {
-	// Real-world scenario: Chinese evidence text with unescaped quotes.
-	input := `{"results": [{"criterion": "\u5305\u542b\u5929\u6c14", "passed": false, "evidence": "\u8f93\u51fa\u5185\u5bb9"\u4eca\u5929\u5929\u6c14\u70ed\u6b7b\u4e86"\u5305\u542b\u4e86\u5929\u6c14"}]}`
-	var resp judgeResponse
-	if err := extractJSON(input, &resp); err != nil {
-		t.Fatalf("extractJSON should handle Chinese text with unescaped quotes: %v", err)
-	}
-	if len(resp.Results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(resp.Results))
-	}
-	if resp.Results[0].Passed {
-		t.Fatal("expected passed=false")
-	}
-}
-
-func TestRepairJSONQuotes_MultipleResults(t *testing.T) {
-	input := `{"results": [
-		{"criterion": "c1", "passed": true, "evidence": "found "the bug" in code"},
-		{"criterion": "c2", "passed": false, "evidence": "no "fix" suggested"}
-	]}`
-	var resp judgeResponse
-	if err := extractJSON(input, &resp); err != nil {
-		t.Fatalf("extractJSON should repair multiple results: %v", err)
-	}
-	if len(resp.Results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(resp.Results))
-	}
-	if !resp.Results[0].Passed {
-		t.Fatal("expected first result passed=true")
-	}
-	if resp.Results[1].Passed {
-		t.Fatal("expected second result passed=false")
+	if got := SessionResultFromError(err); got != session {
+		t.Fatalf("expected preserved judge session, got %#v", got)
 	}
 }

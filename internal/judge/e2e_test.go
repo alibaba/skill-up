@@ -433,8 +433,8 @@ func TestE2E_JudgePolymorphism_SameInputDifferentStrategies(t *testing.T) {
 
 	// Strategy C: agent_judge — uses a mock Agent (simulating partial pass).
 	agentOutput := buildMockAgentOutput([]CriterionResult{
-		{Criterion: "identified the bug", Passed: true, Evidence: "output explicitly mentions null pointer bug"},
-		{Criterion: "provided fix suggestion", Passed: false, Evidence: "output says 'no specific fix provided'"},
+		testCriterionResult(0, true, "output explicitly mentions null pointer bug"),
+		testCriterionResult(1, false, "output says 'no specific fix provided'"),
 	})
 	mockAg := &mockJudgeTestAgent{output: agentOutput}
 	mockRt := &mockJudgeTestRuntime{}
@@ -707,9 +707,9 @@ func TestE2E_AgentJudge_WithExpect_ThresholdDecision(t *testing.T) {
 
 	// Mock Agent: 2 of 3 criteria passed → pass_rate = 2/3 ≈ 0.667.
 	agentOutput := buildMockAgentOutput([]CriterionResult{
-		{Criterion: "identified the bug type", Passed: true, Evidence: "output mentions null pointer"},
-		{Criterion: "located the bug position", Passed: true, Evidence: "output mentions line 42"},
-		{Criterion: "provided fix suggestion", Passed: false, Evidence: "output did not provide fix code"},
+		testCriterionResult(0, true, "output mentions null pointer"),
+		testCriterionResult(1, true, "output mentions line 42"),
+		testCriterionResult(2, false, "output did not provide fix code"),
 	})
 	mockAg := &mockJudgeTestAgent{output: agentOutput}
 	mockRt := &mockJudgeTestRuntime{}

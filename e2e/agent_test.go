@@ -165,9 +165,9 @@ if [[ "$instruction" == *"Required Response Format (JSON)"* ]]; then
   fi
 
   if [[ "$passed" == true ]]; then
-    response='{"results":[{"criterion":"workspace diff reflects the file edit","passed":true,"evidence":"workspace diff captured expected change"}]}'
+    response='{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["workspace diff captured expected change"],"failures":[]}]}'
   else
-    response='{"results":[{"criterion":"workspace diff reflects the file edit","passed":false,"evidence":"workspace diff missing expected change or leaked artifacts"}]}'
+    response='{"results":[{"criterion_id":"criterion-1","passed":false,"evidence":["workspace diff missing expected change or leaked artifacts"],"failures":["workspace diff contract was not satisfied"]}]}'
   fi
   emit_message "$(json_string "$response")"
   exit 0
@@ -1482,6 +1482,104 @@ report:
 
 	if !strings.Contains(result.Stdout, "test-case") {
 		t.Errorf("expected 'test-case' in output, got: %s", result.Stdout)
+	}
+}
+
+// TestAgent_QoderCLI_AgentJudgeUltimate_FullRun verifies the strict agent_judge
+// contract against QoderCLI's ultimate model on the credential-gated model E2E runner.
+func TestAgent_QoderCLI_AgentJudgeUltimate_FullRun(t *testing.T) {
+	skipIfNotFullE2E(t)
+	skipIfQoderCLIUnavailable(t)
+	if os.Getenv("QODER_PERSONAL_ACCESS_TOKEN") == "" {
+		t.Skip("QODER_PERSONAL_ACCESS_TOKEN not set")
+	}
+
+	projectDir := filepath.Join(t.TempDir(), "qoder-agent-judge-contract")
+	evalPath := filepath.Join(projectDir, "evals", "eval.yaml")
+	writeFile(t, filepath.Join(projectDir, "SKILL.md"), "# Qoder contract fixture\n")
+	writeFile(t, evalPath, `schema_version: v1alpha1
+
+environment:
+  type: none
+
+skills: []
+
+engine:
+  name: qodercli
+  model:
+    provider: qoder
+    name: lite
+
+cases:
+  files:
+    - evals/cases/contract.yaml
+  defaults:
+    timeout_seconds: 300
+    max_turns: 1
+  parallelism: 1
+
+report:
+  formats: [json]
+  artifacts: [transcript]
+`)
+	criterion := "The final response contains the exact marker QODER_CONTRACT_OK."
+	writeFile(t, filepath.Join(projectDir, "evals", "cases", "contract.yaml"), `id: qoder-contract
+title: Qoder strict agent judge contract
+input:
+  prompt: Reply with exactly QODER_CONTRACT_OK and no explanation.
+constraints:
+  timeout_seconds: 300
+  max_turns: 1
+judge:
+  type: agent_judge
+  model: ultimate
+  criteria:
+    - "The final response contains the exact marker QODER_CONTRACT_OK."
+  pass_threshold: 1.0
+  timeout_seconds: 180
+`)
+
+	outputDir := filepath.Join(t.TempDir(), "output")
+	preserveWorkspaceArtifacts(t, outputDir)
+	result := Run(t, RunConfig{Timeout: 8 * time.Minute},
+		"run", evalPath, "--output-dir", outputDir, "--verbose")
+	if result.ExitCode != 0 {
+		t.Fatalf("QoderCLI strict agent_judge run failed: exit=%d\nstdout=%s\nstderr=%s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+
+	resolvedConfig := "AGENT_CONFIG kind=judge engine=qodercli model=ultimate source.model=judge_config"
+	logs := result.Stdout + "\n" + result.Stderr
+	if !strings.Contains(logs, resolvedConfig) {
+		t.Fatalf("missing resolved Qoder judge configuration %q\nlogs:\n%s", resolvedConfig, logs)
+	}
+	t.Logf("verified resolved judge configuration: %s", resolvedConfig)
+
+	gradingPath := filepath.Join(outputDir, "iteration-1", "qoder-contract", "with_skill", "grading.json")
+	data, err := os.ReadFile(gradingPath)
+	if err != nil {
+		t.Fatalf("read grading.json: %v", err)
+	}
+	var grading struct {
+		Expectations []struct {
+			Text     string `json:"text"`
+			Passed   bool   `json:"passed"`
+			Evidence string `json:"evidence"`
+		} `json:"expectations"`
+		Summary struct {
+			PassRate float64 `json:"pass_rate"`
+		} `json:"summary"`
+	}
+	if err := json.Unmarshal(data, &grading); err != nil {
+		t.Fatalf("parse grading.json: %v", err)
+	}
+	if grading.Summary.PassRate != 1 || len(grading.Expectations) != 1 || !grading.Expectations[0].Passed {
+		t.Fatalf("expected strict Qoder judge result to pass: %s", data)
+	}
+	if grading.Expectations[0].Text != criterion {
+		t.Fatalf("criterion text = %q, want %q", grading.Expectations[0].Text, criterion)
+	}
+	if strings.TrimSpace(grading.Expectations[0].Evidence) == "" {
+		t.Fatalf("expected non-empty judge evidence: %s", data)
 	}
 }
 

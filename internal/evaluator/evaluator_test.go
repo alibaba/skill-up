@@ -1087,7 +1087,7 @@ func TestExecuteCase_AgentTimeoutDoesNotInvokeAgentJudge(t *testing.T) {
 		name: "judge",
 		runFunc: func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ []transcript.Message) (*agent.SessionResult, error) {
 			judgeRuns.Add(1)
-			return &agent.SessionResult{FinalMessage: `{"results":[{"criterion":"recovered","passed":true,"evidence":"ok"}]}`}, nil
+			return &agent.SessionResult{FinalMessage: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["ok"],"failures":[]}]}`}, nil
 		},
 	}
 
@@ -1142,7 +1142,7 @@ func TestExecuteCase_InstallsJudgeSkillsOnJudgeAgentOnly(t *testing.T) {
 	skillDir := t.TempDir()
 	judgeAgent := &mockAgent{
 		name:   "judge",
-		output: `{"results":[{"criterion":"uses rubric","passed":true,"evidence":"rubric applied"}]}`,
+		output: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["rubric applied"],"failures":[]}]}`,
 	}
 	runAgent := &mockAgent{name: "run", output: "main response"}
 
@@ -1218,7 +1218,7 @@ func TestExecuteCase_JudgeSkillInstallFailureReturnsError(t *testing.T) {
 	judgeAgent := &mockAgent{
 		name:     "judge",
 		skillErr: errors.New("install unsupported"),
-		output:   `{"results":[{"criterion":"uses rubric","passed":true,"evidence":"rubric applied"}]}`,
+		output:   `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["rubric applied"],"failures":[]}]}`,
 	}
 	runAgent := &mockAgent{name: "run", output: "main response"}
 
@@ -2040,7 +2040,7 @@ func TestExecuteCase_AgentJudgeReceivesTranscriptAndWorkspaceDiff(t *testing.T) 
 			}
 			judgePrompt = messages[0].Content
 			return &agent.SessionResult{
-				FinalMessage: `{"results":[{"criterion":"diff included","passed":true,"evidence":"ok"}]}`,
+				FinalMessage: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["ok"],"failures":[]}]}`,
 			}, nil
 		default:
 			t.Fatalf("unexpected run call %d", callNum)
@@ -2143,7 +2143,7 @@ func TestExecuteCase_AgentJudgeWithoutGitContextSkipsWorkspaceDiff(t *testing.T)
 		t.Fatalf("write initial file: %v", err)
 	}
 
-	judgePrompt, ag := newWorkspaceDiffJudgeAgent(t, `{"results":[{"criterion":"diff omitted","passed":true,"evidence":"ok"}]}`)
+	judgePrompt, ag := newWorkspaceDiffJudgeAgent(t)
 	rt := &mockRuntime{workspace: workspace}
 
 	e := newTestEvaluator(EvalOptions{Agent: ag})
@@ -2201,7 +2201,7 @@ func TestExecuteCase_AgentJudgeWithExistingGitRepoReceivesWorkspaceDiff(t *testi
 	}
 	initGitRepo(t, workspace)
 
-	judgePrompt, ag := newWorkspaceDiffJudgeAgent(t, `{"results":[{"criterion":"diff included","passed":true,"evidence":"ok"}]}`)
+	judgePrompt, ag := newWorkspaceDiffJudgeAgent(t)
 
 	e := newTestEvaluator(EvalOptions{Agent: ag})
 	caseCfg := &config.CaseConfig{
@@ -2232,7 +2232,7 @@ func TestExecuteCase_AgentJudgeWithClonedGitRepoReceivesWorkspaceDiff(t *testing
 	workspace := filepath.Join(t.TempDir(), "clone")
 	runCmd(t, "", "git", "clone", originDir, workspace)
 
-	judgePrompt, ag := newWorkspaceDiffJudgeAgent(t, `{"results":[{"criterion":"diff included","passed":true,"evidence":"ok"}]}`)
+	judgePrompt, ag := newWorkspaceDiffJudgeAgent(t)
 
 	e := newTestEvaluator(EvalOptions{Agent: ag})
 	caseCfg := &config.CaseConfig{
@@ -2263,7 +2263,7 @@ func TestExecuteCase_AgentJudgeWithClonedGitRepoWithoutGlobalConfigReceivesWorks
 	workspace := filepath.Join(t.TempDir(), "clone")
 	runCmd(t, "", "git", "clone", originDir, workspace)
 
-	judgePrompt, ag := newWorkspaceDiffJudgeAgent(t, `{"results":[{"criterion":"diff included","passed":true,"evidence":"ok"}]}`)
+	judgePrompt, ag := newWorkspaceDiffJudgeAgent(t)
 	homeDir := t.TempDir()
 
 	e := newTestEvaluator(EvalOptions{Agent: ag})
@@ -2320,7 +2320,7 @@ func TestExecuteCase_AgentJudgeTracksWorkspaceDiffAfterAgentCommit(t *testing.T)
 		case 2:
 			judgePrompt = messages[0].Content
 			return &agent.SessionResult{
-				FinalMessage: `{"results":[{"criterion":"diff included","passed":true,"evidence":"ok"}]}`,
+				FinalMessage: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["ok"],"failures":[]}]}`,
 			}, nil
 		default:
 			t.Fatalf("unexpected run call %d", callNum)
@@ -2360,7 +2360,7 @@ func TestExecuteCase_AgentJudgeWithGitWorktreeReceivesWorkspaceDiff(t *testing.T
 		t.Fatalf("expected worktree .git to be a file, got err=%v isDir=%v", err, err == nil && info.IsDir())
 	}
 
-	judgePrompt, ag := newWorkspaceDiffJudgeAgent(t, `{"results":[{"criterion":"diff included","passed":true,"evidence":"ok"}]}`)
+	judgePrompt, ag := newWorkspaceDiffJudgeAgent(t)
 
 	e := newTestEvaluator(EvalOptions{Agent: ag})
 	caseCfg := &config.CaseConfig{
@@ -3003,7 +3003,7 @@ func initGitRepo(t *testing.T, dir string) {
 	}
 }
 
-func newWorkspaceDiffJudgeAgent(t *testing.T, judgeResponse string) (*string, *mockAgent) {
+func newWorkspaceDiffJudgeAgent(t *testing.T) (*string, *mockAgent) {
 	t.Helper()
 
 	judgePrompt := ""
@@ -3024,7 +3024,7 @@ func newWorkspaceDiffJudgeAgent(t *testing.T, judgeResponse string) (*string, *m
 			}, nil
 		case 2:
 			judgePrompt = messages[0].Content
-			return &agent.SessionResult{FinalMessage: judgeResponse}, nil
+			return &agent.SessionResult{FinalMessage: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["ok"],"failures":[]}]}`}, nil
 		default:
 			t.Fatalf("unexpected run call %d", callNum)
 			return nil, nil

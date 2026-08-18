@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `agent_judge` now uses stable criterion IDs and a strict JSON response
+  contract, rejects malformed or semantically incomplete judge output, and
+  always derives report labels and ordering from configured criteria.
 - HTML and Markdown reports now identify the top-level duration as evaluation
   wall time and show per-case tested-agent execution time plus input, output,
   and total token usage. Benchmark cases include compact with-Skill,
