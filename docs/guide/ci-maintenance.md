@@ -10,9 +10,28 @@ Pull-request code runs on GitHub-hosted runners. Persistent self-hosted runners 
 | --- | --- | --- |
 | Trusted Linux | `self-hosted`, `linux`, `x64`, `trusted` | Trusted integration and model-backed tests |
 | Trusted Linux with Docker | `self-hosted`, `linux`, `x64`, `docker`, `trusted` | Trusted container E2E tests |
-| Untrusted PR validation | `ubuntu-24.04` or `windows-2025` | Builds, lint, smoke tests, docs, and CodeQL |
+| Trusted Windows | `self-hosted`, `Windows`, `X64`, `trusted` | Manually dispatched Windows E2E and model tests |
+| Untrusted PR and merge-group validation | `ubuntu-24.04` or `windows-2025` | Builds, lint, smoke tests, docs, CodeQL, and merge-group Windows E2E |
 
 Do not add `pull_request_target` to workflows that check out or execute pull-request code. Do not place a self-hosted label on PR jobs. Runner hosts are persistent: patch them regularly, remove unused software and credentials, restrict Docker access, and replace a runner after suspected compromise.
+
+The trusted Windows runner must have Git for Windows installed, with both
+`C:\Program Files\Git\cmd` and `C:\Program Files\Git\bin` on the machine
+`PATH`; restart the runner service after changing `PATH`. Workflows install
+their required Go and Node.js versions through pinned setup actions. The
+runner service account, work directory, tool cache, and agent home are
+persistent and must not be treated as a clean GitHub-hosted environment.
+Windows Developer Mode must be enabled. A non-administrative runner service
+account, such as `NETWORK SERVICE`, must also hold
+`SeCreateSymbolicLinkPrivilege`; restart the runner service after changing the
+local security policy so its new logon token includes the privilege. The
+workflow verifies actual symbolic-link creation before installing the Go
+toolchain.
+
+Merge-group code must not run on the same persistent Windows runner that later
+receives model credentials. Extended CI therefore uses `windows-2025` for
+`merge_group` and selects the trusted self-hosted labels only for maintainer
+`workflow_dispatch` runs.
 
 ## Stable checks and merge queue
 
@@ -23,7 +42,7 @@ Configure rulesets using the displayed job names below. Job IDs such as `build` 
 | CI | `push`, `pull_request`, `merge_group` | `Build & Test`, `E2E Smoke`, `Lint` | — |
 | CodeQL | `push`, `pull_request`, `merge_group`, schedule | `Analyze (actions)`, `Analyze (go)`, `Analyze (python)` | — |
 | Extended CI | `merge_group`, manual | `Extended CI Summary` | Its component jobs are aggregated by the summary |
-| Model E2E | manual | Do not make required | `E2E (none runtime, live models)`, `E2E (OpenSandbox, live model)`, `E2E (Docker runtime, live model)` |
+| Model E2E | manual | Do not make required | `E2E (none runtime, live models)`, `E2E (OpenSandbox, live model)`, `E2E (none runtime, Windows, live Claude)`, `E2E (Docker runtime, live model)` |
 | Docs | docs-related `push` and `pull_request` | Do not make globally required because path filters can leave it absent | `Build` |
 | Workflow Security | workflow-related `push`, `pull_request`, `merge_group` | Keep optional while the initial baseline is triaged | `Zizmor` |
 

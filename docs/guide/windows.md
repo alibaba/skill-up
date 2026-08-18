@@ -8,7 +8,9 @@ limitations, and the recommended workflow.
 ## Supported
 
 - **Build and unit tests** — `go build ./...` and `go test ./...` pass on
-  Windows. CI exercises a `windows-latest` runner alongside Linux.
+  Windows. Maintainer-dispatched Extended CI exercises a trusted self-hosted
+  runner; pull-request and merge-group code remains on clean GitHub-hosted
+  runners.
 - **The `none` runtime** — commands run on the host through `cmd.exe`.
 - **The `opensandbox` runtime** — unaffected by the host OS; it always
   executes inside a Linux sandbox.
@@ -70,14 +72,17 @@ under `scripts/windows/` instead:
 
 ```powershell
 # Install git hooks (equivalent to `make hooks`)
-pwsh scripts/windows/hooks.ps1
+powershell -NoProfile -File scripts/windows/hooks.ps1
 
 # Install pinned lint tools into .tools/bin (equivalent to `make lint-tools`)
-pwsh scripts/windows/lint-tools.ps1
+powershell -NoProfile -File scripts/windows/lint-tools.ps1
 
 # fmt-check + vet + revive + golangci-lint (equivalent to `make verify`)
-pwsh scripts/windows/verify.ps1
+powershell -NoProfile -File scripts/windows/verify.ps1
 ```
+
+These scripts support the Windows PowerShell 5.1 included with Windows Server.
+PowerShell 7 is optional; if installed, `pwsh -NoProfile -File ...` works too.
 
 Build and test use the standard Go toolchain, which is cross-platform:
 
