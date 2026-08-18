@@ -11,7 +11,7 @@
 # node:22 — @qwen-code/qwen-code declares engines.node ">=22.0.0"; the older
 # node:20 base tripped an engine mismatch at `qwen --version`. 22 also suits
 # claude-code / codex and matches skill-up's own Node bootstrap default.
-FROM node:26-bookworm-slim@sha256:2d49d876e96237d76de412761cf05dbfe5aee325cc4406a4d41d5824c5bb8beb
+FROM node:26-bookworm-slim@sha256:cd565714d4da3e84bfd341e31448f81d47c6362198f152345297c9c1154e6341
 
 # Pin the agent CLI versions. Bump these in a PR; the build workflow republishes
 # the image. Keep codex aligned with the codexDefaultVersion skill-up expects.
