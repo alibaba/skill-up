@@ -11,6 +11,13 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 5
+    groups:
+      opentelemetry:
+        patterns:
+          - "go.opentelemetry.io/otel*"
+        update-types:
+          - "minor"
+          - "patch"
     labels:
       - "dependencies"
     commit-message:
