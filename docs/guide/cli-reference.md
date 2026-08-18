@@ -29,7 +29,7 @@ skill-up run [path] [flags]
 | `--output-dir`         | `<skill-name>-workspace/` next to the skill dir | Output directory for reports and artifacts                                                                                                 |
 | `--iteration`          | `0` (auto)                    | Repeat selected cases for stability/flakiness sampling. `0` auto-appends one run after the latest `iteration-N/` without summarizing history; positive `N` runs N samples and writes `iteration-1/` … `iteration-N/`; when `N > 1`, the terminal summary covers only samples from the current command |
 | `--engine`             | From config                   | Override engine name                                                                                                                                       |
-| `--model`              | From config                   | Override model (format: `provider/name`)                                                                                                                   |
+| `--model`              | From config                   | Override model. The legacy `provider/name` form is split when the prefix is a configured provider; otherwise the complete value is preserved as an opaque model ID. |
 | `--parallelism`        | From config                   | Override `cases.parallelism`. Allowed range: 1–256                                                                                                          |
 | `--baseline`           | From config                   | Override `benchmark.enabled` to `true` for this run                                                                                                         |
 | `--api-key`            | —                             | Pass an API key (higher precedence than env vars)                                                                                                          |
@@ -56,6 +56,9 @@ skill-up run ./evals/eval.yaml --exclude-case-name "*-old" --exclude-case-name "
 
 # Override engine and model
 skill-up run ./evals/eval.yaml --engine codex --model openai/gpt-4
+
+# Preserve an opaque upstream model ID when its prefix is not a configured provider
+skill-up run ./evals/eval.yaml --engine claude_code --model anthropic_modelscope/deepseek-v4-pro
 
 # Temporarily override case parallelism
 skill-up run ./evals/eval.yaml --parallelism 4
