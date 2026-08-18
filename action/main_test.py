@@ -3,7 +3,10 @@
 
 import importlib.util
 import pathlib
+import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 
 MODULE_PATH = pathlib.Path(__file__).with_name("main.py")
@@ -13,6 +16,57 @@ SPEC.loader.exec_module(ACTION)
 
 
 class ActionConfigurationContractTest(unittest.TestCase):
+    def test_main_composes_codex_argv_and_environment(self):
+        inputs = SimpleNamespace(
+            engine="codex",
+            model="qwen3.6-plus",
+            provider="dashscope",
+            api_key="secret",
+            base_url="",
+            open_sandbox_api_key="",
+            skill_target="evals/eval.yaml",
+            skill_up_version="0.7.0",
+            skill_up_command="skill-up run",
+            parallelism="",
+            agent_install_command="",
+        )
+        final_run = mock.Mock(return_value=SimpleNamespace(returncode=0))
+
+        with tempfile.TemporaryDirectory() as workspace:
+            with (
+                mock.patch.object(ACTION, "parse_inputs", return_value=inputs),
+                mock.patch.object(ACTION.shutil, "which", return_value="/usr/bin/skill-up"),
+                mock.patch.object(ACTION, "_run"),
+                mock.patch.object(ACTION, "get_skill_up_version", return_value=(0, 7, 0)),
+                mock.patch.object(ACTION.subprocess, "run", final_run),
+                mock.patch.dict(ACTION.os.environ, {"GITHUB_WORKSPACE": workspace}, clear=True),
+                mock.patch("builtins.print"),
+                self.assertRaises(SystemExit) as exit_context,
+            ):
+                ACTION.main()
+
+        self.assertEqual(exit_context.exception.code, 0)
+        final_run.assert_called_once()
+        argv = final_run.call_args.args[0]
+        run_env = final_run.call_args.kwargs["env"]
+
+        engine_flag_index = argv.index("--engine")
+        self.assertEqual(
+            argv[engine_flag_index:engine_flag_index + 4],
+            ["--engine", "codex", "--model", "dashscope/qwen3.6-plus"],
+        )
+        self.assertEqual(run_env["OPENAI_MODEL"], "qwen3.6-plus")
+        self.assertEqual(run_env["OPENAI_API_KEY"], "secret")
+        self.assertEqual(
+            run_env["OPENAI_BASE_URL"],
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        )
+        self.assertEqual(run_env["DASHSCOPE_API_KEY"], "secret")
+        self.assertEqual(
+            run_env["DASHSCOPE_BASE_URL"],
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        )
+
     def test_protocol_selects_provider_endpoint(self):
         cases = [
             ("claude_code", "dashscope", "", "https://dashscope.aliyuncs.com/apps/anthropic"),
