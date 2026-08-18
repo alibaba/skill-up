@@ -104,6 +104,117 @@ func TestPipeline_FullRun_WithMockEngine(t *testing.T) {
 	}
 }
 
+// TestPipeline_AgentJudgeCorrectionRetry verifies the bounded correction path
+// through the real CLI pipeline with deterministic engine output.
+func TestPipeline_AgentJudgeCorrectionRetry(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	stateFile := filepath.Join(t.TempDir(), "judge-attempts.txt")
+	outputDir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "SKILL.md"), "# Judge correction fixture\n")
+	writeFile(t, filepath.Join(dir, "evals", "eval.yaml"), `schema_version: v1alpha1
+
+environment:
+  type: none
+
+skills:
+  - source: local_path
+    path: .
+
+engine:
+  name: qoder-cli
+  model:
+    provider: qoder
+    name: auto
+
+cases:
+  files:
+    - evals/cases/correction.yaml
+  defaults:
+    timeout_seconds: 30
+    max_turns: 1
+  parallelism: 1
+
+report:
+  formats: [json]
+`)
+	criterion := "The final response contains the marker MOCK_CORRECTION_MARKER."
+	writeFile(t, filepath.Join(dir, "evals", "cases", "correction.yaml"), `id: judge-correction
+title: Agent judge correction retry
+input:
+  prompt: Return the marker MOCK_CORRECTION_MARKER.
+constraints:
+  timeout_seconds: 30
+  max_turns: 1
+judge:
+  type: agent_judge
+  model: auto
+  criteria:
+    - "The final response contains the marker MOCK_CORRECTION_MARKER."
+  pass_threshold: 1.0
+`)
+
+	result := Run(t, RunConfig{
+		Env: mockEngineEnv(t,
+			"MOCK_JUDGE_CORRECTION_RETRY=1",
+			"MOCK_JUDGE_STATE_FILE="+stateFile,
+		),
+		WorkDir: dir,
+		Timeout: 60 * time.Second,
+	}, "run", filepath.Join(dir, "evals", "eval.yaml"), "--output-dir", outputDir, "--verbose")
+	if result.ExitCode != 0 {
+		t.Fatalf("correction retry run failed: exit=%d\nstdout=%s\nstderr=%s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+
+	state, err := os.ReadFile(stateFile)
+	if err != nil {
+		t.Fatalf("read Judge attempt state: %v", err)
+	}
+	if string(state) != "initial\ncorrection\n" {
+		t.Fatalf("expected exactly one correction retry, got attempts %q", state)
+	}
+
+	caseDir := filepath.Join(outputDir, "iteration-1", "judge-correction", "with_skill")
+	gradingData, err := os.ReadFile(filepath.Join(caseDir, "grading.json"))
+	if err != nil {
+		t.Fatalf("read grading.json: %v", err)
+	}
+	var grading struct {
+		Expectations []struct {
+			Text     string `json:"text"`
+			Passed   bool   `json:"passed"`
+			Evidence string `json:"evidence"`
+		} `json:"expectations"`
+		Summary struct {
+			PassRate float64 `json:"pass_rate"`
+		} `json:"summary"`
+	}
+	if err := json.Unmarshal(gradingData, &grading); err != nil {
+		t.Fatalf("parse grading.json: %v", err)
+	}
+	if grading.Summary.PassRate != 1 || len(grading.Expectations) != 1 || !grading.Expectations[0].Passed {
+		t.Fatalf("expected corrected Judge PASS: %s", gradingData)
+	}
+	if grading.Expectations[0].Text != criterion || strings.TrimSpace(grading.Expectations[0].Evidence) == "" {
+		t.Fatalf("unexpected corrected expectation: %#v", grading.Expectations)
+	}
+
+	judgeDir := filepath.Join(caseDir, "outputs", "judge", "run")
+	for _, relativePath := range []string{
+		"stdout.json",
+		"raw-response-attempt-1.txt",
+		filepath.Join("retry", "stdout.json"),
+		"raw-response-attempt-2.txt",
+	} {
+		path := filepath.Join(judgeDir, relativePath)
+		info, err := os.Stat(path)
+		if err != nil || info.Size() == 0 {
+			t.Fatalf("expected non-empty Judge artifact %s: info=%v err=%v", relativePath, info, err)
+		}
+	}
+}
+
 // TestPipeline_MustContainPass verifies that a case with matching must_contain
 // keywords passes the expect check when the mock engine returns the right output.
 func TestPipeline_MustContainPass(t *testing.T) {

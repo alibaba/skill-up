@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -99,6 +101,9 @@ func TestAgentJudge_AllFail(t *testing.T) {
 	if r.Summary.PassRate != 0 {
 		t.Fatalf("expected pass_rate 0, got %f", r.Summary.PassRate)
 	}
+	if ag.runCalls != 1 {
+		t.Fatalf("valid FAIL judgment must not retry, got %d calls", ag.runCalls)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -141,7 +146,6 @@ func TestAgentJudge_AgentError(t *testing.T) {
 
 func TestAgentJudge_AgentError_PreservesSession(t *testing.T) {
 	session := &agent.SessionResult{
-		FinalMessage: "API Error: 400 rate limit",
 		Artifacts: &agent.SessionArtifacts{
 			GeneratedFiles: []string{"stdout.json"},
 		},
@@ -159,6 +163,9 @@ func TestAgentJudge_AgentError_PreservesSession(t *testing.T) {
 	}
 	if got := SessionResultFromError(err); got != session {
 		t.Fatalf("expected preserved session result, got %#v", got)
+	}
+	if ag.runCalls != 1 {
+		t.Fatalf("unrecoverable agent error must not retry, got %d calls", ag.runCalls)
 	}
 }
 
@@ -891,17 +898,369 @@ func TestAgentJudge_ConfiguredCriteriaRemainAuthoritative(t *testing.T) {
 }
 
 func TestAgentJudge_InvalidContractPreservesSession(t *testing.T) {
-	session := &agent.SessionResult{
+	firstSession := &agent.SessionResult{
 		FinalMessage: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["ok"],"failures":[],"score":1}]}`,
 		Artifacts:    &agent.SessionArtifacts{GeneratedFiles: []string{"stdout.json"}},
 	}
-	j := NewAgentJudge(&mockJudgeTestAgent{runResult: session}, &mockJudgeTestRuntime{}, "test-model", []string{"configured"}, nil, 0)
+	secondSession := &agent.SessionResult{
+		FinalMessage: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["still invalid"],"failures":[],"score":2}]}`,
+		Artifacts:    &agent.SessionArtifacts{GeneratedFiles: []string{"retry/stdout.json"}},
+	}
+	ag := &mockJudgeTestAgent{scriptedResults: []*agent.SessionResult{firstSession, secondSession}}
+	j := NewAgentJudge(ag, &mockJudgeTestRuntime{}, "test-model", []string{"configured"}, nil, 0)
 
 	_, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
 	if err == nil {
 		t.Fatal("expected strict contract error")
 	}
-	if got := SessionResultFromError(err); got != session {
-		t.Fatalf("expected preserved judge session, got %#v", got)
+	got := SessionResultFromError(err)
+	if got == nil || got.FinalMessage != secondSession.FinalMessage {
+		t.Fatalf("expected final correction session, got %#v", got)
+	}
+	if ag.runCalls != 2 {
+		t.Fatalf("expected exactly one correction retry, got %d calls", ag.runCalls)
+	}
+	if got.Artifacts == nil || len(got.Artifacts.GeneratedFiles) != 2 {
+		t.Fatalf("expected merged artifacts, got %#v", got.Artifacts)
+	}
+}
+
+func TestAgentJudge_FirstValidResponsePersistsSingleRawArtifact(t *testing.T) {
+	artifactDir := t.TempDir()
+	output := buildMockAgentOutput([]CriterionResult{testCriterionResult(0, true, "observed marker")})
+	ag := &mockJudgeTestAgent{output: output}
+	j := NewAgentJudge(ag, &mockJudgeTestRuntime{}, "test-model", []string{"configured criterion"}, nil, 0)
+
+	result, err := j.Evaluate(context.Background(), Input{FinalMessage: "test", ArtifactDir: artifactDir})
+	assertNoError(t, err)
+	assertStatus(t, result, StatusPass)
+	if ag.runCalls != 1 {
+		t.Fatalf("valid response must not retry, got %d calls", ag.runCalls)
+	}
+	assertFileContents(t, filepath.Join(artifactDir, agentJudgeRawResponseAttempt1), output)
+	if _, err := os.Stat(filepath.Join(artifactDir, agentJudgeRawResponseAttempt2)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("attempt 2 artifact should not exist, stat error: %v", err)
+	}
+}
+
+func TestAgentJudge_CorrectionRetryFallbackSucceeds(t *testing.T) { //nolint:cyclop,gocyclo // One test asserts the complete fallback protocol and aggregate result.
+	artifactDir := t.TempDir()
+	firstOutput := `{"results":[{"criterion_id":"criterion-1","evidence":["marker"],"failures":[]},{"criterion_id":"criterion-2","passed":false,"evidence":["missing"],"failures":["missing"]}]}`
+	secondOutput := buildMockAgentOutput([]CriterionResult{
+		testCriterionResult(1, false, "second unmet"),
+		testCriterionResult(0, true, "first observed"),
+	})
+	ag := &mockJudgeTestAgent{scriptedResults: []*agent.SessionResult{
+		{FinalMessage: firstOutput, DurationMs: 11, InputTokens: 2, OutputTokens: 3, Turns: 1},
+		{FinalMessage: secondOutput, DurationMs: 13, InputTokens: 5, OutputTokens: 7, Turns: 1},
+	}}
+	threshold := 0.5
+	j := NewAgentJudge(ag, &mockJudgeTestRuntime{}, "test-model", []string{"configured first", "configured second"}, &threshold, 5)
+
+	result, err := j.Evaluate(context.Background(), Input{FinalMessage: "test", ArtifactDir: artifactDir})
+	assertNoError(t, err)
+	assertStatus(t, result, StatusPass)
+	if ag.runCalls != 2 {
+		t.Fatalf("expected one correction retry, got %d calls", ag.runCalls)
+	}
+	if len(ag.allMessages) != 2 || len(ag.allMessages[1]) != 3 {
+		t.Fatalf("expected original/assistant/correction fallback history, got %#v", ag.allMessages)
+	}
+	fallback := ag.allMessages[1]
+	if fallback[0].Role != transcript.RoleUser || fallback[1].Role != transcript.RoleAssistant || fallback[2].Role != transcript.RoleUser {
+		t.Fatalf("unexpected fallback roles: %#v", fallback)
+	}
+	if fallback[1].Content != firstOutput {
+		t.Fatalf("fallback assistant message did not preserve raw output: %q", fallback[1].Content)
+	}
+	if !strings.Contains(fallback[2].Content, `"criterion_id": "criterion-1"`) ||
+		!strings.Contains(fallback[2].Content, "is missing passed") ||
+		!strings.Contains(fallback[2].Content, "Required result fields with exact casing") {
+		t.Fatalf("correction prompt is missing contract guidance: %q", fallback[2].Content)
+	}
+	if len(ag.artifactDirs) != 2 || ag.artifactDirs[0] != artifactDir || ag.artifactDirs[1] != filepath.Join(artifactDir, agentJudgeRetryArtifactDir) {
+		t.Fatalf("unexpected attempt artifact dirs: %#v", ag.artifactDirs)
+	}
+	if len(ag.observedDeadlines) != 2 || !ag.deadlineStates[0] || !ag.deadlineStates[1] || !ag.observedDeadlines[0].Equal(ag.observedDeadlines[1]) {
+		t.Fatalf("attempts must share one deadline: deadlines=%#v states=%#v", ag.observedDeadlines, ag.deadlineStates)
+	}
+	if result.AssertionResults[0].Text != "configured first" || result.AssertionResults[1].Text != "configured second" {
+		t.Fatalf("configured criteria/order were not authoritative: %#v", result.AssertionResults)
+	}
+	if result.JudgeSession.DurationMs != 24 || result.JudgeSession.InputTokens != 7 || result.JudgeSession.OutputTokens != 10 || result.JudgeSession.Turns != 2 {
+		t.Fatalf("unexpected independent session aggregation: %#v", result.JudgeSession)
+	}
+	assertFileContents(t, filepath.Join(artifactDir, agentJudgeRawResponseAttempt1), firstOutput)
+	assertFileContents(t, filepath.Join(artifactDir, agentJudgeRawResponseAttempt2), secondOutput)
+}
+
+func TestAgentJudge_CorrectionRetryUsesSessionResumer(t *testing.T) {
+	artifactDir := t.TempDir()
+	firstOutput := `{"results":null}`
+	secondOutput := buildMockAgentOutput([]CriterionResult{testCriterionResult(0, true, "corrected")})
+	base := &mockJudgeTestAgent{scriptedResults: []*agent.SessionResult{{
+		FinalMessage: firstOutput,
+		SessionID:    "judge-session-123",
+	}}}
+	ag := &resumableJudgeTestAgent{
+		mockJudgeTestAgent: base,
+		turnResult:         &agent.SessionResult{FinalMessage: secondOutput, SessionID: "judge-session-123"},
+	}
+	j := NewAgentJudge(ag, &mockJudgeTestRuntime{}, "test-model", []string{"configured"}, nil, 5)
+
+	result, err := j.Evaluate(context.Background(), Input{FinalMessage: "test", ArtifactDir: artifactDir})
+	assertNoError(t, err)
+	assertStatus(t, result, StatusPass)
+	if base.runCalls != 1 || ag.turnCalls != 1 {
+		t.Fatalf("expected one Run and one RunTurn, got Run=%d RunTurn=%d", base.runCalls, ag.turnCalls)
+	}
+	if ag.turnSessions[0] != "judge-session-123" || ag.turnMessages[0].Role != transcript.RoleUser {
+		t.Fatalf("unexpected resumed turn: sessions=%#v messages=%#v", ag.turnSessions, ag.turnMessages)
+	}
+	if ag.turnDirs[0] != filepath.Join(artifactDir, agentJudgeRetryArtifactDir) {
+		t.Fatalf("unexpected retry artifact dir: %q", ag.turnDirs[0])
+	}
+	if !base.observedDeadlineOK || !ag.turnHasLimit || !base.observedDeadline.Equal(ag.turnDeadline) {
+		t.Fatalf("Run and RunTurn must share one deadline: Run=%v RunTurn=%v", base.observedDeadline, ag.turnDeadline)
+	}
+	if result.JudgeSession.SessionID != "judge-session-123" || result.JudgeSession.FinalMessage != secondOutput {
+		t.Fatalf("last session should be authoritative: %#v", result.JudgeSession)
+	}
+}
+
+func TestAgentJudge_ResumerWithoutSessionIDUsesFallbackHistory(t *testing.T) {
+	valid := buildMockAgentOutput([]CriterionResult{testCriterionResult(0, true, "corrected")})
+	base := &mockJudgeTestAgent{scriptedResults: []*agent.SessionResult{
+		{FinalMessage: `{"results":null}`},
+		{FinalMessage: valid},
+	}}
+	ag := &resumableJudgeTestAgent{mockJudgeTestAgent: base}
+	j := NewAgentJudge(ag, &mockJudgeTestRuntime{}, "test-model", []string{"configured"}, nil, 0)
+
+	result, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
+	assertNoError(t, err)
+	assertStatus(t, result, StatusPass)
+	if base.runCalls != 2 || ag.turnCalls != 0 {
+		t.Fatalf("empty session ID must use Run fallback, got Run=%d RunTurn=%d", base.runCalls, ag.turnCalls)
+	}
+	if len(base.allMessages) != 2 || len(base.allMessages[1]) != 3 {
+		t.Fatalf("expected three-message fallback history, got %#v", base.allMessages)
+	}
+}
+
+func TestAgentJudge_CorrectionRetryStopsAfterTwoInvalidResponses(t *testing.T) {
+	artifactDir := t.TempDir()
+	firstOutput := `{"results":null}`
+	secondOutput := `{"results":[{"criterion_id":"CRITERION-1","passed":true,"evidence":["x"],"failures":[]}]}`
+	ag := &mockJudgeTestAgent{scriptedResults: []*agent.SessionResult{
+		{FinalMessage: firstOutput, SessionID: "first", Artifacts: &agent.SessionArtifacts{GeneratedFiles: []string{"stdout.json"}}},
+		{FinalMessage: secondOutput, SessionID: "second", Artifacts: &agent.SessionArtifacts{GeneratedFiles: []string{"retry/stdout.json"}}},
+	}}
+	j := NewAgentJudge(ag, &mockJudgeTestRuntime{}, "test-model", []string{"configured"}, nil, 0)
+
+	_, err := j.Evaluate(context.Background(), Input{FinalMessage: "test", ArtifactDir: artifactDir})
+	if err == nil {
+		t.Fatal("expected correction retry failure")
+	}
+	if ag.runCalls != 2 {
+		t.Fatalf("expected exactly two calls, got %d", ag.runCalls)
+	}
+	if !strings.Contains(err.Error(), "results is required") || !strings.Contains(err.Error(), "unknown criterion_id") {
+		t.Fatalf("error should preserve initial and final validation reasons: %v", err)
+	}
+	session := SessionResultFromError(err)
+	if session == nil || session.SessionID != "second" || session.FinalMessage != secondOutput {
+		t.Fatalf("expected final session to be preserved: %#v", session)
+	}
+	if session.Artifacts == nil || len(session.Artifacts.GeneratedFiles) != 4 {
+		t.Fatalf("expected engine and raw artifacts from both attempts: %#v", session.Artifacts)
+	}
+	assertFileContents(t, filepath.Join(artifactDir, agentJudgeRawResponseAttempt1), firstOutput)
+	assertFileContents(t, filepath.Join(artifactDir, agentJudgeRawResponseAttempt2), secondOutput)
+}
+
+func TestAgentJudge_InvalidResponseClassesTriggerOneCorrection(t *testing.T) {
+	valid := buildMockAgentOutput([]CriterionResult{testCriterionResult(0, true, "corrected")})
+	tests := []struct {
+		name   string
+		output string
+	}{
+		{name: "malformed JSON", output: `{"results":[`},
+		{name: "unknown field", output: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["x"],"failures":[],"score":1}]}`},
+		{name: "missing field", output: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["x"]}]}`},
+		{name: "duplicate field", output: `{"results":[{"criterion_id":"criterion-1","passed":false,"passed":true,"evidence":["x"],"failures":[]}]}`},
+		{name: "case alias", output: `{"results":[{"Criterion_ID":"criterion-1","passed":true,"evidence":["x"],"failures":[]}]}`},
+		{name: "criterion mapping", output: `{"results":[{"criterion_id":"criterion-99","passed":true,"evidence":["x"],"failures":[]}]}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ag := &mockJudgeTestAgent{scriptedResults: []*agent.SessionResult{
+				{FinalMessage: tt.output},
+				{FinalMessage: valid},
+			}}
+			j := NewAgentJudge(ag, &mockJudgeTestRuntime{}, "test-model", []string{"configured"}, nil, 0)
+			result, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
+			assertNoError(t, err)
+			assertStatus(t, result, StatusPass)
+			if ag.runCalls != 2 {
+				t.Fatalf("expected one correction retry, got %d calls", ag.runCalls)
+			}
+		})
+	}
+}
+
+func TestAgentJudge_CanceledContextAfterInvalidResponseDoesNotRetry(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ag := &mockJudgeTestAgent{
+		output: `{"results":null}`,
+		onRun: func(callIndex int) {
+			if callIndex == 0 {
+				cancel()
+			}
+		},
+	}
+	j := NewAgentJudge(ag, &mockJudgeTestRuntime{}, "test-model", []string{"configured"}, nil, 0)
+
+	_, err := j.Evaluate(ctx, Input{FinalMessage: "test"})
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled validation error, got %v", err)
+	}
+	if ag.runCalls != 1 {
+		t.Fatalf("canceled context must not retry, got %d calls", ag.runCalls)
+	}
+}
+
+func TestAgentJudge_CorrectionCallErrors(t *testing.T) {
+	initialInvalid := &agent.SessionResult{FinalMessage: `{"results":null}`}
+	valid := buildMockAgentOutput([]CriterionResult{testCriterionResult(0, true, "recovered")})
+
+	t.Run("recoverable output is parsed", func(t *testing.T) {
+		ag := &mockJudgeTestAgent{
+			scriptedResults: []*agent.SessionResult{initialInvalid, {FinalMessage: valid}},
+			scriptedErrors:  []error{nil, errors.New("engine exited after response")},
+		}
+		j := NewAgentJudge(ag, &mockJudgeTestRuntime{}, "test-model", []string{"configured"}, nil, 0)
+		result, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
+		assertNoError(t, err)
+		assertStatus(t, result, StatusPass)
+		if ag.runCalls != 2 {
+			t.Fatalf("expected two calls, got %d", ag.runCalls)
+		}
+	})
+
+	t.Run("empty output is unrecoverable", func(t *testing.T) {
+		ag := &mockJudgeTestAgent{
+			scriptedResults: []*agent.SessionResult{initialInvalid, {FinalMessage: ""}},
+			scriptedErrors:  []error{nil, errors.New("engine failed")},
+		}
+		j := NewAgentJudge(ag, &mockJudgeTestRuntime{}, "test-model", []string{"configured"}, nil, 0)
+		_, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
+		if err == nil || !strings.Contains(err.Error(), "correction call failed") {
+			t.Fatalf("expected unrecoverable correction error, got %v", err)
+		}
+		if ag.runCalls != 2 {
+			t.Fatalf("expected two calls, got %d", ag.runCalls)
+		}
+	})
+
+	t.Run("explicit cancellation is unrecoverable", func(t *testing.T) {
+		ag := &mockJudgeTestAgent{
+			scriptedResults: []*agent.SessionResult{initialInvalid, {FinalMessage: valid}},
+			scriptedErrors:  []error{nil, context.Canceled},
+		}
+		j := NewAgentJudge(ag, &mockJudgeTestRuntime{}, "test-model", []string{"configured"}, nil, 0)
+		_, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
+		if err == nil || !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected explicit cancellation error, got %v", err)
+		}
+		if ag.runCalls != 2 {
+			t.Fatalf("expected two calls, got %d", ag.runCalls)
+		}
+	})
+}
+
+func TestAggregateAgentJudgeSessionsMetrics(t *testing.T) {
+	firstTranscript := transcript.Transcript{{Role: transcript.RoleUser, Content: "original", Turn: 1}}
+	firstDelivery := &agent.PromptDeliveryMetadata{Mode: "file", PromptBytes: 101}
+	first := &agent.SessionResult{
+		FinalMessage:   "invalid",
+		DurationMs:     10,
+		Turns:          1,
+		InputTokens:    20,
+		OutputTokens:   5,
+		Transcript:     firstTranscript,
+		PromptDelivery: firstDelivery,
+		Artifacts: &agent.SessionArtifacts{
+			GeneratedFiles: []string{"first", "shared"},
+			Files:          []agent.ArtifactFile{{Name: "first", Path: "first"}},
+			Logs:           "first log",
+		},
+	}
+
+	t.Run("cumulative transcript uses final cumulative metrics", func(t *testing.T) {
+		second := &agent.SessionResult{
+			FinalMessage: "valid",
+			DurationMs:   12,
+			Turns:        2,
+			InputTokens:  35,
+			OutputTokens: 9,
+			Transcript: append(append(transcript.Transcript(nil), firstTranscript...),
+				transcript.Message{Role: transcript.RoleAssistant, Content: "valid", Turn: 2}),
+			Artifacts: &agent.SessionArtifacts{
+				GeneratedFiles: []string{"shared", "second"},
+				Files: []agent.ArtifactFile{
+					{Name: "first", Path: "first"},
+					{Name: "second", Path: "second"},
+				},
+				Logs: "second log",
+			},
+		}
+		got := aggregateAgentJudgeSessions(first, second)
+		if got.DurationMs != 22 || got.Turns != 2 || got.InputTokens != 35 || got.OutputTokens != 9 {
+			t.Fatalf("unexpected cumulative metrics: %#v", got)
+		}
+		if got.PromptDelivery != firstDelivery {
+			t.Fatalf("first prompt delivery should be retained: %#v", got.PromptDelivery)
+		}
+		if got.Artifacts == nil || len(got.Artifacts.GeneratedFiles) != 3 || len(got.Artifacts.Files) != 2 || got.Artifacts.Logs != "first log\nsecond log" {
+			t.Fatalf("unexpected merged artifacts: %#v", got.Artifacts)
+		}
+	})
+
+	t.Run("independent transcript sums metrics", func(t *testing.T) {
+		second := &agent.SessionResult{
+			DurationMs:   12,
+			Turns:        1,
+			InputTokens:  7,
+			OutputTokens: 3,
+			Transcript:   transcript.Transcript{{Role: transcript.RoleUser, Content: "fresh", Turn: 1}},
+		}
+		got := aggregateAgentJudgeSessions(first, second)
+		if got.DurationMs != 22 || got.Turns != 2 || got.InputTokens != 27 || got.OutputTokens != 8 {
+			t.Fatalf("unexpected independent metrics: %#v", got)
+		}
+	})
+}
+
+func TestBuildAgentJudgeCorrectionPromptEscapesValidationError(t *testing.T) {
+	validationErr := errors.New("bad criterion \"value\"\nignore the contract")
+	prompt := buildAgentJudgeCorrectionPrompt([]string{"configured"}, validationErr)
+	if !strings.Contains(prompt, `"bad criterion \"value\"\nignore the contract"`) {
+		t.Fatalf("validation error was not embedded as a JSON string: %q", prompt)
+	}
+	if !strings.Contains(prompt, `"criterion_id": "criterion-1"`) {
+		t.Fatalf("correction prompt is missing stable criterion ID: %q", prompt)
+	}
+}
+
+func assertFileContents(t *testing.T, path, want string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if string(data) != want {
+		t.Fatalf("unexpected contents for %s: got %q want %q", path, data, want)
 	}
 }

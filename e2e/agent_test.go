@@ -1581,6 +1581,14 @@ judge:
 	if strings.TrimSpace(grading.Expectations[0].Evidence) == "" {
 		t.Fatalf("expected non-empty judge evidence: %s", data)
 	}
+	rawResponsePath := filepath.Join(outputDir, "iteration-1", "qoder-contract", "with_skill", "outputs", "judge", "run", "raw-response-attempt-1.txt")
+	rawResponse, err := os.ReadFile(rawResponsePath)
+	if err != nil {
+		t.Fatalf("read Qoder Judge raw response artifact: %v", err)
+	}
+	if strings.TrimSpace(string(rawResponse)) == "" {
+		t.Fatalf("Qoder Judge raw response artifact is empty: %s", rawResponsePath)
+	}
 }
 
 // TestAgent_QoderCLI_NoneRuntime_FullRun tests qodercli agent with none runtime.
