@@ -417,6 +417,76 @@ func TestResolveRunnerConfig_CustomEngineCLIAPIKeyApplies(t *testing.T) {
 	}
 }
 
+func TestResolveRunnerConfig_DoesNotAliasCustomConfig(t *testing.T) {
+	const (
+		sourceValue  = "source"
+		mutatedValue = "mutated"
+	)
+	required := true
+	source := &config.CustomEngineConfig{
+		Transport: "http",
+		Env:       map[string]string{"PROFILE": sourceValue},
+		Kwargs:    map[string]string{"region": sourceValue},
+		Local: &config.CustomLocalConfig{
+			Command: "agent",
+			Args:    []string{"--source"},
+		},
+		HTTP: &config.CustomHTTPConfig{
+			URL:     "https://source.example.test",
+			Headers: map[string]string{"X-Profile": sourceValue},
+			Files: []config.CustomHTTPFile{{
+				Path:     "source.txt",
+				Required: &required,
+			}},
+			RequestBody: map[string]any{
+				"items": []any{map[string]any{"profile": sourceValue}},
+			},
+		},
+	}
+	resolved := ResolveRunnerConfig(config.EngineConfig{
+		Name:   "my-agent",
+		Custom: source,
+	}, nil, CLIOverrides{})
+
+	source.Env["PROFILE"] = mutatedValue
+	source.Kwargs["region"] = mutatedValue
+	source.Local.Args[0] = "--mutated"
+	source.HTTP.Headers["X-Profile"] = mutatedValue
+	source.HTTP.Files[0].Path = "mutated.txt"
+	*source.HTTP.Files[0].Required = false
+	requestBodyProfile(t, source.HTTP.RequestBody)["profile"] = mutatedValue
+
+	if resolved.Custom == source || resolved.Custom.Local == source.Local || resolved.Custom.HTTP == source.HTTP {
+		t.Fatal("resolved custom config retains source pointers")
+	}
+	if resolved.Custom.Env["PROFILE"] != sourceValue || resolved.Custom.Kwargs["region"] != sourceValue ||
+		resolved.Custom.Local.Args[0] != "--source" || resolved.Custom.HTTP.Headers["X-Profile"] != sourceValue ||
+		resolved.Custom.HTTP.Files[0].Path != "source.txt" || !*resolved.Custom.HTTP.Files[0].Required {
+		t.Fatalf("resolved custom config changed after source mutation: %#v", resolved.Custom)
+	}
+	if got := requestBodyProfile(t, resolved.Custom.HTTP.RequestBody)["profile"]; got != sourceValue {
+		t.Fatalf("resolved request body profile = %v, want %s", got, sourceValue)
+	}
+}
+
+func requestBodyProfile(t *testing.T, body any) map[string]any {
+	t.Helper()
+
+	bodyMap, ok := body.(map[string]any)
+	if !ok {
+		t.Fatalf("request body = %T, want map[string]any", body)
+	}
+	items, ok := bodyMap["items"].([]any)
+	if !ok || len(items) == 0 {
+		t.Fatalf("request body items = %#v, want non-empty []any", bodyMap["items"])
+	}
+	profile, ok := items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("request body item = %T, want map[string]any", items[0])
+	}
+	return profile
+}
+
 func captureLogOutput(t *testing.T, fn func()) string {
 	t.Helper()
 
@@ -494,6 +564,32 @@ func TestResolveJudgeConfig_InheritsRunnerLifecycleWithoutAliasingKwargs(t *test
 	runner.ModelParams["reasoning"] = "low"
 	if resolved.Kwargs["bypass_sandbox"] != "true" || resolved.ModelParams["reasoning"] != "high" {
 		t.Fatalf("judge config aliases runner maps: kwargs=%v params=%v", resolved.Kwargs, resolved.ModelParams)
+	}
+}
+
+func TestResolveJudgeConfig_DoesNotAliasRunnerCustomConfig(t *testing.T) {
+	runner := ResolvedAgentConfig{
+		Role:   AgentRoleRunner,
+		Engine: "my-agent",
+		Custom: &config.CustomEngineConfig{
+			Transport: "local",
+			Env:       map[string]string{"PROFILE": "runner"},
+			Local: &config.CustomLocalConfig{
+				Command: "agent",
+				Args:    []string{"--runner"},
+			},
+		},
+	}
+
+	resolved := ResolveJudgeConfig(config.JudgeConfig{Type: "agent_judge"}, runner, nil)
+	runner.Custom.Env["PROFILE"] = "mutated"
+	runner.Custom.Local.Args[0] = "--mutated"
+
+	if resolved.Custom == runner.Custom || resolved.Custom.Local == runner.Custom.Local {
+		t.Fatal("judge custom config retains runner pointers")
+	}
+	if resolved.Custom.Env["PROFILE"] != "runner" || resolved.Custom.Local.Args[0] != "--runner" {
+		t.Fatalf("judge custom config changed after runner mutation: %#v", resolved.Custom)
 	}
 }
 

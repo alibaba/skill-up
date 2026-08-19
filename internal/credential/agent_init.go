@@ -7,6 +7,7 @@ import (
 
 	"github.com/alibaba/skill-up/internal/agentkind"
 	"github.com/alibaba/skill-up/internal/config"
+	"github.com/alibaba/skill-up/internal/customengine"
 	"github.com/alibaba/skill-up/internal/logging"
 )
 
@@ -40,8 +41,8 @@ const (
 
 // ResolvedAgentConfig is the role-aware configuration passed into agent initialization.
 // It is built once after YAML, CLI, environment, and credential-file inputs are
-// available. Maps are cloned during construction so later mutations of EvalConfig
-// cannot change an already resolved value.
+// available. Mutable data is cloned during construction so later mutations of
+// EvalConfig cannot change an already resolved value.
 type ResolvedAgentConfig struct {
 	Role    AgentRole
 	Engine  string
@@ -141,7 +142,7 @@ func resolveResolvedAgentConfig(in agentResolveInput) ResolvedAgentConfig {
 	// A built-in engine ignores any engine.custom block, so it is not carried
 	// into the init params — otherwise downstream logic (e.g. the model "auto"
 	// strip) would mistake a built-in engine for a custom one.
-	custom := in.engine.Custom
+	custom := customengine.CloneConfig(in.engine.Custom)
 	if config.IsBuiltinEngineName(in.engine.Name) {
 		custom = nil
 	}
