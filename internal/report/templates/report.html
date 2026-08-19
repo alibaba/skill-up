@@ -569,7 +569,7 @@
         if (!exp.passed && exp.diagnosis) {
           var d = exp.diagnosis;
           html += '<div class="assertion-diagnosis">';
-          html += '<div class="assertion-diagnosis-label">AI-generated likely cause: ' + esc(d.failure_attribution) + ' (confidence: ' + esc(d.confidence || "low") + ')</div>';
+          html += '<div class="assertion-diagnosis-label">Likely cause: ' + esc(d.failure_attribution) + ' (confidence: ' + esc(d.confidence || "low") + ')</div>';
           html += '<div class="assertion-diagnosis-row"><strong>Attribution evidence:</strong> ' + esc(d.attribution_evidence) + '</div>';
           html += '<div class="assertion-diagnosis-row"><strong>Improvement suggestion:</strong> ' + esc(d.improvement_suggestion) + '</div>';
           html += '</div>';

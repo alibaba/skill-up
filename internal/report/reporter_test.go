@@ -393,7 +393,7 @@ func TestHTMLReporter_ContainsAssertionDetails(t *testing.T) {
 	if !strings.Contains(content, "graceful") {
 		t.Fatal("html should contain failure evidence")
 	}
-	for _, want := range []string{"AI-generated likely cause", "skill_missing_info", "SKILL.md does not define graceful null handling", "Add a null-handling section to SKILL.md"} {
+	for _, want := range []string{"Likely cause", "skill_missing_info", "SKILL.md does not define graceful null handling", "Add a null-handling section to SKILL.md"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("html should contain diagnosis detail %q", want)
 		}
@@ -476,7 +476,7 @@ func TestMarkdownReporter_Write(t *testing.T) {
 		"### edge-case-null",
 		"output_contains: &#39;graceful&#39;",
 		"output does not contain &#39;graceful&#39;",
-		"AI-generated likely cause: skill_missing_info (confidence: high)",
+		"Likely cause: skill_missing_info (confidence: high)",
 		"Attribution evidence: SKILL.md does not define graceful null handling",
 		"Improvement suggestion: Add a null-handling section to SKILL.md",
 		"### error-case",
