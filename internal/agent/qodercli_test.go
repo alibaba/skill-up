@@ -154,6 +154,27 @@ func TestQoderCLIInstall_CNDefaultCommand(t *testing.T) {
 	}
 }
 
+func TestQoderCLIInstall_CNAddsDispatcherToPATH(t *testing.T) {
+	t.Parallel()
+
+	rt := &qoderTestRuntime{
+		workspace: t.TempDir(),
+		execResult: runtime.ExecResult{
+			ExitCode: 0,
+		},
+	}
+	ag := NewQoderCLIAgent(Config{
+		Kwargs: map[string]string{KwargEdition: qoderEditionCN},
+	})
+
+	if err := ag.Install(context.Background(), rt); err != nil {
+		t.Fatalf("Install returned error: %v", err)
+	}
+	if got := rt.mergedEnv["PATH"]; !strings.Contains(got, "/.qoder-cn/entry:") {
+		t.Fatalf("CN runtime PATH = %q, want .qoder-cn/entry", got)
+	}
+}
+
 //nolint:dupl // mirrors TestQwenCodeInstall_UsesDefaultCommand; the probe→install→PATH lifecycle is intentionally identical across CLI agents.
 func TestQoderCLIInstall_UsesDefaultCommand(t *testing.T) {
 	t.Parallel()
@@ -701,10 +722,13 @@ func (r *qoderTestRuntime) Exec(_ context.Context, command string, opts runtime.
 	// literal PATH and are NOT recorded as a real command. Exact-match
 	// the probe constant so unrelated `printf '%s' "$HOME/..."` tests
 	// aren't silently intercepted.
-	if command == qoderExecPathProbeCmd {
+	if command == qoderExecPathProbeCmd || command == qoderCNExecPathProbeCmd {
 		stdout := r.probeResponseStdout
 		if stdout == "" {
 			stdout = "/fake/.local/bin:/usr/bin"
+			if command == qoderCNExecPathProbeCmd {
+				stdout = "/fake/.qoder-cn/entry:/fake/.local/bin:/usr/bin"
+			}
 		}
 		return runtime.ExecResult{Stdout: stdout}, nil
 	}

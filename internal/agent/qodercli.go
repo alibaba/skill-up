@@ -30,6 +30,7 @@ type qoderCLIProfile struct {
 	exposeUsageEnv string
 	configDir      string
 	installURL     string
+	execPathProbe  string
 }
 
 const (
@@ -43,6 +44,11 @@ var supportedQoderModels = []string{"lite", "efficient", "auto", "performance", 
 // self-contained binary placed there by the official installer, not a node
 // script, so the nvm path is unneeded.
 const qoderExecPathProbeCmd = `printf '%s' "$HOME/.local/bin:$PATH"`
+
+// Qoder CLI CN installs the qodercn dispatcher under .qoder-cn/entry and the
+// underlying qoderclicn binary under .local/bin. Include both locations so a
+// fresh runtime can invoke qodercn without sourcing a modified shell profile.
+const qoderCNExecPathProbeCmd = `printf '%s' "$HOME/.qoder-cn/entry:$HOME/.local/bin:$PATH"`
 
 const (
 	qoderExposeTokenUsageEnv     = "QODER_EXPOSE_TOKEN_USAGE"   //nolint:gosec // environment variable name, not a credential
@@ -62,6 +68,7 @@ func qoderProfileForKwargs(kwargs map[string]string) qoderCLIProfile {
 			exposeUsageEnv: qoderExposeTokenUsageEnv,
 			configDir:      ".qoder",
 			installURL:     "https://qoder.com/install",
+			execPathProbe:  qoderExecPathProbeCmd,
 		}
 	case qoderEditionCN:
 		return qoderCLIProfile{
@@ -71,6 +78,7 @@ func qoderProfileForKwargs(kwargs map[string]string) qoderCLIProfile {
 			exposeUsageEnv: qoderCNExposeTokenUsageEnv,
 			configDir:      ".qoder-cn",
 			installURL:     "https://static.qoder.com.cn/qoder-cli-cn/install.sh",
+			execPathProbe:  qoderCNExecPathProbeCmd,
 		}
 	default:
 		logging.Warnf("qodercli ignores unsupported edition %q and uses %q", edition, qoderEditionGlobal)
@@ -390,7 +398,7 @@ func findQoderSessionFileInConfigDir(ctx context.Context, rt Runtime, configDir 
 //
 //nolint:dupl // each agent Install shares the same probe→merge→exec lifecycle; the deltas (probe const, default install cmd) are pulled out, leaving the orchestration intentionally similar.
 func (a *QoderCLIAgent) Install(ctx context.Context, rt Runtime) error {
-	a.probeAndMergePATH(ctx, rt, qoderExecPathProbeCmd)
+	a.probeAndMergePATH(ctx, rt, a.profile.execPathProbe)
 
 	opts := ExecOptions{Cwd: "/"}
 	opts = a.mergeExecOptionsEnv(ctx, opts, nil, nil)
