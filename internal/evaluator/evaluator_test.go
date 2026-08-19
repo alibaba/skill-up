@@ -1966,6 +1966,98 @@ func TestExecuteCase_JudgeCorrectionPreservesAttemptArtifactsOnSuccess(t *testin
 	}
 }
 
+func TestExecuteCase_CustomJudgeCorrectionSnapshotsFrameworkFiles(t *testing.T) { //nolint:funlen // Integration coverage intentionally exercises the real CustomAgent and evaluator artifact pipeline.
+	outputDir := t.TempDir()
+	scriptPath := filepath.Join(t.TempDir(), "custom-judge.sh")
+	script := `#!/bin/sh
+set -eu
+output_file=$2
+workspace=$3
+counter_file="$workspace/custom-judge-calls"
+call_count=0
+if [ -f "$counter_file" ]; then
+  call_count=$(cat "$counter_file")
+fi
+call_count=$((call_count + 1))
+printf '%s' "$call_count" > "$counter_file"
+mkdir -p "$(dirname "$output_file")"
+case "$call_count" in
+  1) result='{"exit_code":0,"final_message":"main result"}' ;;
+  2) result='{"exit_code":0,"final_message":"not-json"}' ;;
+  3) result='{"exit_code":0,"final_message":"{\"results\":[{\"criterion_id\":\"criterion-1\",\"passed\":true,\"evidence\":[\"corrected\"],\"failures\":[]}] }"}' ;;
+  *) exit 2 ;;
+esac
+printf '%s\n' "$result" > "$output_file"
+`
+	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
+		t.Fatalf("write custom engine script: %v", err)
+	}
+
+	rt := &runtime.NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatalf("create none runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+	customAgent := agent.NewCustomAgent(agent.Config{
+		Name: "custom-judge",
+		Custom: &config.CustomEngineConfig{
+			Transport: "local",
+			Local: &config.CustomLocalConfig{
+				Command:    "sh",
+				Args:       []string{scriptPath, "${input_file}", "${output_file}", "${workspace}"},
+				OutputFile: "${output_file}",
+			},
+		},
+	})
+	e := newTestEvaluator(EvalOptions{Agent: customAgent, OutputDir: outputDir})
+	passThreshold := 1.0
+	caseCfg := &config.CaseConfig{
+		ID:    "custom-judge-correction",
+		Title: "Custom Judge Correction",
+		Input: config.Input{Prompt: "main prompt"},
+		Judge: config.JudgeConfig{
+			Type:          "agent_judge",
+			Criteria:      []string{"configured criterion"},
+			PassThreshold: &passThreshold,
+		},
+	}
+
+	result := e.executeCase(context.Background(), caseCfg, "with_skill", rt, nil)
+	if result.Status != judge.StatusPass {
+		t.Fatalf("expected PASS status, got %s: %v", result.Status, result.Error)
+	}
+	if result.JudgeSession == nil || result.JudgeSession.Turns != 2 {
+		t.Fatalf("two independent Judge runs must report two turns, got %#v", result.JudgeSession)
+	}
+
+	judgeDir := filepath.Join(outputDir, caseCfg.ID, "with_skill", "outputs", "judge", "run")
+	firstInput := readTestFile(t, filepath.Join(judgeDir, "messages.json"))
+	retryInput := readTestFile(t, filepath.Join(judgeDir, "retry", "messages.json"))
+	firstOutput := readTestFile(t, filepath.Join(judgeDir, "session-result.json"))
+	retryOutput := readTestFile(t, filepath.Join(judgeDir, "retry", "session-result.json"))
+	if !strings.Contains(firstInput, "configured criterion") || strings.Contains(firstInput, "Agent Judge Output Correction") {
+		t.Fatalf("unexpected first Judge input snapshot: %s", firstInput)
+	}
+	if !strings.Contains(retryInput, "Agent Judge Output Correction") || !strings.Contains(retryInput, "not-json") {
+		t.Fatalf("retry input snapshot lost correction context: %s", retryInput)
+	}
+	if !strings.Contains(firstOutput, `"final_message":"not-json"`) {
+		t.Fatalf("first output snapshot was overwritten: %s", firstOutput)
+	}
+	if !strings.Contains(retryOutput, `criterion-1`) || strings.Contains(retryOutput, `"final_message":"not-json"`) {
+		t.Fatalf("unexpected retry output snapshot: %s", retryOutput)
+	}
+}
+
+func readTestFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(data)
+}
+
 func TestExecuteCase_CaseLevelJudge(t *testing.T) {
 	e := newTestEvaluator(EvalOptions{
 		Agent: &mockAgent{name: "test", output: "hello world"},

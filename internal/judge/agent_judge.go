@@ -162,7 +162,7 @@ func (j *AgentJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 		runErr = errors.New("agent returned no session result")
 	}
 	parentErr := parentCtx.Err()
-	persistAgentJudgeRawResponse(ctx, in.ArtifactDir, agentJudgeRawResponseAttempt1, firstSession)
+	persistAgentJudgeAttemptArtifacts(ctx, j.Runtime, in.ArtifactDir, in.ArtifactDir, agentJudgeRawResponseAttempt1, firstSession)
 	if callErr := j.agentCallError(ctx, runErr, firstSession, parentErr, "agent call"); callErr != nil {
 		return nil, &SessionResultError{Err: callErr, Session: firstSession}
 	}
@@ -192,7 +192,7 @@ func (j *AgentJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 		retryErr = errors.New("agent returned no session result")
 	}
 	parentErr = parentCtx.Err()
-	persistAgentJudgeRawResponse(ctx, in.ArtifactDir, agentJudgeRawResponseAttempt2, retrySession)
+	persistAgentJudgeAttemptArtifacts(ctx, j.Runtime, retryArtifactDir, in.ArtifactDir, agentJudgeRawResponseAttempt2, retrySession)
 	aggregateSession := aggregateAgentJudgeSessions(firstSession, retrySession, correctionMode)
 	if callErr := j.agentCallError(ctx, retryErr, retrySession, parentErr, "correction call"); callErr != nil {
 		return nil, &SessionResultError{
@@ -279,7 +279,7 @@ func (j *AgentJudge) runAgentJudgeCorrection(
 	sessionResult, err := j.Agent.Run(ctx, j.Runtime, opts, []transcript.Message{{
 		Role:    transcript.RoleUser,
 		Content: fallbackPrompt,
-		Turn:    2,
+		Turn:    1,
 	}})
 	return sessionResult, agentJudgeCorrectionIndependent, err
 }
@@ -290,6 +290,18 @@ func parseAgentJudgeResults(criteria []string, output string) ([]CriterionResult
 		return nil, fmt.Errorf("agent_judge failed to parse agent output: %w", err)
 	}
 	return validateAgentJudgeResponse(criteria, resp.Results)
+}
+
+func persistAgentJudgeAttemptArtifacts(
+	ctx context.Context,
+	rt runtime.Runtime,
+	attemptArtifactDir,
+	rawArtifactDir,
+	rawFileName string,
+	sessionResult *agent.SessionResult,
+) {
+	snapshotAgentJudgeAttemptArtifacts(ctx, rt, attemptArtifactDir, sessionResult)
+	persistAgentJudgeRawResponse(ctx, rawArtifactDir, rawFileName, sessionResult)
 }
 
 func persistAgentJudgeRawResponse(ctx context.Context, artifactDir, fileName string, sessionResult *agent.SessionResult) {
@@ -309,6 +321,50 @@ func persistAgentJudgeRawResponse(ctx context.Context, artifactDir, fileName str
 		sessionResult.Artifacts = &agent.SessionArtifacts{}
 	}
 	sessionResult.Artifacts.GeneratedFiles = appendUniqueString(sessionResult.Artifacts.GeneratedFiles, path)
+}
+
+// snapshotAgentJudgeAttemptArtifacts preserves runtime-backed artifacts before
+// a correction attempt can overwrite their workspace paths. Artifacts already
+// materialized inside the attempt directory are left untouched. Snapshot
+// failures are best-effort: the original path remains available to the
+// evaluator and the Judge result is not changed.
+func snapshotAgentJudgeAttemptArtifacts(
+	ctx context.Context,
+	rt runtime.Runtime,
+	artifactDir string,
+	sessionResult *agent.SessionResult,
+) {
+	if artifactDir == "" || sessionResult == nil || sessionResult.Artifacts == nil {
+		return
+	}
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		logging.WarnContextf(ctx, "agent_judge failed to create attempt artifact directory %s: %v", artifactDir, err)
+		return
+	}
+
+	generatedFiles := sessionResult.Artifacts.GeneratedFiles
+	for i, sourcePath := range generatedFiles {
+		if sourcePath == "" || pathWithinDir(sourcePath, artifactDir) {
+			continue
+		}
+		targetPath := filepath.Join(artifactDir, filepath.Base(sourcePath))
+		if err := rt.DownloadFile(ctx, sourcePath, targetPath); err != nil {
+			logging.WarnContextf(ctx, "agent_judge failed to snapshot attempt artifact %s to %s: %v", sourcePath, targetPath, err)
+			continue
+		}
+		generatedFiles[i] = targetPath
+	}
+	sessionResult.Artifacts.GeneratedFiles = appendUniqueStrings(nil, generatedFiles)
+}
+
+func pathWithinDir(path, dir string) bool {
+	cleanPath := filepath.Clean(path)
+	cleanDir := filepath.Clean(dir)
+	if !filepath.IsAbs(cleanPath) || !filepath.IsAbs(cleanDir) {
+		return false
+	}
+	rel, err := filepath.Rel(cleanDir, cleanPath)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func aggregateAgentJudgeSessions(first, second *agent.SessionResult, correctionMode agentJudgeCorrectionMode) *agent.SessionResult {

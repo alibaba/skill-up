@@ -968,7 +968,7 @@ func TestAgentJudge_CorrectionRetryFallbackSucceeds(t *testing.T) { //nolint:cyc
 		t.Fatalf("expected one serialized fallback user message, got %#v", ag.allMessages)
 	}
 	fallback := ag.allMessages[1][0]
-	if fallback.Role != transcript.RoleUser {
+	if fallback.Role != transcript.RoleUser || fallback.Turn != 1 {
 		t.Fatalf("unexpected fallback role: %#v", fallback)
 	}
 	encodedFirstOutput, err := json.Marshal(firstOutput)
@@ -1053,7 +1053,8 @@ func TestAgentJudge_ResumerWithoutSessionIDUsesFallbackHistory(t *testing.T) {
 	if base.runCalls != 2 || ag.turnCalls != 0 {
 		t.Fatalf("empty session ID must use Run fallback, got Run=%d RunTurn=%d", base.runCalls, ag.turnCalls)
 	}
-	if len(base.allMessages) != 2 || len(base.allMessages[1]) != 1 || base.allMessages[1][0].Role != transcript.RoleUser {
+	if len(base.allMessages) != 2 || len(base.allMessages[1]) != 1 ||
+		base.allMessages[1][0].Role != transcript.RoleUser || base.allMessages[1][0].Turn != 1 {
 		t.Fatalf("expected one serialized fallback user message, got %#v", base.allMessages)
 	}
 }
