@@ -32,6 +32,32 @@ func userMessages() []transcript.Message {
 	return []transcript.Message{{Role: transcript.RoleUser, Content: "review the diff"}}
 }
 
+func TestCustomAgent_RunLocal_PromptPreservesSerializedCorrection(t *testing.T) {
+	t.Parallel()
+	rt := newCustomTestRuntime(t)
+	correctionEnvelope := "original judge request\nprevious invalid response\ncorrection instructions"
+	ag := customLocalAgent(&config.CustomEngineConfig{
+		Transport:      "local",
+		ResponseFormat: "text",
+		Local: &config.CustomLocalConfig{
+			Command: "printf",
+			Args:    []string{"%s", "${prompt}"},
+		},
+	})
+
+	result, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{
+		Role:    transcript.RoleUser,
+		Content: correctionEnvelope,
+		Turn:    2,
+	}})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.FinalMessage != correctionEnvelope {
+		t.Fatalf("custom ${prompt} lost correction context: got %q want %q", result.FinalMessage, correctionEnvelope)
+	}
+}
+
 func TestCustomAgent_RunLocal_StdoutSessionResult(t *testing.T) {
 	t.Parallel()
 	rt := newCustomTestRuntime(t)

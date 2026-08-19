@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agent_judge` now uses stable criterion IDs and a strict JSON response
   contract, rejects malformed or semantically incomplete judge output, and
   always derives report labels and ordering from configured criteria.
+- `agent_judge` now makes one bounded output-correction attempt after strict
+  decoding or semantic validation fails. Both raw responses are preserved,
+  retry engine artifacts are isolated under `outputs/judge/run/retry/`, and
+  runtime-backed artifacts are snapshotted before a retry can overwrite them.
+  Independent correction runs begin at turn one, while aggregate Judge duration
+  and usage metrics cover the complete correction flow without changing report
+  schemas.
 - HTML and Markdown reports now identify the top-level duration as evaluation
   wall time and show per-case tested-agent execution time plus input, output,
   and total token usage. Benchmark cases include compact with-Skill,

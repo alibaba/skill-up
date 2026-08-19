@@ -158,6 +158,13 @@ Artifacts include:
 - `stdout.txt` — standard output
 - `*.jsonl` — trace files
 
+For `agent_judge`, artifacts live under `outputs/judge/run/`. The first engine
+artifact paths remain unchanged and `raw-response-attempt-1.txt` is always
+written. When strict output correction is needed, the directory also contains
+`raw-response-attempt-2.txt` and a `retry/` subdirectory for the second engine
+invocation. Evaluator preserves this layout on both successful corrections and
+final Judge errors.
+
 ---
 
 ## Orchestration Flow
