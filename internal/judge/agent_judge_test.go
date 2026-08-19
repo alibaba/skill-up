@@ -3,6 +3,7 @@ package judge
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -963,20 +964,29 @@ func TestAgentJudge_CorrectionRetryFallbackSucceeds(t *testing.T) { //nolint:cyc
 	if ag.runCalls != 2 {
 		t.Fatalf("expected one correction retry, got %d calls", ag.runCalls)
 	}
-	if len(ag.allMessages) != 2 || len(ag.allMessages[1]) != 3 {
-		t.Fatalf("expected original/assistant/correction fallback history, got %#v", ag.allMessages)
+	if len(ag.allMessages) != 2 || len(ag.allMessages[1]) != 1 {
+		t.Fatalf("expected one serialized fallback user message, got %#v", ag.allMessages)
 	}
-	fallback := ag.allMessages[1]
-	if fallback[0].Role != transcript.RoleUser || fallback[1].Role != transcript.RoleAssistant || fallback[2].Role != transcript.RoleUser {
-		t.Fatalf("unexpected fallback roles: %#v", fallback)
+	fallback := ag.allMessages[1][0]
+	if fallback.Role != transcript.RoleUser {
+		t.Fatalf("unexpected fallback role: %#v", fallback)
 	}
-	if fallback[1].Content != firstOutput {
-		t.Fatalf("fallback assistant message did not preserve raw output: %q", fallback[1].Content)
+	encodedFirstOutput, err := json.Marshal(firstOutput)
+	if err != nil {
+		t.Fatalf("marshal first output: %v", err)
 	}
-	if !strings.Contains(fallback[2].Content, `"criterion_id": "criterion-1"`) ||
-		!strings.Contains(fallback[2].Content, "is missing passed") ||
-		!strings.Contains(fallback[2].Content, "Required result fields with exact casing") {
-		t.Fatalf("correction prompt is missing contract guidance: %q", fallback[2].Content)
+	if !strings.Contains(fallback.Content, string(encodedFirstOutput)) {
+		t.Fatalf("fallback message did not preserve raw output: %q", fallback.Content)
+	}
+	if !strings.Contains(fallback.Content, "configured first") ||
+		!strings.Contains(fallback.Content, `"criterion_id": "criterion-1"`) ||
+		!strings.Contains(fallback.Content, "is missing passed") ||
+		!strings.Contains(fallback.Content, "Required result fields with exact casing") {
+		t.Fatalf("serialized fallback is missing correction context: %q", fallback.Content)
+	}
+	renderedInstruction := agent.BuildInstructionFromMessages(ag.allMessages[1])
+	if renderedInstruction != strings.TrimSpace(fallback.Content) || !strings.Contains(renderedInstruction, string(encodedFirstOutput)) {
+		t.Fatalf("CLI adapter input lost the invalid response: %q", renderedInstruction)
 	}
 	if len(ag.artifactDirs) != 2 || ag.artifactDirs[0] != artifactDir || ag.artifactDirs[1] != filepath.Join(artifactDir, agentJudgeRetryArtifactDir) {
 		t.Fatalf("unexpected attempt artifact dirs: %#v", ag.artifactDirs)
@@ -1043,8 +1053,8 @@ func TestAgentJudge_ResumerWithoutSessionIDUsesFallbackHistory(t *testing.T) {
 	if base.runCalls != 2 || ag.turnCalls != 0 {
 		t.Fatalf("empty session ID must use Run fallback, got Run=%d RunTurn=%d", base.runCalls, ag.turnCalls)
 	}
-	if len(base.allMessages) != 2 || len(base.allMessages[1]) != 3 {
-		t.Fatalf("expected three-message fallback history, got %#v", base.allMessages)
+	if len(base.allMessages) != 2 || len(base.allMessages[1]) != 1 || base.allMessages[1][0].Role != transcript.RoleUser {
+		t.Fatalf("expected one serialized fallback user message, got %#v", base.allMessages)
 	}
 }
 
@@ -1180,7 +1190,7 @@ func TestAgentJudge_CorrectionCallErrors(t *testing.T) {
 	})
 }
 
-func TestAggregateAgentJudgeSessionsMetrics(t *testing.T) {
+func TestAggregateAgentJudgeSessionsMetrics(t *testing.T) { //nolint:cyclop,gocyclo // Subtests cover resumed and independent aggregation modes together.
 	firstTranscript := transcript.Transcript{{Role: transcript.RoleUser, Content: "original", Turn: 1}}
 	firstDelivery := &agent.PromptDeliveryMetadata{Mode: "file", PromptBytes: 101}
 	first := &agent.SessionResult{
@@ -1216,7 +1226,7 @@ func TestAggregateAgentJudgeSessionsMetrics(t *testing.T) {
 				Logs: "second log",
 			},
 		}
-		got := aggregateAgentJudgeSessions(first, second)
+		got := aggregateAgentJudgeSessions(first, second, agentJudgeCorrectionResumed)
 		if got.DurationMs != 22 || got.Turns != 2 || got.InputTokens != 35 || got.OutputTokens != 9 {
 			t.Fatalf("unexpected cumulative metrics: %#v", got)
 		}
@@ -1236,9 +1246,24 @@ func TestAggregateAgentJudgeSessionsMetrics(t *testing.T) {
 			OutputTokens: 3,
 			Transcript:   transcript.Transcript{{Role: transcript.RoleUser, Content: "fresh", Turn: 1}},
 		}
-		got := aggregateAgentJudgeSessions(first, second)
+		got := aggregateAgentJudgeSessions(first, second, agentJudgeCorrectionIndependent)
 		if got.DurationMs != 22 || got.Turns != 2 || got.InputTokens != 27 || got.OutputTokens != 8 {
 			t.Fatalf("unexpected independent metrics: %#v", got)
+		}
+	})
+
+	t.Run("independent transcript prefix still sums metrics", func(t *testing.T) {
+		second := &agent.SessionResult{
+			DurationMs:   12,
+			Turns:        2,
+			InputTokens:  35,
+			OutputTokens: 9,
+			Transcript: append(append(transcript.Transcript(nil), firstTranscript...),
+				transcript.Message{Role: transcript.RoleAssistant, Content: "fresh run", Turn: 2}),
+		}
+		got := aggregateAgentJudgeSessions(first, second, agentJudgeCorrectionIndependent)
+		if got.DurationMs != 22 || got.Turns != 3 || got.InputTokens != 55 || got.OutputTokens != 14 {
+			t.Fatalf("independent prefix-shaped transcript must sum metrics: %#v", got)
 		}
 	})
 }

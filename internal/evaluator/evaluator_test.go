@@ -1832,8 +1832,10 @@ func TestExecuteCase_JudgeErrorDownloadsJudgeArtifacts(t *testing.T) { //nolint:
 			if filepath.Base(opts.ArtifactDir) != "retry" {
 				t.Fatalf("correction ArtifactDir = %q, want retry subdirectory", opts.ArtifactDir)
 			}
-			if len(messages) != 3 || !strings.Contains(messages[2].Content, "Agent Judge Output Correction") {
-				t.Fatalf("expected correction fallback history, got %#v", messages)
+			if len(messages) != 1 || messages[0].Role != transcript.RoleUser ||
+				!strings.Contains(messages[0].Content, "Agent Judge Output Correction") ||
+				!strings.Contains(messages[0].Content, `API Error: 400 rate limit`) {
+				t.Fatalf("expected serialized correction fallback, got %#v", messages)
 			}
 			if err := os.WriteFile(filepath.Join(rt.Workspace(), "judge-retry-stdout.json"), []byte(`{"error":"invalid correction"}`), 0o600); err != nil {
 				t.Fatalf("write retry judge artifact: %v", err)
@@ -1889,7 +1891,7 @@ func TestExecuteCase_JudgeErrorDownloadsJudgeArtifacts(t *testing.T) { //nolint:
 	}
 }
 
-func TestExecuteCase_JudgeCorrectionPreservesAttemptArtifactsOnSuccess(t *testing.T) { //nolint:cyclop // End-to-end evaluator assertion covers the full artifact layout.
+func TestExecuteCase_JudgeCorrectionPreservesAttemptArtifactsOnSuccess(t *testing.T) { //nolint:cyclop,gocyclo // End-to-end evaluator assertion covers the full artifact layout.
 	t.Parallel()
 
 	outputDir := t.TempDir()
@@ -1909,7 +1911,7 @@ func TestExecuteCase_JudgeCorrectionPreservesAttemptArtifactsOnSuccess(t *testin
 				Artifacts:    &agent.SessionArtifacts{GeneratedFiles: []string{path}},
 			}, nil
 		case 3:
-			if len(messages) != 3 || filepath.Base(opts.ArtifactDir) != "retry" {
+			if len(messages) != 1 || messages[0].Role != transcript.RoleUser || filepath.Base(opts.ArtifactDir) != "retry" {
 				t.Fatalf("unexpected correction call: dir=%q messages=%#v", opts.ArtifactDir, messages)
 			}
 			if err := os.MkdirAll(opts.ArtifactDir, 0o755); err != nil {

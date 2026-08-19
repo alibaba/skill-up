@@ -199,7 +199,7 @@ Rule assertions:
 - Provides the internal helper `buildJudgePrompt()` to construct the evaluation prompt
 - Accepts one strict JSON object, optionally wrapped in one complete JSON code fence; unknown fields and trailing content are rejected
 - Retries exactly once when strict decoding or semantic validation fails. The retry shares the original timeout budget and only asks the Judge agent to correct its output contract.
-- Resumes the Judge session when the agent exposes `SessionResumer` and a session ID; otherwise it replays the original prompt, raw response, and correction prompt as a three-message history.
+- Resumes the Judge session when the agent exposes `SessionResumer` and a session ID; otherwise it serializes the original prompt, raw response, and correction instructions into one user message so single-instruction adapters preserve the complete context.
 - Does not retry a valid FAIL judgment, explicit context cancellation, context materialization failure, or an agent error without a recoverable response.
 - Persists every raw Judge response without rewriting it. The first engine artifacts remain at their existing paths and retry engine artifacts use a `retry/` subdirectory:
 

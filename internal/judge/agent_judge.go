@@ -29,6 +29,13 @@ const (
 	agentJudgeRetryArtifactDir    = "retry"
 )
 
+type agentJudgeCorrectionMode uint8
+
+const (
+	agentJudgeCorrectionIndependent agentJudgeCorrectionMode = iota
+	agentJudgeCorrectionResumed
+)
+
 // ---------------------------------------------------------------------------
 // Data types for agent_judge JSON parsing
 // ---------------------------------------------------------------------------
@@ -180,13 +187,13 @@ func (j *AgentJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 	if in.ArtifactDir != "" {
 		retryArtifactDir = filepath.Join(in.ArtifactDir, agentJudgeRetryArtifactDir)
 	}
-	retrySession, retryErr := j.runAgentJudgeCorrection(ctx, firstSession, messages, correctionPrompt, retryArtifactDir)
+	retrySession, correctionMode, retryErr := j.runAgentJudgeCorrection(ctx, firstSession, prompt, correctionPrompt, retryArtifactDir)
 	if retrySession == nil && retryErr == nil {
 		retryErr = errors.New("agent returned no session result")
 	}
 	parentErr = parentCtx.Err()
 	persistAgentJudgeRawResponse(ctx, in.ArtifactDir, agentJudgeRawResponseAttempt2, retrySession)
-	aggregateSession := aggregateAgentJudgeSessions(firstSession, retrySession)
+	aggregateSession := aggregateAgentJudgeSessions(firstSession, retrySession, correctionMode)
 	if callErr := j.agentCallError(ctx, retryErr, retrySession, parentErr, "correction call"); callErr != nil {
 		return nil, &SessionResultError{
 			Err: fmt.Errorf(
@@ -248,28 +255,33 @@ func (j *AgentJudge) agentCallError(ctx context.Context, err error, sessionResul
 func (j *AgentJudge) runAgentJudgeCorrection(
 	ctx context.Context,
 	firstSession *agent.SessionResult,
-	originalMessages []transcript.Message,
+	originalPrompt,
 	correctionPrompt,
 	artifactDir string,
-) (*agent.SessionResult, error) {
+) (*agent.SessionResult, agentJudgeCorrectionMode, error) {
 	opts := agent.ExecOptions{ArtifactDir: artifactDir}
 	if resumer, ok := j.Agent.(agent.SessionResumer); ok && firstSession != nil && firstSession.SessionID != "" {
-		return resumer.RunTurn(
+		sessionResult, err := resumer.RunTurn(
 			ctx,
 			j.Runtime,
 			opts,
 			transcript.Message{Role: transcript.RoleUser, Content: correctionPrompt, Turn: 2},
 			firstSession.SessionID,
 		)
+		return sessionResult, agentJudgeCorrectionResumed, err
 	}
 
-	messages := make([]transcript.Message, 0, len(originalMessages)+2)
-	messages = append(messages, originalMessages...)
+	invalidResponse := ""
 	if firstSession != nil {
-		messages = append(messages, transcript.Message{Role: transcript.RoleAssistant, Content: firstSession.FinalMessage, Turn: 1})
+		invalidResponse = firstSession.FinalMessage
 	}
-	messages = append(messages, transcript.Message{Role: transcript.RoleUser, Content: correctionPrompt, Turn: 2})
-	return j.Agent.Run(ctx, j.Runtime, opts, messages)
+	fallbackPrompt := buildAgentJudgeFallbackCorrectionPrompt(originalPrompt, invalidResponse, correctionPrompt)
+	sessionResult, err := j.Agent.Run(ctx, j.Runtime, opts, []transcript.Message{{
+		Role:    transcript.RoleUser,
+		Content: fallbackPrompt,
+		Turn:    2,
+	}})
+	return sessionResult, agentJudgeCorrectionIndependent, err
 }
 
 func parseAgentJudgeResults(criteria []string, output string) ([]CriterionResult, error) {
@@ -299,7 +311,7 @@ func persistAgentJudgeRawResponse(ctx context.Context, artifactDir, fileName str
 	sessionResult.Artifacts.GeneratedFiles = appendUniqueString(sessionResult.Artifacts.GeneratedFiles, path)
 }
 
-func aggregateAgentJudgeSessions(first, second *agent.SessionResult) *agent.SessionResult {
+func aggregateAgentJudgeSessions(first, second *agent.SessionResult, correctionMode agentJudgeCorrectionMode) *agent.SessionResult {
 	if first == nil {
 		return second
 	}
@@ -309,7 +321,7 @@ func aggregateAgentJudgeSessions(first, second *agent.SessionResult) *agent.Sess
 
 	aggregate := *second
 	aggregate.DurationMs = first.DurationMs + second.DurationMs
-	if judgeSessionMetricsAreCumulative(first, second) {
+	if correctionMode == agentJudgeCorrectionResumed && judgeSessionMetricsAreCumulative(first, second) {
 		aggregate.InputTokens = max(first.InputTokens, second.InputTokens)
 		aggregate.OutputTokens = max(first.OutputTokens, second.OutputTokens)
 		aggregate.Turns = max(first.Turns, second.Turns)
@@ -747,6 +759,23 @@ func buildAgentJudgeCorrectionPrompt(criteria []string, validationErr error) str
 	sb.WriteString("Use every configured criterion_id exactly once. Evidence must be a non-empty string array. ")
 	sb.WriteString("Failures must be empty when passed is true and non-empty when passed is false.\n")
 	appendRequiredResponseFormat(&sb, criteria)
+	return sb.String()
+}
+
+func buildAgentJudgeFallbackCorrectionPrompt(originalPrompt, invalidResponse, correctionPrompt string) string {
+	encodedResponse, err := json.Marshal(invalidResponse)
+	if err != nil {
+		encodedResponse = []byte(`""`)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("This is a serialized correction retry for a previous agent_judge evaluation.\n\n")
+	sb.WriteString("## Original Judge Request\n\n")
+	sb.WriteString(originalPrompt)
+	sb.WriteString("\n\n## Previous Invalid Response (JSON string)\n\n")
+	sb.Write(encodedResponse)
+	sb.WriteString("\n\n")
+	sb.WriteString(correctionPrompt)
 	return sb.String()
 }
 
