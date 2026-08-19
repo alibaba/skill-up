@@ -22,11 +22,15 @@ Language: English | [中文](zh/0005-skill-evaluation-event-protocol.md)
   - [Event Envelope](#event-envelope)
   - [Initial Event Types](#initial-event-types)
   - [Payload Field Definitions](#payload-field-definitions)
+  - [Internal Event Model](#internal-event-model)
   - [Task Progress Model](#task-progress-model)
+  - [Task Planning and Lifecycle Emitter](#task-planning-and-lifecycle-emitter)
   - [Example Stream](#example-stream)
   - [Consumer Rules](#consumer-rules)
   - [Sink and Transport Model](#sink-and-transport-model)
   - [JSONL File Semantics](#jsonl-file-semantics)
+  - [Command-Line Contract](#command-line-contract)
+  - [Command Execution Flow](#command-execution-flow)
   - [Failure Semantics](#failure-semantics)
   - [Notes/Constraints/Caveats](#notesconstraintscaveats)
   - [Risks and Mitigations](#risks-and-mitigations)
@@ -177,11 +181,139 @@ optional field with no value is omitted rather than encoded as `null`.
 | iteration and run completion events | `passed`, `failed`, `errored`, `skipped` | integer | Non-negative task counts; iteration-scoped on `iteration_completed` and invocation-scoped on `run_finished` |
 | `run_finished` | `status` | string | Exactly `COMPLETED`, `ERROR`, or `CANCELLED` |
 
+Each `duration_ms` is monotonic wall-clock elapsed time between its matching
+started and completed/finished lifecycle boundaries. Case duration covers all
+work after `case_started`, including agent execution and judging; it is not the
+existing agent-only `EvalResult.DurationMs`. Iteration and run durations are
+not sums of child durations because tasks may execute concurrently.
+
 `COMPLETED` is a lifecycle state: all planned tasks reached a terminal case
 status. It does not mean every case passed and does not by itself imply a zero
 command exit code. `ERROR` means an invocation-level failure prevented normal
 completion; `CANCELLED` means the invocation stopped after cancellation.
 Result counts remain authoritative for case outcomes.
+
+### Internal Event Model
+
+The first implementation should keep the event system internal while the
+wire contract stabilizes. The proposed package is `internal/evalevent`; v1
+does not add types to the semver-stable `pkg/` API.
+
+The concrete Go model should use typed payload values rather than
+`map[string]any`. The following definitions are illustrative of the intended
+API; JSON tags and wire values are normative:
+
+```go
+type Type string
+
+const (
+    SchemaVersion  uint64 = 1
+    MaxSafeInteger uint64 = 9007199254740991
+)
+
+const (
+    EventRunStarted         Type = "run_started"
+    EventIterationStarted   Type = "iteration_started"
+    EventCaseStarted        Type = "case_started"
+    EventCaseCompleted      Type = "case_completed"
+    EventIterationCompleted Type = "iteration_completed"
+    EventRunFinished        Type = "run_finished"
+)
+
+type Configuration string
+type CaseStatus string
+type RunStatus string
+
+const (
+    ConfigurationWithSkill    Configuration = "with_skill"
+    ConfigurationWithoutSkill Configuration = "without_skill"
+
+    CaseStatusPass  CaseStatus = "PASS"
+    CaseStatusFail  CaseStatus = "FAIL"
+    CaseStatusError CaseStatus = "ERROR"
+    CaseStatusSkip  CaseStatus = "SKIP"
+
+    RunStatusCompleted RunStatus = "COMPLETED"
+    RunStatusError     RunStatus = "ERROR"
+    RunStatusCancelled RunStatus = "CANCELLED"
+)
+
+type Payload interface {
+    eventType() Type
+}
+
+type Event struct {
+    SchemaVersion  uint64    `json:"schema_version"`
+    SequenceNumber uint64    `json:"sequence_number"`
+    InvocationID   string    `json:"invocation_id"`
+    Time           time.Time `json:"time"`
+    Type           Type      `json:"event"`
+    LastEvent      bool      `json:"last_event,omitempty"`
+    Payload        Payload   `json:"payload"`
+}
+
+type RunStartedPayload struct {
+    Engine          string `json:"engine"`
+    SkillName       string `json:"skill_name"`
+    TaskTotal       uint64 `json:"task_total"`
+    IterationsTotal uint64 `json:"iterations_total"`
+}
+
+type IterationStartedPayload struct {
+    Iteration uint64 `json:"iteration"`
+}
+
+type TaskFields struct {
+    TaskID        string        `json:"task_id"`
+    Iteration     uint64        `json:"iteration"`
+    CaseID        string        `json:"case_id"`
+    Configuration Configuration `json:"configuration"`
+    TaskIndex     uint64        `json:"task_index"`
+    TaskTotal     uint64        `json:"task_total"`
+    Title         string        `json:"title"`
+}
+
+type CaseStartedPayload struct {
+    TaskFields
+}
+
+type CaseCompletedPayload struct {
+    TaskFields
+    CompletedTasks uint64     `json:"completed_tasks"`
+    Status         CaseStatus `json:"status"`
+    PassRate       *float64   `json:"pass_rate,omitempty"`
+    DurationMS     uint64     `json:"duration_ms"`
+}
+
+type ResultCounts struct {
+    Passed  uint64 `json:"passed"`
+    Failed  uint64 `json:"failed"`
+    Errored uint64 `json:"errored"`
+    Skipped uint64 `json:"skipped"`
+}
+
+type IterationCompletedPayload struct {
+    Iteration      uint64 `json:"iteration"`
+    CompletedTasks uint64 `json:"completed_tasks"`
+    ResultCounts
+    DurationMS uint64 `json:"duration_ms"`
+}
+
+type RunFinishedPayload struct {
+    Status         RunStatus `json:"status"`
+    CompletedTasks uint64    `json:"completed_tasks"`
+    ResultCounts
+    DurationMS uint64 `json:"duration_ms"`
+}
+```
+
+`PassRate` is a pointer because zero is valid while unavailable values must be
+omitted. Constructors and the publisher validate safe-integer ranges and enum
+values before publication. `Payload.eventType` lets the publisher derive
+`Event.Type`, preventing a payload/type mismatch. The publisher alone sets the
+envelope fields and `LastEvent`; callers cannot override them. It generates
+one UUID for the invocation and converts timestamps to UTC so `time.Time`
+encodes with the required `Z` offset.
 
 ### Task Progress Model
 
@@ -220,6 +352,63 @@ completed_tasks == task_total
 An `ERROR` or `CANCELLED` invocation may finish gracefully with
 `completed_tasks < task_total`. These rules let CI display unambiguous progress
 even with benchmark mode, multiple iterations, and parallel execution.
+
+### Task Planning and Lifecycle Emitter
+
+The implementation must build one immutable invocation-wide task plan before
+opening the event stream. The plan resolves:
+
+- the final output directory, start iteration, and iteration count;
+- selected cases after include/exclude filtering;
+- benchmark expansion (`with_skill`, followed by `without_skill` when
+  enabled); and
+- one global `task_index`, `task_id`, and `task_total` for every expanded task.
+
+Plan order is deterministic: iteration number ascending, filtered case order,
+then `with_skill` before `without_skill`. The canonical v1 task ID is:
+
+```text
+iteration-<iteration>/<case_id>/<configuration>
+```
+
+Case IDs are already validated not to contain path separators. Task start and
+completion events may appear in any order under concurrency, but their planned
+identity never changes. The runner must execute this plan rather than
+recompute a second task list; event totals and actual work therefore cannot
+drift apart.
+
+An invocation-scoped lifecycle emitter sits above the generic publisher. It
+owns the plan, a mutex, started/completed task sets, invocation counts, and
+per-iteration counts. Its proposed operations are:
+
+```go
+Start(ctx, engine, skillName)
+IterationStarted(ctx, iteration)
+CaseStarted(ctx, plannedTask)
+CaseCompleted(ctx, plannedTask, status, passRate, duration)
+IterationCompleted(ctx, iteration, duration)
+Finish(ctx, runStatus, duration)
+```
+
+The emitter serializes each lifecycle state transition together with event
+publication. This is required because incrementing `completed_tasks` outside
+the publication order could produce a later sequence number with a smaller
+counter. It also rejects duplicate starts or completions, unknown tasks,
+events before `run_started`, and events after `run_finished`.
+
+Every scheduled iteration emits one `iteration_started` before any of its case
+events. It emits `iteration_completed` only after all tasks planned for that
+iteration reach a terminal case status; an interrupted iteration may omit it.
+Every task that starts emits exactly one `case_started` followed by exactly one
+`case_completed`, including tasks mapped to `ERROR` or `SKIP`. Tasks never
+started because of invocation error or cancellation emit neither case event.
+
+`CaseCompleted` increments invocation and iteration counts exactly once.
+`IterationCompleted` and `Finish` derive their payload counts from emitter
+state rather than caller-supplied counters. `Finish(COMPLETED)` validates that
+all planned tasks completed; `ERROR` and `CANCELLED` allow unfinished tasks.
+The existing `ProgressObserver` remains unchanged and only drives terminal UI;
+it is not a source of protocol identity or aggregate progress.
 
 ### Example Stream
 
@@ -264,6 +453,17 @@ type EventSink interface {
 }
 ```
 
+The concrete publisher API is expected to provide `Publish`, `Err`, and
+`Close`. `Publish` accepts a typed `Payload`, constructs one fully enveloped
+event, fans it out, and records per-sink sticky errors. `Err` returns their
+`errors.Join` aggregate without clearing it. `Close` closes sinks that also
+implement `io.Closer`, records close failures in the same aggregate, and is
+idempotent.
+Lifecycle call sites may log a returned current-event error but must use
+`Err` during command finalization. Payloads are stored as values containing
+only scalar fields, and every sink receives a copy of the same immutable
+event.
+
 The CLI can fan out one event to a JSONL file sink, UI adapter, callback, OTLP
 adapter, socket, or future remote publisher. Existing stdout formatting stays
 unchanged and is not part of the event-log compatibility contract.
@@ -292,6 +492,67 @@ The future JSONL file sink must:
 A concurrently reading process may observe a partial final write, especially
 after a crash or disk failure. Consumers therefore must not parse an
 unterminated trailing record as a complete event.
+
+### Command-Line Contract
+
+Only `skill-up run` gains the flag:
+
+```text
+--event-log <path>   Write v1 evaluation events as JSON Lines to path
+```
+
+The v1 command contract is:
+
+- the flag is optional, takes one path value, and has no config-file or
+  environment-variable equivalent;
+- an empty value and `-` are rejected; stdout remains human-readable and is
+  never an event transport;
+- a relative path is resolved against the process working directory;
+- the parent directory must already exist; the command creates the file with
+  mode `0644` subject to the process umask, or truncates an existing file once;
+- no filename extension is required and one file contains one invocation;
+- the canonicalized path must not resolve inside any scheduled
+  `iteration-N` directory, because the runner deletes and recreates those
+  directories before evaluation;
+- `--event-log` and `--dry-run` are mutually exclusive in v1 because dry-run
+  executes no lifecycle tasks; and
+- when the flag is absent, event publishing is a no-op and existing stdout,
+  reports, and exit behavior remain unchanged.
+
+Planning and path validation occur before the file is opened, so an invalid
+plan cannot truncate an existing event log. Successful open and publication
+of `run_started` complete event-log startup. An open failure stops without an
+event stream. If `run_started` fan-out fails, the command attempts
+`run_finished` with `ERROR` on every still-healthy sink, closes the publisher,
+and stops before credentials are loaded or an agent is invoked.
+
+### Command Execution Flow
+
+`runEval` should be refactored around one explicit finalization path:
+
+1. Parse flags, load and validate configuration, apply filters and overrides.
+2. Reject an incompatible dry-run/event-log combination, then build the
+   immutable task plan.
+3. Validate and open the requested JSONL sink, create the publisher and
+   lifecycle emitter, and publish `run_started`. A first-event failure uses
+   the startup finalization behavior above.
+4. Load credentials and construct the agent. Any graceful failure from this
+   point produces `run_finished` with `ERROR`.
+5. Execute the planned iterations. The runner emits iteration boundaries and
+   the evaluator emits case boundaries using the plan metadata.
+6. Choose `COMPLETED` when every planned task reached a case terminal status,
+   `CANCELLED` for `context.Canceled` or `context.DeadlineExceeded`, and
+   `ERROR` for other invocation-level failures.
+7. Publish exactly one `run_finished`, close all sinks, and combine evaluation,
+   case-result, publisher, and close errors with `errors.Join`.
+
+Case failures and case errors do not change `COMPLETED` when every planned
+task ran; the existing `exitStatusError` still makes a relevant `with_skill`
+result fail the command. A sink error likewise does not rewrite lifecycle
+status, but its sticky error participates in the final non-zero command
+result. If the process is killed or panics before graceful finalization, the
+stream may end without `run_finished` as already defined by the consumer
+contract.
 
 ### Failure Semantics
 
@@ -339,6 +600,25 @@ JSONL file sink, an `EventSink` fan-out, and lifecycle publication at run,
 iteration, and case boundaries. It must not expand `ProgressObserver` with
 additional positional parameters.
 
+The intended implementation boundaries are:
+
+| Location | Responsibility |
+| --- | --- |
+| `internal/evalevent/event.go` | Envelope, event types, enums, and typed payloads |
+| `internal/evalevent/publisher.go` | Sequence assignment, ordered fan-out, sticky per-sink errors, and close aggregation |
+| `internal/evalevent/lifecycle.go` | Lifecycle state machine, task de-duplication, cumulative and per-iteration counts |
+| `internal/evalevent/jsonl.go` | Unbuffered newline-terminated file sink |
+| `internal/evaluator/plan.go` | Deterministic expanded task metadata shared by execution and events |
+| `internal/runner/runner.go` | Invocation and iteration boundaries; execute the immutable task plan |
+| `internal/evaluator/evaluator.go` | Case boundaries and result-to-event status mapping |
+| `internal/cli/run.go` | Flag validation, sink lifecycle, terminal status selection, and final error composition |
+
+`internal/evalevent` depends only on the standard library and UUID generation;
+it must not import CLI, runner, evaluator, judge, report, or UI packages.
+Runner/evaluator adapters map their domain types into event enums at the
+boundary. This keeps the wire layer acyclic and prevents event serialization
+from becoming coupled to terminal presentation.
+
 ## Test Plan
 
 For this documentation-only PR:
@@ -351,7 +631,13 @@ For this documentation-only PR:
 Future implementations must add serialization, unsupported-major rejection,
 concurrent publisher ordering, identical event identity across fan-out,
 per-sink sticky failure, partial trailing record, benchmark, multi-iteration,
-and end-to-end consumer tests.
+and end-to-end consumer tests. Command tests must additionally cover flag help,
+empty and `-` paths, dry-run incompatibility, relative-path resolution,
+existing-file truncation, missing parent directories, iteration-workspace
+collision, startup write failure, terminal close failure, and absence of
+behavioral changes when the flag is omitted. Lifecycle tests must cover
+credential failure after `run_started`, case failure with `COMPLETED`,
+cancellation, partially completed `ERROR`, and exactly one terminal event.
 
 ## Drawbacks
 

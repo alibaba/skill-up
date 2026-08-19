@@ -22,11 +22,15 @@ status: draft
   - [事件信封](#事件信封)
   - [首批事件类型](#首批事件类型)
   - [Payload 字段定义](#payload-字段定义)
+  - [内部事件模型](#内部事件模型)
   - [任务进度模型](#任务进度模型)
+  - [任务规划与生命周期 Emitter](#任务规划与生命周期-emitter)
   - [事件流示例](#事件流示例)
   - [消费规则](#消费规则)
   - [Sink 与传输模型](#sink-与传输模型)
   - [JSONL 文件语义](#jsonl-文件语义)
+  - [命令行契约](#命令行契约)
+  - [命令执行流程](#命令执行流程)
   - [失败语义](#失败语义)
   - [说明/约束/注意事项](#说明约束注意事项)
   - [风险与缓解](#风险与缓解)
@@ -163,9 +167,134 @@ skill-up run --event-log ./events.jsonl
 | Iteration 和 Run 完成事件 | `passed`、`failed`、`errored`、`skipped` | integer | 非负任务数；在 `iteration_completed` 中仅统计当前 iteration，在 `run_finished` 中统计整个 invocation |
 | `run_finished` | `status` | string | 必须为 `COMPLETED`、`ERROR` 或 `CANCELLED` |
 
+每个 `duration_ms` 都是对应 started 与 completed/finished 生命周期边界之间，基
+于单调时钟计算的墙上时间。Case 耗时覆盖 `case_started` 之后的全部工作，包括
+Agent 执行和 Judge；它不是现有仅包含 Agent 耗时的
+`EvalResult.DurationMs`。由于任务可以并发，Iteration 和 Run 耗时不是子任务耗
+时之和。
+
 `COMPLETED` 是生命周期状态，表示所有计划任务都已进入 Case 终态；它不表示所
 有 Case 都通过，也不单独保证命令退出码为零。`ERROR` 表示调用级错误阻止了正
 常完成；`CANCELLED` 表示调用因取消而停止。Case 结果以各状态计数为准。
+
+### 内部事件模型
+
+第一个实现应在传输格式契约稳定前把事件系统保留为内部能力。建议使用
+`internal/evalevent` 包；v1 不向遵循语义化版本的 `pkg/` 公共 API 增加类型。
+
+具体 Go 模型应使用强类型 payload，而不是 `map[string]any`。以下定义展示预期
+API；其中 JSON tag 和传输值具有规范性：
+
+```go
+type Type string
+
+const (
+    SchemaVersion  uint64 = 1
+    MaxSafeInteger uint64 = 9007199254740991
+)
+
+const (
+    EventRunStarted         Type = "run_started"
+    EventIterationStarted   Type = "iteration_started"
+    EventCaseStarted        Type = "case_started"
+    EventCaseCompleted      Type = "case_completed"
+    EventIterationCompleted Type = "iteration_completed"
+    EventRunFinished        Type = "run_finished"
+)
+
+type Configuration string
+type CaseStatus string
+type RunStatus string
+
+const (
+    ConfigurationWithSkill    Configuration = "with_skill"
+    ConfigurationWithoutSkill Configuration = "without_skill"
+
+    CaseStatusPass  CaseStatus = "PASS"
+    CaseStatusFail  CaseStatus = "FAIL"
+    CaseStatusError CaseStatus = "ERROR"
+    CaseStatusSkip  CaseStatus = "SKIP"
+
+    RunStatusCompleted RunStatus = "COMPLETED"
+    RunStatusError     RunStatus = "ERROR"
+    RunStatusCancelled RunStatus = "CANCELLED"
+)
+
+type Payload interface {
+    eventType() Type
+}
+
+type Event struct {
+    SchemaVersion  uint64    `json:"schema_version"`
+    SequenceNumber uint64    `json:"sequence_number"`
+    InvocationID   string    `json:"invocation_id"`
+    Time           time.Time `json:"time"`
+    Type           Type      `json:"event"`
+    LastEvent      bool      `json:"last_event,omitempty"`
+    Payload        Payload   `json:"payload"`
+}
+
+type RunStartedPayload struct {
+    Engine          string `json:"engine"`
+    SkillName       string `json:"skill_name"`
+    TaskTotal       uint64 `json:"task_total"`
+    IterationsTotal uint64 `json:"iterations_total"`
+}
+
+type IterationStartedPayload struct {
+    Iteration uint64 `json:"iteration"`
+}
+
+type TaskFields struct {
+    TaskID        string        `json:"task_id"`
+    Iteration     uint64        `json:"iteration"`
+    CaseID        string        `json:"case_id"`
+    Configuration Configuration `json:"configuration"`
+    TaskIndex     uint64        `json:"task_index"`
+    TaskTotal     uint64        `json:"task_total"`
+    Title         string        `json:"title"`
+}
+
+type CaseStartedPayload struct {
+    TaskFields
+}
+
+type CaseCompletedPayload struct {
+    TaskFields
+    CompletedTasks uint64     `json:"completed_tasks"`
+    Status         CaseStatus `json:"status"`
+    PassRate       *float64   `json:"pass_rate,omitempty"`
+    DurationMS     uint64     `json:"duration_ms"`
+}
+
+type ResultCounts struct {
+    Passed  uint64 `json:"passed"`
+    Failed  uint64 `json:"failed"`
+    Errored uint64 `json:"errored"`
+    Skipped uint64 `json:"skipped"`
+}
+
+type IterationCompletedPayload struct {
+    Iteration      uint64 `json:"iteration"`
+    CompletedTasks uint64 `json:"completed_tasks"`
+    ResultCounts
+    DurationMS uint64 `json:"duration_ms"`
+}
+
+type RunFinishedPayload struct {
+    Status         RunStatus `json:"status"`
+    CompletedTasks uint64    `json:"completed_tasks"`
+    ResultCounts
+    DurationMS uint64 `json:"duration_ms"`
+}
+```
+
+`PassRate` 使用指针，因为零是合法值，而不可用值必须省略。构造函数和
+Publisher 在发布前校验安全整数范围和枚举值。`Payload.eventType` 让 Publisher
+推导 `Event.Type`，避免 payload 与事件类型不匹配。只有 Publisher 可以设置公
+共信封字段和 `LastEvent`，调用方不能覆盖。Publisher 为 invocation 生成一个
+UUID，并在序列化前把时间转换为 UTC，使 `time.Time` 按要求编码为 `Z` 时区偏
+移。
 
 ### 任务进度模型
 
@@ -202,6 +331,56 @@ completed_tasks == task_total
 以 `ERROR` 或 `CANCELLED` 可控收尾的调用可以满足
 `completed_tasks < task_total`。即使启用 Benchmark、多 iteration 和并行执行，
 CI 也能据此展示无歧义的进度。
+
+### 任务规划与生命周期 Emitter
+
+实现必须在打开事件流前构建一份不可变的 invocation 全局任务计划。计划确定：
+
+- 最终输出目录、起始 iteration 和 iteration 数量；
+- include/exclude 过滤后的选中 Case；
+- Benchmark 展开（先 `with_skill`，启用时再 `without_skill`）；
+- 每个展开任务的全局 `task_index`、`task_id` 和 `task_total`。
+
+计划顺序固定为：iteration 编号升序、过滤后 Case 顺序，然后先 `with_skill` 后
+`without_skill`。v1 规范任务 ID 为：
+
+```text
+iteration-<iteration>/<case_id>/<configuration>
+```
+
+Case ID 已经过不得包含路径分隔符的校验。并发执行时，任务开始和完成事件可以按
+任意顺序出现，但计划身份始终不变。Runner 必须执行这份计划，不能再重新计算第
+二份任务列表，从而避免事件总数和实际工作发生偏差。
+
+invocation 级生命周期 Emitter 位于通用 Publisher 之上。它持有任务计划、互斥
+锁、已开始/已完成任务集合、invocation 计数和每个 iteration 的计数。建议提供：
+
+```go
+Start(ctx, engine, skillName)
+IterationStarted(ctx, iteration)
+CaseStarted(ctx, plannedTask)
+CaseCompleted(ctx, plannedTask, status, passRate, duration)
+IterationCompleted(ctx, iteration, duration)
+Finish(ctx, runStatus, duration)
+```
+
+Emitter 把每次生命周期状态变更和事件发布一起串行化。如果在发布顺序之外递增
+`completed_tasks`，可能出现较大的序号反而带有更小计数，因此不能只使用原子计
+数。Emitter 还会拒绝重复开始或完成、未知任务、`run_started` 前的事件，以及
+`run_finished` 后的事件。
+
+每个计划 iteration 在自身所有 Case 事件前恰好发出一条 `iteration_started`。
+只有该 iteration 的所有计划任务都进入 Case 终态后，才发出
+`iteration_completed`；中断的 iteration 可以没有该事件。每个已开始任务恰好
+发出一条 `case_started`，随后恰好发出一条 `case_completed`，包括映射为
+`ERROR` 或 `SKIP` 的任务。因调用错误或取消而从未开始的任务不发出任何 Case
+事件。
+
+`CaseCompleted` 恰好一次地递增 invocation 和 iteration 计数。
+`IterationCompleted` 和 `Finish` 从 Emitter 状态生成 payload 计数，不接受调用
+方传入的计数。`Finish(COMPLETED)` 校验所有计划任务都已完成；`ERROR` 和
+`CANCELLED` 允许存在未完成任务。现有 `ProgressObserver` 保持不变，只负责终
+端 UI，不作为协议身份或汇总进度的数据源。
 
 ### 事件流示例
 
@@ -241,6 +420,13 @@ type EventSink interface {
 }
 ```
 
+具体 Publisher API 应提供 `Publish`、`Err` 和 `Close`。`Publish` 接收强类型
+`Payload`，构造一条完整封装的事件，执行扇出，并按 Sink 记录粘性错误。
+`Err` 返回这些错误的 `errors.Join` 汇总且不清除状态。`Close` 关闭同时实现
+`io.Closer` 的 Sink，把关闭错误记录到同一汇总中，并且可重复调用。生命周期调
+用点可以记录当前事件返回的错误，但命令收尾时必须使用 `Err`。Payload 以只包
+含标量字段的值保存，每个 Sink 都收到同一条不可变事件的副本。
+
 CLI 可以把一条事件扇出到 JSONL 文件 Sink、UI 适配器、回调、OTLP 适配器、
 socket 或未来远程发布器。现有 stdout 格式保持不变，也不属于事件日志兼容契约。
 
@@ -264,6 +450,58 @@ JSONL 是 v1 序列化；文件是首个建议 Sink，而不是协议本身。
 
 并发读取进程可能观察到部分写入的最后一条记录，特别是在进程崩溃或磁盘失败
 后。因此消费方不得把未以换行结束的尾部记录解析为完整事件。
+
+### 命令行契约
+
+只有 `skill-up run` 新增参数：
+
+```text
+--event-log <path>   Write v1 evaluation events as JSON Lines to path
+```
+
+v1 命令契约如下：
+
+- 参数可选、接收一个路径值，并且没有配置文件或环境变量形式；
+- 空值和 `-` 非法；stdout 继续面向人类，永不作为事件传输通道；
+- 相对路径以进程工作目录为基准解析；
+- 父目录必须已存在；命令以受进程 umask 影响的 `0644` 模式创建文件，或在启动
+  时恰好截断一次已有文件；
+- 不要求文件扩展名，每个文件只包含一次 invocation；
+- 规范化后的路径不得位于任何计划执行的 `iteration-N` 目录中，因为 Runner
+  会在评测前删除并重建这些目录；
+- v1 中 `--event-log` 与 `--dry-run` 互斥，因为 dry-run 不执行任何生命周期任
+  务；
+- 未指定参数时，事件发布为 no-op，现有 stdout、报告和退出行为保持不变。
+
+计划和路径校验必须在打开文件前完成，防止无效计划截断已有事件日志。成功打开
+文件并发布 `run_started` 后，事件日志才算启动完成。打开失败时不产生事件流。
+如果 `run_started` 扇出失败，命令会尝试向所有仍然健康的 Sink 发布状态为
+`ERROR` 的 `run_finished`，关闭 Publisher，然后在加载凭据或调用 Agent 前退
+出。
+
+### 命令执行流程
+
+`runEval` 应重构为一条明确的收尾路径：
+
+1. 解析参数，加载并校验配置，应用 Case 过滤和命令行覆盖。
+2. 拒绝 dry-run/event-log 冲突，然后构建不可变任务计划。
+3. 校验并打开请求的 JSONL Sink，创建 Publisher 和生命周期 Emitter，发布
+   `run_started`。首条事件失败时采用上述启动收尾行为。
+4. 加载凭据并创建 Agent。从这一步开始，所有可控失败都产生状态为 `ERROR` 的
+   `run_finished`。
+5. 执行计划中的 iteration；Runner 发出 iteration 边界，Evaluator 使用计划元
+   数据发出 Case 边界。
+6. 所有计划任务都进入 Case 终态时选择 `COMPLETED`；遇到
+   `context.Canceled` 或 `context.DeadlineExceeded` 时选择 `CANCELLED`；其他
+   调用级失败选择 `ERROR`。
+7. 恰好发布一次 `run_finished`，关闭所有 Sink，并使用 `errors.Join` 合并评测
+   错误、Case 结果错误、Publisher 错误和关闭错误。
+
+只要所有计划任务都执行过，Case 失败和 Case 错误不会把 `COMPLETED` 改成其他
+状态；现有 `exitStatusError` 仍会让相关 `with_skill` 结果使命令失败。Sink 错
+误同样不会改写生命周期状态，但其粘性错误会参与最终的非零命令结果。如果进程
+在可控收尾前被杀死或发生 panic，事件流可以像消费契约已定义的那样缺少
+`run_finished`。
 
 ### 失败语义
 
@@ -304,6 +542,23 @@ JSONL 是 v1 序列化；文件是首个建议 Sink，而不是协议本身。
 并在 run、iteration、case 生命周期边界发布事件。它不得继续为
 `ProgressObserver` 增加位置参数。
 
+建议的实现边界为：
+
+| 位置 | 职责 |
+| --- | --- |
+| `internal/evalevent/event.go` | 信封、事件类型、枚举和强类型 payload |
+| `internal/evalevent/publisher.go` | 序号分配、有序扇出、按 Sink 粘性错误和关闭错误汇总 |
+| `internal/evalevent/lifecycle.go` | 生命周期状态机、任务去重、累计和每 iteration 计数 |
+| `internal/evalevent/jsonl.go` | 不缓冲、换行结尾的文件 Sink |
+| `internal/evaluator/plan.go` | 由执行和事件共享的确定性展开任务元数据 |
+| `internal/runner/runner.go` | invocation 和 iteration 边界；执行不可变任务计划 |
+| `internal/evaluator/evaluator.go` | Case 边界以及结果到事件状态的映射 |
+| `internal/cli/run.go` | 参数校验、Sink 生命周期、终止状态选择和最终错误组合 |
+
+`internal/evalevent` 除标准库和 UUID 生成外不依赖其他包；它不得导入 CLI、
+Runner、Evaluator、Judge、Report 或 UI 包。Runner/Evaluator 适配器在边界把领
+域类型映射为事件枚举。这使传输层保持无环，也避免事件序列化与终端展示耦合。
+
 ## 测试计划
 
 针对本次纯文档 PR：
@@ -314,7 +569,11 @@ JSONL 是 v1 序列化；文件是首个建议 Sink，而不是协议本身。
 
 未来实现必须补充序列化、不支持大版本拒绝、并发 Publisher 排序、扇出间事件身
 份一致、按 Sink 粘性失败、尾部残缺记录、Benchmark、多 iteration 和端到端消
-费测试。
+费测试。命令测试还必须覆盖参数帮助、空路径和 `-`、dry-run 冲突、相对路径解
+析、已有文件截断、父目录不存在、iteration 工作区冲突、启动写入失败、终止关
+闭失败，以及未指定参数时行为不变。生命周期测试必须覆盖 `run_started` 后的凭
+据失败、Case 失败但状态为 `COMPLETED`、取消、部分完成的 `ERROR`，以及恰好
+一条终止事件。
 
 ## 缺点
 
