@@ -538,17 +538,18 @@ func TestProbeAndMergePATH_SkipsMergeOnEmptyStdout(t *testing.T) {
 	}
 }
 
-func TestDetectAgentWithInitParams_SetsTypedCredentialFields(t *testing.T) {
+func TestDetectAgentWithResolvedConfig_SetsTypedCredentialFields(t *testing.T) {
 	t.Parallel()
 
-	ag, err := DetectAgentWithInitParams("codex", credential.AgentInitParams{
+	ag, err := DetectAgentWithResolvedConfig(credential.ResolvedAgentConfig{
+		Engine:   "codex",
 		Provider: "openai",
 		Model:    "gpt-5.4",
 		APIKey:   "openai-test-token",
 		BaseURL:  "https://openai.example.com/v1",
-	}, nil)
+	})
 	if err != nil {
-		t.Fatalf("DetectAgentWithInitParams failed: %v", err)
+		t.Fatalf("DetectAgentWithResolvedConfig failed: %v", err)
 	}
 
 	codexAgent, ok := ag.(*CodexAgent)
@@ -569,16 +570,17 @@ func TestDetectAgentWithInitParams_SetsTypedCredentialFields(t *testing.T) {
 	}
 }
 
-func TestDetectAgentWithInitParams_QoderMapsAPIKeyToRuntimeEnv(t *testing.T) {
+func TestDetectAgentWithResolvedConfig_QoderMapsAPIKeyToRuntimeEnv(t *testing.T) {
 	token := "qoder-runtime-token" //nolint:gosec // test credential, not real
 	t.Setenv(credential.EnvQoderPersonalAccessToken, token)
 
-	ag, err := DetectAgentWithInitParams("qoder-cli", credential.AgentInitParams{
+	ag, err := DetectAgentWithResolvedConfig(credential.ResolvedAgentConfig{
+		Engine:   "qoder-cli",
 		Provider: "qoder",
 		Model:    "auto",
-	}, nil)
+	})
 	if err != nil {
-		t.Fatalf("DetectAgentWithInitParams failed: %v", err)
+		t.Fatalf("DetectAgentWithResolvedConfig failed: %v", err)
 	}
 
 	qoderAgent, ok := ag.(*QoderCLIAgent)
@@ -590,16 +592,17 @@ func TestDetectAgentWithInitParams_QoderMapsAPIKeyToRuntimeEnv(t *testing.T) {
 	}
 }
 
-func TestDetectAgentWithInitParams_QoderIgnoresParamsAPIKey(t *testing.T) {
+func TestDetectAgentWithResolvedConfig_QoderIgnoresParamsAPIKey(t *testing.T) {
 	t.Parallel()
 
-	ag, err := DetectAgentWithInitParams("qoder-cli", credential.AgentInitParams{ //nolint:gosec // test dummy key
+	ag, err := DetectAgentWithResolvedConfig(credential.ResolvedAgentConfig{ //nolint:gosec // test dummy key
+		Engine:   "qoder-cli",
 		Provider: "anthropic",
 		Model:    "auto",
 		APIKey:   "sk-ant-should-not-appear",
-	}, nil)
+	})
 	if err != nil {
-		t.Fatalf("DetectAgentWithInitParams failed: %v", err)
+		t.Fatalf("DetectAgentWithResolvedConfig failed: %v", err)
 	}
 
 	qoderAgent, ok := ag.(*QoderCLIAgent)
@@ -634,14 +637,15 @@ func TestUnsupportedAgentError(t *testing.T) {
 	}
 }
 
-func TestDetectAgentWithInitParams_StripsAutoForNonQoderEngines(t *testing.T) {
+func TestDetectAgentWithResolvedConfig_UsesResolvedModelWithoutNormalization(t *testing.T) {
 	t.Parallel()
 
-	ag, err := DetectAgentWithInitParams("claude-code", credential.AgentInitParams{
-		Model: "auto",
-	}, nil)
+	ag, err := DetectAgentWithResolvedConfig(credential.ResolvedAgentConfig{
+		Engine: "claude-code",
+		Model:  "",
+	})
 	if err != nil {
-		t.Fatalf("DetectAgentWithInitParams failed: %v", err)
+		t.Fatalf("DetectAgentWithResolvedConfig failed: %v", err)
 	}
 
 	ccAgent, ok := ag.(*ClaudeCodeAgent)
@@ -649,18 +653,19 @@ func TestDetectAgentWithInitParams_StripsAutoForNonQoderEngines(t *testing.T) {
 		t.Fatalf("expected *ClaudeCodeAgent, got %T", ag)
 	}
 	if got := ccAgent.Cfg.ModelName; got != "" {
-		t.Fatalf("ModelName = %q, want empty (auto should be stripped for claude-code)", got)
+		t.Fatalf("ModelName = %q, want the already-resolved empty value", got)
 	}
 }
 
-func TestDetectAgentWithInitParams_PreservesAutoForQoderCLI(t *testing.T) {
+func TestDetectAgentWithResolvedConfig_PreservesAutoForQoderCLI(t *testing.T) {
 	t.Parallel()
 
-	ag, err := DetectAgentWithInitParams("qoder-cli", credential.AgentInitParams{
-		Model: "auto",
-	}, nil)
+	ag, err := DetectAgentWithResolvedConfig(credential.ResolvedAgentConfig{
+		Engine: "qoder-cli",
+		Model:  "auto",
+	})
 	if err != nil {
-		t.Fatalf("DetectAgentWithInitParams failed: %v", err)
+		t.Fatalf("DetectAgentWithResolvedConfig failed: %v", err)
 	}
 
 	qoderAgent, ok := ag.(*QoderCLIAgent)
@@ -672,16 +677,18 @@ func TestDetectAgentWithInitParams_PreservesAutoForQoderCLI(t *testing.T) {
 	}
 }
 
-func TestDetectAgentWithInitParams_ForwardsKwargs(t *testing.T) {
+func TestDetectAgentWithResolvedConfig_ForwardsKwargs(t *testing.T) {
 	t.Parallel()
 
 	kwargs := map[string]string{KwargBypassSandbox: "true", "future_key": "x"}
-	ag, err := DetectAgentWithInitParams("codex", credential.AgentInitParams{
+	ag, err := DetectAgentWithResolvedConfig(credential.ResolvedAgentConfig{
+		Engine:   "codex",
 		Provider: "openai",
 		Model:    "gpt-5.4",
-	}, kwargs)
+		Kwargs:   kwargs,
+	})
 	if err != nil {
-		t.Fatalf("DetectAgentWithInitParams failed: %v", err)
+		t.Fatalf("DetectAgentWithResolvedConfig failed: %v", err)
 	}
 
 	codexAgent, ok := ag.(*CodexAgent)

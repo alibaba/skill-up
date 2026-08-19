@@ -15,6 +15,21 @@ import (
 
 var logCaptureMu sync.Mutex
 
+func resolveRunnerConfigForTest(
+	engine string,
+	model config.ModelConfig,
+	custom *config.CustomEngineConfig,
+	resolver *Resolver,
+	cliModel string,
+	cliAPIKey string,
+) ResolvedAgentConfig {
+	return ResolveRunnerConfig(config.EngineConfig{
+		Name:   engine,
+		Model:  model,
+		Custom: custom,
+	}, resolver, CLIOverrides{Model: cliModel, APIKey: cliAPIKey})
+}
+
 func TestMaskAPIKey(t *testing.T) {
 	t.Parallel()
 
@@ -210,7 +225,7 @@ func TestResolver_Load_DoesNotImportProcessEnv(t *testing.T) {
 	}
 }
 
-func TestResolveRunnerInitParams_PrefersProviderEnvOverResolver(t *testing.T) {
+func TestResolveRunnerConfig_PrefersProviderEnvOverResolver(t *testing.T) {
 	t.Setenv("OPENAI_MODEL", "gpt-5.5-env")
 	t.Setenv("OPENAI_API_KEY", "sk-env-openai")
 	t.Setenv("OPENAI_BASE_URL", "https://env.example.com/v1")
@@ -222,13 +237,13 @@ func TestResolveRunnerInitParams_PrefersProviderEnvOverResolver(t *testing.T) {
 		BaseURL:  "https://file.example.com/v1",
 	}
 
-	params := ResolveRunnerInitParams("codex", config.ModelConfig{
+	params := resolveRunnerConfigForTest("codex", config.ModelConfig{
 		Provider: "openai",
 		Name:     "gpt-5.4",
 	}, nil, r, "", "")
 
-	if params.Kind != AgentKindRunner {
-		t.Fatalf("Kind = %q, want %q", params.Kind, AgentKindRunner)
+	if params.Role != AgentRoleRunner {
+		t.Fatalf("Kind = %q, want %q", params.Role, AgentRoleRunner)
 	}
 	if params.Model != "gpt-5.5-env" {
 		t.Fatalf("Model = %q, want provider env value", params.Model)
@@ -244,12 +259,12 @@ func TestResolveRunnerInitParams_PrefersProviderEnvOverResolver(t *testing.T) {
 	}
 }
 
-func TestResolveRunnerInitParams_DoesNotScanProviderEnvWhenProviderMissing(t *testing.T) {
+func TestResolveRunnerConfig_DoesNotScanProviderEnvWhenProviderMissing(t *testing.T) {
 	t.Setenv("OPENAI_MODEL", "gpt-5.5-env")
 	t.Setenv("OPENAI_API_KEY", "sk-env-openai")
 	t.Setenv("OPENAI_BASE_URL", "https://env.example.com/v1")
 
-	params := ResolveRunnerInitParams("codex", config.ModelConfig{Name: "gpt-5.4"}, nil, nil, "", "")
+	params := resolveRunnerConfigForTest("codex", config.ModelConfig{Name: "gpt-5.4"}, nil, nil, "", "")
 
 	if params.Provider != "" {
 		t.Fatalf("Provider = %q, want empty", params.Provider)
@@ -268,11 +283,11 @@ func TestResolveRunnerInitParams_DoesNotScanProviderEnvWhenProviderMissing(t *te
 	}
 }
 
-func TestResolveRunnerInitParams_PrefersCLIOverrides(t *testing.T) {
+func TestResolveRunnerConfig_PrefersCLIOverrides(t *testing.T) {
 	t.Setenv("OPENAI_MODEL", "gpt-5.5-env")
 	t.Setenv("OPENAI_API_KEY", "sk-env-openai")
 
-	params := ResolveRunnerInitParams("codex", config.ModelConfig{
+	params := resolveRunnerConfigForTest("codex", config.ModelConfig{
 		Provider: "openai",
 		Name:     "gpt-5.4",
 	}, nil, nil, "gpt-5.6-cli", "sk-cli-openai")
@@ -285,12 +300,70 @@ func TestResolveRunnerInitParams_PrefersCLIOverrides(t *testing.T) {
 	}
 }
 
-func TestResolveRunnerInitParams_LogsCLIAPIKeySource(t *testing.T) {
+func TestResolveRunnerConfig_ResolvesCLIModelOnceWithoutMutatingInput(t *testing.T) {
+	t.Setenv("DASHSCOPE_API_KEY", "dashscope-env-key")
+	engine := config.EngineConfig{
+		Name:    "codex",
+		Version: "1.2.3",
+		Entry:   "codex",
+		Model: config.ModelConfig{
+			Provider: "anthropic",
+			Name:     "yaml-model",
+			Params:   map[string]string{"reasoning": "high"},
+		},
+		Kwargs: map[string]string{"bypass_sandbox": "true"},
+	}
+
+	resolved := ResolveRunnerConfig(engine, nil, CLIOverrides{
+		Model: "dashscope/qwen3.6-plus",
+	})
+
+	if resolved.Provider != "dashscope" || resolved.Model != "qwen3.6-plus" {
+		t.Fatalf("resolved model = %q/%q, want dashscope/qwen3.6-plus", resolved.Provider, resolved.Model)
+	}
+	if resolved.ProviderSource != ValueSourceCLI || resolved.ModelSource != ValueSourceCLI {
+		t.Fatalf("CLI sources not retained: %#v", resolved)
+	}
+	if resolved.APIKey != "dashscope-env-key" || resolved.APIKeySource != ValueSourceEnv {
+		t.Fatalf("provider credentials were not resolved from final CLI provider: %#v", resolved)
+	}
+	if engine.Model.Provider != "anthropic" || engine.Model.Name != "yaml-model" {
+		t.Fatalf("input engine config was mutated: %#v", engine.Model)
+	}
+	engine.Kwargs["bypass_sandbox"] = "false"
+	engine.Model.Params["reasoning"] = "low"
+	if resolved.Kwargs["bypass_sandbox"] != "true" || resolved.ModelParams["reasoning"] != "high" {
+		t.Fatalf("resolved maps alias input config: kwargs=%v params=%v", resolved.Kwargs, resolved.ModelParams)
+	}
+}
+
+func TestResolveRunnerConfig_PreservesOpaqueSlashedCLIModel(t *testing.T) {
+	for _, key := range []string{"ANTHROPIC_MODELSCOPE_API_KEY", "ANTHROPIC_MODELSCOPE_BASE_URL"} {
+		t.Setenv(key, "")
+	}
+
+	resolved := ResolveRunnerConfig(config.EngineConfig{
+		Name:  "codex",
+		Model: config.ModelConfig{Provider: "openai", Name: "yaml-model"},
+	}, nil, CLIOverrides{ //nolint:gosec // test credential, not a real secret
+		Model:  "anthropic_modelscope/deepseek-v4-pro",
+		APIKey: "sk-cli-openai",
+	})
+
+	if resolved.Provider != "" || resolved.Model != "anthropic_modelscope/deepseek-v4-pro" {
+		t.Fatalf("opaque model was split: %#v", resolved)
+	}
+	if resolved.APIKey != "sk-cli-openai" || resolved.APIKeySource != ValueSourceCLI {
+		t.Fatalf("CLI key was not retained for provider-empty model: %#v", resolved)
+	}
+}
+
+func TestResolveRunnerConfig_LogsCLIAPIKeySource(t *testing.T) {
 	logging.SetVerbosity(1)
 	defer logging.SetVerbosity(0)
 
 	output := captureLogOutput(t, func() {
-		ResolveRunnerInitParams("codex", config.ModelConfig{
+		resolveRunnerConfigForTest("codex", config.ModelConfig{
 			Provider: "openai",
 			Name:     "gpt-5.4",
 		}, nil, nil, "", "sk-cli-openai")
@@ -304,7 +377,7 @@ func TestResolveRunnerInitParams_LogsCLIAPIKeySource(t *testing.T) {
 	}
 }
 
-func TestResolveRunnerInitParams_CLIAPIKeyAppliesWithoutProvider(t *testing.T) {
+func TestResolveRunnerConfig_CLIAPIKeyAppliesWithoutProvider(t *testing.T) {
 	// `--api-key K` must apply even when Provider is empty (e.g. user
 	// passed `--model literal_opaque/id` and the prefix is not a
 	// configured namespace, so ResolveModelRef returned Provider="").
@@ -314,7 +387,7 @@ func TestResolveRunnerInitParams_CLIAPIKeyAppliesWithoutProvider(t *testing.T) {
 	// with a provider_required_for_cli_override warning — that guard was
 	// defensive paranoia, not a structural requirement, and it broke
 	// literal-opaque-id flows.
-	params := ResolveRunnerInitParams("codex", config.ModelConfig{
+	params := resolveRunnerConfigForTest("codex", config.ModelConfig{
 		Name: "gpt-5.4",
 	}, nil, nil, "", "sk-cli-openai")
 
@@ -326,11 +399,11 @@ func TestResolveRunnerInitParams_CLIAPIKeyAppliesWithoutProvider(t *testing.T) {
 	}
 }
 
-func TestResolveRunnerInitParams_CustomEngineCLIAPIKeyApplies(t *testing.T) {
+func TestResolveRunnerConfig_CustomEngineCLIAPIKeyApplies(t *testing.T) {
 	// A custom engine references the CLI key explicitly via ${api_key} and
 	// has no model provider. The key must still be applied (it reaches the
 	// agent through engine.custom.env / ${api_key}).
-	params := ResolveRunnerInitParams("my-agent", config.ModelConfig{}, &config.CustomEngineConfig{
+	params := resolveRunnerConfigForTest("my-agent", config.ModelConfig{}, &config.CustomEngineConfig{
 		Transport: "local",
 		Local:     &config.CustomLocalConfig{Command: "/opt/agent"},
 	}, nil, "", "sk-cli-custom")
@@ -339,7 +412,7 @@ func TestResolveRunnerInitParams_CustomEngineCLIAPIKeyApplies(t *testing.T) {
 		t.Fatalf("APIKey = %q, want sk-cli-custom for a custom engine", params.APIKey)
 	}
 	if params.Custom == nil {
-		t.Fatal("Custom config was not threaded into AgentInitParams")
+		t.Fatal("Custom config was not threaded into ResolvedAgentConfig")
 	}
 }
 
@@ -358,14 +431,14 @@ func captureLogOutput(t *testing.T, fn func()) string {
 	return buf.String()
 }
 
-func TestResolveJudgeInitParams_FallsBackToRunnerWhenJudgeModelEmpty(t *testing.T) {
+func TestResolveJudgeConfig_FallsBackToRunnerWhenJudgeModelEmpty(t *testing.T) {
 	// Clear env vars that would override runner fallback.
 	for _, key := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL"} {
 		t.Setenv(key, "")
 	}
 
-	runner := AgentInitParams{
-		Kind:           AgentKindRunner,
+	runner := ResolvedAgentConfig{
+		Role:           AgentRoleRunner,
 		Engine:         "claude-code",
 		Provider:       "anthropic",
 		Model:          "claude-sonnet-4-6",
@@ -377,10 +450,10 @@ func TestResolveJudgeInitParams_FallsBackToRunnerWhenJudgeModelEmpty(t *testing.
 		BaseURLSource:  ValueSourceResolver,
 	}
 
-	params := ResolveJudgeInitParams("claude-code", config.JudgeConfig{}, runner, nil)
+	params := ResolveJudgeConfig(config.JudgeConfig{}, runner, nil)
 
-	if params.Kind != AgentKindJudge {
-		t.Fatalf("Kind = %q, want %q", params.Kind, AgentKindJudge)
+	if params.Role != AgentRoleJudge {
+		t.Fatalf("Kind = %q, want %q", params.Role, AgentRoleJudge)
 	}
 	if params.Provider != runner.Provider || params.Model != runner.Model || params.APIKey != runner.APIKey || params.BaseURL != runner.BaseURL {
 		t.Fatalf("judge params = %#v, want runner values", params)
@@ -390,14 +463,47 @@ func TestResolveJudgeInitParams_FallsBackToRunnerWhenJudgeModelEmpty(t *testing.
 	}
 }
 
-func TestResolveJudgeInitParams_FallsBackToRunnerBaseURLBeforeCredentialFallback(t *testing.T) {
+func TestResolveJudgeConfig_InheritsRunnerLifecycleWithoutAliasingKwargs(t *testing.T) {
+	for _, key := range []string{"ANTHROPIC_MODEL", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"} {
+		t.Setenv(key, "")
+	}
+	runner := ResolvedAgentConfig{
+		Role:        AgentRoleRunner,
+		Engine:      "codex",
+		Version:     "0.42.0",
+		Entry:       "codex",
+		Provider:    "openai",
+		Model:       "gpt-5.4",
+		Kwargs:      map[string]string{"bypass_sandbox": "true"},
+		ModelParams: map[string]string{"reasoning": "high"},
+	}
+
+	resolved := ResolveJudgeConfig(config.JudgeConfig{
+		Type:  "agent_judge",
+		Model: "anthropic/claude-sonnet-4-6",
+	}, runner, nil)
+
+	if resolved.Role != AgentRoleJudge || resolved.Engine != runner.Engine || resolved.Version != runner.Version || resolved.Entry != runner.Entry {
+		t.Fatalf("judge lifecycle config = %#v, want runner engine lifecycle", resolved)
+	}
+	if resolved.Provider != "anthropic" || resolved.Model != "claude-sonnet-4-6" {
+		t.Fatalf("judge role model was not independently resolved: %#v", resolved)
+	}
+	runner.Kwargs["bypass_sandbox"] = "false"
+	runner.ModelParams["reasoning"] = "low"
+	if resolved.Kwargs["bypass_sandbox"] != "true" || resolved.ModelParams["reasoning"] != "high" {
+		t.Fatalf("judge config aliases runner maps: kwargs=%v params=%v", resolved.Kwargs, resolved.ModelParams)
+	}
+}
+
+func TestResolveJudgeConfig_FallsBackToRunnerBaseURLBeforeCredentialFallback(t *testing.T) {
 	// Clear env vars that would override runner fallback.
 	for _, key := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL"} {
 		t.Setenv(key, "")
 	}
 
-	runner := AgentInitParams{
-		Kind:          AgentKindRunner,
+	runner := ResolvedAgentConfig{
+		Role:          AgentRoleRunner,
 		Engine:        "claude-code",
 		Provider:      "anthropic",
 		Model:         "claude-sonnet-4-6",
@@ -405,7 +511,7 @@ func TestResolveJudgeInitParams_FallsBackToRunnerBaseURLBeforeCredentialFallback
 		BaseURLSource: ValueSourceResolver,
 	}
 
-	params := ResolveJudgeInitParams("claude-code", config.JudgeConfig{}, runner, nil)
+	params := ResolveJudgeConfig(config.JudgeConfig{}, runner, nil)
 
 	if params.BaseURL != "https://runner.example.com" {
 		t.Fatalf("BaseURL = %q, want runner base URL", params.BaseURL)
@@ -415,7 +521,7 @@ func TestResolveJudgeInitParams_FallsBackToRunnerBaseURLBeforeCredentialFallback
 	}
 }
 
-func TestResolveJudgeInitParams_ParsesIndependentJudgeModel(t *testing.T) {
+func TestResolveJudgeConfig_ParsesIndependentJudgeModel(t *testing.T) {
 	const provider = "judgeprovider"
 
 	r := NewResolver("")
@@ -425,11 +531,11 @@ func TestResolveJudgeInitParams_ParsesIndependentJudgeModel(t *testing.T) {
 		BaseURL:  "https://judge.example.com/v1",
 	}
 
-	params := ResolveJudgeInitParams("codex", config.JudgeConfig{
+	params := ResolveJudgeConfig(config.JudgeConfig{
 		Type:  "agent_judge",
 		Model: provider + "/gpt-5.4",
-	}, AgentInitParams{
-		Kind:     AgentKindRunner,
+	}, ResolvedAgentConfig{
+		Role:     AgentRoleRunner,
 		Engine:   "codex",
 		Provider: "anthropic",
 		Model:    "claude-sonnet-4-6",
@@ -446,14 +552,14 @@ func TestResolveJudgeInitParams_ParsesIndependentJudgeModel(t *testing.T) {
 	}
 }
 
-func TestResolveJudgeInitParams_PrefersProviderScopedModelEnv(t *testing.T) {
+func TestResolveJudgeConfig_PrefersProviderScopedModelEnv(t *testing.T) {
 	t.Setenv("JUDGEPROVIDER_MODEL", "gpt-5.5-judge-env")
 
-	params := ResolveJudgeInitParams("codex", config.JudgeConfig{
+	params := ResolveJudgeConfig(config.JudgeConfig{
 		Type:  "agent_judge",
 		Model: "judgeprovider/gpt-5.4",
-	}, AgentInitParams{
-		Kind:     AgentKindRunner,
+	}, ResolvedAgentConfig{
+		Role:     AgentRoleRunner,
 		Engine:   "codex",
 		Provider: "anthropic",
 		Model:    "claude-sonnet-4-6",
@@ -467,12 +573,12 @@ func TestResolveJudgeInitParams_PrefersProviderScopedModelEnv(t *testing.T) {
 	}
 }
 
-func TestResolveRunnerInitParams_UsesGenericProviderScopedEnv(t *testing.T) {
+func TestResolveRunnerConfig_UsesGenericProviderScopedEnv(t *testing.T) {
 	t.Setenv("DASHSCOPE_MODEL", "qwen-max-env")
 	t.Setenv("DASHSCOPE_API_KEY", "dashscope-env-key")
 	t.Setenv("DASHSCOPE_BASE_URL", "https://dashscope.example.com")
 
-	params := ResolveRunnerInitParams("custom", config.ModelConfig{
+	params := resolveRunnerConfigForTest("custom", config.ModelConfig{
 		Provider: "dashscope",
 		Name:     "qwen-max",
 	}, nil, nil, "", "")
@@ -488,25 +594,35 @@ func TestResolveRunnerInitParams_UsesGenericProviderScopedEnv(t *testing.T) {
 	}
 }
 
-func TestResolveRunnerInitParams_DropsCustomForBuiltinEngine(t *testing.T) {
+func TestResolveRunnerConfig_DropsCustomForBuiltinEngine(t *testing.T) {
 	custom := &config.CustomEngineConfig{
 		Transport: "local",
 		Local:     &config.CustomLocalConfig{Command: "/opt/agent"},
 	}
-	params := ResolveRunnerInitParams("codex", config.ModelConfig{Name: "auto"}, custom, nil, "", "")
+	params := resolveRunnerConfigForTest("codex", config.ModelConfig{Name: "auto"}, custom, nil, "", "")
 
 	// A built-in engine ignores engine.custom; it must not leak into params.
 	if params.Custom != nil {
 		t.Fatalf("Custom = %#v, want nil for a built-in engine", params.Custom)
 	}
+	if params.Model != "" {
+		t.Fatalf("Model = %q, want legacy non-Qoder auto normalization", params.Model)
+	}
 }
 
-func TestResolveRunnerInitParams_KeepsCustomForCustomEngine(t *testing.T) {
+func TestResolveRunnerConfig_PreservesAutoForQoderCLI(t *testing.T) {
+	params := resolveRunnerConfigForTest("qodercli", config.ModelConfig{Name: "auto"}, nil, nil, "", "")
+	if params.Model != "auto" {
+		t.Fatalf("Model = %q, want auto for qodercli", params.Model)
+	}
+}
+
+func TestResolveRunnerConfig_KeepsCustomForCustomEngine(t *testing.T) {
 	custom := &config.CustomEngineConfig{
 		Transport: "local",
 		Local:     &config.CustomLocalConfig{Command: "/opt/agent"},
 	}
-	params := ResolveRunnerInitParams("my-agent", config.ModelConfig{}, custom, nil, "", "")
+	params := resolveRunnerConfigForTest("my-agent", config.ModelConfig{}, custom, nil, "", "")
 
 	if params.Custom == nil {
 		t.Fatal("Custom = nil, want it preserved for a custom engine")

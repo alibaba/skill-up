@@ -52,19 +52,19 @@ type Runner struct {
 	loader   *config.Loader
 	resolver *credential.Resolver
 
-	runnerParams credential.AgentInitParams
+	runnerConfig credential.ResolvedAgentConfig
 
 	workspace *report.IterationWorkspace
 	now       func() time.Time
 }
 
 // NewRunner creates a new Runner with the given eval config and loader.
-func NewRunner(evalCfg *config.EvalConfig, loader *config.Loader, resolver *credential.Resolver, runnerParams credential.AgentInitParams) *Runner {
+func NewRunner(evalCfg *config.EvalConfig, loader *config.Loader, resolver *credential.Resolver, runnerConfig credential.ResolvedAgentConfig) *Runner {
 	return &Runner{
 		evalCfg:      evalCfg,
 		loader:       loader,
 		resolver:     resolver,
-		runnerParams: runnerParams,
+		runnerConfig: runnerConfig,
 		now:          time.Now,
 	}
 }
@@ -159,7 +159,7 @@ func (r *Runner) Evaluate(ctx context.Context, cases []*config.CaseConfig, ag ag
 			Loader:          r.loader,
 			Resolver:        r.resolver,
 			Agent:           ag,
-			RunnerParams:    r.runnerParams,
+			RunnerConfig:    r.runnerConfig,
 			OutputDir:       r.workspace.IterationDir(),
 			Concurrency:     concurrency,
 			DeleteWorkspace: opts.DeleteWorkspace,
@@ -301,7 +301,7 @@ func (r *Runner) WriteResults(ctx context.Context, results []evaluator.EvalResul
 		return fmt.Errorf("failed to write benchmark.md: %w", err)
 	}
 
-	input := buildReportInput(skillName, grouped, caseIDs, startTime, endTime, r.evalCfg)
+	input := buildReportInput(skillName, grouped, caseIDs, startTime, endTime, r.evalCfg, r.runnerConfig)
 
 	// result.json is always written as the raw evaluation data source.
 	resultJSON, err := json.MarshalIndent(input, "", "  ")
@@ -491,15 +491,29 @@ func resultToBenchmarkRun(res *evaluator.EvalResult, runNumber int) report.Bench
 	}
 }
 
-func buildReportInput(skillName string, grouped map[string]*caseResults, caseIDs []string, startTime, endTime time.Time, evalCfg *config.EvalConfig) report.Input {
-	modelName := evalCfg.Engine.Model.Name
-	if evalCfg.Engine.Model.Provider != "" && modelName != "" {
-		modelName = evalCfg.Engine.Model.Provider + "/" + modelName
+func buildReportInput(
+	skillName string,
+	grouped map[string]*caseResults,
+	caseIDs []string,
+	startTime, endTime time.Time,
+	evalCfg *config.EvalConfig,
+	resolved credential.ResolvedAgentConfig,
+) report.Input {
+	engineName := resolved.Engine
+	provider := resolved.Provider
+	modelName := resolved.Model
+	if engineName == "" {
+		engineName = evalCfg.Engine.Name
+		provider = evalCfg.Engine.Model.Provider
+		modelName = evalCfg.Engine.Model.Name
+	}
+	if provider != "" && modelName != "" {
+		modelName = provider + "/" + modelName
 	}
 	input := report.Input{
 		SkillName:     skillName,
 		SchemaVersion: evalCfg.SchemaVersion,
-		EngineName:    evalCfg.Engine.Name,
+		EngineName:    engineName,
 		ModelName:     modelName,
 		StartTime:     startTime,
 		EndTime:       endTime,

@@ -31,7 +31,6 @@ import (
 )
 
 const (
-	modelFormatParts       = 2
 	maxParallelismOverride = 256
 	runtimeKwargFlagName   = "runtime-kwarg"
 	runtimeKwargAlias      = "rk"
@@ -147,13 +146,13 @@ func runEval(cmd *cobra.Command, args []string) error {
 	}
 
 	// --- Phase 2: Credentials & agent ---
-	ag, resolver, runnerParams, err := loadCredentialsAndAgent(cmd, evalCfg)
+	ag, resolver, runnerConfig, err := loadCredentialsAndAgent(cmd, evalCfg)
 	if err != nil {
 		return err
 	}
 
 	// --- Phase 3: Run evaluation ---
-	results, err := executeEvaluation(cmd, cases, evalCfg, loader, resolver, runnerParams, ag)
+	results, err := executeEvaluation(cmd, cases, evalCfg, loader, resolver, runnerConfig, ag)
 	if err != nil {
 		return err
 	}
@@ -196,7 +195,7 @@ func loadAndPrepareConfig(ctx context.Context, cmd *cobra.Command, args []string
 	}
 
 	engineName, _ := cmd.Flags().GetString("engine")
-	evalCfg = resolveEvalConfig(evalCfg, engineName, cmd)
+	evalCfg = resolveEvalConfig(evalCfg, engineName)
 	if err := applyRunConfigOverrides(evalCfg, cmd); err != nil { //nolint:contextcheck // ctx accessed via cmd.Context() inside helpers
 		return nil, nil, nil, err
 	}
@@ -207,7 +206,8 @@ func loadAndPrepareConfig(ctx context.Context, cmd *cobra.Command, args []string
 		return nil, nil, nil, fmt.Errorf("engine config: %w", err)
 	}
 
-	modelRef := formatModelRef(evalCfg.Engine.Model.Provider, evalCfg.Engine.Model.Name)
+	modelFlag, _ := cmd.Flags().GetString("model")
+	modelRef := requestedModelRef(evalCfg.Engine.Model, modelFlag)
 	span.SetAttributes(
 		attribute.Int("skill_up.cases.count", len(cases)),
 		attribute.String("skill_up.engine", evalCfg.Engine.Name),
@@ -236,7 +236,7 @@ func maybeRunDryRun(cmd *cobra.Command, cases []*config.CaseConfig, evalCfg *con
 
 // loadCredentialsAndAgent executes Phase 2: load resolver, derive runner init
 // params, and instantiate the configured agent.
-func loadCredentialsAndAgent(cmd *cobra.Command, evalCfg *config.EvalConfig) (agent.Agent, *credential.Resolver, credential.AgentInitParams, error) {
+func loadCredentialsAndAgent(cmd *cobra.Command, evalCfg *config.EvalConfig) (agent.Agent, *credential.Resolver, credential.ResolvedAgentConfig, error) {
 	ui.Blank()
 	ui.Step("🔑", "Loading credentials...")
 	cliModel, _ := cmd.Flags().GetString("model")
@@ -244,34 +244,21 @@ func loadCredentialsAndAgent(cmd *cobra.Command, evalCfg *config.EvalConfig) (ag
 
 	resolver := credential.NewResolver(credential.DefaultConfPath())
 	if err := resolver.Load(); err != nil {
-		return nil, nil, credential.AgentInitParams{}, fmt.Errorf("failed to load credentials: %w", err)
+		return nil, nil, credential.ResolvedAgentConfig{}, fmt.Errorf("failed to load credentials: %w", err)
 	}
 
-	// `--model provider/name` was tentatively split into Provider+Name by
-	// resolveEvalConfig (before the resolver was loaded). Now that we know
-	// which providers actually have configuration, collapse the split back
-	// when the provider is unknown: in that case the slashed string is more
-	// likely a literal model identifier the upstream API expects verbatim
-	// (e.g. anthropic-proxy gateways registering models under
-	// `anthropic_modelscope/deepseek-v4-pro`) than a credential-namespace
-	// prefix the agent should peel off.
-	collapseUnconfiguredProviderSplit(evalCfg, resolver, cliModel)
-
-	runnerParams := credential.ResolveRunnerInitParams(
-		evalCfg.Engine.Name,
-		evalCfg.Engine.Model,
-		evalCfg.Engine.Custom,
+	runnerConfig := credential.ResolveRunnerConfig(
+		evalCfg.Engine,
 		resolver,
-		normalizeCLIModelOverride(cliModel, resolver),
-		cliAPIKey,
+		credential.CLIOverrides{Model: cliModel, APIKey: cliAPIKey},
 	)
 
-	ag, err := agent.DetectAgentWithInitParams(evalCfg.Engine.Name, runnerParams, evalCfg.Engine.Kwargs)
+	ag, err := agent.DetectAgentWithResolvedConfig(runnerConfig)
 	if err != nil {
-		return nil, nil, credential.AgentInitParams{}, fmt.Errorf("failed to create agent: %w", err)
+		return nil, nil, credential.ResolvedAgentConfig{}, fmt.Errorf("failed to create agent: %w", err)
 	}
 	ui.Status("✅", "Credentials ready")
-	return ag, resolver, runnerParams, nil
+	return ag, resolver, runnerConfig, nil
 }
 
 // executeEvaluation executes Phase 3: build the runner, derive evaluate
@@ -282,13 +269,13 @@ func executeEvaluation(
 	evalCfg *config.EvalConfig,
 	loader *config.Loader,
 	resolver *credential.Resolver,
-	runnerParams credential.AgentInitParams,
+	runnerConfig credential.ResolvedAgentConfig,
 	ag agent.Agent,
 ) ([]evaluator.EvalResult, error) {
 	ui.Blank()
 	ui.Stepf("🚀", "Running evaluation (%d cases)", len(cases))
 
-	run := runner.NewRunner(evalCfg, loader, resolver, runnerParams)
+	run := runner.NewRunner(evalCfg, loader, resolver, runnerConfig)
 
 	evaluateOpts, err := evaluateOptionsFromFlags(cmd)
 	if err != nil {
@@ -435,49 +422,8 @@ func evaluateOptionsFromFlags(cmd *cobra.Command) (runner.EvaluateOptions, error
 	}, nil
 }
 
-// collapseUnconfiguredProviderSplit re-runs credential.ResolveModelRef
-// against the loaded resolver to undo the optimistic split that
-// resolveEvalConfig performs on `--model provider/name` when the provider
-// half turns out to be unconfigured. See ResolveModelRef for the
-// rationale and the debug log emitted on collapse.
-//
-// Gate: only runs when `cliModel` contains `/`. eval.yaml-sourced pairs
-// (where the user wrote provider and name as separate YAML keys) reach
-// here without `/` in cliModel and must be preserved — they are
-// user-authored explicit configuration, often relying on a CLI's
-// persisted login state with no env footprint.
-//
-// CLI-hint signals (`--api-key`, `engine.model.base_url`) were once used
-// to FORCE a split through, but that broke `--api-key K --model literal_
-// opaque/id` flows (proxy-registered ids like
-// `anthropic_modelscope/deepseek-v4-pro`). credential.applyCLIOverrides
-// no longer requires a non-empty Provider to apply the CLI key — each
-// agent routes cfg.APIKey via its own hardcoded env (ANTHROPIC_API_KEY /
-// OPENAI_API_KEY) regardless of Provider — so the literal-id case now
-// passes through correctly. Users who really mean `provider as namespace`
-// should configure that provider via env / credentials.yaml; that signal
-// alone is enough for ResolveModelRef to preserve the split.
-//
-// Safe no-op when Provider is empty or already collapsed.
-func collapseUnconfiguredProviderSplit(evalCfg *config.EvalConfig, resolver *credential.Resolver, cliModel string) {
-	if evalCfg == nil {
-		return
-	}
-	provider := evalCfg.Engine.Model.Provider
-	name := evalCfg.Engine.Model.Name
-	if provider == "" || name == "" {
-		return
-	}
-	if !strings.Contains(cliModel, "/") {
-		return
-	}
-	newProvider, newName := credential.ResolveModelRef(provider+"/"+name, resolver)
-	evalCfg.Engine.Model.Provider = newProvider
-	evalCfg.Engine.Model.Name = newName
-}
-
 // resolveEvalConfig resolves the engine name and ensures evalCfg is non-nil.
-func resolveEvalConfig(evalCfg *config.EvalConfig, engineName string, cmd *cobra.Command) *config.EvalConfig {
+func resolveEvalConfig(evalCfg *config.EvalConfig, engineName string) *config.EvalConfig {
 	if engineName == "" {
 		if evalCfg != nil {
 			engineName = evalCfg.Engine.Name
@@ -492,17 +438,6 @@ func resolveEvalConfig(evalCfg *config.EvalConfig, engineName string, cmd *cobra
 	}
 
 	evalCfg.Engine.Name = engineName
-
-	if modelFlag, _ := cmd.Flags().GetString("model"); modelFlag != "" {
-		parts := strings.SplitN(modelFlag, "/", modelFormatParts)
-		if len(parts) == modelFormatParts && parts[0] != "" && parts[1] != "" {
-			evalCfg.Engine.Model.Provider = parts[0]
-			evalCfg.Engine.Model.Name = parts[1]
-		} else {
-			evalCfg.Engine.Model.Provider = ""
-			evalCfg.Engine.Model.Name = modelFlag
-		}
-	}
 
 	return evalCfg
 }
@@ -674,18 +609,11 @@ func formatModelRef(provider, name string) string {
 	}
 }
 
-// normalizeCLIModelOverride returns the bare model identifier from a
-// `--model` flag value, peeling off any `provider/` prefix only when the
-// prefix is a configured provider per credential.ResolveModelRef. Kept
-// in lockstep with collapseUnconfiguredProviderSplit so applyCLIOverrides
-// never receives a model identifier that contradicts the post-collapse
-// evalCfg state.
-func normalizeCLIModelOverride(modelFlag string, resolver *credential.Resolver) string {
-	if modelFlag == "" {
-		return modelFlag
+func requestedModelRef(model config.ModelConfig, cliModel string) string {
+	if cliModel != "" {
+		return cliModel
 	}
-	_, name := credential.ResolveModelRef(modelFlag, resolver)
-	return name
+	return formatModelRef(model.Provider, model.Name)
 }
 
 func isDirectory(pathname string) bool {

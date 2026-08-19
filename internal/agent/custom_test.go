@@ -856,18 +856,19 @@ func TestDetectAgent_NonBuiltinWithoutCustom(t *testing.T) {
 	}
 }
 
-func TestDetectAgentWithInitParams_KeepsAutoModelForCustom(t *testing.T) {
+func TestDetectAgentWithResolvedConfig_KeepsAutoModelForCustom(t *testing.T) {
 	t.Parallel()
 	custom := &config.CustomEngineConfig{
 		Transport: "local",
 		Local:     &config.CustomLocalConfig{Command: "/opt/agent"},
 	}
-	ag, err := DetectAgentWithInitParams("my-agent", credential.AgentInitParams{
+	ag, err := DetectAgentWithResolvedConfig(credential.ResolvedAgentConfig{
+		Engine: "my-agent",
 		Model:  modelAuto,
 		Custom: custom,
-	}, nil)
+	})
 	if err != nil {
-		t.Fatalf("DetectAgentWithInitParams: %v", err)
+		t.Fatalf("DetectAgentWithResolvedConfig: %v", err)
 	}
 	ca, ok := ag.(*CustomAgent)
 	if !ok {

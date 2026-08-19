@@ -33,8 +33,8 @@ import (
 )
 
 var (
-	sleepWithContext          = sleepContext
-	agentDetectWithInitParams = agent.DetectAgentWithInitParams
+	sleepWithContext              = sleepContext
+	agentDetectWithResolvedConfig = agent.DetectAgentWithResolvedConfig
 )
 
 const judgeTypeAgentJudge = "agent_judge"
@@ -58,7 +58,7 @@ type EvalOptions struct {
 	Loader          *config.Loader
 	Resolver        *credential.Resolver
 	Agent           agent.Agent
-	RunnerParams    credential.AgentInitParams
+	RunnerConfig    credential.ResolvedAgentConfig
 
 	EvalCfg  *config.EvalConfig
 	Observer ProgressObserver
@@ -142,7 +142,7 @@ type defaultEvaluator struct {
 	loader          *config.Loader
 	resolver        *credential.Resolver
 	ag              agent.Agent
-	runnerParams    credential.AgentInitParams
+	runnerConfig    credential.ResolvedAgentConfig
 	fixtures        *fixtureRegistry
 	deleteWorkspace bool
 	observer        ProgressObserver
@@ -174,7 +174,7 @@ func NewEvaluator(opts EvalOptions) Evaluator {
 		loader:          opts.Loader,
 		resolver:        opts.Resolver,
 		ag:              opts.Agent,
-		runnerParams:    opts.RunnerParams,
+		runnerConfig:    opts.RunnerConfig,
 		fixtures:        newFixtureRegistry(),
 		deleteWorkspace: opts.DeleteWorkspace,
 		observer:        opts.Observer,
@@ -825,9 +825,9 @@ func (e *defaultEvaluator) resolveJudgeAgent(ctx context.Context, judgeCfg confi
 
 	judgeAgent := runAgent
 	if e.evalCfg.Engine.Name != "" {
-		judgeParams := credential.ResolveJudgeInitParams(e.evalCfg.Engine.Name, judgeCfg, e.runnerParams, e.resolver)
+		resolvedJudge := credential.ResolveJudgeConfig(judgeCfg, e.runnerConfig, e.resolver)
 		var err error
-		judgeAgent, err = agentDetectWithInitParams(e.evalCfg.Engine.Name, judgeParams, e.evalCfg.Engine.Kwargs)
+		judgeAgent, err = agentDetectWithResolvedConfig(resolvedJudge)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create judge agent: %w", err)
 		}
