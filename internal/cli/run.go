@@ -199,14 +199,18 @@ func loadAndPrepareConfig(ctx context.Context, cmd *cobra.Command, args []string
 	if err := applyRunConfigOverrides(evalCfg, cmd); err != nil { //nolint:contextcheck // ctx accessed via cmd.Context() inside helpers
 		return nil, nil, nil, err
 	}
+	modelFlag, _ := cmd.Flags().GetString("model")
 	// The loader defers engine.custom env resolution and validation until the
 	// final engine name is known (it can be changed by --engine); process it
-	// now so an override is never blocked by an unrelated custom block.
-	if err := config.ResolveCustomEngineConfig(evalCfg); err != nil {
+	// now so an override is never blocked by an unrelated custom block. A CLI
+	// model supersedes the YAML provider/name, so stale references in those two
+	// fields are not expanded. Base URL and model params remain active.
+	if err := config.ResolveCustomEngineConfigWithOptions(evalCfg, config.ResolveCustomEngineOptions{
+		SkipModelIdentity: modelFlag != "",
+	}); err != nil {
 		return nil, nil, nil, fmt.Errorf("engine config: %w", err)
 	}
 
-	modelFlag, _ := cmd.Flags().GetString("model")
 	modelRef := requestedModelRef(evalCfg.Engine.Model, modelFlag)
 	span.SetAttributes(
 		attribute.Int("skill_up.cases.count", len(cases)),

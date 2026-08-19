@@ -43,7 +43,7 @@ func TestResolveCustomEngineEnv_AllForms(t *testing.T) {
 		},
 	}
 
-	if err := resolveCustomEngineEnv(cfg); err != nil {
+	if err := resolveCustomEngineEnv(cfg, ResolveCustomEngineOptions{}); err != nil {
 		t.Fatalf("resolveCustomEngineEnv: %v", err)
 	}
 
@@ -77,7 +77,7 @@ func TestResolveCustomEngineEnv_MissingRequiredVar(t *testing.T) {
 		},
 	}
 
-	err := resolveCustomEngineEnv(cfg)
+	err := resolveCustomEngineEnv(cfg, ResolveCustomEngineOptions{})
 	if err == nil {
 		t.Fatal("expected error for missing required env var")
 	}
@@ -97,7 +97,7 @@ func TestResolveCustomEngineEnv_ErrorForm(t *testing.T) {
 		},
 	}
 
-	err := resolveCustomEngineEnv(cfg)
+	err := resolveCustomEngineEnv(cfg, ResolveCustomEngineOptions{})
 	if err == nil || !strings.Contains(err.Error(), "token is required") {
 		t.Fatalf("error = %v, want custom error message", err)
 	}
@@ -105,7 +105,7 @@ func TestResolveCustomEngineEnv_ErrorForm(t *testing.T) {
 
 func TestResolveCustomEngineEnv_NoCustomIsNoop(t *testing.T) {
 	cfg := &EvalConfig{Engine: EngineConfig{Name: "claude_code"}}
-	if err := resolveCustomEngineEnv(cfg); err != nil {
+	if err := resolveCustomEngineEnv(cfg, ResolveCustomEngineOptions{}); err != nil {
 		t.Fatalf("resolveCustomEngineEnv: %v", err)
 	}
 }
@@ -122,8 +122,34 @@ func TestResolveCustomEngineEnv_BuiltinEngineSkipsResolution(t *testing.T) {
 			},
 		},
 	}
-	if err := resolveCustomEngineEnv(cfg); err != nil {
+	if err := resolveCustomEngineEnv(cfg, ResolveCustomEngineOptions{}); err != nil {
 		t.Fatalf("resolveCustomEngineEnv for built-in engine: %v", err)
+	}
+}
+
+func TestResolveCustomEngineConfigWithOptions_SkipsSupersededModelIdentity(t *testing.T) {
+	t.Setenv("MISSING_MODEL", "")
+	t.Setenv("MODEL_BASE_URL", "https://resolved.example.test")
+	cfg := &EvalConfig{
+		Engine: EngineConfig{
+			Name: "claude_code",
+			Model: ModelConfig{
+				Provider: "anthropic",
+				Name:     "${MISSING_MODEL:?must set}",
+				BaseURL:  "${MODEL_BASE_URL}",
+			},
+		},
+	}
+
+	err := ResolveCustomEngineConfigWithOptions(cfg, ResolveCustomEngineOptions{SkipModelIdentity: true})
+	if err != nil {
+		t.Fatalf("explicit CLI model should bypass stale YAML model resolution: %v", err)
+	}
+	if cfg.Engine.Model.Name != "${MISSING_MODEL:?must set}" {
+		t.Fatalf("superseded YAML model was mutated: %q", cfg.Engine.Model.Name)
+	}
+	if got := cfg.Engine.Model.BaseURL; got != "https://resolved.example.test" {
+		t.Fatalf("active YAML base URL = %q, want resolved value", got)
 	}
 }
 

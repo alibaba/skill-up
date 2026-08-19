@@ -166,7 +166,23 @@ func IsBuiltinTemplateVar(name string) bool {
 // so callers invoke this once that name is settled. It is a no-op for built-in
 // engines, which ignore any engine.custom block.
 func ResolveCustomEngineConfig(cfg *EvalConfig) error {
-	if err := resolveCustomEngineEnv(cfg); err != nil {
+	return ResolveCustomEngineConfigWithOptions(cfg, ResolveCustomEngineOptions{})
+}
+
+// ResolveCustomEngineOptions controls which raw engine fields are relevant to
+// the current invocation.
+type ResolveCustomEngineOptions struct {
+	// SkipModelIdentity leaves engine.model.provider/name untouched when an
+	// explicit CLI model has already superseded those YAML fields. BaseURL and
+	// Params remain active and are still resolved.
+	SkipModelIdentity bool
+}
+
+// ResolveCustomEngineConfigWithOptions resolves and validates the active
+// custom-engine configuration while allowing superseded YAML model fields to
+// be excluded from environment expansion.
+func ResolveCustomEngineConfigWithOptions(cfg *EvalConfig, opts ResolveCustomEngineOptions) error {
+	if err := resolveCustomEngineEnv(cfg, opts); err != nil {
 		return err
 	}
 	if errs := validateEngine(cfg.Engine); len(errs) > 0 {
@@ -183,12 +199,12 @@ func ResolveCustomEngineConfig(cfg *EvalConfig) error {
 // resolution keys off the resolved provider, and an unresolved
 // `${MODEL_PROVIDER:-...}` literal would silently break auth). Built-in
 // template variables are left intact for run-time resolution.
-func resolveCustomEngineEnv(cfg *EvalConfig) error {
+func resolveCustomEngineEnv(cfg *EvalConfig, opts ResolveCustomEngineOptions) error {
 	// engine.model resolution must run regardless of whether engine.custom
 	// is active, so a config that used both a custom block and a templated
 	// model still has its model fields resolved after a --engine override
 	// drops the custom block from the runtime path.
-	modelErrs := resolveModelEnv(&cfg.Engine.Model)
+	modelErrs := resolveModelEnv(&cfg.Engine.Model, opts)
 
 	custom := cfg.Engine.Custom
 	if custom == nil || IsBuiltinEngineName(cfg.Engine.Name) {
@@ -314,17 +330,19 @@ func resolveHTTPEnv(h *customengine.HTTPConfig) []string {
 }
 
 // resolveModelEnv resolves env references in engine.model string values.
-func resolveModelEnv(model *ModelConfig) []string {
+func resolveModelEnv(model *ModelConfig, opts ResolveCustomEngineOptions) []string {
 	var errs []string
-	if v, err := resolveEnvRefs(model.Provider); err != nil {
-		errs = append(errs, fmt.Sprintf("engine.model.provider: %s", err))
-	} else {
-		model.Provider = v
-	}
-	if v, err := resolveEnvRefs(model.Name); err != nil {
-		errs = append(errs, fmt.Sprintf("engine.model.name: %s", err))
-	} else {
-		model.Name = v
+	if !opts.SkipModelIdentity {
+		if v, err := resolveEnvRefs(model.Provider); err != nil {
+			errs = append(errs, fmt.Sprintf("engine.model.provider: %s", err))
+		} else {
+			model.Provider = v
+		}
+		if v, err := resolveEnvRefs(model.Name); err != nil {
+			errs = append(errs, fmt.Sprintf("engine.model.name: %s", err))
+		} else {
+			model.Name = v
+		}
 	}
 	if v, err := resolveEnvRefs(model.BaseURL); err != nil {
 		errs = append(errs, fmt.Sprintf("engine.model.base_url: %s", err))

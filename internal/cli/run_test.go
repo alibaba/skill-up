@@ -104,6 +104,47 @@ func TestRunEvalDryRunLoadsFiltersAndSkipsAgentSetup(t *testing.T) {
 	}
 }
 
+func TestRunEvalCLIModelSkipsSupersededYAMLModelReference(t *testing.T) {
+	t.Setenv("MISSING_MODEL", "")
+	root := t.TempDir()
+	writeAutoModeSkill(t, root)
+	evalsDir := filepath.Join(root, "evals")
+	casesDir := filepath.Join(evalsDir, "cases")
+	if err := os.MkdirAll(casesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	evalYAML := `schema_version: v1alpha1
+environment:
+  type: none
+engine:
+  name: claude_code
+  model:
+    provider: anthropic
+    name: "${MISSING_MODEL:?must set}"
+cases:
+  files:
+    - evals/cases/basic.yaml
+`
+	if err := os.WriteFile(filepath.Join(evalsDir, "eval.yaml"), []byte(evalYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(casesDir, "basic.yaml"), []byte("id: basic\ninput:\n  prompt: hello\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newRunPhaseTestCommand(t)
+	if err := cmd.Flags().Set("dry-run", testFlagBoolTrue); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("model", "claude-sonnet-4-6"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := captureStdout(t, func() error { return runEval(cmd, []string{root}) }); err != nil {
+		t.Fatalf("explicit --model should bypass stale YAML model reference: %v", err)
+	}
+}
+
 func TestRunEvalValidatesOnlySelectedCases(t *testing.T) {
 	root := t.TempDir()
 	writeAutoModeSkill(t, root)
