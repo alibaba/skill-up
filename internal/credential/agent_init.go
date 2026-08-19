@@ -331,8 +331,8 @@ func logProviderEnvResolution(params *ResolvedAgentConfig, kind scopedValueKind,
 		logging.Debugf("AGENT_CONFIG kind=%s engine=%s provider=%s model_env=%s source.model=%s",
 			params.Role, params.Engine, params.Provider, envVar, ValueSourceEnv)
 	case valueAPIKey:
-		logging.Debugf("AGENT_CONFIG kind=%s engine=%s provider=%s auth_env=%s source.auth=%s",
-			params.Role, params.Engine, params.Provider, envVar, ValueSourceEnv)
+		logging.Debugf("AGENT_CONFIG kind=%s engine=%s provider=%s auth_configured=true source.auth=%s",
+			params.Role, params.Engine, params.Provider, ValueSourceEnv)
 	case valueBaseURL:
 		logging.Debugf("AGENT_CONFIG kind=%s engine=%s provider=%s base_url_env=%s source.base_url=%s",
 			params.Role, params.Engine, params.Provider, envVar, ValueSourceEnv)
@@ -349,8 +349,11 @@ func logResolvedAgentConfig(params ResolvedAgentConfig) {
 			params.Role, params.Engine, params.Model, params.ModelSource)
 	}
 	if params.APIKey != "" {
-		logging.Debugf("AGENT_CONFIG kind=%s engine=%s api_key=%s source.api_key=%s",
-			params.Role, params.Engine, MaskAPIKey(params.APIKey), params.APIKeySource)
+		// Do not log the credential, its masked form, or fields derived from its
+		// resolution path. The resolved config retains APIKeySource for callers
+		// that need programmatic diagnostics without placing it in log output.
+		logging.Debugf("AGENT_CONFIG kind=%s engine=%s auth_configured=true",
+			params.Role, params.Engine)
 	}
 	if params.BaseURL != "" {
 		logging.Debugf("AGENT_CONFIG kind=%s engine=%s base_url=%s source.base_url=%s",

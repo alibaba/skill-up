@@ -358,7 +358,7 @@ func TestResolveRunnerConfig_PreservesOpaqueSlashedCLIModel(t *testing.T) {
 	}
 }
 
-func TestResolveRunnerConfig_LogsCLIAPIKeySource(t *testing.T) {
+func TestResolveRunnerConfig_DoesNotLogCLIAPIKey(t *testing.T) {
 	logging.SetVerbosity(1)
 	defer logging.SetVerbosity(0)
 
@@ -369,11 +369,12 @@ func TestResolveRunnerConfig_LogsCLIAPIKeySource(t *testing.T) {
 		}, nil, nil, "", "sk-cli-openai")
 	})
 
-	if !strings.Contains(output, "source.api_key=cli") {
-		t.Fatalf("expected CLI api-key observability log, got %q", output)
+	if !strings.Contains(output, "auth_configured=true") {
+		t.Fatalf("expected credential-presence log, got %q", output)
 	}
-	if !strings.Contains(output, "api_key=sk****ai") {
-		t.Fatalf("expected masked CLI api-key log, got %q", output)
+	if strings.Contains(output, "sk-cli-openai") || strings.Contains(output, "sk****ai") ||
+		strings.Contains(output, "source.api_key") {
+		t.Fatalf("credential data or its resolution path leaked into log: %q", output)
 	}
 }
 
