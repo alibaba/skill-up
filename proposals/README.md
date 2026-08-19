@@ -10,4 +10,4 @@ This is the complete list of skill-up Enhancement Proposals:
 | [SUP-0002](0002-agent-judge-specific-skill.md) | agent_judge Judge-Specific Skill Support | [中文](zh/0002-agent-judge-specific-skill.md) | draft | 2026-07-07 |
 | [SUP-0003](0003-per-case-mocked-mcp-responses.md) | Per-Case Mocked MCP Response Overrides | [中文](zh/0003-per-case-mocked-mcp-responses.md) | draft | 2026-07-07 |
 | [SUP-0004](0004-agent-judge-context-delivery.md) | Agent Judge Context Delivery and Scale Control | [中文](zh/0004-agent-judge-context-delivery.md) | draft | 2026-07-07 |
-| [SUP-0005](0005-skill-evaluation-event-protocol.md) | Skill Evaluation Event Protocol | [中文](zh/0005-skill-evaluation-event-protocol.md) | draft | 2026-08-19 |
+| [SUP-0005](0005-skill-evaluation-event-protocol.md) | Skill Evaluation Event Log Protocol | [中文](zh/0005-skill-evaluation-event-protocol.md) | draft | 2026-08-19 |
