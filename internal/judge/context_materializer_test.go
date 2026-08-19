@@ -52,6 +52,24 @@ func TestMaterializeJudgeContext_StandardProfileUsesFileRefs(t *testing.T) {
 	}
 }
 
+func TestResolveJudgeContext_DefaultProfileDoesNotOverrideMinimalSkillSource(t *testing.T) {
+	cfg := config.DefaultEvalConfig()
+	if cfg.Judge.Context == nil {
+		t.Fatal("default judge context is nil")
+	}
+
+	standard := resolveJudgeContext(cfg.Judge.Context)
+	if standard.profile != judgeContextProfileStandard || standard.skillSourceMode != judgeContextModeFileRef {
+		t.Fatalf("standard defaults = profile %q, skill_source %q; want standard, file_ref", standard.profile, standard.skillSourceMode)
+	}
+
+	cfg.Judge.Context.Profile = judgeContextProfileMinimal
+	minimal := resolveJudgeContext(cfg.Judge.Context)
+	if minimal.skillSourceMode != judgeContextModeOmit {
+		t.Fatalf("minimal skill_source = %q, want omit", minimal.skillSourceMode)
+	}
+}
+
 func TestMaterializeJudgeContext_SnapshotsEvaluatedSkillSource(t *testing.T) {
 	skillDir := writeSkillSourceFixture(t)
 	mc, err := MaterializeJudgeContext(context.Background(), &mockJudgeTestRuntime{}, nil, Input{

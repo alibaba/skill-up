@@ -22,6 +22,13 @@ cases:
     expect: {}
   parallelism: 1
 
+judge:
+  # Material modes, including skill_source, are derived from this profile.
+  # Keep profile-specific modes unset so profile: minimal can select its own
+  # defaults instead of inheriting standard's file_ref behavior.
+  context:
+    profile: standard
+
 report:
   formats: [json]
   artifacts: []

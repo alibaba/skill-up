@@ -57,6 +57,16 @@ func TestDefaultEvalConfig(t *testing.T) { //nolint:cyclop,gocyclo // exhaustive
 	if cfg.Judge.Type != "" {
 		t.Errorf("Judge.Type = %q, want empty (no global judge)", cfg.Judge.Type)
 	}
+	if cfg.Judge.Context == nil {
+		t.Fatal("Judge.Context should contain profile defaults")
+	} else {
+		if cfg.Judge.Context.Profile != "standard" {
+			t.Errorf("Judge.Context.Profile = %q, want %q", cfg.Judge.Context.Profile, "standard")
+		}
+		if cfg.Judge.Context.SkillSource != "" {
+			t.Errorf("Judge.Context.SkillSource = %q, want empty (derived from profile)", cfg.Judge.Context.SkillSource)
+		}
+	}
 
 	// Verify report defaults
 	if len(cfg.Report.Formats) != 1 || cfg.Report.Formats[0] != "json" {
@@ -188,5 +198,9 @@ func TestDefaultEvalConfig_ReturnsNewInstance(t *testing.T) {
 	cfg1.Engine.Name = "modified"
 	if cfg2.Engine.Name == "modified" {
 		t.Error("DefaultEvalConfig() should return independent instances")
+	}
+	cfg1.Judge.Context.Profile = "minimal"
+	if cfg2.Judge.Context.Profile != "standard" {
+		t.Error("DefaultEvalConfig() should deep-copy judge context defaults")
 	}
 }
