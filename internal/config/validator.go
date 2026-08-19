@@ -400,6 +400,9 @@ func validateJudgeContextModes(ctx *JudgeContextConfig) []string {
 	if ctx.GeneratedFiles != "" && ctx.GeneratedFiles != "omit" && ctx.GeneratedFiles != "index" && ctx.GeneratedFiles != "include" {
 		errs = append(errs, "judge.context.generated_files must be one of: omit, index, include")
 	}
+	if ctx.SkillSource != "" && ctx.SkillSource != "omit" && ctx.SkillSource != "file_ref" {
+		errs = append(errs, "judge.context.skill_source must be one of: omit, file_ref")
+	}
 	return errs
 }
 

@@ -115,6 +115,9 @@ func MergeJudgeContextConfig(global, caseLevel *config.JudgeContextConfig) *conf
 	if caseLevel.GeneratedFiles != "" {
 		merged.GeneratedFiles = caseLevel.GeneratedFiles
 	}
+	if caseLevel.SkillSource != "" {
+		merged.SkillSource = caseLevel.SkillSource
+	}
 	merged.Limits = mergeJudgeContextLimits(global.Limits, caseLevel.Limits)
 	if caseLevel.Attachments != nil {
 		merged.Attachments = append([]config.JudgeContextAttachment(nil), caseLevel.Attachments...)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alibaba/skill-up/internal/judge"
@@ -83,6 +84,29 @@ func TestConvertToAnthropicGrading(t *testing.T) {
 			t.Fatalf("unexpected judge context: %#v", grading.JudgeContext)
 		}
 	})
+}
+
+func TestConvertToAnthropicGrading_DiagnosisStaysOutOfCompatibilityFormat(t *testing.T) {
+	t.Parallel()
+	result := judge.NewResult([]judge.AssertionResult{{
+		Text:     "check",
+		Passed:   false,
+		Evidence: "missing",
+		Diagnosis: &judge.FailureDiagnosis{
+			FailureAttribution:    judge.FailureAttributionSkillMissingInfo,
+			Confidence:            judge.DiagnosisConfidenceHigh,
+			AttributionEvidence:   "SKILL.md omits the requirement",
+			ImprovementSuggestion: "Add the requirement",
+		},
+	}}, 1, 1)
+	grading := ConvertToAnthropicGrading(result)
+	data, err := json.Marshal(grading)
+	if err != nil {
+		t.Fatalf("marshal grading: %v", err)
+	}
+	if strings.Contains(string(data), "diagnosis") || strings.Contains(string(data), "skill_missing_info") {
+		t.Fatalf("Anthropic grading must remain unchanged: %s", data)
+	}
 }
 
 func TestConvertToAnthropicGrading_JSONFormat(t *testing.T) {

@@ -120,9 +120,10 @@ type embeddedGrading struct {
 }
 
 type embeddedExpectation struct {
-	Text     string `json:"text"`
-	Passed   bool   `json:"passed"`
-	Evidence string `json:"evidence"`
+	Text      string                  `json:"text"`
+	Passed    bool                    `json:"passed"`
+	Evidence  string                  `json:"evidence"`
+	Diagnosis *judge.FailureDiagnosis `json:"diagnosis,omitempty"`
 }
 
 type embeddedGradingSummary struct {
@@ -179,9 +180,10 @@ func caseResultToEmbeddedCase(cr CaseResult) embeddedCase {
 		}
 		for _, ar := range cr.Grading.AssertionResults {
 			eg.Expectations = append(eg.Expectations, embeddedExpectation{
-				Text:     ar.Text,
-				Passed:   ar.Passed,
-				Evidence: ar.Evidence,
+				Text:      ar.Text,
+				Passed:    ar.Passed,
+				Evidence:  ar.Evidence,
+				Diagnosis: ar.Diagnosis,
 			})
 		}
 		ec.Grading = eg

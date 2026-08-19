@@ -308,6 +308,7 @@ func TestMergeJudgeConfig_CaseContextOverridesGlobalFields(t *testing.T) {
 			Profile:       "standard",
 			Transcript:    "file_ref",
 			WorkspaceDiff: "file_ref",
+			SkillSource:   "file_ref",
 			Limits: &config.JudgeContextLimits{
 				MaxBytes:              100,
 				WorkspaceDiffMaxLines: 50,
@@ -320,6 +321,7 @@ func TestMergeJudgeConfig_CaseContextOverridesGlobalFields(t *testing.T) {
 		Context: &config.JudgeContextConfig{
 			Profile:      "minimal",
 			FinalMessage: "truncate",
+			SkillSource:  "omit",
 			Limits:       &config.JudgeContextLimits{TranscriptMaxTurns: 20},
 		},
 	}
@@ -336,6 +338,9 @@ func TestMergeJudgeConfig_CaseContextOverridesGlobalFields(t *testing.T) {
 	}
 	if merged.Context.FinalMessage != "truncate" {
 		t.Fatalf("final_message = %q, want truncate", merged.Context.FinalMessage)
+	}
+	if merged.Context.SkillSource != "omit" {
+		t.Fatalf("skill_source = %q, want case override omit", merged.Context.SkillSource)
 	}
 	if merged.Context.Limits == nil {
 		t.Fatalf("limits not inherited: %#v", merged.Context.Limits)

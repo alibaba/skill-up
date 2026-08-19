@@ -108,6 +108,10 @@ type EvalResult struct {
 
 	// Configuration is "with_skill" or "without_skill".
 	Configuration string
+
+	// skillSources is the immutable pre-execution snapshot supplied only to
+	// agent_judge. It is intentionally excluded from public result formats.
+	skillSources []judge.SkillSource
 }
 
 // CaseResult is an alias for EvalResult for backward compatibility with runner.
@@ -395,6 +399,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	logging.DebugContextf(ctx, "Runner: case %s (%s): %s", caseCfg.ID, configName, caseCfg.Title)
 
 	judgeCfg := judge.MergeJudgeConfig(e.evalCfg.Judge, caseCfg.Judge)
+	result.skillSources = e.captureEvaluatedSkillSources(ctx, configName, judgeCfg)
 
 	// Multi-turn branch: delegate to dedicated engine when the case defines
 	// input.turns AND the agent supports session resumption. Agents that do
@@ -507,15 +512,19 @@ func (e *defaultEvaluator) evaluateCaseSession(
 	sessionResult *agent.SessionResult,
 	result *EvalResult,
 ) EvalResult {
+	caseTranscript := sessionTranscript(sessionResult)
 	judgeInput := judge.Input{
 		CaseID:         caseCfg.ID,
 		FinalMessage:   result.FinalMessage,
 		ExitCode:       result.ExitCode,
 		WorkspacePath:  rt.Workspace(),
 		SkillDir:       e.skillDir,
+		Configuration:  configName,
+		SkillSources:   slices.Clone(result.skillSources),
+		SkillUsage:     judge.InferSkillUsageEvidence(caseTranscript),
 		TurnsExecuted:  result.Turns,
 		TurnsTotal:     turnsTotal,
-		Transcript:     sessionTranscript(sessionResult),
+		Transcript:     caseTranscript,
 		WorkspaceDiff:  sessionWorkspaceDiff(sessionResult),
 		GeneratedFiles: sessionGeneratedFiles(sessionResult),
 		SessionResult:  sessionResult,
@@ -542,6 +551,38 @@ func (e *defaultEvaluator) evaluateCaseSession(
 	}
 
 	return finalResult
+}
+
+func (e *defaultEvaluator) evaluatedSkillSources(configName string) []judge.SkillSource {
+	if configName == "without_skill" || len(e.evalCfg.Skills) == 0 {
+		return nil
+	}
+	skillDir := e.resolvedSkillDir()
+	sources := make([]judge.SkillSource, 0, len(e.evalCfg.Skills))
+	for _, ref := range e.evalCfg.Skills {
+		resolved := resolveSkillConfig(skillDir, ref)
+		sources = append(sources, judge.SkillSource{
+			Name:    filepath.Base(filepath.Clean(resolved.Source)),
+			Path:    resolved.Source,
+			Include: slices.Clone(resolved.Include),
+			Exclude: slices.Clone(resolved.Exclude),
+		})
+	}
+	return sources
+}
+
+func (e *defaultEvaluator) captureEvaluatedSkillSources(ctx context.Context, configName string, judgeCfg config.JudgeConfig) []judge.SkillSource {
+	if judgeCfg.Type != judgeTypeAgentJudge {
+		return nil
+	}
+	sources, err := judge.CaptureSkillSources(e.evaluatedSkillSources(configName), judgeCfg.Context)
+	if err != nil {
+		// Diagnosis context is optional and must not turn a runnable evaluation
+		// into ERROR when local source snapshotting is unavailable.
+		logging.WarnContextf(ctx, "Evaluator: evaluated Skill source snapshot unavailable: %v", err)
+		return nil
+	}
+	return sources
 }
 
 func (e *defaultEvaluator) runExpectPreCheck(

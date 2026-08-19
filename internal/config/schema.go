@@ -176,6 +176,7 @@ type JudgeContextConfig struct {
 	Transcript     string                   `json:"transcript,omitempty"      yaml:"transcript,omitempty"`
 	WorkspaceDiff  string                   `json:"workspace_diff,omitempty"  yaml:"workspace_diff,omitempty"`
 	GeneratedFiles string                   `json:"generated_files,omitempty" yaml:"generated_files,omitempty"`
+	SkillSource    string                   `json:"skill_source,omitempty"    yaml:"skill_source,omitempty"`
 	Limits         *JudgeContextLimits      `json:"limits,omitempty"          yaml:"limits,omitempty"`
 	Attachments    []JudgeContextAttachment `json:"attachments,omitempty"     yaml:"attachments,omitempty"`
 }

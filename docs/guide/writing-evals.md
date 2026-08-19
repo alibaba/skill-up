@@ -792,7 +792,40 @@ into the judge prompt.
 materials table into the judge prompt. When `judge.context` is omitted, the
 default profile is `standard`: `final_message` is included inline, while
 `transcript` and `workspace_diff` are provided as file references to avoid
-large prompt/argv failures.
+large prompt/argv failures. The exact evaluated Skill is also exposed through
+a `skill_source` file reference. This bounded snapshot is captured before the
+Agent runs, so files created or changed during evaluation cannot alter the
+Judge's view of the installed source. Its index records file sizes and SHA-256
+digests, while `SKILL.md` and readable source/reference files are retained up
+to the configured context byte limit. The `evals/` directory and large/binary
+assets are not copied into the judge context.
+
+The effective `skill_source` defaults are:
+
+| Context configuration | Effective `skill_source` |
+|---|---|
+| `judge.context` omitted | `file_ref` (because the default profile is `standard`) |
+| `profile: standard` | `file_ref` |
+| `profile: minimal` | `omit` |
+| Explicit `skill_source` | The explicit value overrides the profile default |
+| `without_skill` benchmark variant | Always `omit` |
+
+`file_ref` is not only a host-side path label. Readable Skill source files are
+copied into the Judge-accessible runtime context and retained in the evaluation
+artifacts, so they may be processed by the configured Judge provider. Their
+combined retained content uses `limits.max_bytes` (64 KiB by default); files
+outside that content budget may still appear in the index with path, size, and
+SHA-256 metadata. Use `skill_source: omit` when the Skill source must not be
+made available to the Judge.
+
+For failed criteria, the judge may additionally return an optional structured
+`diagnosis` in `result.json` and the HTML/Markdown reports. It contains a likely
+failure attribution, confidence, attribution evidence, and an improvement
+suggestion. This is AI-generated diagnostic guidance, not a verified root
+cause, and it never changes the pass/fail verdict. If the engine does not expose
+trustworthy Skill-use evidence, `skill_not_triggered` is rejected rather than
+inferred from silence. In a `without_skill` benchmark baseline, all
+Skill-specific attribution categories are rejected.
 
 Use `minimal` for long repository-change benchmarks where the judge should rely
 on explicit attachments or script outputs instead of the full conversation:
@@ -821,6 +854,7 @@ judge:
     transcript: file_ref                     # include auto-downgrades to file_ref above limits.max_bytes
     workspace_diff: file_ref
     generated_files: index                   # index | include | omit
+    skill_source: file_ref                    # file_ref | omit
     limits:
       max_bytes: 65536
 ```

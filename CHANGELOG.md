@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Failed `agent_judge` criteria can now include an optional, structured
+  AI-generated diagnosis with a likely failure attribution, confidence,
+  attribution evidence, and an actionable improvement suggestion. Standard
+  judge context includes a bounded, hashed, pre-execution snapshot of the
+  evaluated Skill source, while benchmark baselines and engines without
+  trustworthy Skill-use evidence are prevented from producing unsupported
+  Skill-specific blame.
+
 ### Fixed
 - `agent_judge` now uses stable criterion IDs and a strict JSON response
   contract, rejects malformed or semantically incomplete judge output, and

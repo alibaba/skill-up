@@ -3,6 +3,7 @@ package judge
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,6 +41,8 @@ func TestMaterializeJudgeContext_StandardProfileUsesFileRefs(t *testing.T) {
 	assertMaterialMode(t, mc.Manifest.Materials, "final_message", "include")
 	assertMaterialMode(t, mc.Manifest.Materials, "transcript", "file_ref")
 	assertMaterialMode(t, mc.Manifest.Materials, "workspace_diff", "file_ref")
+	assertMaterialMode(t, mc.Manifest.Materials, "skill_source", "omit")
+	assertMaterialMode(t, mc.Manifest.Materials, "skill_usage", "include")
 	assertMaterialPath(t, mc.Manifest.Materials, "transcript", "judge/context/transcript.json")
 	if _, err := os.Stat(filepath.Join(mc.Dir, "transcript.json")); err != nil {
 		t.Fatalf("transcript material missing: %v", err)
@@ -47,6 +50,177 @@ func TestMaterializeJudgeContext_StandardProfileUsesFileRefs(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(mc.Dir, "workspace.diff")); err != nil {
 		t.Fatalf("workspace diff material missing: %v", err)
 	}
+}
+
+func TestMaterializeJudgeContext_SnapshotsEvaluatedSkillSource(t *testing.T) {
+	skillDir := writeSkillSourceFixture(t)
+	mc, err := MaterializeJudgeContext(context.Background(), &mockJudgeTestRuntime{}, nil, Input{
+		Configuration: "with_skill",
+		SkillSources:  []SkillSource{{Path: skillDir}},
+		SkillUsage: &SkillUsageEvidence{
+			Status:   SkillUsageTriggered,
+			Reliable: true,
+			Evidence: []string{"observed explicit Skill tool call"},
+		},
+	}, filepath.Join(t.TempDir(), "judge", "run"))
+	if err != nil {
+		t.Fatalf("MaterializeJudgeContext returned error: %v", err)
+	}
+	assertMaterialMode(t, mc.Manifest.Materials, "skill_source", "file_ref")
+	assertMaterialMode(t, mc.Manifest.Materials, "skill_usage", "include")
+
+	indexData, err := os.ReadFile(filepath.Join(mc.Dir, "skill_source", "index.json"))
+	if err != nil {
+		t.Fatalf("read skill source index: %v", err)
+	}
+	var index skillSourceIndex
+	if err := json.Unmarshal(indexData, &index); err != nil {
+		t.Fatalf("parse skill source index: %v", err)
+	}
+	assertSkillSourceIndex(t, index, mc.Dir)
+}
+
+func TestCaptureSkillSources_FreezesPreExecutionContent(t *testing.T) {
+	skillDir := t.TempDir()
+	skillPath := filepath.Join(skillDir, "SKILL.md")
+	if err := os.WriteFile(skillPath, []byte("# Before agent run\n"), 0o600); err != nil {
+		t.Fatalf("write initial SKILL.md: %v", err)
+	}
+	captured, err := CaptureSkillSources([]SkillSource{{Path: skillDir}}, nil)
+	if err != nil {
+		t.Fatalf("CaptureSkillSources returned error: %v", err)
+	}
+	if err := os.WriteFile(skillPath, []byte("# Mutated after capture\n"), 0o600); err != nil {
+		t.Fatalf("mutate SKILL.md: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(skillDir, "output"), 0o755); err != nil {
+		t.Fatalf("create post-capture output: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "output", "report.json"), []byte(`{"generated":true}`), 0o600); err != nil {
+		t.Fatalf("write post-capture output: %v", err)
+	}
+
+	mc, err := MaterializeJudgeContext(context.Background(), &mockJudgeTestRuntime{}, nil, Input{
+		Configuration: "with_skill",
+		SkillSources:  captured,
+	}, filepath.Join(t.TempDir(), "judge", "run"))
+	if err != nil {
+		t.Fatalf("MaterializeJudgeContext returned error: %v", err)
+	}
+	index := readSkillSourceIndex(t, mc.Dir)
+	if len(index.Skills) != 1 || len(index.Skills[0].Files) != 1 || index.Skills[0].Files[0].Path != "SKILL.md" {
+		t.Fatalf("post-capture files leaked into snapshot: %#v", index)
+	}
+	materialPath := index.Skills[0].Files[0].MaterialPath
+	content, err := os.ReadFile(filepath.Join(mc.Dir, "skill_source", filepath.FromSlash(materialPath)))
+	if err != nil {
+		t.Fatalf("read captured SKILL.md: %v", err)
+	}
+	if string(content) != "# Before agent run\n" {
+		t.Fatalf("materialized mutable source instead of snapshot: %q", content)
+	}
+}
+
+func writeSkillSourceFixture(t *testing.T) string {
+	t.Helper()
+	skillDir := t.TempDir()
+	files := map[string][]byte{
+		"SKILL.md":            []byte("# Calculator\nFollow references/rules.md.\n"),
+		"references/rules.md": []byte("Use one operation at a time.\n"),
+		"scripts/add.py":      []byte("print(1 + 2)\n"),
+		"assets/blob.bin":     {0x00, 0xff, 0x01},
+		"evals/secret.yaml":   []byte("must-not-be-materialized: true\n"),
+	}
+	for rel, content := range files {
+		path := filepath.Join(skillDir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", rel, err)
+		}
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	outside := filepath.Join(t.TempDir(), "outside.md")
+	if err := os.WriteFile(outside, []byte("must-not-be-read\n"), 0o600); err != nil {
+		t.Fatalf("write external symlink target: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(skillDir, "linked-secret.md")); err != nil {
+		t.Fatalf("create source symlink: %v", err)
+	}
+	return skillDir
+}
+
+func assertSkillSourceIndex(t *testing.T, index skillSourceIndex, materializedDir string) {
+	t.Helper()
+	if index.Configuration != "with_skill" || len(index.Skills) != 1 {
+		t.Fatalf("unexpected skill source index: %#v", index)
+	}
+	indexed := make(map[string]skillSourceIndexFile)
+	for _, file := range index.Skills[0].Files {
+		indexed[file.Path] = file
+		if len(file.SHA256) != 64 {
+			t.Fatalf("%s has invalid SHA-256 %q", file.Path, file.SHA256)
+		}
+	}
+	if _, ok := indexed["evals/secret.yaml"]; ok {
+		t.Fatal("evals directory must not appear in the evaluated Skill source index")
+	}
+	if _, ok := indexed["linked-secret.md"]; ok {
+		t.Fatal("symlinked files must not appear in the evaluated Skill source index")
+	}
+	for _, rel := range []string{"SKILL.md", "references/rules.md", "scripts/add.py"} {
+		file, ok := indexed[rel]
+		if !ok || file.MaterialPath == "" {
+			t.Fatalf("readable source %q not materialized: %#v", rel, file)
+		}
+		if _, err := os.Stat(filepath.Join(materializedDir, "skill_source", filepath.FromSlash(file.MaterialPath))); err != nil {
+			t.Fatalf("materialized source %q missing: %v", rel, err)
+		}
+	}
+	if blob := indexed["assets/blob.bin"]; blob.MaterialPath != "" {
+		t.Fatalf("binary asset should be indexed without copied content: %#v", blob)
+	}
+}
+
+func readSkillSourceIndex(t *testing.T, materializedDir string) skillSourceIndex {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(materializedDir, "skill_source", "index.json"))
+	if err != nil {
+		t.Fatalf("read skill source index: %v", err)
+	}
+	var index skillSourceIndex
+	if err := json.Unmarshal(data, &index); err != nil {
+		t.Fatalf("parse skill source index: %v", err)
+	}
+	return index
+}
+
+func TestMaterializeJudgeContext_WithoutSkillOmitsSkillSource(t *testing.T) {
+	skillDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Skill\n"), 0o600); err != nil {
+		t.Fatalf("write SKILL.md: %v", err)
+	}
+	mc, err := MaterializeJudgeContext(context.Background(), &mockJudgeTestRuntime{}, &config.JudgeContextConfig{
+		SkillSource: "file_ref",
+	}, Input{
+		Configuration: "without_skill",
+		SkillSources:  []SkillSource{{Path: skillDir}},
+	}, filepath.Join(t.TempDir(), "judge", "run"))
+	if err != nil {
+		t.Fatalf("MaterializeJudgeContext returned error: %v", err)
+	}
+	assertMaterialMode(t, mc.Manifest.Materials, "skill_source", "omit")
+}
+
+func TestMaterializeJudgeContext_UnavailableSkillSourceDoesNotFailEvaluation(t *testing.T) {
+	mc, err := MaterializeJudgeContext(context.Background(), &mockJudgeTestRuntime{}, nil, Input{
+		Configuration: "with_skill",
+		SkillSources:  []SkillSource{{Path: filepath.Join(t.TempDir(), "missing")}},
+	}, filepath.Join(t.TempDir(), "judge", "run"))
+	if err != nil {
+		t.Fatalf("optional Skill source snapshot must degrade gracefully: %v", err)
+	}
+	assertMaterialMode(t, mc.Manifest.Materials, "skill_source", "omit")
 }
 
 func TestMaterializeJudgeContext_MinimalProfileOmitsLargeMaterials(t *testing.T) {
@@ -66,6 +240,7 @@ func TestMaterializeJudgeContext_MinimalProfileOmitsLargeMaterials(t *testing.T)
 	assertMaterialMode(t, mc.Manifest.Materials, "final_message", "truncate")
 	assertMaterialMode(t, mc.Manifest.Materials, "transcript", "omit")
 	assertMaterialMode(t, mc.Manifest.Materials, "workspace_diff", "omit")
+	assertMaterialMode(t, mc.Manifest.Materials, "skill_source", "omit")
 	var final ContextMaterial
 	for _, m := range mc.Materials {
 		if m.Key == "final_message" {

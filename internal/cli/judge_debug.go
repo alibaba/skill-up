@@ -92,18 +92,24 @@ type judgeDebugInput struct {
 
 // toJudgeInput converts the debug input to a judge.Input.
 func (d *judgeDebugInput) toJudgeInput() judge.Input {
-	return judge.Input{
+	input := judge.Input{
 		CaseID:         d.CaseID,
 		Transcript:     d.Transcript,
 		FinalMessage:   d.FinalMessage,
 		ExitCode:       d.ExitCode,
 		SkillDir:       d.SkillDir,
+		Configuration:  "with_skill",
+		SkillUsage:     judge.InferSkillUsageEvidence(d.Transcript),
 		WorkspacePath:  d.WorkspacePath,
 		WorkspaceDiff:  d.WorkspaceDiff,
 		GeneratedFiles: d.GeneratedFiles,
 		TurnsExecuted:  d.TurnsExecuted,
 		TurnsTotal:     d.TurnsTotal,
 	}
+	if d.SkillDir != "" {
+		input.SkillSources = []judge.SkillSource{{Path: d.SkillDir}}
+	}
+	return input
 }
 
 // ---------------------------------------------------------------------------

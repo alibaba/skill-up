@@ -152,6 +152,12 @@ func writeMarkdownCaseDetails(sb *strings.Builder, cr CaseResult) {
 			if ar.Evidence != "" {
 				fmt.Fprintf(sb, "  - Evidence: %s\n", markdownText(ar.Evidence))
 			}
+			if ar.Diagnosis != nil {
+				fmt.Fprintf(sb, "  - AI-generated likely cause: %s (confidence: %s)\n",
+					markdownText(string(ar.Diagnosis.FailureAttribution)), markdownText(string(ar.Diagnosis.Confidence)))
+				fmt.Fprintf(sb, "  - Attribution evidence: %s\n", markdownText(ar.Diagnosis.AttributionEvidence))
+				fmt.Fprintf(sb, "  - Improvement suggestion: %s\n", markdownText(ar.Diagnosis.ImprovementSuggestion))
+			}
 		}
 	}
 	for _, tr := range cr.TurnResults {

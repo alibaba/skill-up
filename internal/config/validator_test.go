@@ -1218,6 +1218,19 @@ func TestValidator_ValidateAll(t *testing.T) {
 	})
 }
 
+func TestValidateJudgeContext_SkillSourceMode(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"", "omit", "file_ref"} {
+		if errs := validateJudgeContext(&JudgeContextConfig{SkillSource: mode}); len(errs) != 0 {
+			t.Fatalf("skill_source mode %q returned errors: %v", mode, errs)
+		}
+	}
+	errs := validateJudgeContext(&JudgeContextConfig{SkillSource: "include"})
+	if len(errs) != 1 || !strings.Contains(errs[0], "judge.context.skill_source must be one of: omit, file_ref") {
+		t.Fatalf("unexpected invalid skill_source errors: %v", errs)
+	}
+}
+
 func TestValidator_JudgeSkills(t *testing.T) {
 	t.Parallel()
 	validator := NewValidator()

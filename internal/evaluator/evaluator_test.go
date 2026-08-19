@@ -3739,6 +3739,34 @@ func TestGitInitUploader_InitWithRemotes(t *testing.T) {
 	}
 }
 
+func TestEvaluatedSkillSources_UsesInstalledSourceAndExcludesBaseline(t *testing.T) {
+	skillDir := t.TempDir()
+	e := &defaultEvaluator{
+		skillDir: skillDir,
+		evalCfg: &config.EvalConfig{Skills: []config.SkillRef{{
+			Source:  "local_path",
+			Path:    ".",
+			Include: []string{"SKILL.md", "references/**"},
+			Exclude: []string{"references/drafts/**"},
+		}}},
+	}
+
+	sources := e.evaluatedSkillSources("with_skill")
+	if len(sources) != 1 || filepath.Clean(sources[0].Path) != filepath.Clean(skillDir) {
+		t.Fatalf("unexpected evaluated Skill sources: %#v", sources)
+	}
+	if sources[0].Name != filepath.Base(skillDir) {
+		t.Fatalf("evaluated Skill name = %q, want %q", sources[0].Name, filepath.Base(skillDir))
+	}
+	if !slices.Equal(sources[0].Include, []string{"SKILL.md", "references/**"}) ||
+		!slices.Equal(sources[0].Exclude, []string{"references/drafts/**"}) {
+		t.Fatalf("Skill filters not preserved: %#v", sources[0])
+	}
+	if baseline := e.evaluatedSkillSources("without_skill"); baseline != nil {
+		t.Fatalf("without_skill baseline must not expose Skill sources: %#v", baseline)
+	}
+}
+
 // absoluteSecretPath returns a path that filepath.IsAbs reports as absolute on
 // the host OS. On Windows that requires a drive letter; `\tmp\secret.txt`
 // alone is considered relative.

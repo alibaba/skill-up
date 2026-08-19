@@ -61,22 +61,7 @@ func sampleInput() Input {
 					Summary: judge.ResultSummary{Passed: 2, Failed: 0, Total: 2, PassRate: 1.0},
 				},
 			},
-			{
-				CaseID:     "edge-case-null",
-				Title:      "Handle null input gracefully",
-				Status:     judge.StatusFail,
-				DurationMs: 62100,
-				Turns:      8,
-				Grading: &judge.Result{
-					Status:        judge.StatusFail,
-					TurnsExecuted: 8,
-					TurnsTotal:    8,
-					AssertionResults: []judge.AssertionResult{
-						{Text: "output_contains: 'graceful'", Passed: false, Evidence: "output does not contain 'graceful'"},
-					},
-					Summary: judge.ResultSummary{Passed: 0, Failed: 1, Total: 1, PassRate: 0.0},
-				},
-			},
+			sampleFailingCase(),
 			{
 				CaseID:     "skipped-case",
 				Title:      "Skipped due to post_condition",
@@ -92,6 +77,33 @@ func sampleInput() Input {
 				DurationMs: 300000,
 				Error:      "engine process killed after 300s",
 			},
+		},
+	}
+}
+
+func sampleFailingCase() CaseResult {
+	return CaseResult{
+		CaseID:     "edge-case-null",
+		Title:      "Handle null input gracefully",
+		Status:     judge.StatusFail,
+		DurationMs: 62100,
+		Turns:      8,
+		Grading: &judge.Result{
+			Status:        judge.StatusFail,
+			TurnsExecuted: 8,
+			TurnsTotal:    8,
+			AssertionResults: []judge.AssertionResult{{
+				Text:     "output_contains: 'graceful'",
+				Passed:   false,
+				Evidence: "output does not contain 'graceful'",
+				Diagnosis: &judge.FailureDiagnosis{
+					FailureAttribution:    judge.FailureAttributionSkillMissingInfo,
+					Confidence:            judge.DiagnosisConfidenceHigh,
+					AttributionEvidence:   "SKILL.md does not define graceful null handling",
+					ImprovementSuggestion: "Add a null-handling section to SKILL.md",
+				},
+			}},
+			Summary: judge.ResultSummary{Passed: 0, Failed: 1, Total: 1, PassRate: 0.0},
 		},
 	}
 }
@@ -137,10 +149,19 @@ func TestJSONReporter_Write(t *testing.T) {
 	if len(parsed.CaseResults[0].JudgeSkills) != 1 || parsed.CaseResults[0].JudgeSkills[0].Path != "evals/fixtures/judge-skill" {
 		t.Fatalf("judge_skills not preserved in JSON: %#v", parsed.CaseResults[0].JudgeSkills)
 	}
+	assertJSONDiagnosis(t, parsed.CaseResults[1])
 	parsedSkill := parsed.CaseResults[0].JudgeSkills[0]
 	if len(parsedSkill.Include) != 2 || parsedSkill.Include[1] != "references/**" ||
 		len(parsedSkill.Exclude) != 1 || parsedSkill.Exclude[0] != "references/drafts/**" {
 		t.Fatalf("judge skill filters not preserved in JSON: %#v", parsedSkill)
+	}
+}
+
+func assertJSONDiagnosis(t *testing.T, result CaseResult) {
+	t.Helper()
+	diagnosis := result.Grading.AssertionResults[0].Diagnosis
+	if diagnosis == nil || diagnosis.FailureAttribution != judge.FailureAttributionSkillMissingInfo {
+		t.Fatalf("criterion diagnosis not preserved in JSON: %#v", diagnosis)
 	}
 }
 
@@ -372,6 +393,11 @@ func TestHTMLReporter_ContainsAssertionDetails(t *testing.T) {
 	if !strings.Contains(content, "graceful") {
 		t.Fatal("html should contain failure evidence")
 	}
+	for _, want := range []string{"AI-generated likely cause", "skill_missing_info", "SKILL.md does not define graceful null handling", "Add a null-handling section to SKILL.md"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("html should contain diagnosis detail %q", want)
+		}
+	}
 	if !strings.Contains(content, "25%") {
 		t.Fatal("html should contain pass rate (1 of 4 = 25%)")
 	}
@@ -450,6 +476,9 @@ func TestMarkdownReporter_Write(t *testing.T) {
 		"### edge-case-null",
 		"output_contains: &#39;graceful&#39;",
 		"output does not contain &#39;graceful&#39;",
+		"AI-generated likely cause: skill_missing_info (confidence: high)",
+		"Attribution evidence: SKILL.md does not define graceful null handling",
+		"Improvement suggestion: Add a null-handling section to SKILL.md",
 		"### error-case",
 		"engine process killed after 300s",
 	} {

@@ -54,6 +54,10 @@ type CriterionResult struct {
 
 	// Failures contains unmet requirements for a failed criterion.
 	Failures []string `json:"failures"`
+
+	// Diagnosis is kept as raw JSON so optional diagnostic mistakes never
+	// invalidate an otherwise valid, strict verdict response.
+	Diagnosis json.RawMessage `json:"diagnosis,omitempty"`
 }
 
 // judgeResponse is the expected JSON structure from the agent judge output.
@@ -182,7 +186,7 @@ func (j *AgentJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 	}
 	logging.WarnContextf(ctx, "agent_judge output failed validation; retrying once with correction guidance: %v", validationErr)
 
-	correctionPrompt := buildAgentJudgeCorrectionPrompt(j.Criteria, validationErr)
+	correctionPrompt := buildAgentJudgeCorrectionPrompt(j.Criteria, validationErr, materialized)
 	retryArtifactDir := ""
 	if in.ArtifactDir != "" {
 		retryArtifactDir = filepath.Join(in.ArtifactDir, agentJudgeRetryArtifactDir)
@@ -469,10 +473,15 @@ func appendUniqueArtifactFiles(groups ...[]agent.ArtifactFile) []agent.ArtifactF
 func (j *AgentJudge) buildResult(in Input, sessionResult *agent.SessionResult, materialized *MaterializedContext, prompt string, criterionResults []CriterionResult) *Result {
 	assertions := make([]AssertionResult, 0, len(criterionResults))
 	for i, cr := range criterionResults {
+		var diagnosis *FailureDiagnosis
+		if !*cr.Passed {
+			diagnosis = normalizeFailureDiagnosis(cr.Diagnosis, in)
+		}
 		assertions = append(assertions, AssertionResult{
-			Text:     j.Criteria[i],
-			Passed:   *cr.Passed,
-			Evidence: formatCriterionEvidence(cr),
+			Text:      j.Criteria[i],
+			Passed:    *cr.Passed,
+			Evidence:  formatCriterionEvidence(cr),
+			Diagnosis: diagnosis,
 		})
 	}
 
@@ -589,6 +598,72 @@ func formatCriterionEvidence(result CriterionResult) string {
 	return evidence
 }
 
+func normalizeFailureDiagnosis(raw json.RawMessage, in Input) *FailureDiagnosis {
+	if len(raw) == 0 || strings.TrimSpace(string(raw)) == "null" {
+		return nil
+	}
+
+	var diagnosis FailureDiagnosis
+	if err := json.Unmarshal(raw, &diagnosis); err != nil {
+		return nil
+	}
+	diagnosis.FailureAttribution = FailureAttribution(strings.TrimSpace(string(diagnosis.FailureAttribution)))
+	diagnosis.Confidence = DiagnosisConfidence(strings.TrimSpace(string(diagnosis.Confidence)))
+	diagnosis.AttributionEvidence = strings.TrimSpace(diagnosis.AttributionEvidence)
+	diagnosis.ImprovementSuggestion = strings.TrimSpace(diagnosis.ImprovementSuggestion)
+	if diagnosis.FailureAttribution == "" || diagnosis.AttributionEvidence == "" || diagnosis.ImprovementSuggestion == "" {
+		return nil
+	}
+	if !validFailureAttribution(diagnosis.FailureAttribution) {
+		diagnosis.FailureAttribution = FailureAttributionOther
+	}
+	if !validDiagnosisConfidence(diagnosis.Confidence) {
+		diagnosis.Confidence = DiagnosisConfidenceLow
+	}
+
+	if in.Configuration == configurationWithoutSkill && isSkillAttribution(diagnosis.FailureAttribution) {
+		return nil
+	}
+	if diagnosis.FailureAttribution == FailureAttributionSkillNotTriggered &&
+		(in.SkillUsage == nil || !in.SkillUsage.Reliable || in.SkillUsage.Status != SkillUsageNotTriggered) {
+		return nil
+	}
+	return &diagnosis
+}
+
+func validFailureAttribution(attribution FailureAttribution) bool {
+	switch attribution {
+	case FailureAttributionSkillNotTriggered,
+		FailureAttributionSkillMissingInfo,
+		FailureAttributionSkillMisleadingInfo,
+		FailureAttributionCaseDesignIssue,
+		FailureAttributionEnvironmentConfiguration,
+		FailureAttributionExternalDependencyUnavailable,
+		FailureAttributionInfrastructureError,
+		FailureAttributionAgentCapability,
+		FailureAttributionUndetermined,
+		FailureAttributionOther:
+		return true
+	default:
+		return false
+	}
+}
+
+func validDiagnosisConfidence(confidence DiagnosisConfidence) bool {
+	switch confidence {
+	case DiagnosisConfidenceLow, DiagnosisConfidenceMedium, DiagnosisConfidenceHigh:
+		return true
+	default:
+		return false
+	}
+}
+
+func isSkillAttribution(attribution FailureAttribution) bool {
+	return attribution == FailureAttributionSkillNotTriggered ||
+		attribution == FailureAttributionSkillMissingInfo ||
+		attribution == FailureAttributionSkillMisleadingInfo
+}
+
 // decodeAgentJudgeResponse accepts one JSON object, optionally wrapped in one
 // complete JSON code fence, and rejects unknown fields or trailing values.
 func decodeAgentJudgeResponse(output string, v any) error {
@@ -624,6 +699,7 @@ const (
 	agentJudgeJSONResponse
 	agentJudgeJSONResults
 	agentJudgeJSONResult
+	agentJudgeJSONDiagnosis
 )
 
 // validateAgentJudgeJSONKeys scans the JSON token stream before decoding into
@@ -657,7 +733,7 @@ func scanAgentJudgeJSONValue(decoder *json.Decoder, contractContext agentJudgeJS
 			if !ok {
 				return errors.New("JSON object key is not a string")
 			}
-			if _, exists := seen[key]; exists {
+			if duplicateAgentJudgeJSONKey(seen, key, contractContext) {
 				return fmt.Errorf("duplicate JSON object key %q", key)
 			}
 			seen[key] = struct{}{}
@@ -687,6 +763,11 @@ func scanAgentJudgeJSONValue(decoder *json.Decoder, contractContext agentJudgeJS
 	return err
 }
 
+func duplicateAgentJudgeJSONKey(seen map[string]struct{}, key string, contractContext agentJudgeJSONContext) bool {
+	_, exists := seen[key]
+	return exists && contractContext != agentJudgeJSONDiagnosis
+}
+
 func agentJudgeJSONChildContext(contractContext agentJudgeJSONContext, key string) (agentJudgeJSONContext, bool) {
 	switch contractContext {
 	case agentJudgeJSONResponse:
@@ -698,9 +779,13 @@ func agentJudgeJSONChildContext(contractContext agentJudgeJSONContext, key strin
 		switch key {
 		case "criterion_id", "passed", "evidence", "failures":
 			return agentJudgeJSONAny, true
+		case "diagnosis":
+			return agentJudgeJSONDiagnosis, true
 		default:
 			return agentJudgeJSONAny, false
 		}
+	case agentJudgeJSONDiagnosis:
+		return agentJudgeJSONDiagnosis, true
 	default:
 		return agentJudgeJSONAny, true
 	}
@@ -782,6 +867,7 @@ func buildJudgePrompt(_ context.Context, criteria []string, materialized *Materi
 	sb.WriteString("- \"evidence\": a non-empty JSON array of concrete observations supporting your judgment\n")
 	sb.WriteString("- \"failures\": an empty JSON array when passed is true, otherwise a non-empty array of unmet requirements\n\n")
 	sb.WriteString("You MUST NOT pass a criterion without specific evidence.\n\n")
+	appendDiagnosisInstructions(&sb, materialized)
 	sb.WriteString("IMPORTANT: Return only the required JSON object, optionally wrapped in one JSON code fence. Do not add prose or extra fields. ")
 	sb.WriteString("Escape double quotes inside string values (e.g. \\\"example\\\").\n\n")
 
@@ -797,7 +883,7 @@ func buildJudgePrompt(_ context.Context, criteria []string, materialized *Materi
 	return sb.String()
 }
 
-func buildAgentJudgeCorrectionPrompt(criteria []string, validationErr error) string {
+func buildAgentJudgeCorrectionPrompt(criteria []string, validationErr error, materialized *MaterializedContext) string {
 	encodedError, err := json.Marshal(validationErr.Error())
 	if err != nil {
 		encodedError = []byte(`"agent_judge response validation failed"`)
@@ -812,8 +898,10 @@ func buildAgentJudgeCorrectionPrompt(criteria []string, validationErr error) str
 	sb.WriteString("\n\n")
 	sb.WriteString("Allowed root field: results.\n")
 	sb.WriteString("Required result fields with exact casing: criterion_id, passed, evidence, failures.\n")
+	sb.WriteString("The only additional result field is diagnosis, using the exact casing shown below.\n")
 	sb.WriteString("Use every configured criterion_id exactly once. Evidence must be a non-empty string array. ")
 	sb.WriteString("Failures must be empty when passed is true and non-empty when passed is false.\n")
+	appendDiagnosisInstructions(&sb, materialized)
 	appendRequiredResponseFormat(&sb, criteria)
 	return sb.String()
 }
@@ -833,6 +921,38 @@ func buildAgentJudgeFallbackCorrectionPrompt(originalPrompt, invalidResponse, co
 	sb.WriteString("\n\n")
 	sb.WriteString(correctionPrompt)
 	return sb.String()
+}
+
+func appendDiagnosisInstructions(sb *strings.Builder, materialized *MaterializedContext) {
+	configuration := configurationWithSkill
+	var usage *SkillUsageEvidence
+	if materialized != nil {
+		if materialized.Configuration != "" {
+			configuration = materialized.Configuration
+		}
+		usage = materialized.SkillUsage
+	}
+
+	sb.WriteString("For each FAILED criterion, provide a \"diagnosis\" object with:\n")
+	sb.WriteString("- \"failure_attribution\": one allowed category from the list below\n")
+	sb.WriteString("- \"confidence\": \"low\", \"medium\", or \"high\"\n")
+	sb.WriteString("- \"attribution_evidence\": why the available materials support the likely cause; do not repeat verdict evidence\n")
+	sb.WriteString("- \"improvement_suggestion\": one concrete next action\n")
+	sb.WriteString("Diagnosis is required for failed criteria and must be omitted for passed criteria. If the cause is not defensible from evidence, use \"undetermined\" and low confidence. Never invent evidence.\n")
+	sb.WriteString("Allowed failure_attribution values: skill_not_triggered, skill_missing_info, skill_misleading_info, case_design_issue, environment_configuration, external_dependency_unavailable, infrastructure_error, agent_capability, undetermined, other.\n")
+	fmt.Fprintf(sb, "Evaluation configuration: %s.\n", configuration)
+	if configuration == configurationWithoutSkill {
+		sb.WriteString("This is an intentional without_skill baseline. Do not use skill_not_triggered, skill_missing_info, or skill_misleading_info.\n")
+	}
+	if usage == nil || !usage.Reliable || usage.Status == SkillUsageUnavailable {
+		sb.WriteString("Reliable Skill-usage evidence is unavailable. Do not use skill_not_triggered.\n\n")
+		return
+	}
+	if usage.Status == SkillUsageTriggered {
+		sb.WriteString("An explicit Skill invocation was observed. Do not use skill_not_triggered.\n\n")
+		return
+	}
+	sb.WriteString("A complete engine evidence channel reports that the Skill was not triggered; skill_not_triggered may be used when relevant.\n\n")
 }
 
 func appendJudgeSkillInstructions(sb *strings.Builder, skills []SkillInfo) {
@@ -886,12 +1006,12 @@ func appendReviewMaterials(sb *strings.Builder, materialized *MaterializedContex
 
 func appendRequiredResponseFormat(sb *strings.Builder, criteria []string) {
 	sb.WriteString("\n## Required Response Format (JSON)\n")
-	sb.WriteString("Use each criterion_id exactly once. Set passed and the arrays according to your judgment.\n")
+	sb.WriteString("Use each criterion_id exactly once. Set passed and the arrays according to your judgment. Diagnosis is null/omitted for a pass and populated for a failure.\n")
 	sb.WriteString("```json\n")
 	sb.WriteString("{\n")
 	sb.WriteString("  \"results\": [\n")
 	for i := range criteria {
-		fmt.Fprintf(sb, "    {\"criterion_id\": %q, \"passed\": true, \"evidence\": [\"concrete observation\"], \"failures\": []}", criterionID(i))
+		fmt.Fprintf(sb, "    {\"criterion_id\": %q, \"passed\": true, \"evidence\": [\"concrete observation\"], \"failures\": [], \"diagnosis\": null}", criterionID(i))
 		if i < len(criteria)-1 {
 			sb.WriteString(",")
 		}

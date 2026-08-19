@@ -752,7 +752,34 @@ skill-up 不会把 Skill 文件内容拼接进 judge prompt。
 `agent_judge` 会将评审上下文物化为文件，并在 judge prompt 中注入一个很小的
 材料表。未配置 `judge.context` 时，默认使用 `standard` profile：
 `final_message` 内联，`transcript` 和 `workspace_diff` 以文件引用形式提供，
-避免超长 prompt/argv 导致执行失败。
+避免超长 prompt/argv 导致执行失败。被测 Skill 的精确源码也会通过
+`skill_source` 文件引用提供。这个有界快照在 Agent 执行前生成，因此评测期间新增或
+修改的文件不会改变 Judge 看到的已安装源码；索引记录文件大小和 SHA-256，
+`SKILL.md` 以及可读的源码/引用文件会在上下文字节限制内保留；`evals/`、大文件和
+二进制资产不会复制到 Judge 上下文中。
+
+`skill_source` 的实际默认值如下：
+
+| 上下文配置 | 实际生效的 `skill_source` |
+|---|---|
+| 未配置 `judge.context` | `file_ref`（因为默认 profile 是 `standard`） |
+| `profile: standard` | `file_ref` |
+| `profile: minimal` | `omit` |
+| 显式配置 `skill_source` | 显式值覆盖 profile 默认值 |
+| benchmark 的 `without_skill` 变体 | 始终为 `omit` |
+
+`file_ref` 不只是记录一个宿主机路径。可读的 Skill 源码文件会复制到 Judge 可访问的
+运行时上下文，并保留在评测产物中，因此可能由所配置的 Judge Provider 处理。保留的
+文件正文共同受 `limits.max_bytes` 限制（默认 64 KiB）；超出正文预算的文件仍可能以
+路径、大小和 SHA-256 元数据的形式出现在索引中。如果 Skill 源码不应提供给 Judge，
+请显式配置 `skill_source: omit`。
+
+对于未通过的 criterion，Judge 还可以在 `result.json`、HTML 和 Markdown 报告中
+返回可选的结构化 `diagnosis`，包括可能的失败归因、置信度、归因证据和可执行的
+修改建议。它是 AI 生成的诊断建议，不是经过验证的根因，也不会改变 PASS/FAIL
+判定。如果 Agent Engine 没有提供可信的 Skill 使用证据，skill-up 会拒绝
+`skill_not_triggered`，而不是根据“没有看到调用”进行猜测；在 `without_skill`
+基线中，所有 Skill 责任类归因都会被拒绝。
 
 长时间运行的仓库变更类评测通常适合使用 `minimal`，让 judge 依赖显式附件或脚本
 输出，而不是完整对话历史：
@@ -781,6 +808,7 @@ judge:
     transcript: file_ref                     # include 超过 limits.max_bytes 会自动降级为 file_ref
     workspace_diff: file_ref
     generated_files: index                   # index | include | omit
+    skill_source: file_ref                    # file_ref | omit
     limits:
       max_bytes: 65536
 ```

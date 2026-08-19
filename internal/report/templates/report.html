@@ -109,6 +109,9 @@
     .assertion-status.a-pass { color: var(--green); }
     .assertion-status.a-fail { color: var(--red); }
     .assertion-evidence { color: var(--text-muted); font-size: 0.75rem; margin-top: 0.25rem; padding-left: 1.5rem; }
+    .assertion-diagnosis { margin: 0.5rem 0 0 1.5rem; padding: 0.625rem 0.75rem; border-left: 3px solid var(--accent); background: #f0f4ff; border-radius: 0 4px 4px 0; font-size: 0.75rem; color: var(--text); }
+    .assertion-diagnosis-label { color: var(--accent); font-weight: 600; margin-bottom: 0.25rem; }
+    .assertion-diagnosis-row { margin-top: 0.2rem; }
 
     .prompt-box { background: #f8fafc; border: 1px solid var(--border); border-radius: 4px; padding: 0.75rem 1rem; font-size: 0.875rem; color: #555; margin-bottom: 0.5rem; }
     .prompt-box strong { color: var(--text); }
@@ -563,6 +566,14 @@
         html += '<li class="assertion-item"><span class="assertion-status ' + sc + '">' + icon + '</span>';
         html += '<span>' + esc(exp.text) + '</span>';
         if (exp.evidence) html += '<div class="assertion-evidence">' + esc(exp.evidence) + '</div>';
+        if (!exp.passed && exp.diagnosis) {
+          var d = exp.diagnosis;
+          html += '<div class="assertion-diagnosis">';
+          html += '<div class="assertion-diagnosis-label">AI-generated likely cause: ' + esc(d.failure_attribution) + ' (confidence: ' + esc(d.confidence || "low") + ')</div>';
+          html += '<div class="assertion-diagnosis-row"><strong>Attribution evidence:</strong> ' + esc(d.attribution_evidence) + '</div>';
+          html += '<div class="assertion-diagnosis-row"><strong>Improvement suggestion:</strong> ' + esc(d.improvement_suggestion) + '</div>';
+          html += '</div>';
+        }
         html += '</li>';
       }
       html += '</ul>';
