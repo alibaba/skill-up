@@ -34,6 +34,24 @@ func TestNewQoderCLIAgent(t *testing.T) {
 	}
 }
 
+func TestNewQoderCLIAgent_CNEdition(t *testing.T) {
+	t.Parallel()
+
+	ag := NewQoderCLIAgent(Config{Kwargs: map[string]string{KwargEdition: qoderEditionCN}})
+	if ag.profile.edition != qoderEditionCN {
+		t.Fatalf("edition = %q, want %q", ag.profile.edition, qoderEditionCN)
+	}
+	if ag.Cfg.CheckCmd != "command -v qodercn" {
+		t.Fatalf("CheckCmd = %q, want qodercn", ag.Cfg.CheckCmd)
+	}
+	if ag.Cfg.RunCmd != `qodercn -p "%s" 2>&1` {
+		t.Fatalf("RunCmd = %q, want qodercn command", ag.Cfg.RunCmd)
+	}
+	if ag.Cfg.SkillPath != ".qoder/skills" {
+		t.Fatalf("SkillPath = %q, want shared project-level .qoder/skills", ag.Cfg.SkillPath)
+	}
+}
+
 func TestQoderCLICheckCredentials(t *testing.T) {
 	ag := NewQoderCLIAgent(Config{})
 
@@ -121,6 +139,21 @@ func TestQoderCLIInstall_DefaultCommand(t *testing.T) {
 	}
 }
 
+func TestQoderCLIInstall_CNDefaultCommand(t *testing.T) {
+	t.Parallel()
+
+	profile := qoderProfileForKwargs(map[string]string{KwargEdition: qoderEditionCN})
+	cmd := defaultQoderCLIInstallCmdForProfile(profile)
+	for _, want := range []string{
+		"command -v qodercn",
+		"curl -fsSL https://static.qoder.com.cn/qoder-cli-cn/install.sh | bash",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("CN install command missing %q:\n%s", want, cmd)
+		}
+	}
+}
+
 //nolint:dupl // mirrors TestQwenCodeInstall_UsesDefaultCommand; the probe→install→PATH lifecycle is intentionally identical across CLI agents.
 func TestQoderCLIInstall_UsesDefaultCommand(t *testing.T) {
 	t.Parallel()
@@ -184,6 +217,42 @@ func TestQoderCLIRun_MergesConfiguredEnvVars(t *testing.T) {
 	}
 	if rt.lastExecEnv[qoderExposeTokenUsageEnv] != qoderExposeTokenUsageEnabled {
 		t.Fatalf("expected %s to default to true, got %q", qoderExposeTokenUsageEnv, rt.lastExecEnv[qoderExposeTokenUsageEnv])
+	}
+}
+
+func TestQoderCLIRun_CNEditionUsesCNCommandAndEnv(t *testing.T) {
+	t.Parallel()
+
+	rt := &qoderTestRuntime{
+		workspace: t.TempDir(),
+		execResult: runtime.ExecResult{
+			Stdout:   `{"type":"result","subtype":"success","result":"OK"}`,
+			ExitCode: 0,
+		},
+	}
+	ag := NewQoderCLIAgent(Config{
+		Kwargs: map[string]string{KwargEdition: qoderEditionCN},
+		EnvVars: map[string]string{
+			credential.EnvQoderCNPersonalAccessToken: "cn-token",
+		},
+	})
+
+	if _, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{
+		Role: transcript.RoleUser, Content: "hello", Turn: 1,
+	}}); err != nil {
+		t.Fatalf("run qodercn: %v", err)
+	}
+	if !strings.Contains(rt.agentCommand, "qodercn --permission-mode=bypass_permissions --output-format json") {
+		t.Fatalf("expected qodercn command, got %q", rt.agentCommand)
+	}
+	if got := rt.lastExecEnv[credential.EnvQoderCNPersonalAccessToken]; got != "cn-token" {
+		t.Fatalf("%s = %q, want configured CN token", credential.EnvQoderCNPersonalAccessToken, got)
+	}
+	if got := rt.lastExecEnv[qoderCNExposeTokenUsageEnv]; got != qoderExposeTokenUsageEnabled {
+		t.Fatalf("%s = %q, want true", qoderCNExposeTokenUsageEnv, got)
+	}
+	if _, exists := rt.lastExecEnv[qoderExposeTokenUsageEnv]; exists {
+		t.Fatalf("global %s must not be injected for CN", qoderExposeTokenUsageEnv)
 	}
 }
 
@@ -313,6 +382,17 @@ func TestBuildQoderResumeCmd(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBuildQoderResumeCmd_CNEdition(t *testing.T) {
+	t.Parallel()
+
+	cmd := buildQoderResumeCmdForBinary("qodercn", "continue", "auto", "session-cn")
+	for _, want := range []string{"qodercn ", "--model 'auto'", "-r 'session-cn'", "-p 'continue'"} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("CN resume command missing %q: %q", want, cmd)
+		}
 	}
 }
 
@@ -533,6 +613,42 @@ func TestFindQoderSessionFile_SelectsNewestByModTime(t *testing.T) {
 	}
 }
 
+func TestFindQoderCNSessionFile_SelectsCNConfigDir(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("qoder workspace-key path layout is POSIX-only")
+	}
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	rt, err := runtime.NewRuntime(runtime.Config{Type: "none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	workspace := rt.Workspace()
+	if realPath, evalErr := filepath.EvalSymlinks(workspace); evalErr == nil {
+		workspace = realPath
+	}
+	workspaceKey := strings.ReplaceAll(workspace, "/", "-")
+	projectDir := filepath.Join(tmpHome, ".qoder-cn", "projects", workspaceKey)
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(projectDir, "cn-session.jsonl")
+	if err := os.WriteFile(sessionFile, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ag := NewQoderCLIAgent(Config{Kwargs: map[string]string{KwargEdition: qoderEditionCN}})
+	if got := ag.findSessionFile(context.Background(), rt); got != sessionFile {
+		t.Fatalf("CN session file = %q, want %q", got, sessionFile)
+	}
+}
+
 func TestFindQoderSessionFileNoProject(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
@@ -602,8 +718,11 @@ func (r *qoderTestRuntime) Exec(_ context.Context, command string, opts runtime.
 		r.agentCommand = command
 	}
 	if strings.Contains(command, "qodercli --permission-mode=bypass_permissions") ||
+		strings.Contains(command, "qodercn --permission-mode=bypass_permissions") ||
 		strings.Contains(command, "qodercli -p ") ||
-		strings.Contains(command, "qoder.com/install") {
+		strings.Contains(command, "qodercn -p ") ||
+		strings.Contains(command, "qoder.com/install") ||
+		strings.Contains(command, "qoder.com.cn/qoder-cli-cn/install.sh") {
 		r.lastExecEnv = mapsClone(opts.Env)
 	}
 	return r.execResult, nil

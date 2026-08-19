@@ -26,7 +26,7 @@ The engine determines the protocol. For example, `provider: dashscope` with a
 | --- | --- | --- | --- |
 | `claude_code` | Anthropic-compatible; `ANTHROPIC_API_KEY` and `ANTHROPIC_BASE_URL` | Passes an explicit model through to Claude Code | Missing credentials delegate to Claude Code's local login. |
 | `codex` | OpenAI-compatible; `OPENAI_API_KEY` and `OPENAI_BASE_URL` | A non-OpenAI provider requires a base URL before skill-up emits a custom Codex provider and model override | Without the required custom-provider endpoint, the model override is omitted and Codex uses local settings. Missing credentials may delegate to local login. |
-| `qodercli` | Qoder-managed auth; `QODER_PERSONAL_ACCESS_TOKEN` or local login | Supports `lite`, `efficient`, `auto`, `performance`, and `ultimate` | Other model values and `base_url` are ignored with diagnostic logs. A generic provider API key is not a Qoder PAT. |
+| `qodercli` | Qoder-managed auth; Global uses `QODER_PERSONAL_ACCESS_TOKEN`, CN uses `QODERCN_PERSONAL_ACCESS_TOKEN` (or the `QODER_CN_ACCESS_TOKEN` input alias), with local-login fallback | Supports `lite`, `efficient`, `auto`, `performance`, and `ultimate` | `engine.kwargs.edition` selects `global` (default) or `cn` and switches the CLI, installer, auth, and session root together. Other model values and `base_url` are ignored. |
 | `qwen_code` | OpenAI-compatible; `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_MODEL` | Passes an explicit model to Qwen Code | Missing credentials may delegate to Qwen OAuth or another existing local login. |
 | Custom engine | Defined by `engine.custom` | Receives the configured provider/model values through session input and template variables | Capabilities and auth behavior belong to the custom-engine contract. |
 

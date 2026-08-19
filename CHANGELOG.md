@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- The built-in `qodercli` engine now supports Qoder CLI CN through
+  `engine.kwargs.edition: cn`, including CN installation, authentication,
+  Skill/MCP execution, multi-turn session resume, token usage, and transcript
+  artifact lookup. `QODER_CN_ACCESS_TOKEN` is accepted as a local secret-manager
+  input alias and forwarded to qodercn as `QODERCN_PERSONAL_ACCESS_TOKEN`.
+
 ### Fixed
 - `agent_judge` now uses stable criterion IDs and a strict JSON response
   contract, rejects malformed or semantically incomplete judge output, and

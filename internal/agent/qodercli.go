@@ -19,7 +19,23 @@ import (
 // QoderCLIAgent implements Agent for qodercli.
 type QoderCLIAgent struct {
 	CLIAgent
+
+	profile qoderCLIProfile
 }
+
+type qoderCLIProfile struct {
+	edition        string
+	binary         string
+	credentialEnv  string
+	exposeUsageEnv string
+	configDir      string
+	installURL     string
+}
+
+const (
+	qoderEditionGlobal = "global"
+	qoderEditionCN     = "cn"
+)
 
 var supportedQoderModels = []string{"lite", "efficient", "auto", "performance", "ultimate"}
 
@@ -29,21 +45,50 @@ var supportedQoderModels = []string{"lite", "efficient", "auto", "performance", 
 const qoderExecPathProbeCmd = `printf '%s' "$HOME/.local/bin:$PATH"`
 
 const (
-	qoderExposeTokenUsageEnv     = "QODER_EXPOSE_TOKEN_USAGE" //nolint:gosec // environment variable name, not a credential
+	qoderExposeTokenUsageEnv     = "QODER_EXPOSE_TOKEN_USAGE"   //nolint:gosec // environment variable name, not a credential
+	qoderCNExposeTokenUsageEnv   = "QODERCN_EXPOSE_TOKEN_USAGE" //nolint:gosec // environment variable name, not a credential
 	qoderExposeTokenUsageEnabled = "true"
 	qoderJSONOutputFlag          = " --output-format json"
 )
 
+func qoderProfileForKwargs(kwargs map[string]string) qoderCLIProfile {
+	edition := strings.ToLower(strings.TrimSpace(kwargs[KwargEdition]))
+	switch edition {
+	case "", qoderEditionGlobal:
+		return qoderCLIProfile{
+			edition:        qoderEditionGlobal,
+			binary:         "qodercli",
+			credentialEnv:  credential.EnvQoderPersonalAccessToken,
+			exposeUsageEnv: qoderExposeTokenUsageEnv,
+			configDir:      ".qoder",
+			installURL:     "https://qoder.com/install",
+		}
+	case qoderEditionCN:
+		return qoderCLIProfile{
+			edition:        qoderEditionCN,
+			binary:         "qodercn",
+			credentialEnv:  credential.EnvQoderCNPersonalAccessToken,
+			exposeUsageEnv: qoderCNExposeTokenUsageEnv,
+			configDir:      ".qoder-cn",
+			installURL:     "https://static.qoder.com.cn/qoder-cli-cn/install.sh",
+		}
+	default:
+		logging.Warnf("qodercli ignores unsupported edition %q and uses %q", edition, qoderEditionGlobal)
+		return qoderProfileForKwargs(nil)
+	}
+}
+
 // NewQoderCLIAgent creates a new QoderCLIAgent.
 func NewQoderCLIAgent(cfg Config) *QoderCLIAgent {
+	profile := qoderProfileForKwargs(cfg.Kwargs)
 	if cfg.Name == "" {
 		cfg.Name = "qodercli"
 	}
 	if cfg.CheckCmd == "" {
-		cfg.CheckCmd = "command -v qodercli"
+		cfg.CheckCmd = "command -v " + profile.binary
 	}
 	if cfg.RunCmd == "" {
-		cfg.RunCmd = "qodercli -p \"%s\" 2>&1"
+		cfg.RunCmd = profile.binary + " -p \"%s\" 2>&1"
 	}
 	if cfg.SkillPath == "" {
 		cfg.SkillPath = ".qoder/skills"
@@ -51,29 +96,30 @@ func NewQoderCLIAgent(cfg Config) *QoderCLIAgent {
 
 	return &QoderCLIAgent{
 		CLIAgent: CLIAgent{BaseAgent: NewBaseAgent(cfg)},
+		profile:  profile,
 	}
 }
 
-// CheckCredentials checks whether qodercli can see QODER_PERSONAL_ACCESS_TOKEN
+// CheckCredentials checks whether the selected qodercli edition can see its PAT
 // either from the runtime env prepared by skill-up or from the current process env.
 // Note: qodercli supports login-based authentication, so missing token is not a hard error.
 // This method logs masked token presence or a warning when missing, but still returns nil to allow execution.
 func (a *QoderCLIAgent) CheckCredentials(ctx context.Context) error {
-	if token := a.Cfg.EnvVars[credential.EnvQoderPersonalAccessToken]; token != "" {
-		logging.DebugContextf(ctx, "QODER_PERSONAL_ACCESS_TOKEN detected for qodercli (source=runtime_env)")
+	if token := a.Cfg.EnvVars[a.profile.credentialEnv]; token != "" {
+		logging.DebugContextf(ctx, "%s detected for %s (source=runtime_env)", a.profile.credentialEnv, a.profile.binary)
 		return nil
 	}
-	if token := os.Getenv(credential.EnvQoderPersonalAccessToken); token != "" {
+	if token := os.Getenv(a.profile.credentialEnv); token != "" {
 		_ = token
-		logging.DebugContextf(ctx, "QODER_PERSONAL_ACCESS_TOKEN detected for qodercli (source=process_env)")
+		logging.DebugContextf(ctx, "%s detected for %s (source=process_env)", a.profile.credentialEnv, a.profile.binary)
 		return nil
 	}
 
-	logging.WarnContextf(ctx, "QODER_PERSONAL_ACCESS_TOKEN not set, qodercli will rely on existing login state if available")
+	logging.WarnContextf(ctx, "%s not set, %s will rely on existing login state if available", a.profile.credentialEnv, a.profile.binary)
 	return nil
 }
 
-// Run executes qodercli with the resolved model and environment overrides.
+// Run executes the selected qodercli edition with the resolved model and environment overrides.
 //
 //nolint:dupl
 func (a *QoderCLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (*SessionResult, error) {
@@ -85,10 +131,10 @@ func (a *QoderCLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 	instruction := BuildInstructionFromMessages(messages)
 	cmd, promptDelivery, err := deliverPrompt(ctx, rt, opts, instruction, promptCommandBuilder{
 		Inline: func(prompt string) string {
-			return buildQoderRunCmd(prompt, a.effectiveModelName(ctx))
+			return buildQoderRunCmdForBinary(a.profile.binary, prompt, a.effectiveModelName(ctx))
 		},
 		StdinFile: func(path string) string {
-			return buildQoderRunStdinCmd(path, a.effectiveModelName(ctx))
+			return buildQoderRunStdinCmdForBinary(a.profile.binary, path, a.effectiveModelName(ctx))
 		},
 	})
 	if err != nil {
@@ -119,11 +165,11 @@ func (a *QoderCLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 				Artifacts:  &SessionArtifacts{},
 			}
 		}
-		return sessionResult, fmt.Errorf("qodercli run failed: %w", err)
+		return sessionResult, fmt.Errorf("%s run failed: %w", a.profile.binary, err)
 	}
 
 	if result.ExitCode != 0 {
-		return sessionResult, fmt.Errorf("qodercli run failed (exit %d): %s", result.ExitCode, result.Stderr)
+		return sessionResult, fmt.Errorf("%s run failed (exit %d): %s", a.profile.binary, result.ExitCode, result.Stderr)
 	}
 
 	return sessionResult, nil
@@ -138,7 +184,8 @@ func (a *QoderCLIAgent) effectiveModelName(ctx context.Context) string {
 	}
 	logging.WarnContextf(
 		ctx,
-		"qodercli ignores configured model %q and will use local qoder model settings instead",
+		"%s ignores configured model %q and will use local qoder model settings instead",
+		a.profile.binary,
 		a.Cfg.ModelName,
 	)
 	return ""
@@ -146,14 +193,18 @@ func (a *QoderCLIAgent) effectiveModelName(ctx context.Context) string {
 
 func (a *QoderCLIAgent) qoderRunEnvVars() map[string]string {
 	envVars := a.credentialEnvVars("", "")
-	if _, configured := envVars[qoderExposeTokenUsageEnv]; !configured {
-		envVars[qoderExposeTokenUsageEnv] = qoderExposeTokenUsageEnabled
+	if _, configured := envVars[a.profile.exposeUsageEnv]; !configured {
+		envVars[a.profile.exposeUsageEnv] = qoderExposeTokenUsageEnabled
 	}
 	return envVars
 }
 
 func buildQoderRunCmd(instruction, model string) string {
-	cmd := "qodercli --permission-mode=bypass_permissions" + qoderJSONOutputFlag
+	return buildQoderRunCmdForBinary("qodercli", instruction, model)
+}
+
+func buildQoderRunCmdForBinary(binary, instruction, model string) string {
+	cmd := binary + " --permission-mode=bypass_permissions" + qoderJSONOutputFlag
 	if model != "" {
 		cmd += " --model " + shellQuote(model)
 	}
@@ -162,8 +213,8 @@ func buildQoderRunCmd(instruction, model string) string {
 	return cmd
 }
 
-func buildQoderRunStdinCmd(promptPath, model string) string {
-	cmd := "cat " + shellQuote(promptPath) + " | qodercli --permission-mode=bypass_permissions" + qoderJSONOutputFlag
+func buildQoderRunStdinCmdForBinary(binary, promptPath, model string) string {
+	cmd := "cat " + shellQuote(promptPath) + " | " + binary + " --permission-mode=bypass_permissions" + qoderJSONOutputFlag
 	if model != "" {
 		cmd += " --model " + shellQuote(model)
 	}
@@ -172,10 +223,14 @@ func buildQoderRunStdinCmd(promptPath, model string) string {
 	return cmd
 }
 
-// buildQoderResumeCmd constructs a qodercli command that resumes an existing
+// buildQoderResumeCmd constructs a Global qodercli command that resumes an existing
 // session identified by sessionID and sends a new user prompt.
 func buildQoderResumeCmd(instruction, model, sessionID string) string {
-	cmd := "qodercli --permission-mode=bypass_permissions" + qoderJSONOutputFlag
+	return buildQoderResumeCmdForBinary("qodercli", instruction, model, sessionID)
+}
+
+func buildQoderResumeCmdForBinary(binary, instruction, model, sessionID string) string {
+	cmd := binary + " --permission-mode=bypass_permissions" + qoderJSONOutputFlag
 	if model != "" {
 		cmd += " --model " + shellQuote(model)
 	}
@@ -198,7 +253,7 @@ func (a *QoderCLIAgent) buildSessionResult(ctx context.Context, rt Runtime, opts
 		}
 	}
 
-	sessionFilePath := findQoderSessionFile(cleanupCtx, rt)
+	sessionFilePath := a.findSessionFile(cleanupCtx, rt)
 	if sessionID == "" && sessionFilePath != "" {
 		sessionID = extractSessionIDFromPath(sessionFilePath)
 	}
@@ -275,7 +330,7 @@ func (a *QoderCLIAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOption
 	start := time.Now()
 
 	instruction := message.Content
-	cmd := buildQoderResumeCmd(instruction, a.effectiveModelName(ctx), sessionID)
+	cmd := buildQoderResumeCmdForBinary(a.profile.binary, instruction, a.effectiveModelName(ctx), sessionID)
 
 	envVars := a.qoderRunEnvVars()
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))
@@ -297,11 +352,11 @@ func (a *QoderCLIAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOption
 				Artifacts:  &SessionArtifacts{},
 			}
 		}
-		return sessionResult, fmt.Errorf("qodercli resume failed: %w", err)
+		return sessionResult, fmt.Errorf("%s resume failed: %w", a.profile.binary, err)
 	}
 
 	if result.ExitCode != 0 {
-		return sessionResult, fmt.Errorf("qodercli resume failed (exit %d): %s", result.ExitCode, result.Stderr)
+		return sessionResult, fmt.Errorf("%s resume failed (exit %d): %s", a.profile.binary, result.ExitCode, result.Stderr)
 	}
 
 	return sessionResult, nil
@@ -316,14 +371,22 @@ func (a *QoderCLIAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOption
 // inside this same tree. Those are often the newest files, and their names are
 // not resumable session ids.
 func findQoderSessionFile(ctx context.Context, rt Runtime) string {
+	return findQoderSessionFileInConfigDir(ctx, rt, ".qoder")
+}
+
+func (a *QoderCLIAgent) findSessionFile(ctx context.Context, rt Runtime) string {
+	return findQoderSessionFileInConfigDir(ctx, rt, a.profile.configDir)
+}
+
+func findQoderSessionFileInConfigDir(ctx context.Context, rt Runtime, configDir string) string {
 	return findAgentSessionJSONL(ctx, rt, agentSessionLookup{
-		projectsRootTmpl: "$home/.qoder/projects",
+		projectsRootTmpl: "$home/" + configDir + "/projects",
 		sessionDepth:     1,
 		findExtra:        `! -name "*-session.json"`,
 	})
 }
 
-// Install installs qoder CLI via official install script.
+// Install installs the selected Qoder CLI edition via its official install script.
 //
 //nolint:dupl // each agent Install shares the same probe→merge→exec lifecycle; the deltas (probe const, default install cmd) are pulled out, leaving the orchestration intentionally similar.
 func (a *QoderCLIAgent) Install(ctx context.Context, rt Runtime) error {
@@ -334,7 +397,7 @@ func (a *QoderCLIAgent) Install(ctx context.Context, rt Runtime) error {
 
 	installCmd := a.Cfg.InstallCmd
 	if installCmd == "" {
-		installCmd = defaultQoderCLIInstallCmd()
+		installCmd = defaultQoderCLIInstallCmdForProfile(a.profile)
 	}
 
 	execResult, err := rt.Exec(ctx, installCmd, opts)
@@ -350,17 +413,27 @@ func (a *QoderCLIAgent) Install(ctx context.Context, rt Runtime) error {
 
 // InstallMCP installs MCP servers with the Qoder CLI.
 func (a *QoderCLIAgent) InstallMCP(ctx context.Context, rt Runtime, mcpCfg runtime.MCPConfig) error {
-	return installMCPServers(ctx, rt, mcpCfg, buildQoderMCPInstallCmd)
+	return installMCPServers(ctx, rt, mcpCfg, func(server runtime.MCPServerConfig) (string, error) {
+		return buildQoderMCPInstallCmdForBinary(a.profile.binary, server)
+	})
 }
 
 func buildQoderMCPInstallCmd(server runtime.MCPServerConfig) (string, error) {
-	return buildClaudeCompatibleMCPInstallCmd("qodercli", "qodercli", server)
+	return buildQoderMCPInstallCmdForBinary("qodercli", server)
+}
+
+func buildQoderMCPInstallCmdForBinary(binary string, server runtime.MCPServerConfig) (string, error) {
+	return buildClaudeCompatibleMCPInstallCmd(binary, binary, server)
 }
 
 func defaultQoderCLIInstallCmd() string {
+	return defaultQoderCLIInstallCmdForProfile(qoderProfileForKwargs(nil))
+}
+
+func defaultQoderCLIInstallCmdForProfile(profile qoderCLIProfile) string {
 	return strings.Join([]string{
 		"set -e",
-		"if command -v qodercli >/dev/null 2>&1; then exit 0; fi",
-		"curl -fsSL https://qoder.com/install | bash",
+		"if command -v " + profile.binary + " >/dev/null 2>&1; then exit 0; fi",
+		"curl -fsSL " + profile.installURL + " | bash",
 	}, "\n")
 }

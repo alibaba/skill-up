@@ -146,6 +146,7 @@ remains a valid Skill. The same fields are supported by `judge.skills`.
 | `bypass_sandbox` | `claude_code` | No-op — claude already runs with `--permission-mode=bypassPermissions` | No-op |
 | `bypass_sandbox` | `qodercli` | No-op — no equivalent flag | No-op |
 | `bypass_sandbox` | `qwen_code` | No-op — `qwen_code` never imposes its own sandbox (`--yolo` only auto-approves tool calls; it does **not** isolate). Like `claude_code`/`qodercli`, isolation is the runtime's job | No-op |
+| `edition` | `qodercli` | Set to `cn` to use Qoder CLI CN (`qodercn`); switches the installer, credential env, user config/session root, MCP command, and run/resume command together | `global` (Qoder CLI from qoder.com) |
 
 Codex also accepts byte limits for its JSONL artifacts:
 
@@ -897,6 +898,7 @@ qodercli authentication is **completely separate** from model-layer credentials 
 | Layer              | Environment variable             | Purpose                                                  |
 | :----------------: | :------------------------------: | :------------------------------------------------------: |
 | qodercli service   | `QODER_PERSONAL_ACCESS_TOKEN`    | Authenticates against the qodercli service               |
+| qodercli CN service | `QODERCN_PERSONAL_ACCESS_TOKEN` | Authenticates against Qoder CLI CN                        |
 | Model layer        | `ANTHROPIC_API_KEY`, etc.        | Managed internally by qodercli; users do not configure it |
 
 Setup:
@@ -909,9 +911,22 @@ export QODER_PERSONAL_ACCESS_TOKEN=your_token_here
 echo 'QODER_PERSONAL_ACCESS_TOKEN=your_token_here' >> .env
 ```
 
-> **Tip:** `QODER_PERSONAL_ACCESS_TOKEN` is optional. When unset, qodercli falls back to the local login state under `~/.qoder/`, the same as running `qodercli` manually. Use `qodercli /login` to log in locally.
+Select Qoder CLI CN with `engine.kwargs.edition: cn`. Its official credential
+is `QODERCN_PERSONAL_ACCESS_TOKEN`; `skill-up` also accepts the local input alias
+`QODER_CN_ACCESS_TOKEN` and forwards its value under the official name. This is
+useful when a secret manager or macOS Keychain injects the shorter alias without
+exposing the value in an eval file:
+
+```yaml
+engine:
+  name: qodercli
+  kwargs:
+    edition: cn
+```
+
+> **Tip:** The selected edition's PAT is optional. When unset, Global falls back to `~/.qoder/` and CN to `~/.qoder-cn/`. Project-level settings and Skills remain under the shared project `.qoder/` directory.
 >
-> **Note:** the `--api-key` flag and any provider API key declared in `eval.yaml` are **not** used as the qodercli auth token. qodercli only reads `QODER_PERSONAL_ACCESS_TOKEN` or the local login state.
+> **Note:** the `--api-key` flag and any provider API key declared in `eval.yaml` are **not** used as the qodercli auth token. Authentication comes from the selected edition's PAT or local login state.
 
 qodercli also has model-parameter restrictions:
 

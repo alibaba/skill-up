@@ -14,13 +14,15 @@ import (
 
 // Standard environment variable names for agent configuration.
 const (
-	EnvOpenAIAPIKey             = "OPENAI_API_KEY" //nolint:gosec // false positive: constant name, not a credential
-	EnvOpenAIBaseURL            = "OPENAI_BASE_URL"
-	EnvOpenAIModel              = "OPENAI_MODEL"
-	EnvAnthropicAPIKey          = "ANTHROPIC_API_KEY"    //nolint:gosec // false positive: constant name, not a credential
-	EnvAnthropicAuthToken       = "ANTHROPIC_AUTH_TOKEN" //nolint:gosec // false positive: constant name, not a credential
-	EnvAnthropicBaseURL         = "ANTHROPIC_BASE_URL"
-	EnvQoderPersonalAccessToken = "QODER_PERSONAL_ACCESS_TOKEN" //nolint:gosec // false positive: constant name, not a credential
+	EnvOpenAIAPIKey               = "OPENAI_API_KEY" //nolint:gosec // false positive: constant name, not a credential
+	EnvOpenAIBaseURL              = "OPENAI_BASE_URL"
+	EnvOpenAIModel                = "OPENAI_MODEL"
+	EnvAnthropicAPIKey            = "ANTHROPIC_API_KEY"    //nolint:gosec // false positive: constant name, not a credential
+	EnvAnthropicAuthToken         = "ANTHROPIC_AUTH_TOKEN" //nolint:gosec // false positive: constant name, not a credential
+	EnvAnthropicBaseURL           = "ANTHROPIC_BASE_URL"
+	EnvQoderPersonalAccessToken   = "QODER_PERSONAL_ACCESS_TOKEN"   //nolint:gosec // false positive: constant name, not a credential
+	EnvQoderCNPersonalAccessToken = "QODERCN_PERSONAL_ACCESS_TOKEN" //nolint:gosec // false positive: constant name, not a credential
+	EnvQoderCNAccessToken         = "QODER_CN_ACCESS_TOKEN"         //nolint:gosec // local secret alias, not a credential value
 )
 
 const apiKeyMaskLen = 4 // Length for API key masking
