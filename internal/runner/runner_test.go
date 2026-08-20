@@ -21,14 +21,14 @@ func TestNewRunner(t *testing.T) {
 	evalCfg := &config.EvalConfig{
 		Judge: config.JudgeConfig{Type: "rule_based"},
 	}
-	r := NewRunner(evalCfg, nil, nil, credential.AgentInitParams{})
+	r := NewRunner(evalCfg, nil, nil, credential.ResolvedAgentConfig{})
 	if r == nil {
 		t.Fatal("expected non-nil runner")
 	}
 }
 
 func TestRunner_InitWorkspace(t *testing.T) {
-	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.AgentInitParams{})
+	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.ResolvedAgentConfig{})
 
 	tmpDir := t.TempDir()
 	err := r.InitWorkspace(tmpDir, "test-skill", 1)
@@ -47,7 +47,7 @@ func TestRunner_InitWorkspace(t *testing.T) {
 }
 
 func TestRunner_WriteResults_WithSkillOnly(t *testing.T) {
-	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.AgentInitParams{})
+	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.ResolvedAgentConfig{})
 
 	tmpDir := t.TempDir()
 	err := r.InitWorkspace(tmpDir, "test-skill", 1)
@@ -132,7 +132,7 @@ func TestRunner_WriteResults_WithSkillOnly(t *testing.T) {
 }
 
 func TestRunner_WriteResults_WithBaseline(t *testing.T) {
-	r := NewRunner(&config.EvalConfig{Benchmark: config.BenchmarkConfig{Enabled: true}}, nil, nil, credential.AgentInitParams{})
+	r := NewRunner(&config.EvalConfig{Benchmark: config.BenchmarkConfig{Enabled: true}}, nil, nil, credential.ResolvedAgentConfig{})
 
 	tmpDir := t.TempDir()
 	err := r.InitWorkspace(tmpDir, "test-skill", 1)
@@ -199,7 +199,7 @@ func TestRunner_WriteResults_WithBaseline(t *testing.T) {
 }
 
 func TestRunner_WriteResults_UsesStderrWhenFinalMessageEmpty(t *testing.T) {
-	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.AgentInitParams{})
+	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.ResolvedAgentConfig{})
 
 	tmpDir := t.TempDir()
 	err := r.InitWorkspace(tmpDir, "test-skill", 1)
@@ -258,7 +258,7 @@ func TestRunner_WriteResults_UsesStderrWhenFinalMessageEmpty(t *testing.T) {
 }
 
 func TestRunner_WriteResults_DoesNotUseStderrOnSuccessfulEmptyResponse(t *testing.T) {
-	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.AgentInitParams{})
+	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.ResolvedAgentConfig{})
 
 	tmpDir := t.TempDir()
 	err := r.InitWorkspace(tmpDir, "test-skill", 1)
@@ -348,7 +348,7 @@ func TestBuildReportInput_EngineAndModelPopulated(t *testing.T) {
 		},
 	}
 
-	input := buildReportInput("my-skill", grouped, []string{"case-1"}, now, end, evalCfg)
+	input := buildReportInput("my-skill", grouped, []string{"case-1"}, now, end, evalCfg, credential.ResolvedAgentConfig{})
 
 	if input.SchemaVersion != "v1alpha1" {
 		t.Errorf("SchemaVersion = %q, want %q", input.SchemaVersion, "v1alpha1")
@@ -419,11 +419,30 @@ func TestBuildReportInput_ModelNameVariants(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			grouped := map[string]*caseResults{}
-			input := buildReportInput("s", grouped, nil, time.Time{}, time.Time{}, tt.evalCfg)
+			input := buildReportInput("s", grouped, nil, time.Time{}, time.Time{}, tt.evalCfg, credential.ResolvedAgentConfig{})
 			if input.ModelName != tt.wantName {
 				t.Errorf("ModelName = %q, want %q", input.ModelName, tt.wantName)
 			}
 		})
+	}
+}
+
+func TestBuildReportInput_UsesResolvedRunnerIdentity(t *testing.T) {
+	evalCfg := &config.EvalConfig{
+		Engine: config.EngineConfig{
+			Name:  "claude_code",
+			Model: config.ModelConfig{Provider: "anthropic", Name: "yaml-model"},
+		},
+	}
+	resolved := credential.ResolvedAgentConfig{
+		Engine:   "codex",
+		Provider: "dashscope",
+		Model:    "qwen3.6-plus",
+	}
+
+	input := buildReportInput("s", map[string]*caseResults{}, nil, time.Time{}, time.Time{}, evalCfg, resolved)
+	if input.EngineName != "codex" || input.ModelName != "dashscope/qwen3.6-plus" {
+		t.Fatalf("report identity = %s/%s, want resolved codex/dashscope/qwen3.6-plus", input.EngineName, input.ModelName)
 	}
 }
 
@@ -454,7 +473,7 @@ func TestBuildReportInput_TokenAccumulation(t *testing.T) {
 		},
 	}
 
-	input := buildReportInput("s", grouped, []string{"c1", "c2"}, time.Time{}, time.Time{}, evalCfg)
+	input := buildReportInput("s", grouped, []string{"c1", "c2"}, time.Time{}, time.Time{}, evalCfg, credential.ResolvedAgentConfig{})
 
 	// c1: (100+50) + (80+40) = 270, c2: (200+100) = 300, total = 570
 	if input.TotalTokens != 570 {
@@ -493,7 +512,7 @@ func TestBuildReportInput_IncludesFailedJudgeSessionMetrics(t *testing.T) {
 		},
 	}
 
-	input := buildReportInput("s", grouped, []string{"judge-error"}, time.Time{}, time.Time{}, evalCfg)
+	input := buildReportInput("s", grouped, []string{"judge-error"}, time.Time{}, time.Time{}, evalCfg, credential.ResolvedAgentConfig{})
 
 	if len(input.CaseResults) != 1 {
 		t.Fatalf("CaseResults count = %d, want 1", len(input.CaseResults))
@@ -514,7 +533,7 @@ func TestBuildReportInput_IncludesFailedJudgeSessionMetrics(t *testing.T) {
 }
 
 func TestRunner_WriteResults_NoWorkspace(t *testing.T) {
-	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.AgentInitParams{})
+	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.ResolvedAgentConfig{})
 	err := r.WriteResults(context.Background(), nil, "", "", 1, nil, time.Time{}, time.Time{})
 	if err == nil {
 		t.Error("expected error when workspace not initialized")

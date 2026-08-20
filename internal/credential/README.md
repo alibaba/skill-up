@@ -4,7 +4,7 @@
 
 This document describes the **recommended approach and pipeline constraints**, focusing on:
 
-- How the parameter dict eventually passed to agent initialization is decided
+- How the resolved value passed to agent initialization is decided
 - How runner agent and judge agent configurations are differentiated
 - When a provider is configured, how environment variables override global configuration
 - How different agents consume these parameters
@@ -20,18 +20,28 @@ Consolidate information scattered across the following sources into agent initia
 - The global credential configuration file
 - Process environment variables
 
-Before entering `agent.DetectAgent(...)` / judge-agent initialization, produce a parameter dict **per agent kind**:
+Before entering adapter construction, produce one resolved value **per agent role**:
 
 ```go
-type AgentInitParams struct {
-    Provider string
-    Model    string
-    APIKey   string
-    BaseURL  string
+type ResolvedAgentConfig struct {
+    Role        AgentRole
+    Engine      string
+    Version     string
+    Entry       string
+    Provider    string
+    Model       string
+    APIKey      string
+    BaseURL     string
+    Kwargs      map[string]string
+    ModelParams map[string]string
 }
 ```
 
-This dict is the "intermediate decision result" — it does not require every agent to consume all four fields verbatim. Each agent may use them selectively according to its own capabilities.
+This value is the boundary between raw YAML/CLI/credential inputs and adapter
+construction. Map fields are cloned while resolving, so later mutations of the
+loaded eval config do not alter a resolved runner or judge configuration. It
+does not require every adapter to consume every field; capability validation
+remains adapter-specific.
 
 ## Two Pipelines
 
@@ -59,7 +69,7 @@ It is recommended to treat the judge agent as a separate parameter resolution pi
 
 ## Final Parameter Decisions
 
-For each agent kind (`runner` / `judge`), compute the final values of:
+For each agent role (`runner` / `judge`), compute the final values of:
 
 - `provider`
 - `model`
@@ -111,47 +121,45 @@ Key points:
 
 ## Recommended Resolution Flow
 
-A unified "resolve by role" entry point is recommended, e.g.:
+A unified "resolve by role" flow is implemented through the runner and judge
+entry points:
 
 ```go
-type AgentKind string
-
-const (
-    AgentKindRunner AgentKind = "runner"
-    AgentKindJudge  AgentKind = "judge"
-)
-
-func ResolveAgentInitParams(
-    kind AgentKind,
-    roleConfig AgentConfigSource,
-    fallback *AgentInitParams,
+func ResolveRunnerConfig(
+    engine config.EngineConfig,
     resolver *Resolver,
     cli CLIOverrides,
-) AgentInitParams
+) ResolvedAgentConfig
+
+func ResolveJudgeConfig(
+    judge config.JudgeConfig,
+    runner ResolvedAgentConfig,
+    resolver *Resolver,
+) ResolvedAgentConfig
 ```
 
 Where:
 
-- `roleConfig` is the role's own raw configuration
-- `fallback` is only used when the judge agent reuses the runner agent's final result
+- `engine` is the runner's complete raw engine configuration
+- `runner` supplies the judge's inherited engine lifecycle and per-field fallback
 - `resolver` only provides provider-scoped credential lookup
 - `cli` only provides ad-hoc overrides
 
 Recommended execution order:
 
-1. Determine the current role's final `provider`
-2. Determine the role's own explicit `model` / `base_url`
-3. If the provider is non-empty, uniformly read `${PROVIDER}_MODEL` / `${PROVIDER}_API_KEY` / `${PROVIDER}_BASE_URL`
-4. If the `api-key` / `base-url` env var is missing, read from the resolver's global credential configuration
-5. For the judge agent, fall back to the runner agent's final result for any missing fields
-6. Apply CLI overrides last
-7. Output the final `AgentInitParams`
+1. Copy the role's YAML values and clone its kwargs/model params
+2. Resolve a raw CLI `--model` once, including legacy slash disambiguation
+3. For the judge agent, fill missing fields from the resolved runner config
+4. If the final provider is non-empty, uniformly read `${PROVIDER}_MODEL` / `${PROVIDER}_API_KEY` / `${PROVIDER}_BASE_URL`
+5. If the `api-key` / `base-url` env var is missing, read from the resolver's credential configuration
+6. Apply the explicit CLI API key and preserve CLI model precedence
+7. Apply compatibility normalization and output the final `ResolvedAgentConfig`
 
 Benefits:
 
 - Judge and runner share the same rules, only the input sources differ
 - Provider is decided first, avoiding cross-application of the wrong provider's env/config
-- CLI overrides are applied last, making behavior the most direct
+- CLI model identity is available before credential lookup while retaining the highest precedence
 
 ## Environment Variable Override Rules
 
@@ -174,7 +182,7 @@ Rules:
 
 ## Agent Consumption Rules
 
-The unified layer is responsible for producing `AgentInitParams`, but **how to use them is up to each agent's implementation**.
+The unified layer is responsible for producing `ResolvedAgentConfig`, but **how to consume unsupported settings remains up to each adapter**. The historical non-Qoder `auto` normalization is centralized during resolution so the factory does not reinterpret raw configuration.
 
 ### claude-code
 
@@ -299,13 +307,19 @@ These logs are particularly important for qodercli; otherwise users may mistaken
 
 ## Relation to the Current Implementation
 
-The resolution pipeline described in this document is fully implemented in `agent_init.go`:
+The resolution pipeline described in this document is implemented in `agent_init.go`:
 
-- `ResolveRunnerInitParams()` — resolves runner agent parameters from the eval config and CLI overrides
-- `ResolveJudgeInitParams()` — resolves judge agent parameters, falling back to runner params when no independent judge config is set
-- `resolveAgentInitParams()` — shared resolution logic used by both pipelines
+- `ResolveRunnerConfig()` — resolves the complete runner configuration from eval config and CLI overrides
+- `ResolveJudgeConfig()` — resolves a judge role while inheriting the runner engine lifecycle and per-field fallbacks
+- `resolveResolvedAgentConfig()` — shared resolution logic used by both pipelines
 
-`Resolver.Load()` emits "global discovery" logs (discovered providers from .env and config file). These are distinct from the per-role `[AGENT_CONFIG]` logs emitted by `logResolvedAgentConfig()` in `agent_init.go`, which describe the final resolved parameters and their sources for each agent kind.
+The CLI no longer tentatively splits `--model` into `evalCfg` and later
+collapses it. `ResolveRunnerConfig()` receives the raw flag and makes the slash
+decision once, after provider configuration is available. The resulting value
+is passed directly to `agent.DetectAgentWithResolvedConfig()` and is also used
+for report engine/model identity.
+
+`Resolver.Load()` emits "global discovery" logs (discovered providers from .env and config file). These are distinct from the per-role `[AGENT_CONFIG]` logs emitted by `logResolvedAgentConfig()` in `agent_init.go`, which describe the final resolved parameters and their sources for each agent role.
 
 ## Current Package Responsibilities
 

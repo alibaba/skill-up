@@ -36,20 +36,25 @@ the first validation of a delegated local login.
 
 ## Current resolution order
 
-The current runner path resolves values in these stages:
+The runner path resolves values in these stages:
 
-1. Load the eval YAML and apply `--engine` and `--model` overrides.
+1. Load the eval YAML, apply `--engine`, and retain the raw `--model` value.
 2. Load `~/.skill-up/credentials.yaml` and provider-scoped environment values.
-3. Resolve provider-scoped `MODEL`, `API_KEY`, and `BASE_URL` values. A
+3. Build one role-aware `ResolvedAgentConfig`. Legacy slash disambiguation is
+   performed once at this point instead of mutating and later repairing the
+   loaded eval config.
+4. Resolve provider-scoped `MODEL`, `API_KEY`, and `BASE_URL` values. A
    provider-scoped model environment variable currently overrides the YAML
    model; provider environment credentials override the credential file.
-4. Apply explicit CLI `--model` and `--api-key` last.
-5. Let the selected adapter normalize unsupported values and construct its
+5. Preserve explicit CLI `--model` and `--api-key` precedence.
+6. Pass the resolved value to the selected adapter, which constructs its
    command and environment.
 
-This explains why requested and effective values can differ today. A later
-phase should retain both instead of reconstructing effective configuration from
-the eval YAML in reports.
+Runner and judge roles use the same resolution flow. Until an explicit judge
+engine schema is introduced, the judge inherits the runner engine lifecycle and
+kwargs, while resolving its provider/model and credentials as a separate role.
+Reports use the resolved runner engine/model identity rather than reconstructing
+it from a CLI-mutated eval config.
 
 ## Legacy slashed model compatibility
 
@@ -88,14 +93,13 @@ These translations are covered by `action/main_test.py`. Any future explicit
 
 ## Known gaps for later phases
 
-- Provider, protocol, credential source, and effective model are not yet held
-  in one immutable resolved configuration.
+- Protocol and adapter capabilities are not yet declared on the resolved value.
 - Nested provider endpoints are flattened before the adapter protocol is known.
 - Provider-scoped `MODEL` currently overrides an explicit YAML model.
 - Adapters may ignore unsupported explicit values rather than failing before
   case execution.
-- Reports do not consistently distinguish requested configuration from the
-  effective adapter configuration.
+- Reports use the resolved runner identity but do not yet distinguish every
+  requested value from the adapter's effective configuration.
 
 See [Issue #196](https://github.com/alibaba/skill-up/issues/196) for the staged
 cleanup plan.

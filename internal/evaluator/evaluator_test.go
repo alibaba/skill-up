@@ -1102,11 +1102,11 @@ func TestExecuteCase_AgentTimeoutDoesNotInvokeAgentJudge(t *testing.T) {
 		},
 	})
 
-	origDetect := agentDetectWithInitParams
-	agentDetectWithInitParams = func(_ string, _ credential.AgentInitParams, _ map[string]string) (agent.Agent, error) {
+	origDetect := agentDetectWithResolvedConfig
+	agentDetectWithResolvedConfig = func(_ credential.ResolvedAgentConfig) (agent.Agent, error) {
 		return judgeAgent, nil
 	}
-	defer func() { agentDetectWithInitParams = origDetect }()
+	defer func() { agentDetectWithResolvedConfig = origDetect }()
 
 	caseCfg := &config.CaseConfig{
 		ID:    "case-timeout-no-judge-salvage",
@@ -1146,11 +1146,11 @@ func TestExecuteCase_InstallsJudgeSkillsOnJudgeAgentOnly(t *testing.T) {
 	}
 	runAgent := &mockAgent{name: "run", output: "main response"}
 
-	origDetect := agentDetectWithInitParams
-	agentDetectWithInitParams = func(_ string, _ credential.AgentInitParams, _ map[string]string) (agent.Agent, error) {
+	origDetect := agentDetectWithResolvedConfig
+	agentDetectWithResolvedConfig = func(_ credential.ResolvedAgentConfig) (agent.Agent, error) {
 		return judgeAgent, nil
 	}
-	defer func() { agentDetectWithInitParams = origDetect }()
+	defer func() { agentDetectWithResolvedConfig = origDetect }()
 
 	e := newTestEvaluator(EvalOptions{
 		SkillDir: skillDir,
@@ -1222,11 +1222,11 @@ func TestExecuteCase_JudgeSkillInstallFailureReturnsError(t *testing.T) {
 	}
 	runAgent := &mockAgent{name: "run", output: "main response"}
 
-	origDetect := agentDetectWithInitParams
-	agentDetectWithInitParams = func(_ string, _ credential.AgentInitParams, _ map[string]string) (agent.Agent, error) {
+	origDetect := agentDetectWithResolvedConfig
+	agentDetectWithResolvedConfig = func(_ credential.ResolvedAgentConfig) (agent.Agent, error) {
 		return judgeAgent, nil
 	}
-	defer func() { agentDetectWithInitParams = origDetect }()
+	defer func() { agentDetectWithResolvedConfig = origDetect }()
 
 	e := newTestEvaluator(EvalOptions{
 		SkillDir: t.TempDir(),

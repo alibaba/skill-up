@@ -1,21 +1,24 @@
 package credential
 
 import (
+	"maps"
 	"os"
 	"strings"
 
+	"github.com/alibaba/skill-up/internal/agentkind"
 	"github.com/alibaba/skill-up/internal/config"
+	"github.com/alibaba/skill-up/internal/customengine"
 	"github.com/alibaba/skill-up/internal/logging"
 )
 
-// AgentKind identifies which evaluation agent a resolved config targets.
-type AgentKind string
+// AgentRole identifies which evaluation agent a resolved config targets.
+type AgentRole string
 
 const (
-	// AgentKindRunner is the primary agent that executes a case.
-	AgentKindRunner AgentKind = "runner"
-	// AgentKindJudge is the agent used by agent_judge evaluation.
-	AgentKindJudge AgentKind = "judge"
+	// AgentRoleRunner is the primary agent that executes a case.
+	AgentRoleRunner AgentRole = "runner"
+	// AgentRoleJudge is the agent used by agent_judge evaluation.
+	AgentRoleJudge AgentRole = "judge"
 )
 
 // ValueSource records where a resolved config value came from.
@@ -36,15 +39,22 @@ const (
 	ValueSourceCLI ValueSource = "cli"
 )
 
-// AgentInitParams is the resolved configuration passed into agent initialization.
-type AgentInitParams struct {
-	Kind   AgentKind
-	Engine string
+// ResolvedAgentConfig is the role-aware configuration passed into agent initialization.
+// It is built once after YAML, CLI, environment, and credential-file inputs are
+// available. Mutable data is cloned during construction so later mutations of
+// EvalConfig cannot change an already resolved value.
+type ResolvedAgentConfig struct {
+	Role    AgentRole
+	Engine  string
+	Version string
+	Entry   string
 
-	Provider string
-	Model    string
-	APIKey   string
-	BaseURL  string
+	Provider    string
+	Model       string
+	APIKey      string
+	BaseURL     string
+	Kwargs      map[string]string
+	ModelParams map[string]string
 
 	// Custom carries the custom engine config when the engine name does not
 	// match a built-in agent. It is nil for built-in agents.
@@ -56,53 +66,66 @@ type AgentInitParams struct {
 	BaseURLSource  ValueSource
 }
 
+// CLIOverrides contains explicit runner-only command-line overrides.
+type CLIOverrides struct {
+	Model  string
+	APIKey string
+}
+
 type agentResolveInput struct {
-	kind        AgentKind
-	engine      string
+	role        AgentRole
+	engine      config.EngineConfig
 	provider    string
 	model       string
 	baseURL     string
 	valueSource ValueSource
-	fallback    *AgentInitParams
+	fallback    *ResolvedAgentConfig
 	resolver    *Resolver
-	cliModel    string
-	cliAPIKey   string
-	custom      *config.CustomEngineConfig
+	cli         CLIOverrides
 }
 
-// ResolveRunnerInitParams resolves the final init params for the runner agent.
-func ResolveRunnerInitParams(engine string, modelCfg config.ModelConfig, custom *config.CustomEngineConfig, resolver *Resolver, cliModel string, cliAPIKey string) AgentInitParams {
-	return resolveAgentInitParams(agentResolveInput{
-		kind:        AgentKindRunner,
+// ResolveRunnerConfig resolves the final configuration for the runner agent.
+func ResolveRunnerConfig(engine config.EngineConfig, resolver *Resolver, cli CLIOverrides) ResolvedAgentConfig {
+	return resolveResolvedAgentConfig(agentResolveInput{
+		role:        AgentRoleRunner,
 		engine:      engine,
-		provider:    modelCfg.Provider,
-		model:       modelCfg.Name,
-		baseURL:     modelCfg.BaseURL,
+		provider:    engine.Model.Provider,
+		model:       engine.Model.Name,
+		baseURL:     engine.Model.BaseURL,
 		valueSource: ValueSourceConfig,
 		resolver:    resolver,
-		cliModel:    cliModel,
-		cliAPIKey:   cliAPIKey,
-		custom:      custom,
+		cli:         cli,
 	})
 }
 
-// ResolveJudgeInitParams resolves the final init params for the judge agent.
-func ResolveJudgeInitParams(engine string, judgeCfg config.JudgeConfig, runner AgentInitParams, resolver *Resolver) AgentInitParams {
+// ResolveJudgeConfig resolves the final configuration for the judge agent.
+// The judge inherits the runner engine lifecycle and kwargs until an explicit
+// judge-engine schema is introduced, but its model/provider resolution is a
+// separate role-aware pass.
+func ResolveJudgeConfig(judgeCfg config.JudgeConfig, runner ResolvedAgentConfig, resolver *Resolver) ResolvedAgentConfig {
 	provider, model := parseJudgeModel(judgeCfg.Model)
-	var fallback *AgentInitParams
+	var fallback *ResolvedAgentConfig
 	if runner.Provider != "" || runner.Model != "" || runner.APIKey != "" || runner.BaseURL != "" {
 		fallback = &runner
 	}
 
-	return resolveAgentInitParams(agentResolveInput{
-		kind:        AgentKindJudge,
-		engine:      engine,
+	return resolveResolvedAgentConfig(agentResolveInput{
+		role: AgentRoleJudge,
+		engine: config.EngineConfig{
+			Name:    runner.Engine,
+			Version: runner.Version,
+			Entry:   runner.Entry,
+			Kwargs:  maps.Clone(runner.Kwargs),
+			Custom:  runner.Custom,
+			Model: config.ModelConfig{
+				Params: maps.Clone(runner.ModelParams),
+			},
+		},
 		provider:    provider,
 		model:       model,
 		valueSource: ValueSourceJudge,
 		fallback:    fallback,
 		resolver:    resolver,
-		custom:      runner.Custom,
 	})
 }
 
@@ -115,21 +138,25 @@ func parseJudgeModel(value string) (provider, model string) {
 	return "", value
 }
 
-func resolveAgentInitParams(in agentResolveInput) AgentInitParams {
+func resolveResolvedAgentConfig(in agentResolveInput) ResolvedAgentConfig {
 	// A built-in engine ignores any engine.custom block, so it is not carried
 	// into the init params — otherwise downstream logic (e.g. the model "auto"
 	// strip) would mistake a built-in engine for a custom one.
-	custom := in.custom
-	if config.IsBuiltinEngineName(in.engine) {
+	custom := customengine.CloneConfig(in.engine.Custom)
+	if config.IsBuiltinEngineName(in.engine.Name) {
 		custom = nil
 	}
-	params := AgentInitParams{
-		Kind:     in.kind,
-		Engine:   in.engine,
-		Provider: in.provider,
-		Model:    in.model,
-		BaseURL:  in.baseURL,
-		Custom:   custom,
+	params := ResolvedAgentConfig{
+		Role:        in.role,
+		Engine:      in.engine.Name,
+		Version:     in.engine.Version,
+		Entry:       in.engine.Entry,
+		Provider:    in.provider,
+		Model:       in.model,
+		BaseURL:     in.baseURL,
+		Kwargs:      maps.Clone(in.engine.Kwargs),
+		ModelParams: maps.Clone(in.engine.Model.Params),
+		Custom:      custom,
 	}
 	if params.Provider != "" {
 		params.ProviderSource = in.valueSource
@@ -141,16 +168,18 @@ func resolveAgentInitParams(in agentResolveInput) AgentInitParams {
 		params.BaseURLSource = in.valueSource
 	}
 
+	applyCLIModelOverride(&params, in.cli.Model, in.resolver)
 	applyFallback(&params, in.fallback)
 	resolveProviderScopedFields(&params, in.resolver)
 	applyFallbackCredentials(&params, in.fallback)
-	applyCLIOverrides(&params, in.cliModel, in.cliAPIKey)
+	applyCLIAPIKeyOverride(&params, in.cli.APIKey)
+	normalizeLegacyModel(&params)
 	logResolvedAgentConfig(params)
 
 	return params
 }
 
-func applyFallback(params *AgentInitParams, fallback *AgentInitParams) {
+func applyFallback(params *ResolvedAgentConfig, fallback *ResolvedAgentConfig) {
 	if fallback == nil {
 		return
 	}
@@ -168,7 +197,7 @@ func applyFallback(params *AgentInitParams, fallback *AgentInitParams) {
 	}
 }
 
-func applyFallbackCredentials(params *AgentInitParams, fallback *AgentInitParams) {
+func applyFallbackCredentials(params *ResolvedAgentConfig, fallback *ResolvedAgentConfig) {
 	if fallback == nil {
 		return
 	}
@@ -178,11 +207,19 @@ func applyFallbackCredentials(params *AgentInitParams, fallback *AgentInitParams
 	}
 }
 
-func applyCLIOverrides(params *AgentInitParams, cliModel string, cliAPIKey string) {
+func applyCLIModelOverride(params *ResolvedAgentConfig, cliModel string, resolver *Resolver) {
 	if cliModel != "" {
-		params.Model = cliModel
+		params.Provider, params.Model = ResolveModelRef(cliModel, resolver)
+		if params.Provider != "" {
+			params.ProviderSource = ValueSourceCLI
+		} else {
+			params.ProviderSource = ""
+		}
 		params.ModelSource = ValueSourceCLI
 	}
+}
+
+func applyCLIAPIKeyOverride(params *ResolvedAgentConfig, cliAPIKey string) {
 	if cliAPIKey == "" {
 		return
 	}
@@ -199,7 +236,19 @@ func applyCLIOverrides(params *AgentInitParams, cliModel string, cliAPIKey strin
 	params.APIKeySource = ValueSourceCLI
 }
 
-func resolveProviderScopedFields(params *AgentInitParams, resolver *Resolver) {
+func normalizeLegacyModel(params *ResolvedAgentConfig) {
+	if params.Model != "auto" || params.Custom != nil {
+		return
+	}
+	switch params.Engine {
+	case agentkind.QoderCLI, agentkind.QoderAlias, agentkind.QoderCLIAlias:
+		return
+	default:
+		params.Model = ""
+	}
+}
+
+func resolveProviderScopedFields(params *ResolvedAgentConfig, resolver *Resolver) {
 	if params.Provider == "" {
 		return
 	}
@@ -217,7 +266,12 @@ const (
 	valueBaseURL scopedValueKind = "BASE_URL"
 )
 
-func resolveValue(params *AgentInitParams, kind scopedValueKind, resolver *Resolver) {
+func resolveValue(params *ResolvedAgentConfig, kind scopedValueKind, resolver *Resolver) {
+	// A CLI model is applied before provider lookup so its provider prefix can
+	// select credentials, but it must retain the historical highest precedence.
+	if kind == valueModel && params.ModelSource == ValueSourceCLI {
+		return
+	}
 	if value, envVar, ok := lookupProviderEnv(params.Provider, kind); ok {
 		setResolvedValue(params, kind, value, ValueSourceEnv)
 		logProviderEnvResolution(params, kind, envVar)
@@ -256,9 +310,9 @@ func lookupProviderEnv(provider string, kind scopedValueKind) (value, envVar str
 
 // Provider-existence and slashed-model disambiguation helpers live in
 // provider_query.go (Resolver.HasProvider, ResolveModelRef) so that
-// agent_init.go stays focused on AgentInitParams construction.
+// agent_init.go stays focused on ResolvedAgentConfig construction.
 
-func setResolvedValue(params *AgentInitParams, kind scopedValueKind, value string, source ValueSource) {
+func setResolvedValue(params *ResolvedAgentConfig, kind scopedValueKind, value string, source ValueSource) {
 	switch kind {
 	case valueModel:
 		params.Model = value
@@ -272,35 +326,38 @@ func setResolvedValue(params *AgentInitParams, kind scopedValueKind, value strin
 	}
 }
 
-func logProviderEnvResolution(params *AgentInitParams, kind scopedValueKind, envVar string) {
+func logProviderEnvResolution(params *ResolvedAgentConfig, kind scopedValueKind, envVar string) {
 	switch kind {
 	case valueModel:
 		logging.Debugf("AGENT_CONFIG kind=%s engine=%s provider=%s model_env=%s source.model=%s",
-			params.Kind, params.Engine, params.Provider, envVar, ValueSourceEnv)
+			params.Role, params.Engine, params.Provider, envVar, ValueSourceEnv)
 	case valueAPIKey:
-		logging.Debugf("AGENT_CONFIG kind=%s engine=%s provider=%s auth_env=%s source.auth=%s",
-			params.Kind, params.Engine, params.Provider, envVar, ValueSourceEnv)
+		logging.Debugf("AGENT_CONFIG kind=%s engine=%s provider=%s auth_configured=true source.auth=%s",
+			params.Role, params.Engine, params.Provider, ValueSourceEnv)
 	case valueBaseURL:
 		logging.Debugf("AGENT_CONFIG kind=%s engine=%s provider=%s base_url_env=%s source.base_url=%s",
-			params.Kind, params.Engine, params.Provider, envVar, ValueSourceEnv)
+			params.Role, params.Engine, params.Provider, envVar, ValueSourceEnv)
 	}
 }
 
-func logResolvedAgentConfig(params AgentInitParams) {
+func logResolvedAgentConfig(params ResolvedAgentConfig) {
 	if params.Provider != "" {
 		logging.Debugf("AGENT_CONFIG kind=%s engine=%s provider=%s source.provider=%s",
-			params.Kind, params.Engine, params.Provider, params.ProviderSource)
+			params.Role, params.Engine, params.Provider, params.ProviderSource)
 	}
 	if params.Model != "" {
 		logging.Debugf("AGENT_CONFIG kind=%s engine=%s model=%s source.model=%s",
-			params.Kind, params.Engine, params.Model, params.ModelSource)
+			params.Role, params.Engine, params.Model, params.ModelSource)
 	}
 	if params.APIKey != "" {
-		logging.Debugf("AGENT_CONFIG kind=%s engine=%s api_key=%s source.api_key=%s",
-			params.Kind, params.Engine, MaskAPIKey(params.APIKey), params.APIKeySource)
+		// Do not log the credential, its masked form, or fields derived from its
+		// resolution path. The resolved config retains APIKeySource for callers
+		// that need programmatic diagnostics without placing it in log output.
+		logging.Debugf("AGENT_CONFIG kind=%s engine=%s auth_configured=true",
+			params.Role, params.Engine)
 	}
 	if params.BaseURL != "" {
 		logging.Debugf("AGENT_CONFIG kind=%s engine=%s base_url=%s source.base_url=%s",
-			params.Kind, params.Engine, params.BaseURL, params.BaseURLSource)
+			params.Role, params.Engine, params.BaseURL, params.BaseURLSource)
 	}
 }

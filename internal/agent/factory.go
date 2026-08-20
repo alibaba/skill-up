@@ -33,30 +33,21 @@ func DetectAgent(engineName string, cfg Config) (Agent, error) {
 	}
 }
 
-// DetectAgentWithInitParams maps resolved init params into an engine-specific agent config.
-// kwargs carries engine.kwargs from eval.yaml (or --engine-kwarg overrides) and
-// is forwarded as-is to the agent; each agent reads only the keys it understands.
-func DetectAgentWithInitParams(engineName string, params credential.AgentInitParams, kwargs map[string]string) (Agent, error) {
-	model := params.Model
-	// "auto" is a QoderCLI-specific model tier; strip it for other built-in
-	// engines so they don't need to hard-code awareness of it. A custom engine
-	// keeps the user's configured value — it is exposed verbatim via ${model}
-	// and SessionInput.model.
-	if model == "auto" && !isQoderCLIEngine(engineName) && params.Custom == nil {
-		model = ""
-	}
-
+// DetectAgentWithResolvedConfig maps a resolved role configuration into the
+// selected adapter without reinterpreting raw YAML or CLI values.
+func DetectAgentWithResolvedConfig(params credential.ResolvedAgentConfig) (Agent, error) {
+	engineName := params.Engine
 	cfg := Config{
 		Name:          engineName,
-		ModelName:     model,
+		ModelName:     params.Model,
 		ModelProvider: params.Provider,
 		APIKey:        params.APIKey,
 		BaseURL:       params.BaseURL,
 		EnvVars:       make(map[string]string),
-		Kwargs:        kwargs,
+		Kwargs:        params.Kwargs,
 		Custom:        params.Custom,
 	}
-	logUnknownEngineKwargs(engineName, kwargs)
+	logUnknownEngineKwargs(engineName, params.Kwargs)
 
 	switch engineName {
 	case agentkind.QoderCLIAlias, agentkind.QoderAlias, agentkind.QoderCLI:
@@ -64,7 +55,7 @@ func DetectAgentWithInitParams(engineName string, params credential.AgentInitPar
 		// underlying model provider (e.g. anthropic). params.APIKey may hold a provider-scoped
 		// key (e.g. ANTHROPIC_API_KEY) which must not be forwarded as the qodercli token.
 		// See docs/bugfix/Bug_ QODER_PERSONAL_ACCESS_TOKEN is invalid.md for details.
-		profile := qoderProfileForKwargs(kwargs)
+		profile := qoderProfileForKwargs(params.Kwargs)
 		sourceEnv := profile.credentialEnv
 		token := os.Getenv(sourceEnv)
 		if token == "" && profile.edition == qoderEditionCN {
@@ -75,22 +66,13 @@ func DetectAgentWithInitParams(engineName string, params credential.AgentInitPar
 			cfg.EnvVars[profile.credentialEnv] = token
 			logging.Debugf(
 				"AGENT_CONFIG kind=%s engine=%s edition=%s auth_env=%s source.auth=process_env source.env=%s",
-				params.Kind, engineName, profile.edition, profile.credentialEnv, sourceEnv,
+				params.Role, engineName, profile.edition, profile.credentialEnv, sourceEnv,
 			)
 		}
 		if params.BaseURL != "" {
-			logging.Debugf("AGENT_CONFIG kind=%s engine=%s ignored.base_url reason=unsupported_by_agent", params.Kind, engineName)
+			logging.Debugf("AGENT_CONFIG kind=%s engine=%s ignored.base_url reason=unsupported_by_agent", params.Role, engineName)
 		}
 	}
 
 	return DetectAgent(engineName, cfg)
-}
-
-func isQoderCLIEngine(name string) bool {
-	switch name {
-	case agentkind.QoderCLIAlias, agentkind.QoderAlias, agentkind.QoderCLI:
-		return true
-	default:
-		return false
-	}
 }

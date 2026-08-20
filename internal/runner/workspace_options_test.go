@@ -26,7 +26,7 @@ import (
 func TestRunner_InitWorkspace_UsesExplicitRunNumber(t *testing.T) {
 	t.Parallel()
 
-	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.AgentInitParams{})
+	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.ResolvedAgentConfig{})
 	tmpDir := t.TempDir()
 
 	if err := r.InitWorkspace(tmpDir, "test-skill", 99); err != nil {
@@ -44,7 +44,7 @@ func TestRunner_InitWorkspace_UsesExplicitRunNumber(t *testing.T) {
 func TestRunner_InitWorkspace_DefaultRunKeepsOtherIterations(t *testing.T) {
 	t.Parallel()
 
-	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.AgentInitParams{})
+	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.ResolvedAgentConfig{})
 	tmpDir := t.TempDir()
 
 	if err := os.MkdirAll(filepath.Join(tmpDir, "iteration-2"), 0o755); err != nil {
@@ -66,7 +66,7 @@ func TestRunner_InitWorkspace_DefaultRunKeepsOtherIterations(t *testing.T) {
 func TestRunner_InitWorkspace_ExplicitRunCleansOnlyRequestedIteration(t *testing.T) {
 	t.Parallel()
 
-	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.AgentInitParams{})
+	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.ResolvedAgentConfig{})
 	tmpDir := t.TempDir()
 
 	staleFile := filepath.Join(tmpDir, "iteration-99", "stale.txt")
@@ -105,7 +105,7 @@ func TestRunner_Evaluate_DefaultsZeroIterationToOne(t *testing.T) {
 	r := NewRunner(&config.EvalConfig{
 		Environment: config.Environment{Type: "none"},
 		Cases:       config.CasesConfig{Parallelism: 1},
-	}, loader, nil, credential.AgentInitParams{})
+	}, loader, nil, credential.ResolvedAgentConfig{})
 
 	ag := &runnerTestAgent{}
 	results, err := r.Evaluate(context.Background(), []*config.CaseConfig{{ID: "case-1", Title: "Case 1"}}, ag, EvaluateOptions{
@@ -138,7 +138,7 @@ func TestRunner_Evaluate_DefaultWorkspaceIsSiblingOfSkillDir(t *testing.T) {
 	r := NewRunner(&config.EvalConfig{
 		Environment: config.Environment{Type: "none"},
 		Cases:       config.CasesConfig{Parallelism: 1},
-	}, loader, nil, credential.AgentInitParams{})
+	}, loader, nil, credential.ResolvedAgentConfig{})
 
 	if _, err := r.Evaluate(context.Background(), []*config.CaseConfig{{ID: "case-1", Title: "Case 1"}}, &runnerTestAgent{}, EvaluateOptions{}); err != nil {
 		t.Fatalf("Evaluate failed: %v", err)
@@ -161,7 +161,7 @@ func TestRunner_Evaluate_RunsMultipleIterations(t *testing.T) {
 	r := NewRunner(&config.EvalConfig{
 		Environment: config.Environment{Type: "none"},
 		Cases:       config.CasesConfig{Parallelism: 1},
-	}, loader, nil, credential.AgentInitParams{})
+	}, loader, nil, credential.ResolvedAgentConfig{})
 	baseTime := time.Date(2026, time.August, 17, 10, 0, 0, 0, time.UTC)
 	clockTimes := []time.Time{
 		baseTime,
@@ -271,7 +271,7 @@ func TestRunner_Evaluate_MultipleIterationsPrintStabilitySummaryAndDoNotWriteFil
 	r := NewRunner(&config.EvalConfig{
 		Environment: config.Environment{Type: "none"},
 		Cases:       config.CasesConfig{Parallelism: 1},
-	}, loader, nil, credential.AgentInitParams{})
+	}, loader, nil, credential.ResolvedAgentConfig{})
 
 	origNewEvaluator := newEvaluator
 	t.Cleanup(func() { newEvaluator = origNewEvaluator })
@@ -347,7 +347,7 @@ func TestRunner_Evaluate_AutoIterationAppendsWithoutStabilitySummary(t *testing.
 	r := NewRunner(&config.EvalConfig{
 		Environment: config.Environment{Type: "none"},
 		Cases:       config.CasesConfig{Parallelism: 1},
-	}, loader, nil, credential.AgentInitParams{})
+	}, loader, nil, credential.ResolvedAgentConfig{})
 
 	var output bytes.Buffer
 	captureUIOutput(t, &output)
@@ -411,7 +411,7 @@ func TestRunner_Evaluate_ReturnsPartialResultsWhenLaterRunFails(t *testing.T) {
 	r := NewRunner(&config.EvalConfig{
 		Environment: config.Environment{Type: "none"},
 		Cases:       config.CasesConfig{Parallelism: 1},
-	}, loader, nil, credential.AgentInitParams{})
+	}, loader, nil, credential.ResolvedAgentConfig{})
 
 	origNewEvaluator := newEvaluator
 	t.Cleanup(func() { newEvaluator = origNewEvaluator })
@@ -513,7 +513,7 @@ func TestRunner_Evaluate_AutoIncrementsIteration(t *testing.T) {
 		return NewRunner(&config.EvalConfig{
 			Environment: config.Environment{Type: "none"},
 			Cases:       config.CasesConfig{Parallelism: 1},
-		}, loader, nil, credential.AgentInitParams{})
+		}, loader, nil, credential.ResolvedAgentConfig{})
 	}
 
 	opts := EvaluateOptions{OutputDir: workspaceRoot, Iteration: 0, DeleteWorkspace: false}
