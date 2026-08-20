@@ -88,6 +88,8 @@ skills:
 # ========== 5. Agent Engine ==========
 engine:
   name: claude_code               # claude_code / codex / qodercli（也兼容 qoder-cli）/ qwen_code（也兼容 qwen-code、qwen）
+  # kwargs:
+  #   edition: cn                 # qodercli 可选：global（默认）/ cn
   model:
     provider: anthropic           # 模型供应商
     name: claude-sonnet-4-6       # 模型名称
@@ -857,6 +859,7 @@ qodercli 的认证凭证与模型层凭证（如 `ANTHROPIC_API_KEY`）**完全�
 | 层级               | 环境变量                        | 用途                                  |
 | :----------------: | :-----------------------------: | :-----------------------------------: |
 | qodercli 服务认证   | `QODER_PERSONAL_ACCESS_TOKEN`   | 向 qodercli 服务验证身份               |
+| qodercli CN 服务认证 | `QODERCN_PERSONAL_ACCESS_TOKEN` | 向 Qoder CLI CN 服务验证身份           |
 | 模型层认证          | `ANTHROPIC_API_KEY` 等          | 由 qodercli 内部管理，用户无需关心      |
 
 配置方式：
@@ -869,9 +872,21 @@ export QODER_PERSONAL_ACCESS_TOKEN=your_token_here
 echo 'QODER_PERSONAL_ACCESS_TOKEN=your_token_here' >> .env
 ```
 
-> **提示**：`QODER_PERSONAL_ACCESS_TOKEN` 不是必须的。如果未设置，qodercli 会自动使用本地登录态（`~/.qoder/`），与手动运行 `qodercli` 的行为一致。你可以通过 `qodercli /login` 完成本地登录。
+通过 `engine.kwargs.edition: cn` 选择 Qoder CLI CN。CN 官方凭据变量是
+`QODERCN_PERSONAL_ACCESS_TOKEN`；`skill-up` 也接受本地输入别名
+`QODER_CN_ACCESS_TOKEN`，并在运行时以官方变量名转发。这样可以由 macOS
+Keychain 等密钥管理器注入凭据，而不需要把 Token 写进 eval 文件：
+
+```yaml
+engine:
+  name: qodercli
+  kwargs:
+    edition: cn
+```
+
+> **提示**：所选版本的 PAT 不是必须的。未设置时，Global 使用 `~/.qoder/`，CN 使用 `~/.qoder-cn/` 中的本地登录态；项目级配置和 Skill 仍共同使用项目内的 `.qoder/` 目录。
 >
-> **注意**：`--api-key` 参数和 `eval.yaml` 中的 provider API key **不会**被用作 qodercli 的认证 token。qodercli 仅从环境变量 `QODER_PERSONAL_ACCESS_TOKEN` 或本地登录态获取认证信息。
+> **注意**：`--api-key` 参数和 `eval.yaml` 中的 provider API key **不会**被用作 qodercli 的认证 token。鉴权来自所选版本对应的 PAT 或本地登录态。
 
 qodercli 的模型参数也有特殊限制：
 

@@ -20,6 +20,9 @@ const (
 	// KwargMaxJSONLOutputBytes caps a complete JSONL artifact before skill-up
 	// downloads it from the runtime.
 	KwargMaxJSONLOutputBytes = "max_jsonl_output_bytes"
+	// KwargEdition selects a branded edition of an otherwise shared CLI.
+	// Qoder accepts "global" (default) and "cn".
+	KwargEdition = "edition"
 )
 
 // knownEngineKwargs is the project-wide set of recognised engine kwarg keys.
@@ -29,6 +32,7 @@ var knownEngineKwargs = map[string]struct{}{
 	KwargBypassSandbox:       {},
 	KwargMaxJSONLRecordBytes: {},
 	KwargMaxJSONLOutputBytes: {},
+	KwargEdition:             {},
 }
 
 // EngineKwargBool reads a boolean engine kwarg. Returns false when the key

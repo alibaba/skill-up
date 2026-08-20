@@ -234,8 +234,8 @@ Constraints:
 
 - `model` only accepts Qoder-recognized values such as `lite`, `efficient`, `auto`
 - `base-url` is ignored by qodercli
-- `api-key` does not take effect as a qodercli command-line argument, but it can be mapped to `QODER_PERSONAL_ACCESS_TOKEN` in the runtime env
-- qodercli authentication mainly takes effect via environment variables such as `QODER_PERSONAL_ACCESS_TOKEN`
+- `api-key` does not take effect as a qodercli command-line argument; Global authenticates with `QODER_PERSONAL_ACCESS_TOKEN`, while `engine.kwargs.edition=cn` uses `QODERCN_PERSONAL_ACCESS_TOKEN`
+- `QODER_CN_ACCESS_TOKEN` is a skill-up input alias for secret-manager/Keychain injection and is forwarded to qodercn under the official `QODERCN_PERSONAL_ACCESS_TOKEN` name
 
 Therefore for qodercli:
 
