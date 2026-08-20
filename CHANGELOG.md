@@ -7,10 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- The built-in `qodercli` engine now supports Qoder CLI CN through
+  `engine.kwargs.edition: cn`, including CN installation, authentication,
+  Skill/MCP execution, multi-turn session resume, token usage, and transcript
+  artifact lookup. `QODER_CN_ACCESS_TOKEN` is accepted as a local secret-manager
+  input alias and forwarded to qodercn as `QODERCN_PERSONAL_ACCESS_TOKEN`.
+
+## [0.9.1] - 2026-08-20
+
 ### Fixed
 - `agent_judge` now uses stable criterion IDs and a strict JSON response
   contract, rejects malformed or semantically incomplete judge output, and
   always derives report labels and ordering from configured criteria.
+- `agent_judge` now makes one bounded output-correction attempt after strict
+  decoding or semantic validation fails. Both raw responses are preserved,
+  retry engine artifacts are isolated under `outputs/judge/run/retry/`, and
+  runtime-backed artifacts are snapshotted before a retry can overwrite them.
+  Independent correction runs begin at turn one, while aggregate Judge duration
+  and usage metrics cover the complete correction flow without changing report
+  schemas.
 - HTML and Markdown reports now identify the top-level duration as evaluation
   wall time and show per-case tested-agent execution time plus input, output,
   and total token usage. Benchmark cases include compact with-Skill,
@@ -26,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   memory, and the `--output-last-message` artifact remains the authoritative
   final response, so a large tool result cannot leave an earlier progress update
   to be graded as the answer.
+- QoderCLI runs now enable token-usage exposure and parse usage from JSON
+  stdout, allowing `input_tokens` and `output_tokens` to be populated even when
+  the runtime cannot read Qoder's private session directory.
 
 ## [0.9.0] - 2026-08-12
 
@@ -87,11 +106,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Aggregate report statistics now exclude `without_skill` baseline runs, so
   pass rates and status totals describe the evaluated Skill rather than mixing
   benchmark control results into the headline metrics.
-
-### Fixed
-- QoderCLI runs now enable token-usage exposure and parse usage from JSON
-  stdout, allowing `input_tokens` and `output_tokens` to be populated even when
-  the runtime cannot read Qoder's private session directory.
 
 ## [0.7.0] - 2026-07-16
 
@@ -502,6 +516,7 @@ The `v0.5.0` release tag is available at
   project and delivers the end-to-end capability to declare eval environments,
   run cases and emit structured reports as described in [README.md](README.md).
 
+[0.9.1]: https://github.com/alibaba/skill-up/releases/tag/v0.9.1
 [0.9.0]: https://github.com/alibaba/skill-up/releases/tag/v0.9.0
 [0.8.0]: https://github.com/alibaba/skill-up/releases/tag/v0.8.0
 [0.7.0]: https://github.com/alibaba/skill-up/releases/tag/v0.7.0

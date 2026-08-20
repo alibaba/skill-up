@@ -67,8 +67,16 @@ func (r *Resolver) HasProvider(name string) bool {
 	if _, _, ok := lookupProviderEnv(name, valueBaseURL); ok {
 		return true
 	}
-	if strings.EqualFold(name, "qoder") && os.Getenv(EnvQoderPersonalAccessToken) != "" {
-		return true
+	if strings.EqualFold(name, "qoder") {
+		for _, envName := range []string{
+			EnvQoderPersonalAccessToken,
+			EnvQoderCNPersonalAccessToken,
+			EnvQoderCNAccessToken,
+		} {
+			if os.Getenv(envName) != "" {
+				return true
+			}
+		}
 	}
 	return false
 }

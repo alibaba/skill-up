@@ -68,6 +68,20 @@ func TestHasProvider_TrueWhenQoderPATEnvSet(t *testing.T) {
 	}
 }
 
+func TestHasProvider_TrueWhenQoderCNTokenEnvSet(t *testing.T) {
+	for _, envName := range []string{EnvQoderCNPersonalAccessToken, EnvQoderCNAccessToken} {
+		t.Run(envName, func(t *testing.T) {
+			t.Setenv(EnvQoderPersonalAccessToken, "")
+			t.Setenv(EnvQoderCNPersonalAccessToken, "")
+			t.Setenv(EnvQoderCNAccessToken, "")
+			t.Setenv(envName, "qoder-cn-test-token")
+			if !(&Resolver{}).HasProvider("qoder") {
+				t.Fatalf("HasProvider returned false when %s is set", envName)
+			}
+		})
+	}
+}
+
 func TestHasProvider_QoderPATDoesNotLeakToOtherProviders(t *testing.T) {
 	// The PAT probe is qoder-specific; setting QODER_PERSONAL_ACCESS_TOKEN
 	// must not mark unrelated providers (or imaginary `<X>_PAT` env names)

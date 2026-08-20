@@ -80,6 +80,27 @@ func TestBuildQoderMCPInstallCmd_Stdio(t *testing.T) {
 	}
 }
 
+func TestBuildQoderMCPInstallCmd_CNStdio(t *testing.T) {
+	t.Parallel()
+
+	cmd, err := buildQoderMCPInstallCmdForBinary("qodercn", runtime.MCPServerConfig{
+		Name:      "marker",
+		Transport: "stdio",
+		Command:   "node",
+	})
+	if err != nil {
+		t.Fatalf("buildQoderMCPInstallCmdForBinary failed: %v", err)
+	}
+	for _, want := range []string{
+		"qodercn mcp remove --scope project 'marker'",
+		"qodercn mcp add --scope project 'marker'",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("CN command missing %q:\n%s", want, cmd)
+		}
+	}
+}
+
 func TestBuildMCPInstallCmd_HTTPHeaders(t *testing.T) {
 	t.Parallel()
 

@@ -51,13 +51,23 @@ func DetectAgentWithResolvedConfig(params credential.ResolvedAgentConfig) (Agent
 
 	switch engineName {
 	case agentkind.QoderCLIAlias, agentkind.QoderAlias, agentkind.QoderCLI:
-		// QODER_PERSONAL_ACCESS_TOKEN is qodercli's own auth credential, independent of the
+		// The selected edition's PAT is qodercli's own auth credential, independent of the
 		// underlying model provider (e.g. anthropic). params.APIKey may hold a provider-scoped
 		// key (e.g. ANTHROPIC_API_KEY) which must not be forwarded as the qodercli token.
 		// See docs/bugfix/Bug_ QODER_PERSONAL_ACCESS_TOKEN is invalid.md for details.
-		if token := os.Getenv(credential.EnvQoderPersonalAccessToken); token != "" {
-			cfg.EnvVars[credential.EnvQoderPersonalAccessToken] = token
-			logging.Debugf("AGENT_CONFIG kind=%s engine=%s auth_env=%s source.auth=process_env", params.Role, engineName, credential.EnvQoderPersonalAccessToken)
+		profile := qoderProfileForKwargs(params.Kwargs)
+		sourceEnv := profile.credentialEnv
+		token := os.Getenv(sourceEnv)
+		if token == "" && profile.edition == qoderEditionCN {
+			sourceEnv = credential.EnvQoderCNAccessToken
+			token = os.Getenv(sourceEnv)
+		}
+		if token != "" {
+			cfg.EnvVars[profile.credentialEnv] = token
+			logging.Debugf(
+				"AGENT_CONFIG kind=%s engine=%s edition=%s auth_env=%s source.auth=process_env source.env=%s",
+				params.Role, engineName, profile.edition, profile.credentialEnv, sourceEnv,
+			)
 		}
 		if params.BaseURL != "" {
 			logging.Debugf("AGENT_CONFIG kind=%s engine=%s ignored.base_url reason=unsupported_by_agent", params.Role, engineName)

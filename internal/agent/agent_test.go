@@ -592,6 +592,53 @@ func TestDetectAgentWithResolvedConfig_QoderMapsAPIKeyToRuntimeEnv(t *testing.T)
 	}
 }
 
+func TestDetectAgentWithResolvedConfig_QoderCNMapsKeychainAliasToOfficialEnv(t *testing.T) {
+	token := "qoder-cn-runtime-token" //nolint:gosec // test credential, not real
+	t.Setenv(credential.EnvQoderCNAccessToken, token)
+	t.Setenv(credential.EnvQoderCNPersonalAccessToken, "")
+
+	ag, err := DetectAgentWithResolvedConfig(credential.ResolvedAgentConfig{
+		Engine:   "qoder-cli",
+		Provider: "qoder",
+		Model:    "auto",
+		Kwargs:   map[string]string{KwargEdition: qoderEditionCN},
+	})
+	if err != nil {
+		t.Fatalf("DetectAgentWithResolvedConfig failed: %v", err)
+	}
+
+	qoderAgent, ok := ag.(*QoderCLIAgent)
+	if !ok {
+		t.Fatalf("expected *QoderCLIAgent, got %T", ag)
+	}
+	if got := qoderAgent.Cfg.EnvVars[credential.EnvQoderCNPersonalAccessToken]; got != token {
+		t.Fatalf("%s = %q, want mapped Keychain alias value", credential.EnvQoderCNPersonalAccessToken, got)
+	}
+	if _, leaked := qoderAgent.Cfg.EnvVars[credential.EnvQoderCNAccessToken]; leaked {
+		t.Fatalf("local alias %s must not be forwarded to qodercn", credential.EnvQoderCNAccessToken)
+	}
+}
+
+func TestDetectAgentWithResolvedConfig_QoderCNPrefersOfficialEnv(t *testing.T) {
+	t.Setenv(credential.EnvQoderCNPersonalAccessToken, "official-token")
+	t.Setenv(credential.EnvQoderCNAccessToken, "alias-token")
+
+	ag, err := DetectAgentWithResolvedConfig(credential.ResolvedAgentConfig{
+		Engine: "qoder-cli",
+		Kwargs: map[string]string{KwargEdition: qoderEditionCN},
+	})
+	if err != nil {
+		t.Fatalf("DetectAgentWithResolvedConfig failed: %v", err)
+	}
+	qoderAgent, ok := ag.(*QoderCLIAgent)
+	if !ok {
+		t.Fatalf("expected *QoderCLIAgent, got %T", ag)
+	}
+	if got := qoderAgent.Cfg.EnvVars[credential.EnvQoderCNPersonalAccessToken]; got != "official-token" {
+		t.Fatalf("official CN env must win, got %q", got)
+	}
+}
+
 func TestDetectAgentWithResolvedConfig_QoderIgnoresParamsAPIKey(t *testing.T) {
 	t.Parallel()
 

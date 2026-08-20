@@ -198,13 +198,30 @@ Rule assertions:
 - `pass_threshold` (default 0.7): `pass_rate >= threshold` → PASS
 - Provides the internal helper `buildJudgePrompt()` to construct the evaluation prompt
 - Accepts one strict JSON object, optionally wrapped in one complete JSON code fence; unknown fields and trailing content are rejected
+- Retries exactly once when strict decoding or semantic validation fails. The retry shares the original timeout budget and only asks the Judge agent to correct its output contract.
+- Resumes the Judge session when the agent exposes `SessionResumer` and a session ID; otherwise it starts an independent first turn and serializes the original prompt, raw response, and correction instructions into one user message so single-instruction adapters preserve the complete context.
+- Does not retry a valid FAIL judgment, explicit context cancellation, context materialization failure, or an agent error without a recoverable response.
+- Persists every raw Judge response without rewriting it. The first engine artifacts remain at their existing paths and retry engine artifacts use a `retry/` subdirectory:
+
+```text
+outputs/judge/run/
+├── stdout.json (or other first-attempt engine artifacts)
+├── messages.json / session-result.json  # snapshotted Custom Engine framework files, when used
+├── raw-response-attempt-1.txt
+├── raw-response-attempt-2.txt       # only when correction runs
+└── retry/
+    ├── stdout.json (or other retry engine artifacts)
+    └── messages.json / session-result.json  # retry snapshots, when used
+```
+
+Runtime-backed attempt artifacts are snapshotted before another call can overwrite their workspace paths. The final Judge session represents the last attempt, while duration and usage metrics include the complete correction flow. Invalid output after the single correction remains an ERROR and preserves both attempts for diagnosis.
 
 ## Security
 
 - Workspace file checks (`files_exist`, `files_not_exist`) and `golden_file` all go through `safePath()`.
   The first two are relative to the workspace; `golden_file` is relative to the skill root. Both prevent `../` path-traversal attacks.
 - File-existence checks share a single helper, `fileExistsInWorkspace()`, ensuring that the `expect` layer and the `rule_based` layer use the same path-safety validation and detection logic.
-- Invalid agent judge responses remain errors and preserve the judge session for artifact collection.
+- Invalid agent judge responses remain errors after the bounded correction attempt and preserve the aggregated judge session for artifact collection.
 
 ## Testing
 

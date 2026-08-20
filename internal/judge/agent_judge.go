@@ -6,6 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,8 +20,21 @@ import (
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
 
-// DefaultPassThreshold is the default minimum pass rate for agent_judge.
-const DefaultPassThreshold = 0.7
+const (
+	// DefaultPassThreshold is the default minimum pass rate for agent_judge.
+	DefaultPassThreshold = 0.7
+
+	agentJudgeRawResponseAttempt1 = "raw-response-attempt-1.txt"
+	agentJudgeRawResponseAttempt2 = "raw-response-attempt-2.txt"
+	agentJudgeRetryArtifactDir    = "retry"
+)
+
+type agentJudgeCorrectionMode uint8
+
+const (
+	agentJudgeCorrectionIndependent agentJudgeCorrectionMode = iota
+	agentJudgeCorrectionResumed
+)
 
 // ---------------------------------------------------------------------------
 // Data types for agent_judge JSON parsing
@@ -138,44 +155,315 @@ func (j *AgentJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 	prompt := buildJudgePrompt(ctx, j.Criteria, materialized, j.JudgeSkills)
 	messages := []transcript.Message{{Role: transcript.RoleUser, Content: prompt, Turn: 1}}
 
-	// Get criterion results via agent.Agent. Snapshot parentCtx.Err() the
-	// instant Run returns, before parent's timer has any chance to fire on
-	// its own; this is how we distinguish a judge-level deadline from a
-	// parent (case-level) one and decide whether to annotate. Reading
-	// parentCtx.Err() later would race against the parent timer in the
-	// caseTimeout ≈ judgeTimeout boundary.
-	sessionResult, err := j.Agent.Run(ctx, j.Runtime, agent.ExecOptions{ArtifactDir: in.ArtifactDir}, messages)
-	parentExpired := parentCtx.Err() != nil
-	if err != nil {
-		annotated := err
-		if !parentExpired {
-			annotated = j.annotateTimeoutError(ctx, err)
-		}
-		if !canRecoverAgentJudgeResult(err, sessionResult) {
-			return nil, &SessionResultError{
-				Err:     fmt.Errorf("agent_judge agent call failed: %w", annotated),
-				Session: sessionResult,
-			}
-		}
-		logging.WarnContextf(ctx, "agent_judge recovering judge output despite agent error: %v (judge.timeout_seconds=%d, parent_ctx_expired=%t)", err, j.TimeoutSeconds, parentExpired)
+	// Snapshot parentCtx.Err() immediately after each call so a parent timer
+	// firing later is not mislabeled as judge.timeout_seconds.
+	firstSession, runErr := j.Agent.Run(ctx, j.Runtime, agent.ExecOptions{ArtifactDir: in.ArtifactDir}, messages)
+	if firstSession == nil && runErr == nil {
+		runErr = errors.New("agent returned no session result")
+	}
+	parentErr := parentCtx.Err()
+	persistAgentJudgeAttemptArtifacts(ctx, j.Runtime, in.ArtifactDir, in.ArtifactDir, agentJudgeRawResponseAttempt1, firstSession)
+	if callErr := j.agentCallError(ctx, runErr, firstSession, parentErr, "agent call"); callErr != nil {
+		return nil, &SessionResultError{Err: callErr, Session: firstSession}
 	}
 
+	criterionResults, validationErr := parseAgentJudgeResults(j.Criteria, firstSession.FinalMessage)
+	if validationErr == nil {
+		return j.buildResult(in, firstSession, materialized, prompt, criterionResults), nil
+	}
+	if ctx.Err() != nil {
+		return nil, &SessionResultError{
+			Err: fmt.Errorf(
+				"agent_judge output validation failed and correction retry could not start: %w",
+				errors.Join(validationErr, ctx.Err()),
+			),
+			Session: firstSession,
+		}
+	}
+	logging.WarnContextf(ctx, "agent_judge output failed validation; retrying once with correction guidance: %v", validationErr)
+
+	correctionPrompt := buildAgentJudgeCorrectionPrompt(j.Criteria, validationErr)
+	retryArtifactDir := ""
+	if in.ArtifactDir != "" {
+		retryArtifactDir = filepath.Join(in.ArtifactDir, agentJudgeRetryArtifactDir)
+	}
+	retrySession, correctionMode, retryErr := j.runAgentJudgeCorrection(ctx, firstSession, prompt, correctionPrompt, retryArtifactDir)
+	if retrySession == nil && retryErr == nil {
+		retryErr = errors.New("agent returned no session result")
+	}
+	parentErr = parentCtx.Err()
+	persistAgentJudgeAttemptArtifacts(ctx, j.Runtime, retryArtifactDir, in.ArtifactDir, agentJudgeRawResponseAttempt2, retrySession)
+	aggregateSession := aggregateAgentJudgeSessions(firstSession, retrySession, correctionMode)
+	if callErr := j.agentCallError(ctx, retryErr, retrySession, parentErr, "correction call"); callErr != nil {
+		return nil, &SessionResultError{
+			Err: fmt.Errorf(
+				"agent_judge correction retry failed after initial validation error %q: %w",
+				validationErr.Error(),
+				callErr,
+			),
+			Session: aggregateSession,
+		}
+	}
+
+	criterionResults, correctionErr := parseAgentJudgeResults(j.Criteria, retrySession.FinalMessage)
+	if correctionErr != nil {
+		return nil, &SessionResultError{
+			Err: fmt.Errorf(
+				"agent_judge correction retry remained invalid after initial validation error %q: %w",
+				validationErr.Error(),
+				correctionErr,
+			),
+			Session: aggregateSession,
+		}
+	}
+	logging.DebugContextf(ctx, "agent_judge correction retry produced a valid response")
+	return j.buildResult(in, aggregateSession, materialized, prompt, criterionResults), nil
+}
+
+func (j *AgentJudge) agentCallError(ctx context.Context, err error, sessionResult *agent.SessionResult, parentErr error, callLabel string) error {
+	if err == nil {
+		return nil
+	}
+	annotated := err
+	if parentErr == nil {
+		annotated = j.annotateTimeoutError(ctx, err)
+	}
+	if !canRecoverAgentJudgeResult(err, sessionResult) {
+		return fmt.Errorf("agent_judge %s failed: %w", callLabel, annotated)
+	}
+	if callLabel == "agent call" {
+		logging.WarnContextf(
+			ctx,
+			"agent_judge recovering judge output despite agent error: %v (judge.timeout_seconds=%d, parent_ctx_expired=%t)",
+			err,
+			j.TimeoutSeconds,
+			parentErr != nil,
+		)
+	} else {
+		logging.WarnContextf(
+			ctx,
+			"agent_judge recovering output from %s despite agent error: %v (judge.timeout_seconds=%d, parent_ctx_expired=%t)",
+			callLabel,
+			err,
+			j.TimeoutSeconds,
+			parentErr != nil,
+		)
+	}
+	return nil
+}
+
+func (j *AgentJudge) runAgentJudgeCorrection(
+	ctx context.Context,
+	firstSession *agent.SessionResult,
+	originalPrompt,
+	correctionPrompt,
+	artifactDir string,
+) (*agent.SessionResult, agentJudgeCorrectionMode, error) {
+	opts := agent.ExecOptions{ArtifactDir: artifactDir}
+	if resumer, ok := j.Agent.(agent.SessionResumer); ok && firstSession != nil && firstSession.SessionID != "" {
+		sessionResult, err := resumer.RunTurn(
+			ctx,
+			j.Runtime,
+			opts,
+			transcript.Message{Role: transcript.RoleUser, Content: correctionPrompt, Turn: 2},
+			firstSession.SessionID,
+		)
+		return sessionResult, agentJudgeCorrectionResumed, err
+	}
+
+	invalidResponse := ""
+	if firstSession != nil {
+		invalidResponse = firstSession.FinalMessage
+	}
+	fallbackPrompt := buildAgentJudgeFallbackCorrectionPrompt(originalPrompt, invalidResponse, correctionPrompt)
+	sessionResult, err := j.Agent.Run(ctx, j.Runtime, opts, []transcript.Message{{
+		Role:    transcript.RoleUser,
+		Content: fallbackPrompt,
+		Turn:    1,
+	}})
+	return sessionResult, agentJudgeCorrectionIndependent, err
+}
+
+func parseAgentJudgeResults(criteria []string, output string) ([]CriterionResult, error) {
 	var resp judgeResponse
-	if err := decodeAgentJudgeResponse(sessionResult.FinalMessage, &resp); err != nil {
-		return nil, &SessionResultError{
-			Err:     fmt.Errorf("agent_judge failed to parse agent output: %w", err),
-			Session: sessionResult,
-		}
+	if err := decodeAgentJudgeResponse(output, &resp); err != nil {
+		return nil, fmt.Errorf("agent_judge failed to parse agent output: %w", err)
 	}
-	criterionResults, err := validateAgentJudgeResponse(j.Criteria, resp.Results)
-	if err != nil {
-		return nil, &SessionResultError{
-			Err:     err,
-			Session: sessionResult,
-		}
+	return validateAgentJudgeResponse(criteria, resp.Results)
+}
+
+func persistAgentJudgeAttemptArtifacts(
+	ctx context.Context,
+	rt runtime.Runtime,
+	attemptArtifactDir,
+	rawArtifactDir,
+	rawFileName string,
+	sessionResult *agent.SessionResult,
+) {
+	snapshotAgentJudgeAttemptArtifacts(ctx, rt, attemptArtifactDir, sessionResult)
+	persistAgentJudgeRawResponse(ctx, rawArtifactDir, rawFileName, sessionResult)
+}
+
+func persistAgentJudgeRawResponse(ctx context.Context, artifactDir, fileName string, sessionResult *agent.SessionResult) {
+	if artifactDir == "" || sessionResult == nil {
+		return
+	}
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		logging.WarnContextf(ctx, "agent_judge failed to create raw response artifact directory %s: %v", artifactDir, err)
+		return
+	}
+	path := filepath.Join(artifactDir, fileName)
+	if err := os.WriteFile(path, []byte(sessionResult.FinalMessage), 0o600); err != nil {
+		logging.WarnContextf(ctx, "agent_judge failed to persist raw response artifact %s: %v", path, err)
+		return
+	}
+	if sessionResult.Artifacts == nil {
+		sessionResult.Artifacts = &agent.SessionArtifacts{}
+	}
+	sessionResult.Artifacts.GeneratedFiles = appendUniqueString(sessionResult.Artifacts.GeneratedFiles, path)
+}
+
+// snapshotAgentJudgeAttemptArtifacts preserves runtime-backed artifacts before
+// a correction attempt can overwrite their workspace paths. Artifacts already
+// materialized inside the attempt directory are left untouched. Snapshot
+// failures are best-effort: the original path remains available to the
+// evaluator and the Judge result is not changed.
+func snapshotAgentJudgeAttemptArtifacts(
+	ctx context.Context,
+	rt runtime.Runtime,
+	artifactDir string,
+	sessionResult *agent.SessionResult,
+) {
+	if artifactDir == "" || sessionResult == nil || sessionResult.Artifacts == nil {
+		return
+	}
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		logging.WarnContextf(ctx, "agent_judge failed to create attempt artifact directory %s: %v", artifactDir, err)
+		return
 	}
 
-	return j.buildResult(in, sessionResult, materialized, prompt, criterionResults), nil
+	generatedFiles := sessionResult.Artifacts.GeneratedFiles
+	for i, sourcePath := range generatedFiles {
+		if sourcePath == "" || pathWithinDir(sourcePath, artifactDir) {
+			continue
+		}
+		targetPath := filepath.Join(artifactDir, filepath.Base(sourcePath))
+		if err := rt.DownloadFile(ctx, sourcePath, targetPath); err != nil {
+			logging.WarnContextf(ctx, "agent_judge failed to snapshot attempt artifact %s to %s: %v", sourcePath, targetPath, err)
+			continue
+		}
+		generatedFiles[i] = targetPath
+	}
+	sessionResult.Artifacts.GeneratedFiles = appendUniqueStrings(nil, generatedFiles)
+}
+
+func pathWithinDir(path, dir string) bool {
+	cleanPath := filepath.Clean(path)
+	cleanDir := filepath.Clean(dir)
+	if !filepath.IsAbs(cleanPath) || !filepath.IsAbs(cleanDir) {
+		return false
+	}
+	rel, err := filepath.Rel(cleanDir, cleanPath)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func aggregateAgentJudgeSessions(first, second *agent.SessionResult, correctionMode agentJudgeCorrectionMode) *agent.SessionResult {
+	if first == nil {
+		return second
+	}
+	if second == nil {
+		return first
+	}
+
+	aggregate := *second
+	aggregate.DurationMs = first.DurationMs + second.DurationMs
+	if correctionMode == agentJudgeCorrectionResumed && judgeSessionMetricsAreCumulative(first, second) {
+		aggregate.InputTokens = max(first.InputTokens, second.InputTokens)
+		aggregate.OutputTokens = max(first.OutputTokens, second.OutputTokens)
+		aggregate.Turns = max(first.Turns, second.Turns)
+	} else {
+		aggregate.InputTokens = first.InputTokens + second.InputTokens
+		aggregate.OutputTokens = first.OutputTokens + second.OutputTokens
+		aggregate.Turns = first.Turns + second.Turns
+	}
+	aggregate.Artifacts = mergeAgentJudgeSessionArtifacts(first.Artifacts, second.Artifacts)
+	if first.PromptDelivery != nil {
+		aggregate.PromptDelivery = first.PromptDelivery
+	}
+	return &aggregate
+}
+
+func judgeSessionMetricsAreCumulative(first, second *agent.SessionResult) bool {
+	if len(first.Transcript) == 0 || len(second.Transcript) < len(first.Transcript) {
+		return false
+	}
+	for i := range first.Transcript {
+		if !reflect.DeepEqual(first.Transcript[i], second.Transcript[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func mergeAgentJudgeSessionArtifacts(first, second *agent.SessionArtifacts) *agent.SessionArtifacts {
+	if first == nil {
+		return second
+	}
+	if second == nil {
+		return first
+	}
+
+	merged := *second
+	if merged.WorkspaceDiff == "" {
+		merged.WorkspaceDiff = first.WorkspaceDiff
+	}
+	merged.GeneratedFiles = appendUniqueStrings(first.GeneratedFiles, second.GeneratedFiles)
+	merged.Files = appendUniqueArtifactFiles(first.Files, second.Files)
+	switch {
+	case first.Logs == "":
+	case merged.Logs == "":
+		merged.Logs = first.Logs
+	case first.Logs != merged.Logs:
+		merged.Logs = first.Logs + "\n" + merged.Logs
+	}
+	return &merged
+}
+
+func appendUniqueStrings(groups ...[]string) []string {
+	seen := make(map[string]struct{})
+	var values []string
+	for _, group := range groups {
+		for _, value := range group {
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
+func appendUniqueString(values []string, value string) []string {
+	if slices.Contains(values, value) {
+		return values
+	}
+	return append(values, value)
+}
+
+func appendUniqueArtifactFiles(groups ...[]agent.ArtifactFile) []agent.ArtifactFile {
+	seen := make(map[agent.ArtifactFile]struct{})
+	var files []agent.ArtifactFile
+	for _, group := range groups {
+		for _, file := range group {
+			if _, ok := seen[file]; ok {
+				continue
+			}
+			seen[file] = struct{}{}
+			files = append(files, file)
+		}
+	}
+	return files
 }
 
 func (j *AgentJudge) buildResult(in Input, sessionResult *agent.SessionResult, materialized *MaterializedContext, prompt string, criterionResults []CriterionResult) *Result {
@@ -506,6 +794,44 @@ func buildJudgePrompt(_ context.Context, criteria []string, materialized *Materi
 
 	appendReviewMaterials(&sb, materialized)
 	appendRequiredResponseFormat(&sb, criteria)
+	return sb.String()
+}
+
+func buildAgentJudgeCorrectionPrompt(criteria []string, validationErr error) string {
+	encodedError, err := json.Marshal(validationErr.Error())
+	if err != nil {
+		encodedError = []byte(`"agent_judge response validation failed"`)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Agent Judge Output Correction\n\n")
+	sb.WriteString("Your previous response failed the program-owned output contract. Correct the response using the same evaluation. ")
+	sb.WriteString("Do not add commentary, do not wrap the response in a Markdown fence, and do not introduce fields outside the schema.\n\n")
+	sb.WriteString("Validation error (JSON string): ")
+	sb.Write(encodedError)
+	sb.WriteString("\n\n")
+	sb.WriteString("Allowed root field: results.\n")
+	sb.WriteString("Required result fields with exact casing: criterion_id, passed, evidence, failures.\n")
+	sb.WriteString("Use every configured criterion_id exactly once. Evidence must be a non-empty string array. ")
+	sb.WriteString("Failures must be empty when passed is true and non-empty when passed is false.\n")
+	appendRequiredResponseFormat(&sb, criteria)
+	return sb.String()
+}
+
+func buildAgentJudgeFallbackCorrectionPrompt(originalPrompt, invalidResponse, correctionPrompt string) string {
+	encodedResponse, err := json.Marshal(invalidResponse)
+	if err != nil {
+		encodedResponse = []byte(`""`)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("This is a serialized correction retry for a previous agent_judge evaluation.\n\n")
+	sb.WriteString("## Original Judge Request\n\n")
+	sb.WriteString(originalPrompt)
+	sb.WriteString("\n\n## Previous Invalid Response (JSON string)\n\n")
+	sb.Write(encodedResponse)
+	sb.WriteString("\n\n")
+	sb.WriteString(correctionPrompt)
 	return sb.String()
 }
 
