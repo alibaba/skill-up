@@ -64,7 +64,8 @@ package "internal/report" {
     EngineName : string
     ModelName : string
     RequestedConfiguration : *AgentConfiguration
-    EffectiveConfiguration : *AgentConfiguration
+    AppliedConfiguration : *AgentConfiguration
+    ObservedConfiguration : *AgentConfiguration
     StartTime : time.Time
     EndTime : time.Time
     CaseResults : []CaseResult

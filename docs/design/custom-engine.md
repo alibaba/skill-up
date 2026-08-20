@@ -688,7 +688,7 @@ The standard result of a Custom Engine is `SessionResult` JSON:
 | Field | Type | Description |
 | --- | --- | --- |
 | `engine` | string | Identifier of the responder; filled by `skill-up` with `engine.name` when unset |
-| `model` | string | Model reference; filled by `skill-up` from config when unset |
+| `model` | string | Model reference explicitly observed by the engine. It remains empty when the engine does not report one; skill-up does not infer it from the applied input configuration. |
 | `duration_ms` | integer | Engine-side elapsed time; filled by `skill-up` with the call duration when unset |
 | `turns` | integer | Number of agent interaction turns |
 | `input_tokens` | integer | Number of input tokens |

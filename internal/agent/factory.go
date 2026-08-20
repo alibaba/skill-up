@@ -42,7 +42,7 @@ func DetectAgentWithResolvedConfig(params credential.ResolvedAgentConfig) (Agent
 		Name:               engineName,
 		Version:            params.Version,
 		Entry:              params.Entry,
-		ModelName:          params.EffectiveModel,
+		ModelName:          params.AppliedModel,
 		RequestedModelName: params.Model,
 		ModelProvider:      params.Provider,
 		Protocol:           params.Protocol,

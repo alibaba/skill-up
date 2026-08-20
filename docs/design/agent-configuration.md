@@ -13,7 +13,8 @@ claim that every current precedence rule is ideal.
 | Provider | The namespace used to look up model, credential, and endpoint configuration. |
 | Model name | The upstream model identifier. It may contain `/` when the upstream service uses an opaque slashed identifier. |
 | Requested configuration | Values supplied by eval YAML, CLI flags, environment variables, or the credential file. |
-| Effective configuration | Values the adapter actually passes to the agent CLI after adapter-specific normalization. |
+| Applied configuration | Values skill-up passes to the agent CLI after adapter-specific normalization. Local CLI settings may still override them. |
+| Observed configuration | Values explicitly reported by the running agent. Missing values are unknown, not inferred from the applied configuration. |
 | Local-login delegation | No credential is injected; the agent CLI may use its existing local login state. This does not prove that the login is valid. |
 
 The engine determines the protocol. For example, `provider: dashscope` with a
@@ -48,10 +49,10 @@ The runner path resolves values in these stages:
    model; provider environment credentials override the credential file.
 5. Preserve explicit CLI `--model` and `--api-key` precedence.
 6. Apply the selected adapter's declared protocol and capability contract.
-   Keep the requested model intact, compute the effective model once, remove
+   Keep the requested model intact, compute the applied model once, remove
    unsupported kwargs, and emit warnings for ignored or invalid explicit
    settings before case execution.
-7. Pass the effective value to the selected adapter, which constructs its
+7. Pass the applied value to the selected adapter, which constructs its
    command and environment without repeating model normalization.
 
 Runner and judge roles use the same resolution flow. Until an explicit judge
@@ -60,9 +61,11 @@ kwargs, while resolving its provider/model and credentials as a separate role.
 Reports use the resolved runner identity rather than reconstructing it from a
 CLI-mutated eval config. `result.json` retains the legacy `engine_name` and
 `model_name` fields while also recording credential-free
-`requested_configuration` and `effective_configuration` objects. Per-session
-results carry the adapter protocol, provider namespace, requested model,
-effective model, and capability warnings.
+`requested_configuration`, `applied_configuration`, and optional
+`observed_configuration` objects. Per-session results carry the requested and
+applied values, capability warnings, and an observed `model` only when the
+agent explicitly reports it. An absent observation remains unknown; skill-up
+does not probe authentication or spend tokens to infer local CLI state.
 
 ## Legacy slashed model compatibility
 

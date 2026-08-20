@@ -480,21 +480,21 @@ func TestQoderCLIRunTurn_ResumeUsesCorrectFlag(t *testing.T) {
 	}
 }
 
-func TestQoderCLIEffectiveModelName_AllowsSupportedModel(t *testing.T) {
+func TestQoderCLIAppliedModelName_AllowsSupportedModel(t *testing.T) {
 	t.Parallel()
 
 	ag := NewQoderCLIAgent(Config{ModelProvider: "anthropic", ModelName: "auto"})
-	if got := ag.effectiveModelName(context.Background()); got != "auto" {
-		t.Fatalf("effectiveModelName() = %q, want auto", got)
+	if got := ag.appliedModelName(context.Background()); got != "auto" {
+		t.Fatalf("appliedModelName() = %q, want auto", got)
 	}
 }
 
-func TestQoderCLIEffectiveModelName_IgnoresUnsupportedConfiguredModel(t *testing.T) {
+func TestQoderCLIAppliedModelName_IgnoresUnsupportedConfiguredModel(t *testing.T) {
 	t.Parallel()
 
 	ag := NewQoderCLIAgent(Config{ModelProvider: "anthropic", ModelName: "claude-sonnet-4-6"})
-	if got := ag.effectiveModelName(context.Background()); got != "" {
-		t.Fatalf("effectiveModelName() = %q, want empty", got)
+	if got := ag.appliedModelName(context.Background()); got != "" {
+		t.Fatalf("appliedModelName() = %q, want empty", got)
 	}
 }
 

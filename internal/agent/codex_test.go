@@ -241,7 +241,7 @@ func TestBuildCodexRunCmdWithCustomProvider(t *testing.T) {
 	}
 }
 
-func TestCodexEffectiveModelName_IgnoresNonOpenAIProvider(t *testing.T) {
+func TestCodexAppliedModelName_IgnoresNonOpenAIProvider(t *testing.T) {
 	t.Parallel()
 
 	ag := NewCodexAgent(Config{
@@ -249,12 +249,12 @@ func TestCodexEffectiveModelName_IgnoresNonOpenAIProvider(t *testing.T) {
 		ModelName:     "claude-sonnet-4-6",
 	})
 
-	if got := ag.effectiveModelName(context.Background()); got != "" {
-		t.Fatalf("effectiveModelName() = %q, want empty", got)
+	if got := ag.appliedModelName(context.Background()); got != "" {
+		t.Fatalf("appliedModelName() = %q, want empty", got)
 	}
 }
 
-func TestCodexEffectiveModelName_UsesCustomProviderModel(t *testing.T) {
+func TestCodexAppliedModelName_UsesCustomProviderModel(t *testing.T) {
 	t.Parallel()
 
 	ag := NewCodexAgent(Config{
@@ -263,8 +263,8 @@ func TestCodexEffectiveModelName_UsesCustomProviderModel(t *testing.T) {
 		BaseURL:       "https://example.com/compatible-mode/v1",
 	})
 
-	if got := ag.effectiveModelName(context.Background()); got != "qwen3.6-plus" {
-		t.Fatalf("effectiveModelName() = %q, want qwen3.6-plus", got)
+	if got := ag.appliedModelName(context.Background()); got != "qwen3.6-plus" {
+		t.Fatalf("appliedModelName() = %q, want qwen3.6-plus", got)
 	}
 }
 
@@ -303,8 +303,8 @@ func TestCodexRunProviderConfig_RejectsInvalidProviderName(t *testing.T) {
 		BaseURL:       "https://example.com/compatible-mode/v1",
 	})
 
-	if got := ag.effectiveModelName(context.Background()); got != "" {
-		t.Fatalf("effectiveModelName() = %q, want empty for invalid provider name", got)
+	if got := ag.appliedModelName(context.Background()); got != "" {
+		t.Fatalf("appliedModelName() = %q, want empty for invalid provider name", got)
 	}
 	if got := ag.runProviderConfig(context.Background()); got.Name != "" || got.BaseURL != "" {
 		t.Fatalf("runProviderConfig() = %+v, want empty for invalid provider name", got)
@@ -325,7 +325,7 @@ func TestBuildCodexRunCmd_OpenAIWithBaseURL_EmitsSkillUpProviderFlags(t *testing
 		BaseURL:       "https://dashscope.aliyuncs.com/compatible-mode/v1",
 	})
 
-	cmd := buildCodexRunCmd("hello world", ag.effectiveModelName(context.Background()), ag.runProviderConfig(context.Background()), codexBypassSandbox)
+	cmd := buildCodexRunCmd("hello world", ag.appliedModelName(context.Background()), ag.runProviderConfig(context.Background()), codexBypassSandbox)
 	want := `codex exec --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -c 'model_provider="skill-up-openai"' -c 'model_providers.skill-up-openai.name="skill-up-openai"' -c 'model_providers.skill-up-openai.base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"' -c 'model_providers.skill-up-openai.env_key="OPENAI_API_KEY"' -c 'model_providers.skill-up-openai.wire_api="chat"' -m 'qwen3.6-plus' 'hello world'`
 	if cmd != want {
 		t.Fatalf("unexpected command:\nwant: %s\ngot:  %s", want, cmd)

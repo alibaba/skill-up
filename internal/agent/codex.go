@@ -302,7 +302,7 @@ func (a *CodexAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, 
 	if err != nil {
 		return nil, err
 	}
-	cmd := buildCodexResumeCmdWithLastMessage(sessionID, instruction, a.effectiveModelName(ctx), a.runProviderConfig(ctx), lastMessagePath) +
+	cmd := buildCodexResumeCmdWithLastMessage(sessionID, instruction, a.appliedModelName(ctx), a.runProviderConfig(ctx), lastMessagePath) +
 		" >" + shellQuote(stdoutPath)
 
 	result, err := rt.Exec(ctx, cmd, opts)
@@ -370,10 +370,10 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 	}
 	runCmd, promptDelivery, err := deliverPrompt(ctx, rt, opts, instruction, promptCommandBuilder{
 		Inline: func(prompt string) string {
-			return buildCodexRunCmdWithLastMessage(prompt, a.effectiveModelName(ctx), a.runProviderConfig(ctx), sandboxFlag, lastMessagePath)
+			return buildCodexRunCmdWithLastMessage(prompt, a.appliedModelName(ctx), a.runProviderConfig(ctx), sandboxFlag, lastMessagePath)
 		},
 		StdinFile: func(path string) string {
-			return buildCodexRunStdinCmdWithLastMessage(path, a.effectiveModelName(ctx), a.runProviderConfig(ctx), sandboxFlag, lastMessagePath)
+			return buildCodexRunStdinCmdWithLastMessage(path, a.appliedModelName(ctx), a.runProviderConfig(ctx), sandboxFlag, lastMessagePath)
 		},
 	})
 	if err != nil {
@@ -415,7 +415,7 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 	return sessionResult, nil
 }
 
-func (a *CodexAgent) effectiveModelName(_ context.Context) string {
+func (a *CodexAgent) appliedModelName(_ context.Context) string {
 	model := strings.TrimSpace(a.Cfg.ModelName)
 	if codexCustomProviderUnavailableReason(a.Cfg.ModelProvider, a.Cfg.BaseURL) != "" {
 		return ""

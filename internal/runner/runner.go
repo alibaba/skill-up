@@ -521,16 +521,17 @@ func buildReportInput(
 		Model:    resolved.Model,
 		Version:  resolved.Version,
 	}
-	effective := &report.AgentConfiguration{
+	applied := &report.AgentConfiguration{
 		Role:     string(resolved.Role),
 		Engine:   resolved.Engine,
 		Protocol: resolved.Protocol,
 		Provider: resolved.Provider,
-		Model:    resolved.EffectiveModel,
+		Model:    resolved.AppliedModel,
 	}
 	// Keep the legacy top-level model_name requested-value semantics for report
-	// compatibility. Consumers that need execution identity should use the
-	// explicit effective_configuration object.
+	// compatibility. Consumers that need invocation identity should use the
+	// explicit applied_configuration object. Runtime identity is recorded only
+	// when an agent explicitly reports it.
 	modelName := resolved.Model
 	if resolved.Provider != "" && modelName != "" {
 		modelName = resolved.Provider + "/" + modelName
@@ -541,7 +542,7 @@ func buildReportInput(
 		EngineName:             resolved.Engine,
 		ModelName:              modelName,
 		RequestedConfiguration: requested,
-		EffectiveConfiguration: effective,
+		AppliedConfiguration:   applied,
 		StartTime:              startTime,
 		EndTime:                endTime,
 	}
@@ -562,8 +563,43 @@ func buildReportInput(
 		}
 	}
 	input.OverallTokens = input.TotalTokens + input.JudgeTokens
+	input.ObservedConfiguration = observedRunnerConfiguration(grouped, caseIDs)
 
 	return input
+}
+
+// observedRunnerConfiguration returns a run-level model only when every
+// executed runner session explicitly reported the same non-empty value. A
+// missing or mixed observation cannot safely describe the entire run.
+func observedRunnerConfiguration(grouped map[string]*caseResults, caseIDs []string) *report.AgentConfiguration {
+	observed := ""
+	seen := false
+	for _, caseID := range caseIDs {
+		results := grouped[caseID]
+		if results == nil {
+			continue
+		}
+		for _, result := range []*evaluator.EvalResult{results.withSkill, results.withoutSkill} {
+			if result == nil {
+				continue
+			}
+			seen = true
+			if result.SessionResult == nil || result.Model == "" {
+				return nil
+			}
+			if observed == "" {
+				observed = result.Model
+				continue
+			}
+			if result.Model != observed {
+				return nil
+			}
+		}
+	}
+	if !seen || observed == "" {
+		return nil
+	}
+	return &report.AgentConfiguration{Model: observed}
 }
 
 func evalResultToCaseResult(res *evaluator.EvalResult) report.CaseResult {
@@ -580,6 +616,7 @@ func evalResultToCaseResult(res *evaluator.EvalResult) report.CaseResult {
 		Configuration: res.Configuration,
 		Prompt:        res.Prompt,
 		Response:      responseContent(res),
+		ObservedModel: res.Model,
 		TurnResults:   evalTurnResultsToReport(res.TurnResults),
 	}
 	judgeSession := res.JudgeSession

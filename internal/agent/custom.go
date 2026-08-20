@@ -546,7 +546,7 @@ func (a *CustomAgent) parseSessionResult(ctx context.Context, rt Runtime, opts E
 	// Stderr / Transcript content above.
 	res := &SessionResult{
 		Engine:       firstNonEmpty(a.maskAPIKey(parsed.Engine), a.Name()),
-		Model:        firstNonEmpty(a.maskAPIKey(parsed.Model), formatAgentModel(a.Cfg.ModelProvider, a.Cfg.ModelName)),
+		Model:        a.maskAPIKey(parsed.Model),
 		ExitCode:     *parsed.ExitCode,
 		DurationMs:   parsed.DurationMs,
 		Turns:        turns,

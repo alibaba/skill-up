@@ -93,8 +93,10 @@ func CapabilitiesForEngine(engineName string) Capabilities {
 }
 
 // ResolveAdapterConfig applies an adapter's capability contract to an already
-// merged role configuration. Requested values remain intact while EffectiveModel
-// records the model that will actually be forwarded to the CLI.
+// merged role configuration. Requested values remain intact while AppliedModel
+// records the model that skill-up will forward to the CLI. It does not claim
+// that the CLI ultimately selected that model: local CLI configuration may
+// override it, and most adapters do not report their final runtime choice.
 func ResolveAdapterConfig(params credential.ResolvedAgentConfig) credential.ResolvedAgentConfig {
 	if params.Role == "" {
 		params.Role = credential.AgentRoleRunner
@@ -105,14 +107,14 @@ func ResolveAdapterConfig(params credential.ResolvedAgentConfig) credential.Reso
 
 	capabilities := CapabilitiesForEngine(params.Engine)
 	params.Protocol = string(capabilities.Protocol)
-	params.EffectiveModel = resolveEffectiveModel(&params, capabilities)
+	params.AppliedModel = resolveAppliedModel(&params, capabilities)
 	validateBaseURL(&params, capabilities)
 	validateDeferredFields(&params, capabilities)
 	validateKwargs(&params, capabilities)
 	return params
 }
 
-func resolveEffectiveModel(params *credential.ResolvedAgentConfig, capabilities Capabilities) string {
+func resolveAppliedModel(params *credential.ResolvedAgentConfig, capabilities Capabilities) string {
 	requested := strings.TrimSpace(params.Model)
 	if requested == "" {
 		return ""
@@ -245,8 +247,8 @@ func appendUniqueWarning(warnings []string, warning string) []string {
 func LogAdapterConfig(ctx context.Context, params credential.ResolvedAgentConfig) {
 	logging.DebugContextf(
 		ctx,
-		"AGENT_CONFIG kind=%s engine=%s protocol=%s provider=%s requested.model=%s effective.model=%s",
-		params.Role, params.Engine, params.Protocol, params.Provider, params.Model, params.EffectiveModel,
+		"AGENT_CONFIG kind=%s engine=%s protocol=%s provider=%s requested.model=%s applied.model=%s",
+		params.Role, params.Engine, params.Protocol, params.Provider, params.Model, params.AppliedModel,
 	)
 	for _, warning := range params.Warnings {
 		logging.WarnContextf(ctx, "AGENT_CONFIG kind=%s engine=%s warning=%s", params.Role, params.Engine, warning)

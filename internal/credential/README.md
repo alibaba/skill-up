@@ -31,7 +31,7 @@ type ResolvedAgentConfig struct {
     Protocol       string
     Provider       string
     Model          string // requested model
-    EffectiveModel string
+    AppliedModel   string
     APIKey         string
     BaseURL        string
     Kwargs         map[string]string
@@ -43,7 +43,7 @@ type ResolvedAgentConfig struct {
 This value is the boundary between raw YAML/CLI/credential inputs and adapter
 construction. Map fields are cloned while resolving, so later mutations of the
 loaded eval config do not alter a resolved runner or judge configuration.
-Protocol, effective model, and warnings are filled by the subsequent adapter
+Protocol, applied model, and warnings are filled by the subsequent adapter
 capability pass.
 
 ## Two Pipelines
@@ -178,7 +178,7 @@ Examples:
 Rules:
 
 - Env vars only override the configuration corresponding to the current role's final provider
-- Do not treat "every env var found during scanning" as "effective configuration for the current role"
+- Do not treat "every env var found during scanning" as configuration adopted for the current role
 - When the provider is empty, skip the `${PROVIDER}_*` lookup and let the agent handle special-case fallbacks itself
 - Do not maintain extra special-case env-var names for any provider in the resolver; agent-specific variables like `QODER_PERSONAL_ACCESS_TOKEN` should be consumed by the agent itself
 - Logs must distinguish between "which global credentials were discovered" and "which provider's parameter set was actually adopted by the current role"
@@ -188,7 +188,7 @@ Rules:
 The unified credential layer produces the requested `ResolvedAgentConfig`.
 `agent.ResolveAdapterConfig` then applies the selected adapter's declared
 protocol and capability contract once, before construction. It records
-`EffectiveModel` separately and reports unsupported explicit settings instead
+`AppliedModel` separately and reports unsupported explicit settings instead
 of leaving each adapter to reinterpret the same raw values during execution.
 The historical non-Qoder `auto` normalization remains in credential resolution
 for compatibility.

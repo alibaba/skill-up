@@ -405,9 +405,10 @@ func TestBaseAgentMergeExecOptionsEnvMergesRuntimeAndTelemetry(t *testing.T) {
 	for _, want := range []string{
 		"telemetry.project.id=745",
 		"skill_up.engine=codex",
-		"skill_up.protocol=openai",
-		"skill_up.provider=openai",
+		"skill_up.protocol.applied=openai",
+		"skill_up.provider.applied=openai",
 		"skill_up.model=openai/gpt-5.4",
+		"skill_up.model.applied=openai/gpt-5.4",
 		"skill_up.model.requested=openai/gpt-5.4",
 		"skill_up.case.id=case-1",
 		"skill_up.parent_trace_id=4bf92f3577b34da6a3ce929d0e0e4736",

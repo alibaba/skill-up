@@ -48,23 +48,24 @@ var ErrAgentInstallFailed = errors.New("agent installation failed")
 
 // SessionResult holds the result of an agent session execution.
 type SessionResult struct {
-	Engine         string                  `json:"engine,omitempty"`
-	Protocol       string                  `json:"protocol,omitempty"`
-	Provider       string                  `json:"provider,omitempty"`
-	RequestedModel string                  `json:"requested_model,omitempty"`
-	Model          string                  `json:"model,omitempty"`
-	Warnings       []string                `json:"warnings,omitempty"`
-	SessionID      string                  `json:"session_id,omitempty"`
-	ExitCode       int                     `json:"exit_code"`
-	DurationMs     int64                   `json:"duration_ms"`
-	Turns          int                     `json:"turns"`
-	InputTokens    int                     `json:"input_tokens,omitempty"`
-	OutputTokens   int                     `json:"output_tokens,omitempty"`
-	FinalMessage   string                  `json:"final_message,omitempty"`
-	Stderr         string                  `json:"stderr,omitempty"`
-	Transcript     transcript.Transcript   `json:"transcript,omitempty"`
-	Artifacts      *SessionArtifacts       `json:"artifacts,omitempty"`
-	PromptDelivery *PromptDeliveryMetadata `json:"prompt_delivery,omitempty"`
+	Engine          string                  `json:"engine,omitempty"`
+	AppliedProtocol string                  `json:"applied_protocol,omitempty"`
+	AppliedProvider string                  `json:"applied_provider,omitempty"`
+	RequestedModel  string                  `json:"requested_model,omitempty"`
+	AppliedModel    string                  `json:"applied_model,omitempty"`
+	Model           string                  `json:"model,omitempty"` // Agent-reported observed model; empty when unavailable.
+	Warnings        []string                `json:"warnings,omitempty"`
+	SessionID       string                  `json:"session_id,omitempty"`
+	ExitCode        int                     `json:"exit_code"`
+	DurationMs      int64                   `json:"duration_ms"`
+	Turns           int                     `json:"turns"`
+	InputTokens     int                     `json:"input_tokens,omitempty"`
+	OutputTokens    int                     `json:"output_tokens,omitempty"`
+	FinalMessage    string                  `json:"final_message,omitempty"`
+	Stderr          string                  `json:"stderr,omitempty"`
+	Transcript      transcript.Transcript   `json:"transcript,omitempty"`
+	Artifacts       *SessionArtifacts       `json:"artifacts,omitempty"`
+	PromptDelivery  *PromptDeliveryMetadata `json:"prompt_delivery,omitempty"`
 }
 
 // SessionResumer is an optional interface that agents may implement to support
@@ -382,13 +383,14 @@ func (a *BaseAgent) buildAgentObservabilityAttrs(extra map[string]string) map[st
 		attrs["skill_up.engine"] = a.Name()
 	}
 	if a.Cfg.Protocol != "" {
-		attrs["skill_up.protocol"] = a.Cfg.Protocol
+		attrs["skill_up.protocol.applied"] = a.Cfg.Protocol
 	}
 	if a.Cfg.ModelProvider != "" {
-		attrs["skill_up.provider"] = a.Cfg.ModelProvider
+		attrs["skill_up.provider.applied"] = a.Cfg.ModelProvider
 	}
 	if a.Cfg.ModelName != "" {
 		attrs["skill_up.model"] = formatAgentModel(a.Cfg.ModelProvider, a.Cfg.ModelName)
+		attrs["skill_up.model.applied"] = formatAgentModel(a.Cfg.ModelProvider, a.Cfg.ModelName)
 	}
 	if a.Cfg.RequestedModelName != "" {
 		attrs["skill_up.model.requested"] = formatAgentModel(a.Cfg.ModelProvider, a.Cfg.RequestedModelName)
@@ -403,12 +405,10 @@ func (a *BaseAgent) annotateSessionResult(result *SessionResult) {
 	if result.Engine == "" {
 		result.Engine = a.Name()
 	}
-	result.Protocol = a.Cfg.Protocol
-	result.Provider = a.Cfg.ModelProvider
+	result.AppliedProtocol = a.Cfg.Protocol
+	result.AppliedProvider = a.Cfg.ModelProvider
 	result.RequestedModel = a.Cfg.RequestedModelName
-	if result.Model == "" {
-		result.Model = a.Cfg.ModelName
-	}
+	result.AppliedModel = a.Cfg.ModelName
 	for _, warning := range a.Cfg.Warnings {
 		result.Warnings = appendUniqueWarning(result.Warnings, warning)
 	}

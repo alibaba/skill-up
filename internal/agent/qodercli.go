@@ -140,10 +140,10 @@ func (a *QoderCLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 	instruction := BuildInstructionFromMessages(messages)
 	cmd, promptDelivery, err := deliverPrompt(ctx, rt, opts, instruction, promptCommandBuilder{
 		Inline: func(prompt string) string {
-			return buildQoderRunCmdForBinary(a.profile.binary, prompt, a.effectiveModelName(ctx))
+			return buildQoderRunCmdForBinary(a.profile.binary, prompt, a.appliedModelName(ctx))
 		},
 		StdinFile: func(path string) string {
-			return buildQoderRunStdinCmdForBinary(a.profile.binary, path, a.effectiveModelName(ctx))
+			return buildQoderRunStdinCmdForBinary(a.profile.binary, path, a.appliedModelName(ctx))
 		},
 	})
 	if err != nil {
@@ -184,7 +184,7 @@ func (a *QoderCLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 	return sessionResult, nil
 }
 
-func (a *QoderCLIAgent) effectiveModelName(_ context.Context) string {
+func (a *QoderCLIAgent) appliedModelName(_ context.Context) string {
 	model := strings.TrimSpace(a.Cfg.ModelName)
 	if slices.Contains(supportedQoderModels, model) {
 		return model
@@ -332,7 +332,7 @@ func (a *QoderCLIAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOption
 	start := time.Now()
 
 	instruction := message.Content
-	cmd := buildQoderResumeCmdForBinary(a.profile.binary, instruction, a.effectiveModelName(ctx), sessionID)
+	cmd := buildQoderResumeCmdForBinary(a.profile.binary, instruction, a.appliedModelName(ctx), sessionID)
 
 	envVars := a.qoderRunEnvVars()
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))

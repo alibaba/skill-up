@@ -20,7 +20,8 @@ type Input struct {
 	EngineName             string              `json:"engine_name"`
 	ModelName              string              `json:"model_name"`
 	RequestedConfiguration *AgentConfiguration `json:"requested_configuration,omitempty"`
-	EffectiveConfiguration *AgentConfiguration `json:"effective_configuration,omitempty"`
+	AppliedConfiguration   *AgentConfiguration `json:"applied_configuration,omitempty"`
+	ObservedConfiguration  *AgentConfiguration `json:"observed_configuration,omitempty"`
 	StartTime              time.Time           `json:"start_time"`
 	EndTime                time.Time           `json:"end_time"`
 	CaseResults            []CaseResult        `json:"case_results"`
@@ -30,11 +31,12 @@ type Input struct {
 	Benchmark              *BenchmarkResult    `json:"benchmark,omitempty"`
 }
 
-// AgentConfiguration is a credential-free snapshot of requested or effective
-// adapter configuration recorded in reports.
+// AgentConfiguration is a credential-free configuration snapshot. Requested
+// and applied snapshots describe skill-up's inputs and invocation. An observed
+// snapshot contains only values explicitly reported by the agent runtime.
 type AgentConfiguration struct {
-	Role     string `json:"role"`
-	Engine   string `json:"engine"`
+	Role     string `json:"role,omitempty"`
+	Engine   string `json:"engine,omitempty"`
 	Protocol string `json:"protocol,omitempty"`
 	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`
@@ -137,10 +139,11 @@ type CaseResult struct {
 	Error             string            `json:"error,omitempty"`
 	Grading           *judge.Result     `json:"grading"`
 	JudgeSkills       []judge.SkillInfo `json:"judge_skills,omitempty"`
-	Configuration     string            `json:"configuration,omitempty"` // "with_skill" or "without_skill"
-	Prompt            string            `json:"prompt,omitempty"`        // input prompt sent to the agent
-	Response          string            `json:"response,omitempty"`      // agent final message
-	TurnResults       []CaseTurnResult  `json:"turn_results,omitempty"`  // per-turn outcomes; nil for single-turn
+	Configuration     string            `json:"configuration,omitempty"`  // "with_skill" or "without_skill"
+	Prompt            string            `json:"prompt,omitempty"`         // input prompt sent to the agent
+	Response          string            `json:"response,omitempty"`       // agent final message
+	ObservedModel     string            `json:"observed_model,omitempty"` // model explicitly reported by the agent
+	TurnResults       []CaseTurnResult  `json:"turn_results,omitempty"`   // per-turn outcomes; nil for single-turn
 }
 
 // CaseTurnResult holds the outcome of a single turn for reporting purposes.

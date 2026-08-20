@@ -99,8 +99,8 @@ func TestResolveAdapterConfig_ModelPolicies(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got := ResolveAdapterConfig(tt.params)
-			if got.Protocol != string(tt.wantProtocol) || got.EffectiveModel != tt.wantEffective {
-				t.Fatalf("ResolveAdapterConfig() protocol/effective = %q/%q, want %q/%q", got.Protocol, got.EffectiveModel, tt.wantProtocol, tt.wantEffective)
+			if got.Protocol != string(tt.wantProtocol) || got.AppliedModel != tt.wantEffective {
+				t.Fatalf("ResolveAdapterConfig() protocol/applied = %q/%q, want %q/%q", got.Protocol, got.AppliedModel, tt.wantProtocol, tt.wantEffective)
 			}
 			if got.Model != tt.params.Model {
 				t.Fatalf("requested Model = %q, want preserved %q", got.Model, tt.params.Model)
@@ -172,12 +172,12 @@ func TestBaseAgentAnnotateSessionResult(t *testing.T) {
 		Protocol:           string(ProtocolOpenAI),
 		ModelProvider:      "dashscope",
 		RequestedModelName: "requested-model",
-		ModelName:          "effective-model",
+		ModelName:          "applied-model",
 		Warnings:           []string{"model fallback"},
 	})
 	result := &SessionResult{}
 	base.annotateSessionResult(result)
-	if result.Engine != "codex" || result.Protocol != string(ProtocolOpenAI) || result.Provider != "dashscope" || result.RequestedModel != "requested-model" || result.Model != "effective-model" {
+	if result.Engine != "codex" || result.AppliedProtocol != string(ProtocolOpenAI) || result.AppliedProvider != "dashscope" || result.RequestedModel != "requested-model" || result.AppliedModel != "applied-model" || result.Model != "" {
 		t.Fatalf("annotated session = %+v", result)
 	}
 	if !slices.Equal(result.Warnings, []string{"model fallback"}) {
@@ -203,7 +203,7 @@ func TestLogAdapterConfig_DoesNotExposeCredentialsOrEndpoint(t *testing.T) {
 			t.Fatalf("configuration log exposed %q: %s", forbidden, output)
 		}
 	}
-	for _, want := range []string{"protocol=openai", "requested.model=gpt-5.4", "effective.model=gpt-5.4"} {
+	for _, want := range []string{"protocol=openai", "requested.model=gpt-5.4", "applied.model=gpt-5.4"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("configuration log missing %q: %s", want, output)
 		}

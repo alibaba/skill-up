@@ -302,15 +302,24 @@ The `outputs/workspace/` subtree appears only when `collect_artifacts` is config
 ### result.json configuration identity
 
 The iteration-level `result.json` keeps `engine_name` and the requested-value
-`model_name` semantics for compatibility and also records two credential-free objects:
+`model_name` semantics for compatibility and also records credential-free objects:
 
 - `requested_configuration`: the engine, provider namespace, model, and version
   selected after YAML/CLI/credential precedence;
-- `effective_configuration`: the adapter protocol and model actually forwarded
-  to the CLI. An empty effective model means the adapter delegated model choice
-  to its local/default settings.
+- `applied_configuration`: the adapter protocol and model skill-up forwarded
+  to the CLI. An empty applied model means model selection was delegated to
+  local/default settings;
+- `observed_configuration`: present only when every runner session explicitly
+  reported the same model. If absent, the runtime model is unknown. Per-case
+  `observed_model` retains an individual agent-reported value when available.
 
-Capability warnings are also attached to each agent `SessionResult`. API keys
+Applied configuration is not proof of the CLI's final choice: local settings
+may override command-line or environment values. skill-up does not make an
+extra model request merely to inspect local login state.
+
+Capability warnings and requested/applied values are also attached to each
+agent `SessionResult`; its legacy `model` field is reserved for an explicitly
+agent-reported observation. API keys
 and other credential values are never written to these fields.
 
 ### grading.json

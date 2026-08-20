@@ -150,10 +150,10 @@ func (a *ClaudeCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions,
 	}
 	cmd, promptDelivery, err := deliverPrompt(ctx, rt, opts, instruction, promptCommandBuilder{
 		Inline: func(prompt string) string {
-			return buildClaudePrintCmd(sessionID, a.effectiveModelName(ctx), prompt)
+			return buildClaudePrintCmd(sessionID, a.appliedModelName(ctx), prompt)
 		},
 		StdinFile: func(path string) string {
-			return buildClaudePrintStdinCmd(sessionID, a.effectiveModelName(ctx), path)
+			return buildClaudePrintStdinCmd(sessionID, a.appliedModelName(ctx), path)
 		},
 	})
 	if err != nil {
@@ -194,7 +194,7 @@ func (a *ClaudeCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions,
 	return sessionResult, nil
 }
 
-func (a *ClaudeCodeAgent) effectiveModelName(_ context.Context) string {
+func (a *ClaudeCodeAgent) appliedModelName(_ context.Context) string {
 	return strings.TrimSpace(a.Cfg.ModelName)
 }
 
@@ -482,7 +482,7 @@ func (a *ClaudeCodeAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOpti
 			Artifacts:  &SessionArtifacts{},
 		}, err
 	}
-	cmd := buildClaudeResumeCmd(sessionID, a.effectiveModelName(ctx), instruction)
+	cmd := buildClaudeResumeCmd(sessionID, a.appliedModelName(ctx), instruction)
 
 	result, err := rt.Exec(ctx, cmd, opts)
 	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result)

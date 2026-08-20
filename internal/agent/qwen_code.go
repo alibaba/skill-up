@@ -132,7 +132,7 @@ func (a *QwenCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 	start := time.Now()
 
 	instruction := BuildInstructionFromMessages(messages)
-	model := a.effectiveModelName(ctx)
+	model := a.appliedModelName(ctx)
 
 	envVars := a.credentialEnvVars(credential.EnvOpenAIAPIKey, credential.EnvOpenAIBaseURL)
 	// Qwen Code resolves the active model from OPENAI_MODEL when --model is not
@@ -196,7 +196,7 @@ func (a *QwenCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 	return sessionResult, nil
 }
 
-func (a *QwenCodeAgent) effectiveModelName(_ context.Context) string {
+func (a *QwenCodeAgent) appliedModelName(_ context.Context) string {
 	return strings.TrimSpace(a.Cfg.ModelName)
 }
 

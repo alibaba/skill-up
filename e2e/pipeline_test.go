@@ -104,14 +104,14 @@ func TestPipeline_FullRun_WithMockEngine(t *testing.T) {
 	}
 }
 
-// TestPipeline_ReportsRequestedAndEffectiveModel verifies that an adapter
+// TestPipeline_ReportsRequestedAppliedAndUnknownObservedModel verifies that an adapter
 // fallback is visible without changing the legacy requested model_name field.
-func TestPipeline_ReportsRequestedAndEffectiveModel(t *testing.T) {
+func TestPipeline_ReportsRequestedAppliedAndUnknownObservedModel(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
 	outputDir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "SKILL.md"), "# Effective config fixture\n")
+	writeFile(t, filepath.Join(dir, "SKILL.md"), "# Applied config fixture\n")
 	writeFile(t, filepath.Join(dir, "evals", "eval.yaml"), `schema_version: v1alpha1
 environment:
   type: none
@@ -144,10 +144,10 @@ expect:
 		Timeout: 60 * time.Second,
 	}, "run", filepath.Join(dir, "evals", "eval.yaml"), "--output-dir", outputDir, "--verbose")
 	if result.ExitCode != 0 {
-		t.Fatalf("effective config run failed: exit=%d\nstdout=%s\nstderr=%s", result.ExitCode, result.Stdout, result.Stderr)
+		t.Fatalf("applied config run failed: exit=%d\nstdout=%s\nstderr=%s", result.ExitCode, result.Stdout, result.Stderr)
 	}
 	for _, want := range []string{
-		"requested.model=qwen3.6-plus effective.model=",
+		"requested.model=qwen3.6-plus applied.model=",
 		`does not support model \"qwen3.6-plus\"`,
 	} {
 		if !strings.Contains(result.Stdout, want) {
@@ -166,19 +166,22 @@ expect:
 			Provider string `json:"provider"`
 			Model    string `json:"model"`
 		} `json:"requested_configuration"`
-		Effective struct {
+		Applied struct {
 			Protocol string `json:"protocol"`
 			Provider string `json:"provider"`
 			Model    string `json:"model"`
-		} `json:"effective_configuration"`
+		} `json:"applied_configuration"`
+		Observed *struct {
+			Model string `json:"model"`
+		} `json:"observed_configuration"`
 	}
 	if err := json.Unmarshal(data, &report); err != nil {
 		t.Fatalf("parse result.json: %v", err)
 	}
-	if report.ModelName != "dashscope/qwen3.6-plus" || report.Requested.Model != "qwen3.6-plus" || report.Effective.Model != "" {
-		t.Fatalf("requested/effective report mismatch: %+v", report)
+	if report.ModelName != "dashscope/qwen3.6-plus" || report.Requested.Model != "qwen3.6-plus" || report.Applied.Model != "" || report.Observed != nil {
+		t.Fatalf("requested/applied/observed report mismatch: %+v", report)
 	}
-	if report.Requested.Protocol != "qoder" || report.Effective.Protocol != "qoder" || report.Effective.Provider != "dashscope" {
+	if report.Requested.Protocol != "qoder" || report.Applied.Protocol != "qoder" || report.Applied.Provider != "dashscope" {
 		t.Fatalf("protocol/provider report mismatch: %+v", report)
 	}
 }

@@ -101,12 +101,13 @@ type Agent interface {
 
 ```go
 type SessionResult struct {
-    Engine         string
-    Protocol       string
-    Provider       string
-    RequestedModel string
-    Model          string // effective model passed to the adapter; empty means local/default settings
-    Warnings       []string
+    Engine          string
+    AppliedProtocol string
+    AppliedProvider string
+    RequestedModel  string
+    AppliedModel    string
+    Model           string // agent-reported observed model; empty means unknown
+    Warnings        []string
     ExitCode       int
     DurationMs     int64
     Turns          int
@@ -123,8 +124,12 @@ type SessionResult struct {
 
 `ResolveAdapterConfig` runs after YAML/CLI/credential resolution and before
 agent construction. It keeps the requested model intact, records the model
-that will actually be forwarded as `EffectiveModel`, and emits warnings for
+that skill-up will forward as `AppliedModel`, and emits warnings for
 explicit settings that the selected adapter does not consume.
+
+Applied values describe the invocation, not the CLI's final runtime choice.
+Local configuration may override them. `SessionResult.Model` remains empty
+unless the agent explicitly reports a model.
 
 | Adapter | Protocol | Model behavior | Base URL | Supported kwargs |
 |---------|----------|----------------|----------|------------------|
