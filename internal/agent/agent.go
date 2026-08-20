@@ -48,24 +48,25 @@ var ErrAgentInstallFailed = errors.New("agent installation failed")
 
 // SessionResult holds the result of an agent session execution.
 type SessionResult struct {
-	Engine          string                  `json:"engine,omitempty"`
-	AppliedProtocol string                  `json:"applied_protocol,omitempty"`
-	AppliedProvider string                  `json:"applied_provider,omitempty"`
-	RequestedModel  string                  `json:"requested_model,omitempty"`
-	AppliedModel    string                  `json:"applied_model,omitempty"`
-	Model           string                  `json:"model,omitempty"` // Agent-reported observed model; empty when unavailable.
-	Warnings        []string                `json:"warnings,omitempty"`
-	SessionID       string                  `json:"session_id,omitempty"`
-	ExitCode        int                     `json:"exit_code"`
-	DurationMs      int64                   `json:"duration_ms"`
-	Turns           int                     `json:"turns"`
-	InputTokens     int                     `json:"input_tokens,omitempty"`
-	OutputTokens    int                     `json:"output_tokens,omitempty"`
-	FinalMessage    string                  `json:"final_message,omitempty"`
-	Stderr          string                  `json:"stderr,omitempty"`
-	Transcript      transcript.Transcript   `json:"transcript,omitempty"`
-	Artifacts       *SessionArtifacts       `json:"artifacts,omitempty"`
-	PromptDelivery  *PromptDeliveryMetadata `json:"prompt_delivery,omitempty"`
+	Engine            string                  `json:"engine,omitempty"`
+	AppliedProtocol   string                  `json:"applied_protocol,omitempty"`
+	RequestedProvider string                  `json:"requested_provider,omitempty"`
+	AppliedProvider   string                  `json:"applied_provider,omitempty"`
+	RequestedModel    string                  `json:"requested_model,omitempty"`
+	AppliedModel      string                  `json:"applied_model,omitempty"`
+	Model             string                  `json:"model,omitempty"` // Agent-reported observed model; empty when unavailable.
+	Warnings          []string                `json:"warnings,omitempty"`
+	SessionID         string                  `json:"session_id,omitempty"`
+	ExitCode          int                     `json:"exit_code"`
+	DurationMs        int64                   `json:"duration_ms"`
+	Turns             int                     `json:"turns"`
+	InputTokens       int                     `json:"input_tokens,omitempty"`
+	OutputTokens      int                     `json:"output_tokens,omitempty"`
+	FinalMessage      string                  `json:"final_message,omitempty"`
+	Stderr            string                  `json:"stderr,omitempty"`
+	Transcript        transcript.Transcript   `json:"transcript,omitempty"`
+	Artifacts         *SessionArtifacts       `json:"artifacts,omitempty"`
+	PromptDelivery    *PromptDeliveryMetadata `json:"prompt_delivery,omitempty"`
 }
 
 // SessionResumer is an optional interface that agents may implement to support
@@ -115,6 +116,7 @@ type Config struct {
 	SkillPath          string
 	ModelName          string
 	RequestedModelName string
+	RequestedProvider  string
 	ModelProvider      string
 	Protocol           string
 	Warnings           []string
@@ -207,7 +209,11 @@ func (a *BaseAgent) SkillPath() string {
 
 // CheckCredentials checks if the required credentials are set.
 func (a *BaseAgent) CheckCredentials(ctx context.Context) error {
-	switch a.Cfg.ModelProvider {
+	provider := a.Cfg.RequestedProvider
+	if provider == "" {
+		provider = a.Cfg.ModelProvider
+	}
+	switch provider {
 	case agentProviderOpenAI:
 		a.logCredentialStatus(
 			ctx,
@@ -388,12 +394,15 @@ func (a *BaseAgent) buildAgentObservabilityAttrs(extra map[string]string) map[st
 	if a.Cfg.ModelProvider != "" {
 		attrs["skill_up.provider.applied"] = a.Cfg.ModelProvider
 	}
+	if a.Cfg.RequestedProvider != "" {
+		attrs["skill_up.provider.requested"] = a.Cfg.RequestedProvider
+	}
 	if a.Cfg.ModelName != "" {
 		attrs["skill_up.model"] = formatAgentModel(a.Cfg.ModelProvider, a.Cfg.ModelName)
 		attrs["skill_up.model.applied"] = formatAgentModel(a.Cfg.ModelProvider, a.Cfg.ModelName)
 	}
 	if a.Cfg.RequestedModelName != "" {
-		attrs["skill_up.model.requested"] = formatAgentModel(a.Cfg.ModelProvider, a.Cfg.RequestedModelName)
+		attrs["skill_up.model.requested"] = formatAgentModel(a.Cfg.RequestedProvider, a.Cfg.RequestedModelName)
 	}
 	return attrs
 }
@@ -406,6 +415,7 @@ func (a *BaseAgent) annotateSessionResult(result *SessionResult) {
 		result.Engine = a.Name()
 	}
 	result.AppliedProtocol = a.Cfg.Protocol
+	result.RequestedProvider = a.Cfg.RequestedProvider
 	result.AppliedProvider = a.Cfg.ModelProvider
 	result.RequestedModel = a.Cfg.RequestedModelName
 	result.AppliedModel = a.Cfg.ModelName

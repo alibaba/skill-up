@@ -66,6 +66,10 @@ CLI-mutated eval config. `result.json` retains the legacy `engine_name` and
 applied values, capability warnings, and an observed `model` only when the
 agent explicitly reports it. An absent observation remains unknown; skill-up
 does not probe authentication or spend tokens to infer local CLI state.
+An applied provider is recorded only when the adapter actively selects that
+provider. If Codex falls back to local provider selection, both the applied
+provider and model are empty and credentials resolved for the rejected provider
+are not injected into the fallback invocation.
 
 ## Legacy slashed model compatibility
 

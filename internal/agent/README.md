@@ -103,6 +103,7 @@ type Agent interface {
 type SessionResult struct {
     Engine          string
     AppliedProtocol string
+    RequestedProvider string
     AppliedProvider string
     RequestedModel  string
     AppliedModel    string
@@ -130,6 +131,8 @@ explicit settings that the selected adapter does not consume.
 Applied values describe the invocation, not the CLI's final runtime choice.
 Local configuration may override them. `SessionResult.Model` remains empty
 unless the agent explicitly reports a model.
+Provider-scoped credentials are carried separately as applied values so a
+rejected Codex provider cannot leak its key or endpoint into local fallback.
 
 | Adapter | Protocol | Model behavior | Base URL | Supported kwargs |
 |---------|----------|----------------|----------|------------------|

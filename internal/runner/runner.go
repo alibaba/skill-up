@@ -525,7 +525,7 @@ func buildReportInput(
 		Role:     string(resolved.Role),
 		Engine:   resolved.Engine,
 		Protocol: resolved.Protocol,
-		Provider: resolved.Provider,
+		Provider: resolved.AppliedProvider,
 		Model:    resolved.AppliedModel,
 	}
 	// Keep the legacy top-level model_name requested-value semantics for report

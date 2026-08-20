@@ -551,7 +551,7 @@ func TestMarkdownReporter_DistinguishesRequestedAppliedAndObservedModel(t *testi
 		Role: "runner", Engine: "qoder-cli", Protocol: "qoder", Provider: "dashscope", Model: "qwen3.6-plus",
 	}
 	input.AppliedConfiguration = &AgentConfiguration{
-		Role: "runner", Engine: "qoder-cli", Protocol: "qoder", Provider: "dashscope",
+		Role: "runner", Engine: "qoder-cli", Protocol: "qoder",
 	}
 	if err := (&MarkdownReporter{OutputPath: path}).Write(context.Background(), input); err != nil {
 		t.Fatalf("MarkdownReporter.Write failed: %v", err)

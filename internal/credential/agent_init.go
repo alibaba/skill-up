@@ -50,14 +50,17 @@ type ResolvedAgentConfig struct {
 	Entry    string
 	Protocol string
 
-	Provider     string
-	Model        string
-	AppliedModel string
-	APIKey       string
-	BaseURL      string
-	Kwargs       map[string]string
-	ModelParams  map[string]string
-	Warnings     []string
+	Provider        string
+	Model           string
+	AppliedProvider string
+	AppliedModel    string
+	AppliedAPIKey   string
+	AppliedBaseURL  string
+	APIKey          string
+	BaseURL         string
+	Kwargs          map[string]string
+	ModelParams     map[string]string
+	Warnings        []string
 
 	// Custom carries the custom engine config when the engine name does not
 	// match a built-in agent. It is nil for built-in agents.

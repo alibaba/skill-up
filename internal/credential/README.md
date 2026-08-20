@@ -31,7 +31,10 @@ type ResolvedAgentConfig struct {
     Protocol       string
     Provider       string
     Model          string // requested model
-    AppliedModel   string
+    AppliedProvider string
+    AppliedModel    string
+    AppliedAPIKey   string
+    AppliedBaseURL  string
     APIKey         string
     BaseURL        string
     Kwargs         map[string]string

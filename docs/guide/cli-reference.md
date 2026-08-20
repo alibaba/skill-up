@@ -308,7 +308,8 @@ The iteration-level `result.json` keeps `engine_name` and the requested-value
   selected after YAML/CLI/credential precedence;
 - `applied_configuration`: the adapter protocol and model skill-up forwarded
   to the CLI. An empty applied model means model selection was delegated to
-  local/default settings;
+  local/default settings. Its provider is also empty when the adapter did not
+  actively select one;
 - `observed_configuration`: present only when every runner session explicitly
   reported the same model. If absent, the runtime model is unknown. Per-case
   `observed_model` retains an individual agent-reported value when available.
@@ -316,6 +317,9 @@ The iteration-level `result.json` keeps `engine_name` and the requested-value
 Applied configuration is not proof of the CLI's final choice: local settings
 may override command-line or environment values. skill-up does not make an
 extra model request merely to inspect local login state.
+When a Codex custom provider cannot be applied, its provider-scoped endpoint
+and credential are omitted from the fallback invocation rather than being sent
+to Codex's local/default provider.
 
 Capability warnings and requested/applied values are also attached to each
 agent `SessionResult`; its legacy `model` field is reserved for an explicitly

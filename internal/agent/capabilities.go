@@ -104,14 +104,49 @@ func ResolveAdapterConfig(params credential.ResolvedAgentConfig) credential.Reso
 	params.Kwargs = maps.Clone(params.Kwargs)
 	params.ModelParams = maps.Clone(params.ModelParams)
 	params.Warnings = slices.Clone(params.Warnings)
+	params.AppliedAPIKey = params.APIKey
+	params.AppliedBaseURL = params.BaseURL
 
 	capabilities := CapabilitiesForEngine(params.Engine)
 	params.Protocol = string(capabilities.Protocol)
+	params.AppliedProvider = resolveAppliedProvider(&params, capabilities)
 	params.AppliedModel = resolveAppliedModel(&params, capabilities)
 	validateBaseURL(&params, capabilities)
 	validateDeferredFields(&params, capabilities)
 	validateKwargs(&params, capabilities)
 	return params
+}
+
+func resolveAppliedProvider(params *credential.ResolvedAgentConfig, capabilities Capabilities) string {
+	switch capabilities.ModelPolicy {
+	case ModelPolicyQoderTier:
+		// Qoder owns provider routing and authentication. A provider namespace
+		// can participate in requested-value compatibility, but it is not sent
+		// to qodercli.
+		params.AppliedAPIKey = ""
+		params.AppliedBaseURL = ""
+		return ""
+	case ModelPolicyCodexProvider:
+		if reason := codexCustomProviderUnavailableReason(params.Provider, params.BaseURL); reason != "" {
+			params.Warnings = appendUniqueWarning(params.Warnings, fmt.Sprintf(
+				"engine %q cannot apply provider %q: provider %s; the provider override, endpoint, and provider-scoped credential are omitted and local Codex settings will be used",
+				params.Engine, params.Provider, reason,
+			))
+			params.AppliedAPIKey = ""
+			params.AppliedBaseURL = ""
+			return ""
+		}
+		if params.BaseURL == "" {
+			// Codex receives no model_provider override in this case. Even an
+			// explicit provider namespace cannot prove which local provider Codex
+			// ultimately selects.
+			return ""
+		}
+		if params.Provider == "" || params.Provider == agentProviderOpenAI {
+			return codexOpenAIOverrideProvider
+		}
+	}
+	return params.Provider
 }
 
 func resolveAppliedModel(params *credential.ResolvedAgentConfig, capabilities Capabilities) string {
@@ -132,10 +167,6 @@ func resolveAppliedModel(params *credential.ResolvedAgentConfig, capabilities Ca
 		return ""
 	case ModelPolicyCodexProvider:
 		if reason := codexCustomProviderUnavailableReason(params.Provider, params.BaseURL); reason != "" {
-			params.Warnings = appendUniqueWarning(params.Warnings, fmt.Sprintf(
-				"engine %q cannot apply model %q with provider %q: provider %s; the model override is omitted and local Codex settings will be used",
-				params.Engine, requested, params.Provider, reason,
-			))
 			return ""
 		}
 	}
@@ -151,6 +182,7 @@ func validateBaseURL(params *credential.ResolvedAgentConfig, capabilities Capabi
 		"engine %q does not support base_url; the configured endpoint is ignored",
 		params.Engine,
 	))
+	params.AppliedBaseURL = ""
 }
 
 func validateDeferredFields(params *credential.ResolvedAgentConfig, capabilities Capabilities) {
@@ -247,8 +279,8 @@ func appendUniqueWarning(warnings []string, warning string) []string {
 func LogAdapterConfig(ctx context.Context, params credential.ResolvedAgentConfig) {
 	logging.DebugContextf(
 		ctx,
-		"AGENT_CONFIG kind=%s engine=%s protocol=%s provider=%s requested.model=%s applied.model=%s",
-		params.Role, params.Engine, params.Protocol, params.Provider, params.Model, params.AppliedModel,
+		"AGENT_CONFIG kind=%s engine=%s protocol=%s requested.provider=%s applied.provider=%s requested.model=%s applied.model=%s",
+		params.Role, params.Engine, params.Protocol, params.Provider, params.AppliedProvider, params.Model, params.AppliedModel,
 	)
 	for _, warning := range params.Warnings {
 		logging.WarnContextf(ctx, "AGENT_CONFIG kind=%s engine=%s warning=%s", params.Role, params.Engine, warning)

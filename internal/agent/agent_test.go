@@ -369,6 +369,7 @@ func TestBaseAgentMergeExecOptionsEnvMergesRuntimeAndTelemetry(t *testing.T) {
 	base := NewBaseAgent(Config{
 		Name:               "codex",
 		Protocol:           string(ProtocolOpenAI),
+		RequestedProvider:  "openai",
 		ModelProvider:      "openai",
 		RequestedModelName: "gpt-5.4",
 		ModelName:          "gpt-5.4",
@@ -406,6 +407,7 @@ func TestBaseAgentMergeExecOptionsEnvMergesRuntimeAndTelemetry(t *testing.T) {
 		"telemetry.project.id=745",
 		"skill_up.engine=codex",
 		"skill_up.protocol.applied=openai",
+		"skill_up.provider.requested=openai",
 		"skill_up.provider.applied=openai",
 		"skill_up.model=openai/gpt-5.4",
 		"skill_up.model.applied=openai/gpt-5.4",
@@ -577,8 +579,38 @@ func TestDetectAgentWithResolvedConfig_SetsTypedCredentialFields(t *testing.T) {
 	if got := codexAgent.Cfg.Protocol; got != string(ProtocolOpenAI) {
 		t.Fatalf("Protocol = %q, want %q", got, ProtocolOpenAI)
 	}
-	if got := codexAgent.Cfg.ModelProvider; got != "openai" {
-		t.Fatalf("ModelProvider = %q, want openai", got)
+	if got := codexAgent.Cfg.RequestedProvider; got != "openai" {
+		t.Fatalf("RequestedProvider = %q, want openai", got)
+	}
+	if got := codexAgent.Cfg.ModelProvider; got != codexOpenAIOverrideProvider {
+		t.Fatalf("ModelProvider = %q, want %q", got, codexOpenAIOverrideProvider)
+	}
+}
+
+func TestDetectAgentWithResolvedConfig_CodexFallbackOmitsRejectedProviderCredential(t *testing.T) {
+	t.Parallel()
+
+	ag, err := DetectAgentWithResolvedConfig(credential.ResolvedAgentConfig{ //nolint:gosec // dummy test credential
+		Engine:   "codex",
+		Provider: testDashscopeProvider,
+		Model:    "qwen3.6-plus",
+		APIKey:   "dashscope-test-token",
+	})
+	if err != nil {
+		t.Fatalf("DetectAgentWithResolvedConfig failed: %v", err)
+	}
+	codexAgent, ok := ag.(*CodexAgent)
+	if !ok {
+		t.Fatalf("expected *CodexAgent, got %T", ag)
+	}
+	if codexAgent.Cfg.RequestedProvider != testDashscopeProvider || codexAgent.Cfg.RequestedModelName != "qwen3.6-plus" {
+		t.Fatalf("requested identity was not preserved: %+v", codexAgent.Cfg)
+	}
+	if codexAgent.Cfg.ModelProvider != "" || codexAgent.Cfg.ModelName != "" || codexAgent.Cfg.APIKey != "" || codexAgent.Cfg.BaseURL != "" {
+		t.Fatalf("fallback forwarded rejected provider config: provider=%q model=%q key=%q baseURL=%q", codexAgent.Cfg.ModelProvider, codexAgent.Cfg.ModelName, codexAgent.Cfg.APIKey, codexAgent.Cfg.BaseURL)
+	}
+	if got := codexAgent.credentialEnvVars(credential.EnvOpenAIAPIKey, credential.EnvOpenAIBaseURL); len(got) != 0 {
+		t.Fatalf("fallback credential env = %v, want empty", got)
 	}
 }
 

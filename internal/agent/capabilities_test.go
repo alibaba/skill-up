@@ -10,6 +10,8 @@ import (
 	"github.com/alibaba/skill-up/internal/logging"
 )
 
+const testDashscopeProvider = "dashscope"
+
 func TestCapabilitiesForEngine(t *testing.T) {
 	t.Parallel()
 
@@ -45,35 +47,37 @@ func TestResolveAdapterConfig_ModelPolicies(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name          string
-		params        credential.ResolvedAgentConfig
-		wantProtocol  Protocol
-		wantEffective string
-		wantWarning   string
+		name         string
+		params       credential.ResolvedAgentConfig
+		wantProtocol Protocol
+		wantApplied  string
+		wantProvider string
+		wantWarning  string
 	}{
 		{
-			name:          "claude passthrough",
-			params:        credential.ResolvedAgentConfig{Engine: "claude_code", Model: " claude-sonnet-4-6 "},
-			wantProtocol:  ProtocolAnthropic,
-			wantEffective: "claude-sonnet-4-6",
+			name:         "claude passthrough",
+			params:       credential.ResolvedAgentConfig{Engine: "claude_code", Model: " claude-sonnet-4-6 "},
+			wantProtocol: ProtocolAnthropic,
+			wantApplied:  "claude-sonnet-4-6",
 		},
 		{
-			name:          "codex custom provider",
-			params:        credential.ResolvedAgentConfig{Engine: "codex", Provider: "dashscope", Model: "qwen3.6-plus", BaseURL: "https://example.test/v1"},
-			wantProtocol:  ProtocolOpenAI,
-			wantEffective: "qwen3.6-plus",
+			name:         "codex custom provider",
+			params:       credential.ResolvedAgentConfig{Engine: "codex", Provider: testDashscopeProvider, Model: "qwen3.6-plus", BaseURL: "https://example.test/v1"},
+			wantProtocol: ProtocolOpenAI,
+			wantApplied:  "qwen3.6-plus",
+			wantProvider: testDashscopeProvider,
 		},
 		{
 			name:         "codex unusable provider",
-			params:       credential.ResolvedAgentConfig{Engine: "codex", Provider: "dashscope", Model: "qwen3.6-plus"},
+			params:       credential.ResolvedAgentConfig{Engine: "codex", Provider: testDashscopeProvider, Model: "qwen3.6-plus"},
 			wantProtocol: ProtocolOpenAI,
 			wantWarning:  "requires base_url",
 		},
 		{
-			name:          "qoder supported tier",
-			params:        credential.ResolvedAgentConfig{Engine: "qodercli", Model: "auto"},
-			wantProtocol:  ProtocolQoder,
-			wantEffective: "auto",
+			name:         "qoder supported tier",
+			params:       credential.ResolvedAgentConfig{Engine: "qodercli", Model: "auto"},
+			wantProtocol: ProtocolQoder,
+			wantApplied:  "auto",
 		},
 		{
 			name:         "qoder unsupported model",
@@ -82,16 +86,16 @@ func TestResolveAdapterConfig_ModelPolicies(t *testing.T) {
 			wantWarning:  "does not support model",
 		},
 		{
-			name:          "qwen passthrough",
-			params:        credential.ResolvedAgentConfig{Engine: "qwen_code", Model: "qwen3-coder-plus"},
-			wantProtocol:  ProtocolOpenAI,
-			wantEffective: "qwen3-coder-plus",
+			name:         "qwen passthrough",
+			params:       credential.ResolvedAgentConfig{Engine: "qwen_code", Model: "qwen3-coder-plus"},
+			wantProtocol: ProtocolOpenAI,
+			wantApplied:  "qwen3-coder-plus",
 		},
 		{
-			name:          "custom passthrough",
-			params:        credential.ResolvedAgentConfig{Engine: "my-agent", Model: "opaque/model"},
-			wantProtocol:  ProtocolCustom,
-			wantEffective: "opaque/model",
+			name:         "custom passthrough",
+			params:       credential.ResolvedAgentConfig{Engine: "my-agent", Model: "opaque/model"},
+			wantProtocol: ProtocolCustom,
+			wantApplied:  "opaque/model",
 		},
 	}
 
@@ -99,8 +103,8 @@ func TestResolveAdapterConfig_ModelPolicies(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got := ResolveAdapterConfig(tt.params)
-			if got.Protocol != string(tt.wantProtocol) || got.AppliedModel != tt.wantEffective {
-				t.Fatalf("ResolveAdapterConfig() protocol/applied = %q/%q, want %q/%q", got.Protocol, got.AppliedModel, tt.wantProtocol, tt.wantEffective)
+			if got.Protocol != string(tt.wantProtocol) || got.AppliedProvider != tt.wantProvider || got.AppliedModel != tt.wantApplied {
+				t.Fatalf("ResolveAdapterConfig() protocol/provider/model = %q/%q/%q, want %q/%q/%q", got.Protocol, got.AppliedProvider, got.AppliedModel, tt.wantProtocol, tt.wantProvider, tt.wantApplied)
 			}
 			if got.Model != tt.params.Model {
 				t.Fatalf("requested Model = %q, want preserved %q", got.Model, tt.params.Model)
@@ -109,6 +113,23 @@ func TestResolveAdapterConfig_ModelPolicies(t *testing.T) {
 				t.Fatalf("warnings = %v, want substring %q", got.Warnings, tt.wantWarning)
 			}
 		})
+	}
+}
+
+func TestResolveAdapterConfig_CodexFallbackDoesNotForwardProviderCredential(t *testing.T) {
+	t.Parallel()
+
+	got := ResolveAdapterConfig(credential.ResolvedAgentConfig{ //nolint:gosec // dummy test credential
+		Engine: "codex", Provider: testDashscopeProvider, APIKey: "dashscope-test-key",
+	})
+	if got.Provider != testDashscopeProvider || got.APIKey != "dashscope-test-key" {
+		t.Fatalf("requested provider credential was mutated: %+v", got)
+	}
+	if got.AppliedProvider != "" || got.AppliedModel != "" || got.AppliedAPIKey != "" || got.AppliedBaseURL != "" {
+		t.Fatalf("fallback applied config = provider %q model %q key %q baseURL %q, want all omitted", got.AppliedProvider, got.AppliedModel, got.AppliedAPIKey, got.AppliedBaseURL)
+	}
+	if !containsWarning(got.Warnings, "provider-scoped credential are omitted") {
+		t.Fatalf("Warnings = %v, want provider fallback warning even without a model", got.Warnings)
 	}
 }
 
@@ -170,14 +191,15 @@ func TestBaseAgentAnnotateSessionResult(t *testing.T) {
 	base := NewBaseAgent(Config{
 		Name:               "codex",
 		Protocol:           string(ProtocolOpenAI),
-		ModelProvider:      "dashscope",
+		RequestedProvider:  testDashscopeProvider,
+		ModelProvider:      testDashscopeProvider,
 		RequestedModelName: "requested-model",
 		ModelName:          "applied-model",
 		Warnings:           []string{"model fallback"},
 	})
 	result := &SessionResult{}
 	base.annotateSessionResult(result)
-	if result.Engine != "codex" || result.AppliedProtocol != string(ProtocolOpenAI) || result.AppliedProvider != "dashscope" || result.RequestedModel != "requested-model" || result.AppliedModel != "applied-model" || result.Model != "" {
+	if result.Engine != "codex" || result.AppliedProtocol != string(ProtocolOpenAI) || result.RequestedProvider != testDashscopeProvider || result.AppliedProvider != testDashscopeProvider || result.RequestedModel != "requested-model" || result.AppliedModel != "applied-model" || result.Model != "" {
 		t.Fatalf("annotated session = %+v", result)
 	}
 	if !slices.Equal(result.Warnings, []string{"model fallback"}) {
@@ -203,7 +225,7 @@ func TestLogAdapterConfig_DoesNotExposeCredentialsOrEndpoint(t *testing.T) {
 			t.Fatalf("configuration log exposed %q: %s", forbidden, output)
 		}
 	}
-	for _, want := range []string{"protocol=openai", "requested.model=gpt-5.4", "applied.model=gpt-5.4"} {
+	for _, want := range []string{"protocol=openai", "requested.provider=openai", "applied.provider=skill-up-openai", "requested.model=gpt-5.4", "applied.model=gpt-5.4"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("configuration log missing %q: %s", want, output)
 		}

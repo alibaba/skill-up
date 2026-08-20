@@ -181,7 +181,7 @@ expect:
 	if report.ModelName != "dashscope/qwen3.6-plus" || report.Requested.Model != "qwen3.6-plus" || report.Applied.Model != "" || report.Observed != nil {
 		t.Fatalf("requested/applied/observed report mismatch: %+v", report)
 	}
-	if report.Requested.Protocol != "qoder" || report.Applied.Protocol != "qoder" || report.Applied.Provider != "dashscope" {
+	if report.Requested.Protocol != "qoder" || report.Applied.Protocol != "qoder" || report.Applied.Provider != "" {
 		t.Fatalf("protocol/provider report mismatch: %+v", report)
 	}
 }

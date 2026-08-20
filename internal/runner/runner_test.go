@@ -470,7 +470,7 @@ func TestBuildReportInput_DistinguishesRequestedModelFromLocalFallback(t *testin
 	if input.ModelName != "dashscope/qwen3.6-plus" {
 		t.Fatalf("ModelName = %q, want legacy requested identity", input.ModelName)
 	}
-	if input.RequestedConfiguration.Model != "qwen3.6-plus" || input.AppliedConfiguration.Model != "" {
+	if input.RequestedConfiguration.Model != "qwen3.6-plus" || input.AppliedConfiguration.Provider != "" || input.AppliedConfiguration.Model != "" {
 		t.Fatalf("report requested/applied configuration = %+v / %+v", input.RequestedConfiguration, input.AppliedConfiguration)
 	}
 	if input.ObservedConfiguration != nil {
