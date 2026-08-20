@@ -85,6 +85,13 @@ type mockJudgeTestAgent struct {
 	err       error
 	runResult *agent.SessionResult
 
+	scriptedResults []*agent.SessionResult
+	scriptedErrors  []error
+	runCalls        int
+	allMessages     [][]transcript.Message
+	artifactDirs    []string
+	onRun           func(callIndex int)
+
 	// runDelay simulates a slow agent call by blocking on either the ctx
 	// deadline or the duration expiring, whichever happens first. Used by
 	// timeout tests; leave zero for the immediate-return default.
@@ -95,6 +102,8 @@ type mockJudgeTestAgent struct {
 	// TimeoutSeconds correctly. ok mirrors ctx.Deadline()'s second return.
 	observedDeadline   time.Time
 	observedDeadlineOK bool
+	observedDeadlines  []time.Time
+	deadlineStates     []bool
 	lastMessages       []transcript.Message
 }
 
@@ -116,9 +125,15 @@ func (m *mockJudgeTestAgent) Check(_ context.Context, _ runtime.Runtime) error {
 
 func (m *mockJudgeTestAgent) CheckCredentials(_ context.Context) error { return nil }
 
-func (m *mockJudgeTestAgent) Run(ctx context.Context, _ runtime.Runtime, _ agent.ExecOptions, messages []transcript.Message) (*agent.SessionResult, error) {
+func (m *mockJudgeTestAgent) Run(ctx context.Context, _ runtime.Runtime, opts agent.ExecOptions, messages []transcript.Message) (*agent.SessionResult, error) {
 	m.observedDeadline, m.observedDeadlineOK = ctx.Deadline()
+	m.observedDeadlines = append(m.observedDeadlines, m.observedDeadline)
+	m.deadlineStates = append(m.deadlineStates, m.observedDeadlineOK)
 	m.lastMessages = messages
+	m.allMessages = append(m.allMessages, append([]transcript.Message(nil), messages...))
+	m.artifactDirs = append(m.artifactDirs, opts.ArtifactDir)
+	callIndex := m.runCalls
+	m.runCalls++
 	if m.runDelay > 0 {
 		select {
 		case <-ctx.Done():
@@ -126,10 +141,48 @@ func (m *mockJudgeTestAgent) Run(ctx context.Context, _ runtime.Runtime, _ agent
 		case <-time.After(m.runDelay):
 		}
 	}
+	if m.onRun != nil {
+		m.onRun(callIndex)
+	}
+	if callIndex < len(m.scriptedResults) {
+		var err error
+		if callIndex < len(m.scriptedErrors) {
+			err = m.scriptedErrors[callIndex]
+		}
+		return m.scriptedResults[callIndex], err
+	}
 	if m.runResult != nil {
 		return m.runResult, m.err
 	}
 	return &agent.SessionResult{FinalMessage: m.output}, m.err
+}
+
+type resumableJudgeTestAgent struct {
+	*mockJudgeTestAgent
+
+	turnResult   *agent.SessionResult
+	turnErr      error
+	turnCalls    int
+	turnMessages []transcript.Message
+	turnSessions []string
+	turnDirs     []string
+	turnDeadline time.Time
+	turnHasLimit bool
+}
+
+func (m *resumableJudgeTestAgent) RunTurn(
+	ctx context.Context,
+	_ runtime.Runtime,
+	opts agent.ExecOptions,
+	message transcript.Message,
+	sessionID string,
+) (*agent.SessionResult, error) {
+	m.turnDeadline, m.turnHasLimit = ctx.Deadline()
+	m.turnCalls++
+	m.turnMessages = append(m.turnMessages, message)
+	m.turnSessions = append(m.turnSessions, sessionID)
+	m.turnDirs = append(m.turnDirs, opts.ArtifactDir)
+	return m.turnResult, m.turnErr
 }
 
 // mockJudgeTestRuntime is a minimal Runtime for testing.
