@@ -15,17 +15,40 @@ type Reporter interface {
 
 // Input aggregates run results for reporting.
 type Input struct {
-	SkillName     string           `json:"skill_name"`
-	SchemaVersion string           `json:"schema_version"`
-	EngineName    string           `json:"engine_name"`
-	ModelName     string           `json:"model_name"`
-	StartTime     time.Time        `json:"start_time"`
-	EndTime       time.Time        `json:"end_time"`
-	CaseResults   []CaseResult     `json:"case_results"`
-	TotalTokens   int              `json:"total_tokens"` // tested-agent tokens across all configurations
-	JudgeTokens   int              `json:"judge_tokens"`
-	OverallTokens int              `json:"overall_tokens"`
-	Benchmark     *BenchmarkResult `json:"benchmark,omitempty"`
+	SkillName              string              `json:"skill_name"`
+	SchemaVersion          string              `json:"schema_version"`
+	EngineName             string              `json:"engine_name"`
+	ModelName              string              `json:"model_name"`
+	RequestedConfiguration *AgentConfiguration `json:"requested_configuration,omitempty"`
+	EffectiveConfiguration *AgentConfiguration `json:"effective_configuration,omitempty"`
+	StartTime              time.Time           `json:"start_time"`
+	EndTime                time.Time           `json:"end_time"`
+	CaseResults            []CaseResult        `json:"case_results"`
+	TotalTokens            int                 `json:"total_tokens"` // tested-agent tokens across all configurations
+	JudgeTokens            int                 `json:"judge_tokens"`
+	OverallTokens          int                 `json:"overall_tokens"`
+	Benchmark              *BenchmarkResult    `json:"benchmark,omitempty"`
+}
+
+// AgentConfiguration is a credential-free snapshot of requested or effective
+// adapter configuration recorded in reports.
+type AgentConfiguration struct {
+	Role     string `json:"role"`
+	Engine   string `json:"engine"`
+	Protocol string `json:"protocol,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Version  string `json:"version,omitempty"`
+}
+
+func agentConfigurationModel(configuration *AgentConfiguration) string {
+	if configuration == nil || configuration.Model == "" {
+		return ""
+	}
+	if configuration.Provider == "" {
+		return configuration.Model
+	}
+	return configuration.Provider + "/" + configuration.Model
 }
 
 // TotalDuration calculates the total wall-clock duration from StartTime to EndTime.

@@ -47,14 +47,22 @@ The runner path resolves values in these stages:
    provider-scoped model environment variable currently overrides the YAML
    model; provider environment credentials override the credential file.
 5. Preserve explicit CLI `--model` and `--api-key` precedence.
-6. Pass the resolved value to the selected adapter, which constructs its
-   command and environment.
+6. Apply the selected adapter's declared protocol and capability contract.
+   Keep the requested model intact, compute the effective model once, remove
+   unsupported kwargs, and emit warnings for ignored or invalid explicit
+   settings before case execution.
+7. Pass the effective value to the selected adapter, which constructs its
+   command and environment without repeating model normalization.
 
 Runner and judge roles use the same resolution flow. Until an explicit judge
 engine schema is introduced, the judge inherits the runner engine lifecycle and
 kwargs, while resolving its provider/model and credentials as a separate role.
-Reports use the resolved runner engine/model identity rather than reconstructing
-it from a CLI-mutated eval config.
+Reports use the resolved runner identity rather than reconstructing it from a
+CLI-mutated eval config. `result.json` retains the legacy `engine_name` and
+`model_name` fields while also recording credential-free
+`requested_configuration` and `effective_configuration` objects. Per-session
+results carry the adapter protocol, provider namespace, requested model,
+effective model, and capability warnings.
 
 ## Legacy slashed model compatibility
 
@@ -93,13 +101,13 @@ These translations are covered by `action/main_test.py`. Any future explicit
 
 ## Known gaps for later phases
 
-- Protocol and adapter capabilities are not yet declared on the resolved value.
 - Nested provider endpoints are flattened before the adapter protocol is known.
 - Provider-scoped `MODEL` currently overrides an explicit YAML model.
-- Adapters may ignore unsupported explicit values rather than failing before
-  case execution.
-- Reports use the resolved runner identity but do not yet distinguish every
-  requested value from the adapter's effective configuration.
+- `engine.version`, `engine.entry`, and `engine.model.params` now produce
+  warnings when ineffective, but their final implementation/removal is deferred
+  to the installation and schema phases.
+- The actual installed CLI version is not yet recorded as effective runtime
+  configuration.
 
 See [Issue #196](https://github.com/alibaba/skill-up/issues/196) for the staged
 cleanup plan.

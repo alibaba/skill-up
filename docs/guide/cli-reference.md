@@ -299,6 +299,20 @@ After a run, the output directory looks like:
 
 The `outputs/workspace/` subtree appears only when `collect_artifacts` is configured; see [Writing evals → Collecting workspace artifacts](writing-evals.md#collecting-workspace-artifacts-collect_artifacts).
 
+### result.json configuration identity
+
+The iteration-level `result.json` keeps `engine_name` and the requested-value
+`model_name` semantics for compatibility and also records two credential-free objects:
+
+- `requested_configuration`: the engine, provider namespace, model, and version
+  selected after YAML/CLI/credential precedence;
+- `effective_configuration`: the adapter protocol and model actually forwarded
+  to the CLI. An empty effective model means the adapter delegated model choice
+  to its local/default settings.
+
+Capability warnings are also attached to each agent `SessionResult`. API keys
+and other credential values are never written to these fields.
+
 ### grading.json
 
 Per-case grading result (Anthropic-compatible):

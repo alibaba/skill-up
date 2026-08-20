@@ -367,9 +367,11 @@ func TestBaseAgentMergeExecOptionsEnvMergesRuntimeAndTelemetry(t *testing.T) {
 	}))
 
 	base := NewBaseAgent(Config{
-		Name:          "codex",
-		ModelProvider: "openai",
-		ModelName:     "gpt-5.4",
+		Name:               "codex",
+		Protocol:           string(ProtocolOpenAI),
+		ModelProvider:      "openai",
+		RequestedModelName: "gpt-5.4",
+		ModelName:          "gpt-5.4",
 	})
 	opts := base.mergeExecOptionsEnv(
 		ctx,
@@ -403,7 +405,10 @@ func TestBaseAgentMergeExecOptionsEnvMergesRuntimeAndTelemetry(t *testing.T) {
 	for _, want := range []string{
 		"telemetry.project.id=745",
 		"skill_up.engine=codex",
+		"skill_up.protocol=openai",
+		"skill_up.provider=openai",
 		"skill_up.model=openai/gpt-5.4",
+		"skill_up.model.requested=openai/gpt-5.4",
 		"skill_up.case.id=case-1",
 		"skill_up.parent_trace_id=4bf92f3577b34da6a3ce929d0e0e4736",
 		"skill_up.parent_span_id=00f067aa0ba902b7",
@@ -564,6 +569,12 @@ func TestDetectAgentWithResolvedConfig_SetsTypedCredentialFields(t *testing.T) {
 	}
 	if got := codexAgent.Cfg.ModelName; got != "gpt-5.4" {
 		t.Fatalf("ModelName = %q, want gpt-5.4", got)
+	}
+	if got := codexAgent.Cfg.RequestedModelName; got != "gpt-5.4" {
+		t.Fatalf("RequestedModelName = %q, want gpt-5.4", got)
+	}
+	if got := codexAgent.Cfg.Protocol; got != string(ProtocolOpenAI) {
+		t.Fatalf("Protocol = %q, want %q", got, ProtocolOpenAI)
 	}
 	if got := codexAgent.Cfg.ModelProvider; got != "openai" {
 		t.Fatalf("ModelProvider = %q, want openai", got)
@@ -745,8 +756,11 @@ func TestDetectAgentWithResolvedConfig_ForwardsKwargs(t *testing.T) {
 	if got := codexAgent.Cfg.Kwargs[KwargBypassSandbox]; got != "true" {
 		t.Fatalf("Cfg.Kwargs[%s] = %q, want true", KwargBypassSandbox, got)
 	}
-	if got := codexAgent.Cfg.Kwargs["future_key"]; got != "x" {
-		t.Fatalf("Cfg.Kwargs[future_key] = %q, want x", got)
+	if _, ok := codexAgent.Cfg.Kwargs["future_key"]; ok {
+		t.Fatalf("unsupported future_key must not reach Codex adapter: %v", codexAgent.Cfg.Kwargs)
+	}
+	if !containsWarning(codexAgent.Cfg.Warnings, `does not support kwarg "future_key"`) {
+		t.Fatalf("Warnings = %v, want unsupported kwarg warning", codexAgent.Cfg.Warnings)
 	}
 }
 

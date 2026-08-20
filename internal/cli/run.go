@@ -256,6 +256,8 @@ func loadCredentialsAndAgent(cmd *cobra.Command, evalCfg *config.EvalConfig) (ag
 		resolver,
 		credential.CLIOverrides{Model: cliModel, APIKey: cliAPIKey},
 	)
+	runnerConfig = agent.ResolveAdapterConfig(runnerConfig)
+	agent.LogAdapterConfig(cmd.Context(), runnerConfig)
 
 	ag, err := agent.DetectAgentWithResolvedConfig(runnerConfig)
 	if err != nil {

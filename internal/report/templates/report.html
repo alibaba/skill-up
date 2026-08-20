@@ -268,8 +268,13 @@
 
     function init() {
       document.getElementById("skill-name").textContent = DATA.skill_name;
-      var meta = "Engine: " + DATA.engine_name + " | Model: " + DATA.model_name +
-        " | Started: " + DATA.start_time + " | Evaluation wall time: " + DATA.evaluation_wall_time;
+      var meta = "Engine: " + DATA.engine_name;
+      if (DATA.protocol) meta += " | Protocol: " + DATA.protocol;
+      if (DATA.requested_model) meta += " | Requested model: " + DATA.requested_model;
+      if (DATA.effective_model) meta += " | Effective model: " + DATA.effective_model;
+      else if (DATA.requested_model) meta += " | Effective model: local/default";
+      else if (DATA.model_name) meta += " | Model: " + DATA.model_name;
+      meta += " | Started: " + DATA.start_time + " | Evaluation wall time: " + DATA.evaluation_wall_time;
       meta += " | Tested agent tokens: " + fmtInteger(DATA.agent_tokens);
       meta += " | Judge tokens: " + fmtInteger(DATA.judge_tokens);
       meta += " | Overall tokens: " + fmtInteger(DATA.overall_tokens);

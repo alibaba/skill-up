@@ -124,7 +124,8 @@ func (a *QwenCodeAgent) CheckCredentials(ctx context.Context) error {
 
 // Run executes qwen non-interactively (instruction piped to `qwen --yolo`) and
 // builds a transcript from the session file (falling back to stdout).
-func (a *QwenCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (*SessionResult, error) {
+func (a *QwenCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (finalResult *SessionResult, finalErr error) {
+	defer func() { a.annotateSessionResult(finalResult) }()
 	if err := requireBashTargetShell(rt); err != nil {
 		return nil, fmt.Errorf("%s: %w", a.Name(), err)
 	}

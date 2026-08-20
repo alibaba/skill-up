@@ -9,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/alibaba/skill-up/internal/credential"
@@ -48,7 +49,11 @@ var ErrAgentInstallFailed = errors.New("agent installation failed")
 // SessionResult holds the result of an agent session execution.
 type SessionResult struct {
 	Engine         string                  `json:"engine,omitempty"`
+	Protocol       string                  `json:"protocol,omitempty"`
+	Provider       string                  `json:"provider,omitempty"`
+	RequestedModel string                  `json:"requested_model,omitempty"`
 	Model          string                  `json:"model,omitempty"`
+	Warnings       []string                `json:"warnings,omitempty"`
 	SessionID      string                  `json:"session_id,omitempty"`
 	ExitCode       int                     `json:"exit_code"`
 	DurationMs     int64                   `json:"duration_ms"`
@@ -106,11 +111,14 @@ type Config struct {
 	EnvVars         map[string]string
 	// SkillPath is the directory where the agent reads skills.
 	// If not set, agent uses default location (~/.claude/skills/).
-	SkillPath     string
-	ModelName     string
-	ModelProvider string
-	APIKey        string
-	BaseURL       string
+	SkillPath          string
+	ModelName          string
+	RequestedModelName string
+	ModelProvider      string
+	Protocol           string
+	Warnings           []string
+	APIKey             string
+	BaseURL            string
 	// Kwargs carries agent-specific key/value options forwarded from
 	// EngineConfig.Kwargs. Each agent reads only the keys it understands;
 	// unknown keys are ignored. See agent kwargs helpers in kwargs.go.
@@ -178,6 +186,7 @@ func NewBaseAgent(cfg Config) BaseAgent {
 	if cfg.EnvVars == nil {
 		cfg.EnvVars = make(map[string]string)
 	}
+	cfg.Warnings = slices.Clone(cfg.Warnings)
 
 	return BaseAgent{
 		Cfg:     cfg,
@@ -372,10 +381,37 @@ func (a *BaseAgent) buildAgentObservabilityAttrs(extra map[string]string) map[st
 	if a.Name() != "" {
 		attrs["skill_up.engine"] = a.Name()
 	}
+	if a.Cfg.Protocol != "" {
+		attrs["skill_up.protocol"] = a.Cfg.Protocol
+	}
+	if a.Cfg.ModelProvider != "" {
+		attrs["skill_up.provider"] = a.Cfg.ModelProvider
+	}
 	if a.Cfg.ModelName != "" {
 		attrs["skill_up.model"] = formatAgentModel(a.Cfg.ModelProvider, a.Cfg.ModelName)
 	}
+	if a.Cfg.RequestedModelName != "" {
+		attrs["skill_up.model.requested"] = formatAgentModel(a.Cfg.ModelProvider, a.Cfg.RequestedModelName)
+	}
 	return attrs
+}
+
+func (a *BaseAgent) annotateSessionResult(result *SessionResult) {
+	if result == nil {
+		return
+	}
+	if result.Engine == "" {
+		result.Engine = a.Name()
+	}
+	result.Protocol = a.Cfg.Protocol
+	result.Provider = a.Cfg.ModelProvider
+	result.RequestedModel = a.Cfg.RequestedModelName
+	if result.Model == "" {
+		result.Model = a.Cfg.ModelName
+	}
+	for _, warning := range a.Cfg.Warnings {
+		result.Warnings = appendUniqueWarning(result.Warnings, warning)
+	}
 }
 
 func formatAgentModel(provider, model string) string {

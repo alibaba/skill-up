@@ -541,6 +541,37 @@ func TestMarkdownReporter_OmitsEmptyMetadataLines(t *testing.T) {
 	}
 }
 
+func TestMarkdownReporter_DistinguishesRequestedAndEffectiveModel(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.md")
+	input := sampleInput()
+	input.RequestedConfiguration = &AgentConfiguration{
+		Role: "runner", Engine: "qoder-cli", Protocol: "qoder", Provider: "dashscope", Model: "qwen3.6-plus",
+	}
+	input.EffectiveConfiguration = &AgentConfiguration{
+		Role: "runner", Engine: "qoder-cli", Protocol: "qoder", Provider: "dashscope",
+	}
+	if err := (&MarkdownReporter{OutputPath: path}).Write(context.Background(), input); err != nil {
+		t.Fatalf("MarkdownReporter.Write failed: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read markdown file: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		"- **Protocol**: qoder",
+		"- **Requested Model**: dashscope/qwen3.6-plus",
+		"- **Effective Model**: local/default",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("markdown missing %q:\n%s", want, content)
+		}
+	}
+}
+
 func TestMarkdownReporter_EscapesHTML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "report.md")

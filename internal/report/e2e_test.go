@@ -55,8 +55,14 @@ func buildRealisticInput() Input {
 		SchemaVersion: "v1alpha1",
 		EngineName:    "codex",
 		ModelName:     "openai/gpt-5.4",
-		StartTime:     start,
-		EndTime:       end,
+		RequestedConfiguration: &AgentConfiguration{
+			Role: "runner", Engine: "codex", Protocol: "openai", Provider: "openai", Model: "gpt-5.4",
+		},
+		EffectiveConfiguration: &AgentConfiguration{
+			Role: "runner", Engine: "codex", Protocol: "openai", Provider: "openai", Model: "gpt-5.4",
+		},
+		StartTime: start,
+		EndTime:   end,
 		CaseResults: []CaseResult{
 			{
 				CaseID:     "identify-null-bug",
@@ -219,6 +225,7 @@ func TestE2E_JSONReporter_FullPipeline(t *testing.T) {
 	if parsed.EngineName != "codex" {
 		t.Fatalf("engine_name: want 'codex', got %q", parsed.EngineName)
 	}
+	assertReportConfigurations(t, parsed)
 
 	// All 4 cases preserved.
 	if len(parsed.CaseResults) != 4 {
@@ -261,6 +268,16 @@ func TestE2E_JSONReporter_FullPipeline(t *testing.T) {
 	}
 	if errorCase.Grading != nil {
 		t.Fatal("ERROR case should NOT have grading")
+	}
+}
+
+func assertReportConfigurations(t *testing.T, parsed Input) {
+	t.Helper()
+	if parsed.RequestedConfiguration == nil || parsed.EffectiveConfiguration == nil {
+		t.Fatalf("requested/effective configuration missing: %+v", parsed)
+	}
+	if parsed.RequestedConfiguration.Model != "gpt-5.4" || parsed.EffectiveConfiguration.Protocol != "openai" {
+		t.Fatalf("requested/effective configuration = %+v / %+v", parsed.RequestedConfiguration, parsed.EffectiveConfiguration)
 	}
 }
 
@@ -411,6 +428,11 @@ func TestE2E_HTMLReporter_FullPipeline(t *testing.T) {
 	}
 	if !strings.Contains(content, "gpt-5.4") {
 		t.Fatal("HTML should contain model name")
+	}
+	for _, want := range []string{`"protocol":"openai"`, `"requested_model":"openai/gpt-5.4"`, `"effective_model":"openai/gpt-5.4"`} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("HTML should contain effective configuration field %s", want)
+		}
 	}
 }
 

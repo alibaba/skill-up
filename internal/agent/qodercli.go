@@ -130,7 +130,8 @@ func (a *QoderCLIAgent) CheckCredentials(ctx context.Context) error {
 // Run executes the selected qodercli edition with the resolved model and environment overrides.
 //
 //nolint:dupl
-func (a *QoderCLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (*SessionResult, error) {
+func (a *QoderCLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (finalResult *SessionResult, finalErr error) {
+	defer func() { a.annotateSessionResult(finalResult) }()
 	if err := requireBashTargetShell(rt); err != nil {
 		return nil, fmt.Errorf("%s: %w", a.Name(), err)
 	}
@@ -183,19 +184,11 @@ func (a *QoderCLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 	return sessionResult, nil
 }
 
-func (a *QoderCLIAgent) effectiveModelName(ctx context.Context) string {
-	if a.Cfg.ModelName == "" {
-		return ""
+func (a *QoderCLIAgent) effectiveModelName(_ context.Context) string {
+	model := strings.TrimSpace(a.Cfg.ModelName)
+	if slices.Contains(supportedQoderModels, model) {
+		return model
 	}
-	if slices.Contains(supportedQoderModels, a.Cfg.ModelName) {
-		return a.Cfg.ModelName
-	}
-	logging.WarnContextf(
-		ctx,
-		"%s ignores configured model %q and will use local qoder model settings instead",
-		a.profile.binary,
-		a.Cfg.ModelName,
-	)
 	return ""
 }
 
@@ -326,7 +319,8 @@ func parseQoderSessionID(output string) string {
 // RunTurn resumes an existing QoderCLI session and sends a single user
 // message. If sessionID is empty, it starts a new session (first turn).
 // This implements the SessionResumer interface for multi-turn evaluation.
-func (a *QoderCLIAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, message transcript.Message, sessionID string) (*SessionResult, error) {
+func (a *QoderCLIAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, message transcript.Message, sessionID string) (finalResult *SessionResult, finalErr error) {
+	defer func() { a.annotateSessionResult(finalResult) }()
 	if sessionID == "" {
 		// First turn — delegate to Run which creates a new session.
 		return a.Run(ctx, rt, opts, []transcript.Message{message})

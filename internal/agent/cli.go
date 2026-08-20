@@ -127,7 +127,8 @@ func (a *CLIAgent) InstallSkill(ctx context.Context, rt Runtime, skillCfg runtim
 }
 
 // Run executes the agent with the given messages and returns the session result.
-func (a *CLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (*SessionResult, error) {
+func (a *CLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (finalResult *SessionResult, finalErr error) {
+	defer func() { a.annotateSessionResult(finalResult) }()
 	if err := requireBashTargetShell(rt); err != nil {
 		return nil, fmt.Errorf("%s: %w", a.Name(), err)
 	}

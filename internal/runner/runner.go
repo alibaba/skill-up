@@ -499,24 +499,51 @@ func buildReportInput(
 	evalCfg *config.EvalConfig,
 	resolved credential.ResolvedAgentConfig,
 ) report.Input {
-	engineName := resolved.Engine
-	provider := resolved.Provider
-	modelName := resolved.Model
-	if engineName == "" {
-		engineName = evalCfg.Engine.Name
-		provider = evalCfg.Engine.Model.Provider
-		modelName = evalCfg.Engine.Model.Name
+	if resolved.Engine == "" {
+		resolved = credential.ResolvedAgentConfig{
+			Role:        credential.AgentRoleRunner,
+			Engine:      evalCfg.Engine.Name,
+			Version:     evalCfg.Engine.Version,
+			Entry:       evalCfg.Engine.Entry,
+			Provider:    evalCfg.Engine.Model.Provider,
+			Model:       evalCfg.Engine.Model.Name,
+			BaseURL:     evalCfg.Engine.Model.BaseURL,
+			Kwargs:      evalCfg.Engine.Kwargs,
+			ModelParams: evalCfg.Engine.Model.Params,
+		}
 	}
-	if provider != "" && modelName != "" {
-		modelName = provider + "/" + modelName
+	resolved = agent.ResolveAdapterConfig(resolved)
+	requested := &report.AgentConfiguration{
+		Role:     string(resolved.Role),
+		Engine:   resolved.Engine,
+		Protocol: resolved.Protocol,
+		Provider: resolved.Provider,
+		Model:    resolved.Model,
+		Version:  resolved.Version,
+	}
+	effective := &report.AgentConfiguration{
+		Role:     string(resolved.Role),
+		Engine:   resolved.Engine,
+		Protocol: resolved.Protocol,
+		Provider: resolved.Provider,
+		Model:    resolved.EffectiveModel,
+	}
+	// Keep the legacy top-level model_name requested-value semantics for report
+	// compatibility. Consumers that need execution identity should use the
+	// explicit effective_configuration object.
+	modelName := resolved.Model
+	if resolved.Provider != "" && modelName != "" {
+		modelName = resolved.Provider + "/" + modelName
 	}
 	input := report.Input{
-		SkillName:     skillName,
-		SchemaVersion: evalCfg.SchemaVersion,
-		EngineName:    engineName,
-		ModelName:     modelName,
-		StartTime:     startTime,
-		EndTime:       endTime,
+		SkillName:              skillName,
+		SchemaVersion:          evalCfg.SchemaVersion,
+		EngineName:             resolved.Engine,
+		ModelName:              modelName,
+		RequestedConfiguration: requested,
+		EffectiveConfiguration: effective,
+		StartTime:              startTime,
+		EndTime:                endTime,
 	}
 
 	for _, caseID := range caseIDs {

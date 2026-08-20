@@ -270,7 +270,8 @@ func (a *CodexAgent) CheckCredentials(ctx context.Context) error {
 // RunTurn implements SessionResumer for multi-turn conversation support.
 // First turn (sessionID=="") delegates to Run; subsequent turns use
 // `codex resume <sessionID>` to continue the existing session.
-func (a *CodexAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, message transcript.Message, sessionID string) (*SessionResult, error) {
+func (a *CodexAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, message transcript.Message, sessionID string) (finalResult *SessionResult, finalErr error) {
+	defer func() { a.annotateSessionResult(finalResult) }()
 	if sessionID == "" {
 		// First turn — delegate to Run which creates a new session.
 		return a.Run(ctx, rt, opts, []transcript.Message{message})
@@ -336,7 +337,8 @@ func (a *CodexAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, 
 // Run executes codex in non-interactive JSON mode and converts events into a transcript.
 //
 //nolint:dupl
-func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (*SessionResult, error) {
+func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (finalResult *SessionResult, finalErr error) {
+	defer func() { a.annotateSessionResult(finalResult) }()
 	if err := requireBashTargetShell(rt); err != nil {
 		return nil, fmt.Errorf("%s: %w", a.Name(), err)
 	}
@@ -413,22 +415,12 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 	return sessionResult, nil
 }
 
-func (a *CodexAgent) effectiveModelName(ctx context.Context) string {
-	if a.Cfg.ModelProvider == "" || a.Cfg.ModelProvider == agentProviderOpenAI {
-		return a.Cfg.ModelName
+func (a *CodexAgent) effectiveModelName(_ context.Context) string {
+	model := strings.TrimSpace(a.Cfg.ModelName)
+	if codexCustomProviderUnavailableReason(a.Cfg.ModelProvider, a.Cfg.BaseURL) != "" {
+		return ""
 	}
-	reason := codexCustomProviderUnavailableReason(a.Cfg.ModelProvider, a.Cfg.BaseURL)
-	if reason == "" {
-		return a.Cfg.ModelName
-	}
-	logging.WarnContextf(
-		ctx,
-		"codex custom model provider %q %s; model override %q is omitted and local codex model settings will be used instead",
-		a.Cfg.ModelProvider,
-		reason,
-		a.Cfg.ModelName,
-	)
-	return ""
+	return model
 }
 
 type codexProviderConfig struct {

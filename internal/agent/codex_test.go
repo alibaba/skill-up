@@ -242,18 +242,15 @@ func TestBuildCodexRunCmdWithCustomProvider(t *testing.T) {
 }
 
 func TestCodexEffectiveModelName_IgnoresNonOpenAIProvider(t *testing.T) {
+	t.Parallel()
+
 	ag := NewCodexAgent(Config{
 		ModelProvider: "anthropic",
 		ModelName:     "claude-sonnet-4-6",
 	})
 
-	output := captureStdout(t, func() {
-		if got := ag.effectiveModelName(context.Background()); got != "" {
-			t.Fatalf("effectiveModelName() = %q, want empty", got)
-		}
-	})
-	if !strings.Contains(output, `level=WARNING msg="codex custom model provider \"anthropic\" requires base_url; model override \"claude-sonnet-4-6\" is omitted and local codex model settings will be used instead"`) {
-		t.Fatalf("expected warning log, got %q", output)
+	if got := ag.effectiveModelName(context.Background()); got != "" {
+		t.Fatalf("effectiveModelName() = %q, want empty", got)
 	}
 }
 

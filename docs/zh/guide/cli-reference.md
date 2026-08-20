@@ -283,6 +283,20 @@ skill-up import ./evals/evals.json --output ./new-evals
 
 `outputs/workspace/` 子目录仅在配置了 `collect_artifacts` 时出现，详见[编写评测 → 采集 workspace 产物](writing-evals.md#采集-workspace-产物collect_artifacts)。
 
+### result.json 中的配置标识
+
+每轮迭代的 `result.json` 会保留兼容字段 `engine_name`，并保持
+`model_name` 记录请求值的历史语义，
+并新增两个不包含凭据的对象：
+
+- `requested_configuration`：按 YAML、CLI 和凭据优先级解析后的 engine、
+  provider 命名空间、model 与 version；
+- `effective_configuration`：适配器协议及真正传给 CLI 的 model。若有效
+  model 为空，表示模型选择委托给 CLI 的本地或默认设置。
+
+适配器能力警告也会写入每个 Agent 的 `SessionResult`；API key 等凭据值
+不会进入这些字段。
+
 ### grading.json 格式
 
 每个用例的评估结果（Anthropic 兼容格式）：

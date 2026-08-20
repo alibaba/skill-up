@@ -36,16 +36,22 @@ func DetectAgent(engineName string, cfg Config) (Agent, error) {
 // DetectAgentWithResolvedConfig maps a resolved role configuration into the
 // selected adapter without reinterpreting raw YAML or CLI values.
 func DetectAgentWithResolvedConfig(params credential.ResolvedAgentConfig) (Agent, error) {
+	params = ResolveAdapterConfig(params)
 	engineName := params.Engine
 	cfg := Config{
-		Name:          engineName,
-		ModelName:     params.Model,
-		ModelProvider: params.Provider,
-		APIKey:        params.APIKey,
-		BaseURL:       params.BaseURL,
-		EnvVars:       make(map[string]string),
-		Kwargs:        params.Kwargs,
-		Custom:        params.Custom,
+		Name:               engineName,
+		Version:            params.Version,
+		Entry:              params.Entry,
+		ModelName:          params.EffectiveModel,
+		RequestedModelName: params.Model,
+		ModelProvider:      params.Provider,
+		Protocol:           params.Protocol,
+		Warnings:           params.Warnings,
+		APIKey:             params.APIKey,
+		BaseURL:            params.BaseURL,
+		EnvVars:            make(map[string]string),
+		Kwargs:             params.Kwargs,
+		Custom:             params.Custom,
 	}
 	logUnknownEngineKwargs(engineName, params.Kwargs)
 

@@ -46,6 +46,7 @@ Both are parsed by **`parseSessionFile`** in `internal/agent/claude_code.go` (`c
 ```
 internal/agent/
 ├── agent.go           # Core interface definitions: Agent, SessionResult, BaseAgent
+├── capabilities.go    # Adapter protocol/capability declarations and effective config resolution
 ├── factory.go         # DetectAgent / DetectAgentWithResolvedConfig factory functions
 ├── claude_code.go     # ClaudeCodeAgent implementation
 ├── qodercli.go        # QoderCLIAgent implementation
@@ -100,19 +101,44 @@ type Agent interface {
 
 ```go
 type SessionResult struct {
-    Engine       string
-    Model        string
-    ExitCode     int
-    DurationMs   int64
-    Turns        int
-    InputTokens  int
-    OutputTokens int
-    FinalMessage string
-    Stderr       string
-    Transcript   transcript.Transcript
-    Artifacts    *SessionArtifacts
+    Engine         string
+    Protocol       string
+    Provider       string
+    RequestedModel string
+    Model          string // effective model passed to the adapter; empty means local/default settings
+    Warnings       []string
+    ExitCode       int
+    DurationMs     int64
+    Turns          int
+    InputTokens    int
+    OutputTokens   int
+    FinalMessage   string
+    Stderr         string
+    Transcript     transcript.Transcript
+    Artifacts      *SessionArtifacts
 }
 ```
+
+## Adapter capability resolution
+
+`ResolveAdapterConfig` runs after YAML/CLI/credential resolution and before
+agent construction. It keeps the requested model intact, records the model
+that will actually be forwarded as `EffectiveModel`, and emits warnings for
+explicit settings that the selected adapter does not consume.
+
+| Adapter | Protocol | Model behavior | Base URL | Supported kwargs |
+|---------|----------|----------------|----------|------------------|
+| Claude Code | `anthropic` | pass through | yes | none |
+| Codex | `openai` | requires a usable Codex provider configuration | yes | `bypass_sandbox`, JSONL size limits |
+| QoderCLI | `qoder` | `lite`, `efficient`, `auto`, `performance`, `ultimate` | no | `edition` |
+| Qwen Code | `openai` | pass through | yes | none |
+| Custom Engine | `custom` | pass through | yes | arbitrary |
+
+Unsupported kwargs and invalid supported-kwarg values are removed from the
+adapter input after producing an actionable warning. `engine.version`,
+`engine.entry`, and `engine.model.params` are also reported as currently
+ineffective; version lifecycle enforcement is intentionally deferred to the
+installation phase of issue #196.
 
 ### SessionArtifacts
 

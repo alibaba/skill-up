@@ -45,6 +45,24 @@ func writeMarkdownHeader(sb *strings.Builder, in Input) {
 		fmt.Fprintf(sb, "- **Model**: %s\n", markdownText(in.ModelName))
 		wroteMetadata = true
 	}
+	if protocol := configurationProtocol(in); protocol != "" {
+		fmt.Fprintf(sb, "- **Protocol**: %s\n", markdownText(protocol))
+		wroteMetadata = true
+	}
+	if requested := agentConfigurationModel(in.RequestedConfiguration); requested != "" {
+		fmt.Fprintf(sb, "- **Requested Model**: %s\n", markdownText(requested))
+		wroteMetadata = true
+	}
+	if in.EffectiveConfiguration != nil {
+		effective := agentConfigurationModel(in.EffectiveConfiguration)
+		if effective == "" && in.RequestedConfiguration != nil && in.RequestedConfiguration.Model != "" {
+			effective = "local/default"
+		}
+		if effective != "" {
+			fmt.Fprintf(sb, "- **Effective Model**: %s\n", markdownText(effective))
+			wroteMetadata = true
+		}
+	}
 	if wroteMetadata {
 		sb.WriteString("\n")
 	}

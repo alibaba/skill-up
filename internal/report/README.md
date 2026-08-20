@@ -63,6 +63,8 @@ package "internal/report" {
     SchemaVersion : string
     EngineName : string
     ModelName : string
+    RequestedConfiguration : *AgentConfiguration
+    EffectiveConfiguration : *AgentConfiguration
     StartTime : time.Time
     EndTime : time.Time
     CaseResults : []CaseResult

@@ -438,11 +438,37 @@ func TestBuildReportInput_UsesResolvedRunnerIdentity(t *testing.T) {
 		Engine:   "codex",
 		Provider: "dashscope",
 		Model:    "qwen3.6-plus",
+		BaseURL:  "https://dashscope.example.com/v1",
 	}
 
 	input := buildReportInput("s", map[string]*caseResults{}, nil, time.Time{}, time.Time{}, evalCfg, resolved)
 	if input.EngineName != "codex" || input.ModelName != "dashscope/qwen3.6-plus" {
 		t.Fatalf("report identity = %s/%s, want resolved codex/dashscope/qwen3.6-plus", input.EngineName, input.ModelName)
+	}
+	if input.RequestedConfiguration == nil || input.EffectiveConfiguration == nil {
+		t.Fatalf("report configurations missing: %+v", input)
+	}
+	if input.RequestedConfiguration.Model != "qwen3.6-plus" || input.EffectiveConfiguration.Model != "qwen3.6-plus" || input.EffectiveConfiguration.Protocol != "openai" {
+		t.Fatalf("report requested/effective configuration = %+v / %+v", input.RequestedConfiguration, input.EffectiveConfiguration)
+	}
+}
+
+func TestBuildReportInput_DistinguishesRequestedModelFromLocalFallback(t *testing.T) {
+	t.Parallel()
+
+	evalCfg := &config.EvalConfig{Engine: config.EngineConfig{Name: "codex"}}
+	resolved := credential.ResolvedAgentConfig{
+		Role:     credential.AgentRoleRunner,
+		Engine:   "codex",
+		Provider: "dashscope",
+		Model:    "qwen3.6-plus",
+	}
+	input := buildReportInput("s", map[string]*caseResults{}, nil, time.Time{}, time.Time{}, evalCfg, resolved)
+	if input.ModelName != "dashscope/qwen3.6-plus" {
+		t.Fatalf("ModelName = %q, want legacy requested identity", input.ModelName)
+	}
+	if input.RequestedConfiguration.Model != "qwen3.6-plus" || input.EffectiveConfiguration.Model != "" {
+		t.Fatalf("report requested/effective configuration = %+v / %+v", input.RequestedConfiguration, input.EffectiveConfiguration)
 	}
 }
 

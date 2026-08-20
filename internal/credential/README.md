@@ -24,24 +24,27 @@ Before entering adapter construction, produce one resolved value **per agent rol
 
 ```go
 type ResolvedAgentConfig struct {
-    Role        AgentRole
-    Engine      string
-    Version     string
-    Entry       string
-    Provider    string
-    Model       string
-    APIKey      string
-    BaseURL     string
-    Kwargs      map[string]string
-    ModelParams map[string]string
+    Role           AgentRole
+    Engine         string
+    Version        string
+    Entry          string
+    Protocol       string
+    Provider       string
+    Model          string // requested model
+    EffectiveModel string
+    APIKey         string
+    BaseURL        string
+    Kwargs         map[string]string
+    ModelParams    map[string]string
+    Warnings       []string
 }
 ```
 
 This value is the boundary between raw YAML/CLI/credential inputs and adapter
 construction. Map fields are cloned while resolving, so later mutations of the
-loaded eval config do not alter a resolved runner or judge configuration. It
-does not require every adapter to consume every field; capability validation
-remains adapter-specific.
+loaded eval config do not alter a resolved runner or judge configuration.
+Protocol, effective model, and warnings are filled by the subsequent adapter
+capability pass.
 
 ## Two Pipelines
 
@@ -182,7 +185,13 @@ Rules:
 
 ## Agent Consumption Rules
 
-The unified layer is responsible for producing `ResolvedAgentConfig`, but **how to consume unsupported settings remains up to each adapter**. The historical non-Qoder `auto` normalization is centralized during resolution so the factory does not reinterpret raw configuration.
+The unified credential layer produces the requested `ResolvedAgentConfig`.
+`agent.ResolveAdapterConfig` then applies the selected adapter's declared
+protocol and capability contract once, before construction. It records
+`EffectiveModel` separately and reports unsupported explicit settings instead
+of leaving each adapter to reinterpret the same raw values during execution.
+The historical non-Qoder `auto` normalization remains in credential resolution
+for compatibility.
 
 ### claude-code
 

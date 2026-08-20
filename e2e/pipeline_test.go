@@ -104,6 +104,85 @@ func TestPipeline_FullRun_WithMockEngine(t *testing.T) {
 	}
 }
 
+// TestPipeline_ReportsRequestedAndEffectiveModel verifies that an adapter
+// fallback is visible without changing the legacy requested model_name field.
+func TestPipeline_ReportsRequestedAndEffectiveModel(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	outputDir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "SKILL.md"), "# Effective config fixture\n")
+	writeFile(t, filepath.Join(dir, "evals", "eval.yaml"), `schema_version: v1alpha1
+environment:
+  type: none
+engine:
+  name: qoder-cli
+  model:
+    provider: dashscope
+    name: qwen3.6-plus
+cases:
+  files:
+    - evals/cases/effective.yaml
+  defaults:
+    timeout_seconds: 30
+    max_turns: 1
+report:
+  formats: [json]
+`)
+	writeFile(t, filepath.Join(dir, "evals", "cases", "effective.yaml"), `id: effective-config
+title: Effective configuration reporting
+input:
+  prompt: Say hello.
+expect:
+  must_contain:
+    - hello
+`)
+
+	result := Run(t, RunConfig{
+		Env:     mockEngineEnv(t, "MOCK_RESPONSE=hello"),
+		WorkDir: dir,
+		Timeout: 60 * time.Second,
+	}, "run", filepath.Join(dir, "evals", "eval.yaml"), "--output-dir", outputDir, "--verbose")
+	if result.ExitCode != 0 {
+		t.Fatalf("effective config run failed: exit=%d\nstdout=%s\nstderr=%s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	for _, want := range []string{
+		"requested.model=qwen3.6-plus effective.model=",
+		`does not support model \"qwen3.6-plus\"`,
+	} {
+		if !strings.Contains(result.Stdout, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, result.Stdout)
+		}
+	}
+
+	data, err := os.ReadFile(filepath.Join(outputDir, "iteration-1", "result.json"))
+	if err != nil {
+		t.Fatalf("read result.json: %v", err)
+	}
+	var report struct {
+		ModelName string `json:"model_name"`
+		Requested struct {
+			Protocol string `json:"protocol"`
+			Provider string `json:"provider"`
+			Model    string `json:"model"`
+		} `json:"requested_configuration"`
+		Effective struct {
+			Protocol string `json:"protocol"`
+			Provider string `json:"provider"`
+			Model    string `json:"model"`
+		} `json:"effective_configuration"`
+	}
+	if err := json.Unmarshal(data, &report); err != nil {
+		t.Fatalf("parse result.json: %v", err)
+	}
+	if report.ModelName != "dashscope/qwen3.6-plus" || report.Requested.Model != "qwen3.6-plus" || report.Effective.Model != "" {
+		t.Fatalf("requested/effective report mismatch: %+v", report)
+	}
+	if report.Requested.Protocol != "qoder" || report.Effective.Protocol != "qoder" || report.Effective.Provider != "dashscope" {
+		t.Fatalf("protocol/provider report mismatch: %+v", report)
+	}
+}
+
 // TestPipeline_AgentJudgeCorrectionRetry verifies the bounded correction path
 // through the real CLI pipeline with deterministic engine output.
 func TestPipeline_AgentJudgeCorrectionRetry(t *testing.T) {

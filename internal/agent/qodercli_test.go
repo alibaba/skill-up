@@ -490,16 +490,11 @@ func TestQoderCLIEffectiveModelName_AllowsSupportedModel(t *testing.T) {
 }
 
 func TestQoderCLIEffectiveModelName_IgnoresUnsupportedConfiguredModel(t *testing.T) {
-	// Not parallel: captureStdout redirects package-level log output.
+	t.Parallel()
 
 	ag := NewQoderCLIAgent(Config{ModelProvider: "anthropic", ModelName: "claude-sonnet-4-6"})
-	output := captureStdout(t, func() {
-		if got := ag.effectiveModelName(context.Background()); got != "" {
-			t.Fatalf("effectiveModelName() = %q, want empty", got)
-		}
-	})
-	if !strings.Contains(output, `level=WARNING msg="qodercli ignores configured model \"claude-sonnet-4-6\" and will use local qoder model settings instead"`) {
-		t.Fatalf("expected warning log, got %q", output)
+	if got := ag.effectiveModelName(context.Background()); got != "" {
+		t.Fatalf("effectiveModelName() = %q, want empty", got)
 	}
 }
 
