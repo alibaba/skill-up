@@ -275,7 +275,7 @@ func appendUniqueWarning(warnings []string, warning string) []string {
 	return append(warnings, warning)
 }
 
-// LogAdapterConfig reports requested/effective values and actionable warnings.
+// LogAdapterConfig reports requested/applied values and actionable warnings.
 func LogAdapterConfig(ctx context.Context, params credential.ResolvedAgentConfig) {
 	logging.DebugContextf(
 		ctx,

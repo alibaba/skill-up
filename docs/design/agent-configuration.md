@@ -71,6 +71,40 @@ provider. If Codex falls back to local provider selection, both the applied
 provider and model are empty and credentials resolved for the rejected provider
 are not injected into the fallback invocation.
 
+## Model connection boundary
+
+Provider configuration, a resolved model connection, and an agent's native
+configuration are related but distinct layers:
+
+1. Provider configuration is static input. It may contain credentials and
+   protocol-specific endpoints for a named namespace such as `dashscope`.
+2. A resolved model connection selects one `(provider, protocol)` combination,
+   preserves the source of each selected value, and records whether auth and
+   routing are injected or delegated to agent-local state.
+3. The adapter materializes that connection as CLI flags, environment
+   variables, or native agent configuration. Native configuration files and
+   local login databases remain owned by the agent and may be opaque to
+   skill-up.
+
+`ResolvedAgentConfig` currently spans the first two steps and the capability
+pass computes what skill-up can apply. A later protocol-aware resolver may
+introduce an internal `ResolvedModelConnection`, but it should not be confused
+with observed runtime state: it describes the connection selected for the
+adapter, not proof of the provider, model, or credential ultimately used by the
+agent.
+
+This layering is informed by Harbor's
+[`ProviderAccess`, `ModelConnectionSpec`, and `ResolvedModelConnection`](https://github.com/harbor-framework/harbor/blob/71180a2e6fb40626b661c13f261b1d44517ad91a/src/harbor/agents/model_connection.py),
+while retaining skill-up's different compatibility constraints. In particular,
+skill-up must not infer the provider from an opaque model ID, fan one credential
+out to unrelated provider aliases, or treat a resolved connection as an
+observation. Explicit empty values must also remain distinguishable from absent
+values where an empty value intentionally suppresses inherited configuration.
+
+Native agent configuration support, if added later, belongs after connection
+resolution. It must use the same adapter materialization boundary rather than
+becoming a second provider/model/credential resolver.
+
 ## Legacy slashed model compatibility
 
 `--model provider/name` is a public, historical CLI form and remains supported.
@@ -113,7 +147,7 @@ These translations are covered by `action/main_test.py`. Any future explicit
 - `engine.version`, `engine.entry`, and `engine.model.params` now produce
   warnings when ineffective, but their final implementation/removal is deferred
   to the installation and schema phases.
-- The actual installed CLI version is not yet recorded as effective runtime
+- The actual installed CLI version is not yet recorded as observed runtime
   configuration.
 
 See [Issue #196](https://github.com/alibaba/skill-up/issues/196) for the staged

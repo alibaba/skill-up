@@ -46,7 +46,7 @@ Both are parsed by **`parseSessionFile`** in `internal/agent/claude_code.go` (`c
 ```
 internal/agent/
 ├── agent.go           # Core interface definitions: Agent, SessionResult, BaseAgent
-├── capabilities.go    # Adapter protocol/capability declarations and effective config resolution
+├── capabilities.go    # Adapter protocol/capability declarations and applied config resolution
 ├── factory.go         # DetectAgent / DetectAgentWithResolvedConfig factory functions
 ├── claude_code.go     # ClaudeCodeAgent implementation
 ├── qodercli.go        # QoderCLIAgent implementation

@@ -122,15 +122,15 @@ engine:
     name: qwen3.6-plus
 cases:
   files:
-    - evals/cases/effective.yaml
+    - evals/cases/applied.yaml
   defaults:
     timeout_seconds: 30
     max_turns: 1
 report:
   formats: [json]
 `)
-	writeFile(t, filepath.Join(dir, "evals", "cases", "effective.yaml"), `id: effective-config
-title: Effective configuration reporting
+	writeFile(t, filepath.Join(dir, "evals", "cases", "applied.yaml"), `id: applied-config
+title: Applied configuration reporting
 input:
   prompt: Say hello.
 expect:
