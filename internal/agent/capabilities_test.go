@@ -27,7 +27,7 @@ func TestCapabilitiesForEngine(t *testing.T) {
 		{engine: "codex", protocol: ProtocolOpenAI, modelPolicy: ModelPolicyCodexProvider, supportsBaseURL: true, kwarg: KwargBypassSandbox},
 		{engine: "qoder-cli", protocol: ProtocolQoder, modelPolicy: ModelPolicyQoderTier, kwarg: KwargEdition},
 		{engine: "qwen", protocol: ProtocolOpenAI, modelPolicy: ModelPolicyPassthrough, supportsBaseURL: true},
-		{engine: "custom-agent", protocol: ProtocolCustom, modelPolicy: ModelPolicyPassthrough, supportsBaseURL: true, arbitraryKwargs: true},
+		{engine: "custom-agent", protocol: ProtocolCustom, modelPolicy: ModelPolicyPassthrough},
 	}
 	for _, tt := range tests {
 		t.Run(tt.engine, func(t *testing.T) {
@@ -137,7 +137,7 @@ func TestResolveAdapterConfig_ValidatesExplicitSettingsWithoutAliasing(t *testin
 	t.Parallel()
 
 	kwargs := map[string]string{
-		KwargBypassSandbox:       "not-a-bool",
+		KwargBypassSandbox:       "sensitive-invalid-value",
 		KwargMaxJSONLRecordBytes: "0",
 		"typo":                   "value",
 	}
@@ -161,8 +161,13 @@ func TestResolveAdapterConfig_ValidatesExplicitSettingsWithoutAliasing(t *testin
 			t.Fatalf("warnings = %v, want substring %q", got.Warnings, want)
 		}
 	}
-	if kwargs[KwargBypassSandbox] != "not-a-bool" || kwargs["typo"] != "value" {
+	if kwargs[KwargBypassSandbox] != "sensitive-invalid-value" || kwargs["typo"] != "value" {
 		t.Fatalf("ResolveAdapterConfig mutated source kwargs: %v", kwargs)
+	}
+	for _, warning := range got.Warnings {
+		if strings.Contains(warning, "sensitive-invalid-value") {
+			t.Fatalf("warning exposed invalid kwarg value: %q", warning)
+		}
 	}
 	params.ModelParams["reasoning"] = "low"
 	if got.ModelParams["reasoning"] != "high" {
@@ -180,8 +185,26 @@ func TestResolveAdapterConfig_QoderNormalizesUnsupportedEdition(t *testing.T) {
 	if got.Kwargs[KwargEdition] != qoderEditionGlobal {
 		t.Fatalf("edition = %q, want %q", got.Kwargs[KwargEdition], qoderEditionGlobal)
 	}
-	if !containsWarning(got.Warnings, "does not support edition") {
+	if !containsWarning(got.Warnings, "does not support the configured edition") {
 		t.Fatalf("warnings = %v, want unsupported edition warning", got.Warnings)
+	}
+}
+
+func TestResolveAdapterConfig_CustomRejectsUnusedTopLevelSettings(t *testing.T) {
+	t.Parallel()
+
+	got := ResolveAdapterConfig(credential.ResolvedAgentConfig{
+		Engine:  "custom-agent",
+		BaseURL: "https://unused.example.test",
+		Kwargs:  map[string]string{"profile": "unused"},
+	})
+	if got.AppliedBaseURL != "" || len(got.Kwargs) != 0 {
+		t.Fatalf("custom applied unused top-level settings: baseURL=%q kwargs=%v", got.AppliedBaseURL, got.Kwargs)
+	}
+	for _, want := range []string{"does not support base_url", `does not support kwarg "profile"`} {
+		if !containsWarning(got.Warnings, want) {
+			t.Fatalf("warnings = %v, want substring %q", got.Warnings, want)
+		}
 	}
 }
 

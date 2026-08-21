@@ -84,10 +84,8 @@ func CapabilitiesForEngine(engineName string) Capabilities {
 		return Capabilities{Protocol: ProtocolOpenAI, ModelPolicy: ModelPolicyPassthrough, SupportsBaseURL: true}
 	default:
 		return Capabilities{
-			Protocol:        ProtocolCustom,
-			ModelPolicy:     ModelPolicyPassthrough,
-			SupportsBaseURL: true,
-			ArbitraryKwargs: true,
+			Protocol:    ProtocolCustom,
+			ModelPolicy: ModelPolicyPassthrough,
 		}
 	}
 }
@@ -242,8 +240,8 @@ func validateKwargValue(params *credential.ResolvedAgentConfig, key, value strin
 			return
 		}
 		params.Warnings = appendUniqueWarning(params.Warnings, fmt.Sprintf(
-			"engine %q does not support edition %q; edition %q will be used",
-			params.Engine, value, qoderEditionGlobal,
+			"engine %q does not support the configured edition; edition %q will be used",
+			params.Engine, qoderEditionGlobal,
 		))
 		params.Kwargs[key] = qoderEditionGlobal
 	case KwargBypassSandbox:
@@ -251,8 +249,8 @@ func validateKwargValue(params *credential.ResolvedAgentConfig, key, value strin
 			return
 		}
 		params.Warnings = appendUniqueWarning(params.Warnings, fmt.Sprintf(
-			"engine %q requires boolean kwarg %q; invalid value %q is ignored",
-			params.Engine, key, value,
+			"engine %q requires boolean kwarg %q; the configured value is ignored",
+			params.Engine, key,
 		))
 		delete(params.Kwargs, key)
 	case KwargMaxJSONLRecordBytes, KwargMaxJSONLOutputBytes:
@@ -261,8 +259,8 @@ func validateKwargValue(params *credential.ResolvedAgentConfig, key, value strin
 			return
 		}
 		params.Warnings = appendUniqueWarning(params.Warnings, fmt.Sprintf(
-			"engine %q requires positive integer kwarg %q; invalid value %q is ignored",
-			params.Engine, key, value,
+			"engine %q requires positive integer kwarg %q; the configured value is ignored",
+			params.Engine, key,
 		))
 		delete(params.Kwargs, key)
 	}

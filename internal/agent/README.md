@@ -140,7 +140,7 @@ rejected Codex provider cannot leak its key or endpoint into local fallback.
 | Codex | `openai` | requires a usable Codex provider configuration | yes | `bypass_sandbox`, JSONL size limits |
 | QoderCLI | `qoder` | `lite`, `efficient`, `auto`, `performance`, `ultimate` | no | `edition` |
 | Qwen Code | `openai` | pass through | yes | none |
-| Custom Engine | `custom` | pass through | yes | arbitrary |
+| Custom Engine | `custom` | pass through | no; use `engine.custom.http.url` | none; use `engine.custom.kwargs` |
 
 Unsupported kwargs and invalid supported-kwarg values are removed from the
 adapter input after producing an actionable warning. `engine.version`,
