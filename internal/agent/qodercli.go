@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/observability"
@@ -28,6 +30,7 @@ type qoderCLIProfile struct {
 	binary         string
 	credentialEnv  string
 	exposeUsageEnv string
+	sessionEnv     string
 	configDir      string
 	installURL     string
 	execPathProbe  string
@@ -55,6 +58,8 @@ const (
 	qoderCNExposeTokenUsageEnv   = "QODERCN_EXPOSE_TOKEN_USAGE" //nolint:gosec // environment variable name, not a credential
 	qoderExposeTokenUsageEnabled = "true"
 	qoderJSONOutputFlag          = " --output-format json"
+	qoderSessionIDEnv            = "QODER_SESSION_ID"
+	qoderCNSessionIDEnv          = "QODERCN_SESSION_ID"
 )
 
 func qoderProfileForKwargs(kwargs map[string]string) qoderCLIProfile {
@@ -66,6 +71,7 @@ func qoderProfileForKwargs(kwargs map[string]string) qoderCLIProfile {
 			binary:         "qodercli",
 			credentialEnv:  credential.EnvQoderPersonalAccessToken,
 			exposeUsageEnv: qoderExposeTokenUsageEnv,
+			sessionEnv:     qoderSessionIDEnv,
 			configDir:      ".qoder",
 			installURL:     "https://qoder.com/install",
 			execPathProbe:  qoderExecPathProbeCmd,
@@ -76,6 +82,7 @@ func qoderProfileForKwargs(kwargs map[string]string) qoderCLIProfile {
 			binary:         "qodercn",
 			credentialEnv:  credential.EnvQoderCNPersonalAccessToken,
 			exposeUsageEnv: qoderCNExposeTokenUsageEnv,
+			sessionEnv:     qoderCNSessionIDEnv,
 			configDir:      ".qoder-cn",
 			installURL:     "https://static.qoder.com.cn/qoder-cli-cn/install.sh",
 			execPathProbe:  qoderCNExecPathProbeCmd,
@@ -155,13 +162,22 @@ func (a *QoderCLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 		}, err
 	}
 
-	envVars := a.qoderRunEnvVars()
+	sessionID := uuid.NewString()
+	envVars := a.qoderRunEnvVars(sessionID)
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))
+	a.pinQoderSessionEnv(&opts, sessionID)
 	ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, opts.Env)
 
 	result, err := rt.Exec(ctx, cmd, opts)
 	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result)
 	if sessionResult != nil {
+		if sessionResult.SessionID != "" && sessionResult.SessionID != sessionID {
+			return sessionResult, fmt.Errorf(
+				"%s returned session %q after launcher assigned %q",
+				a.profile.binary, sessionResult.SessionID, sessionID,
+			)
+		}
+		sessionResult.SessionID = sessionID
 		sessionResult.PromptDelivery = promptDelivery
 	}
 	if err != nil {
@@ -192,12 +208,24 @@ func (a *QoderCLIAgent) appliedModelName(_ context.Context) string {
 	return ""
 }
 
-func (a *QoderCLIAgent) qoderRunEnvVars() map[string]string {
+func (a *QoderCLIAgent) qoderRunEnvVars(sessionID string) map[string]string {
 	envVars := a.credentialEnvVars("", "")
 	if _, configured := envVars[a.profile.exposeUsageEnv]; !configured {
 		envVars[a.profile.exposeUsageEnv] = qoderExposeTokenUsageEnabled
 	}
+	if sessionID != "" {
+		envVars[a.profile.sessionEnv] = sessionID
+	}
 	return envVars
+}
+
+func (a *QoderCLIAgent) pinQoderSessionEnv(opts *ExecOptions, sessionID string) {
+	if opts.Env == nil {
+		opts.Env = make(map[string]string)
+	}
+	// Pin the launcher-assigned ID after all user/runtime env layers have
+	// merged so the Qoder process and its child tools observe one session.
+	opts.Env[a.profile.sessionEnv] = sessionID
 }
 
 func buildQoderRunCmd(instruction, model string) string {
@@ -231,7 +259,11 @@ func buildQoderResumeCmd(instruction, model, sessionID string) string {
 }
 
 func buildQoderResumeCmdForBinary(binary, instruction, model, sessionID string) string {
-	cmd := binary + " --permission-mode=bypass_permissions" + qoderJSONOutputFlag
+	// A resumed Qoder process selects the session through -r. Inherited Qoder
+	// session variables map to --session-id and conflict with --resume unless
+	// --fork-session is also used, so remove both editions before launching.
+	cmd := "unset " + qoderSessionIDEnv + " " + qoderCNSessionIDEnv + "; " +
+		binary + " --permission-mode=bypass_permissions" + qoderJSONOutputFlag
 	if model != "" {
 		cmd += " --model " + shellQuote(model)
 	}
@@ -334,7 +366,7 @@ func (a *QoderCLIAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOption
 	instruction := message.Content
 	cmd := buildQoderResumeCmdForBinary(a.profile.binary, instruction, a.appliedModelName(ctx), sessionID)
 
-	envVars := a.qoderRunEnvVars()
+	envVars := a.qoderRunEnvVars("")
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))
 	ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, opts.Env)
 
