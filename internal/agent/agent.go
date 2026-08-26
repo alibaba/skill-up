@@ -9,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/alibaba/skill-up/internal/credential"
@@ -47,19 +48,25 @@ var ErrAgentInstallFailed = errors.New("agent installation failed")
 
 // SessionResult holds the result of an agent session execution.
 type SessionResult struct {
-	Engine         string                  `json:"engine,omitempty"`
-	Model          string                  `json:"model,omitempty"`
-	SessionID      string                  `json:"session_id,omitempty"`
-	ExitCode       int                     `json:"exit_code"`
-	DurationMs     int64                   `json:"duration_ms"`
-	Turns          int                     `json:"turns"`
-	InputTokens    int                     `json:"input_tokens,omitempty"`
-	OutputTokens   int                     `json:"output_tokens,omitempty"`
-	FinalMessage   string                  `json:"final_message,omitempty"`
-	Stderr         string                  `json:"stderr,omitempty"`
-	Transcript     transcript.Transcript   `json:"transcript,omitempty"`
-	Artifacts      *SessionArtifacts       `json:"artifacts,omitempty"`
-	PromptDelivery *PromptDeliveryMetadata `json:"prompt_delivery,omitempty"`
+	Engine            string                  `json:"engine,omitempty"`
+	AppliedProtocol   string                  `json:"applied_protocol,omitempty"`
+	RequestedProvider string                  `json:"requested_provider,omitempty"`
+	AppliedProvider   string                  `json:"applied_provider,omitempty"`
+	RequestedModel    string                  `json:"requested_model,omitempty"`
+	AppliedModel      string                  `json:"applied_model,omitempty"`
+	Model             string                  `json:"model,omitempty"` // Agent-reported observed model; empty when unavailable.
+	Warnings          []string                `json:"warnings,omitempty"`
+	SessionID         string                  `json:"session_id,omitempty"`
+	ExitCode          int                     `json:"exit_code"`
+	DurationMs        int64                   `json:"duration_ms"`
+	Turns             int                     `json:"turns"`
+	InputTokens       int                     `json:"input_tokens,omitempty"`
+	OutputTokens      int                     `json:"output_tokens,omitempty"`
+	FinalMessage      string                  `json:"final_message,omitempty"`
+	Stderr            string                  `json:"stderr,omitempty"`
+	Transcript        transcript.Transcript   `json:"transcript,omitempty"`
+	Artifacts         *SessionArtifacts       `json:"artifacts,omitempty"`
+	PromptDelivery    *PromptDeliveryMetadata `json:"prompt_delivery,omitempty"`
 }
 
 // SessionResumer is an optional interface that agents may implement to support
@@ -106,11 +113,15 @@ type Config struct {
 	EnvVars         map[string]string
 	// SkillPath is the directory where the agent reads skills.
 	// If not set, agent uses default location (~/.claude/skills/).
-	SkillPath     string
-	ModelName     string
-	ModelProvider string
-	APIKey        string
-	BaseURL       string
+	SkillPath          string
+	ModelName          string
+	RequestedModelName string
+	RequestedProvider  string
+	ModelProvider      string
+	Protocol           string
+	Warnings           []string
+	APIKey             string
+	BaseURL            string
 	// Kwargs carries agent-specific key/value options forwarded from
 	// EngineConfig.Kwargs. Each agent reads only the keys it understands;
 	// unknown keys are ignored. See agent kwargs helpers in kwargs.go.
@@ -178,6 +189,7 @@ func NewBaseAgent(cfg Config) BaseAgent {
 	if cfg.EnvVars == nil {
 		cfg.EnvVars = make(map[string]string)
 	}
+	cfg.Warnings = slices.Clone(cfg.Warnings)
 
 	return BaseAgent{
 		Cfg:     cfg,
@@ -197,7 +209,11 @@ func (a *BaseAgent) SkillPath() string {
 
 // CheckCredentials checks if the required credentials are set.
 func (a *BaseAgent) CheckCredentials(ctx context.Context) error {
-	switch a.Cfg.ModelProvider {
+	provider := a.Cfg.RequestedProvider
+	if provider == "" {
+		provider = a.Cfg.ModelProvider
+	}
+	switch provider {
 	case agentProviderOpenAI:
 		a.logCredentialStatus(
 			ctx,
@@ -372,10 +388,40 @@ func (a *BaseAgent) buildAgentObservabilityAttrs(extra map[string]string) map[st
 	if a.Name() != "" {
 		attrs["skill_up.engine"] = a.Name()
 	}
+	if a.Cfg.Protocol != "" {
+		attrs["skill_up.protocol.applied"] = a.Cfg.Protocol
+	}
+	if a.Cfg.ModelProvider != "" {
+		attrs["skill_up.provider.applied"] = a.Cfg.ModelProvider
+	}
+	if a.Cfg.RequestedProvider != "" {
+		attrs["skill_up.provider.requested"] = a.Cfg.RequestedProvider
+	}
 	if a.Cfg.ModelName != "" {
 		attrs["skill_up.model"] = formatAgentModel(a.Cfg.ModelProvider, a.Cfg.ModelName)
+		attrs["skill_up.model.applied"] = formatAgentModel(a.Cfg.ModelProvider, a.Cfg.ModelName)
+	}
+	if a.Cfg.RequestedModelName != "" {
+		attrs["skill_up.model.requested"] = formatAgentModel(a.Cfg.RequestedProvider, a.Cfg.RequestedModelName)
 	}
 	return attrs
+}
+
+func (a *BaseAgent) annotateSessionResult(result *SessionResult) {
+	if result == nil {
+		return
+	}
+	if result.Engine == "" {
+		result.Engine = a.Name()
+	}
+	result.AppliedProtocol = a.Cfg.Protocol
+	result.RequestedProvider = a.Cfg.RequestedProvider
+	result.AppliedProvider = a.Cfg.ModelProvider
+	result.RequestedModel = a.Cfg.RequestedModelName
+	result.AppliedModel = a.Cfg.ModelName
+	for _, warning := range a.Cfg.Warnings {
+		result.Warnings = appendUniqueWarning(result.Warnings, warning)
+	}
 }
 
 func formatAgentModel(provider, model string) string {

@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Agent adapters now declare their protocol, model, endpoint, and kwarg
+  capabilities. Explicit unsupported settings are surfaced before case
+  execution. Requested and applied model configuration is recorded separately
+  from optional agent-reported observations in session results and
+  `result.json`, without exposing credentials or guessing local CLI state.
 - The built-in `qodercli` engine now supports Qoder CLI CN through
   `engine.kwargs.edition: cn`, including CN installation, authentication,
   Skill/MCP execution, multi-turn session resume, token usage, and transcript

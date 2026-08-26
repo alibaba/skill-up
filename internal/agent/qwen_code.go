@@ -124,14 +124,15 @@ func (a *QwenCodeAgent) CheckCredentials(ctx context.Context) error {
 
 // Run executes qwen non-interactively (instruction piped to `qwen --yolo`) and
 // builds a transcript from the session file (falling back to stdout).
-func (a *QwenCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (*SessionResult, error) {
+func (a *QwenCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (finalResult *SessionResult, finalErr error) {
+	defer func() { a.annotateSessionResult(finalResult) }()
 	if err := requireBashTargetShell(rt); err != nil {
 		return nil, fmt.Errorf("%s: %w", a.Name(), err)
 	}
 	start := time.Now()
 
 	instruction := BuildInstructionFromMessages(messages)
-	model := a.effectiveModelName(ctx)
+	model := a.appliedModelName(ctx)
 
 	envVars := a.credentialEnvVars(credential.EnvOpenAIAPIKey, credential.EnvOpenAIBaseURL)
 	// Qwen Code resolves the active model from OPENAI_MODEL when --model is not
@@ -195,7 +196,7 @@ func (a *QwenCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 	return sessionResult, nil
 }
 
-func (a *QwenCodeAgent) effectiveModelName(_ context.Context) string {
+func (a *QwenCodeAgent) appliedModelName(_ context.Context) string {
 	return strings.TrimSpace(a.Cfg.ModelName)
 }
 

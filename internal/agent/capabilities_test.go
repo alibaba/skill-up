@@ -1,0 +1,262 @@
+package agent
+
+import (
+	"context"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/alibaba/skill-up/internal/credential"
+	"github.com/alibaba/skill-up/internal/logging"
+)
+
+const testDashscopeProvider = "dashscope"
+
+func TestCapabilitiesForEngine(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		engine          string
+		protocol        Protocol
+		modelPolicy     ModelPolicy
+		supportsBaseURL bool
+		kwarg           string
+		arbitraryKwargs bool
+	}{
+		{engine: "claude_code", protocol: ProtocolAnthropic, modelPolicy: ModelPolicyPassthrough, supportsBaseURL: true},
+		{engine: "codex", protocol: ProtocolOpenAI, modelPolicy: ModelPolicyCodexProvider, supportsBaseURL: true, kwarg: KwargBypassSandbox},
+		{engine: "qoder-cli", protocol: ProtocolQoder, modelPolicy: ModelPolicyQoderTier, kwarg: KwargEdition},
+		{engine: "qwen", protocol: ProtocolOpenAI, modelPolicy: ModelPolicyPassthrough, supportsBaseURL: true},
+		{engine: "custom-agent", protocol: ProtocolCustom, modelPolicy: ModelPolicyPassthrough},
+	}
+	for _, tt := range tests {
+		t.Run(tt.engine, func(t *testing.T) {
+			t.Parallel()
+			got := CapabilitiesForEngine(tt.engine)
+			if got.Protocol != tt.protocol || got.ModelPolicy != tt.modelPolicy || got.SupportsBaseURL != tt.supportsBaseURL || got.ArbitraryKwargs != tt.arbitraryKwargs {
+				t.Fatalf("CapabilitiesForEngine(%q) = %+v", tt.engine, got)
+			}
+			if tt.kwarg != "" && !slices.Contains(got.SupportedKwargs, tt.kwarg) {
+				t.Fatalf("CapabilitiesForEngine(%q).SupportedKwargs = %v, want %q", tt.engine, got.SupportedKwargs, tt.kwarg)
+			}
+		})
+	}
+}
+
+func TestResolveAdapterConfig_ModelPolicies(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		params       credential.ResolvedAgentConfig
+		wantProtocol Protocol
+		wantApplied  string
+		wantProvider string
+		wantWarning  string
+	}{
+		{
+			name:         "claude passthrough",
+			params:       credential.ResolvedAgentConfig{Engine: "claude_code", Model: " claude-sonnet-4-6 "},
+			wantProtocol: ProtocolAnthropic,
+			wantApplied:  "claude-sonnet-4-6",
+		},
+		{
+			name:         "codex custom provider",
+			params:       credential.ResolvedAgentConfig{Engine: "codex", Provider: testDashscopeProvider, Model: "qwen3.6-plus", BaseURL: "https://example.test/v1"},
+			wantProtocol: ProtocolOpenAI,
+			wantApplied:  "qwen3.6-plus",
+			wantProvider: testDashscopeProvider,
+		},
+		{
+			name:         "codex unusable provider",
+			params:       credential.ResolvedAgentConfig{Engine: "codex", Provider: testDashscopeProvider, Model: "qwen3.6-plus"},
+			wantProtocol: ProtocolOpenAI,
+			wantWarning:  "requires base_url",
+		},
+		{
+			name:         "qoder supported tier",
+			params:       credential.ResolvedAgentConfig{Engine: "qodercli", Model: "auto"},
+			wantProtocol: ProtocolQoder,
+			wantApplied:  "auto",
+		},
+		{
+			name:         "qoder unsupported model",
+			params:       credential.ResolvedAgentConfig{Engine: "qodercli", Model: "qwen3.6-plus"},
+			wantProtocol: ProtocolQoder,
+			wantWarning:  "does not support model",
+		},
+		{
+			name:         "qwen passthrough",
+			params:       credential.ResolvedAgentConfig{Engine: "qwen_code", Model: "qwen3-coder-plus"},
+			wantProtocol: ProtocolOpenAI,
+			wantApplied:  "qwen3-coder-plus",
+		},
+		{
+			name:         "custom passthrough",
+			params:       credential.ResolvedAgentConfig{Engine: "my-agent", Model: "opaque/model"},
+			wantProtocol: ProtocolCustom,
+			wantApplied:  "opaque/model",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := ResolveAdapterConfig(tt.params)
+			if got.Protocol != string(tt.wantProtocol) || got.AppliedProvider != tt.wantProvider || got.AppliedModel != tt.wantApplied {
+				t.Fatalf("ResolveAdapterConfig() protocol/provider/model = %q/%q/%q, want %q/%q/%q", got.Protocol, got.AppliedProvider, got.AppliedModel, tt.wantProtocol, tt.wantProvider, tt.wantApplied)
+			}
+			if got.Model != tt.params.Model {
+				t.Fatalf("requested Model = %q, want preserved %q", got.Model, tt.params.Model)
+			}
+			if tt.wantWarning != "" && !containsWarning(got.Warnings, tt.wantWarning) {
+				t.Fatalf("warnings = %v, want substring %q", got.Warnings, tt.wantWarning)
+			}
+		})
+	}
+}
+
+func TestResolveAdapterConfig_CodexFallbackDoesNotForwardProviderCredential(t *testing.T) {
+	t.Parallel()
+
+	got := ResolveAdapterConfig(credential.ResolvedAgentConfig{ //nolint:gosec // dummy test credential
+		Engine: "codex", Provider: testDashscopeProvider, APIKey: "dashscope-test-key",
+	})
+	if got.Provider != testDashscopeProvider || got.APIKey != "dashscope-test-key" {
+		t.Fatalf("requested provider credential was mutated: %+v", got)
+	}
+	if got.AppliedProvider != "" || got.AppliedModel != "" || got.AppliedAPIKey != "" || got.AppliedBaseURL != "" {
+		t.Fatalf("fallback applied config = provider %q model %q key %q baseURL %q, want all omitted", got.AppliedProvider, got.AppliedModel, got.AppliedAPIKey, got.AppliedBaseURL)
+	}
+	if !containsWarning(got.Warnings, "provider-scoped credential are omitted") {
+		t.Fatalf("Warnings = %v, want provider fallback warning even without a model", got.Warnings)
+	}
+}
+
+func TestResolveAdapterConfig_ValidatesExplicitSettingsWithoutAliasing(t *testing.T) {
+	t.Parallel()
+
+	kwargs := map[string]string{
+		KwargBypassSandbox:       "sensitive-invalid-value",
+		KwargMaxJSONLRecordBytes: "0",
+		"typo":                   "value",
+	}
+	params := credential.ResolvedAgentConfig{
+		Engine:      "codex",
+		Version:     "1.2.3",
+		Entry:       "codex-custom",
+		Model:       "gpt-5.4",
+		Kwargs:      kwargs,
+		ModelParams: map[string]string{"reasoning": "high"},
+	}
+
+	got := ResolveAdapterConfig(params)
+	for _, key := range []string{KwargBypassSandbox, KwargMaxJSONLRecordBytes, "typo"} {
+		if _, ok := got.Kwargs[key]; ok {
+			t.Fatalf("invalid or unsupported kwarg %q was not removed: %v", key, got.Kwargs)
+		}
+	}
+	for _, want := range []string{"engine.version", "engine.entry", "engine.model.params", "requires boolean", "requires positive integer", "does not support kwarg"} {
+		if !containsWarning(got.Warnings, want) {
+			t.Fatalf("warnings = %v, want substring %q", got.Warnings, want)
+		}
+	}
+	if kwargs[KwargBypassSandbox] != "sensitive-invalid-value" || kwargs["typo"] != "value" {
+		t.Fatalf("ResolveAdapterConfig mutated source kwargs: %v", kwargs)
+	}
+	for _, warning := range got.Warnings {
+		if strings.Contains(warning, "sensitive-invalid-value") {
+			t.Fatalf("warning exposed invalid kwarg value: %q", warning)
+		}
+	}
+	params.ModelParams["reasoning"] = "low"
+	if got.ModelParams["reasoning"] != "high" {
+		t.Fatalf("resolved ModelParams aliases source: %v", got.ModelParams)
+	}
+}
+
+func TestResolveAdapterConfig_QoderNormalizesUnsupportedEdition(t *testing.T) {
+	t.Parallel()
+
+	got := ResolveAdapterConfig(credential.ResolvedAgentConfig{
+		Engine: "qodercli",
+		Kwargs: map[string]string{KwargEdition: "enterprise"},
+	})
+	if got.Kwargs[KwargEdition] != qoderEditionGlobal {
+		t.Fatalf("edition = %q, want %q", got.Kwargs[KwargEdition], qoderEditionGlobal)
+	}
+	if !containsWarning(got.Warnings, "does not support the configured edition") {
+		t.Fatalf("warnings = %v, want unsupported edition warning", got.Warnings)
+	}
+}
+
+func TestResolveAdapterConfig_CustomRejectsUnusedTopLevelSettings(t *testing.T) {
+	t.Parallel()
+
+	got := ResolveAdapterConfig(credential.ResolvedAgentConfig{
+		Engine:  "custom-agent",
+		BaseURL: "https://unused.example.test",
+		Kwargs:  map[string]string{"profile": "unused"},
+	})
+	if got.AppliedBaseURL != "" || len(got.Kwargs) != 0 {
+		t.Fatalf("custom applied unused top-level settings: baseURL=%q kwargs=%v", got.AppliedBaseURL, got.Kwargs)
+	}
+	for _, want := range []string{"does not support base_url", `does not support kwarg "profile"`} {
+		if !containsWarning(got.Warnings, want) {
+			t.Fatalf("warnings = %v, want substring %q", got.Warnings, want)
+		}
+	}
+}
+
+func TestBaseAgentAnnotateSessionResult(t *testing.T) {
+	t.Parallel()
+
+	base := NewBaseAgent(Config{
+		Name:               "codex",
+		Protocol:           string(ProtocolOpenAI),
+		RequestedProvider:  testDashscopeProvider,
+		ModelProvider:      testDashscopeProvider,
+		RequestedModelName: "requested-model",
+		ModelName:          "applied-model",
+		Warnings:           []string{"model fallback"},
+	})
+	result := &SessionResult{}
+	base.annotateSessionResult(result)
+	if result.Engine != "codex" || result.AppliedProtocol != string(ProtocolOpenAI) || result.RequestedProvider != testDashscopeProvider || result.AppliedProvider != testDashscopeProvider || result.RequestedModel != "requested-model" || result.AppliedModel != "applied-model" || result.Model != "" {
+		t.Fatalf("annotated session = %+v", result)
+	}
+	if !slices.Equal(result.Warnings, []string{"model fallback"}) {
+		t.Fatalf("Warnings = %v", result.Warnings)
+	}
+}
+
+func TestLogAdapterConfig_DoesNotExposeCredentialsOrEndpoint(t *testing.T) {
+	logging.SetVerbosity(1)
+	defer logging.SetVerbosity(0)
+
+	params := ResolveAdapterConfig(credential.ResolvedAgentConfig{ //nolint:gosec // dummy test credential and URL
+		Role:     credential.AgentRoleRunner,
+		Engine:   "codex",
+		Provider: "openai",
+		Model:    "gpt-5.4",
+		APIKey:   "secret-api-key",
+		BaseURL:  "https://user:secret@example.test/v1",
+	})
+	output := captureStdout(t, func() { LogAdapterConfig(context.Background(), params) })
+	for _, forbidden := range []string{"secret-api-key", "user:secret", "example.test"} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("configuration log exposed %q: %s", forbidden, output)
+		}
+	}
+	for _, want := range []string{"protocol=openai", "requested.provider=openai", "applied.provider=skill-up-openai", "requested.model=gpt-5.4", "applied.model=gpt-5.4"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("configuration log missing %q: %s", want, output)
+		}
+	}
+}
+
+func containsWarning(warnings []string, substring string) bool {
+	return slices.ContainsFunc(warnings, func(warning string) bool {
+		return strings.Contains(warning, substring)
+	})
+}

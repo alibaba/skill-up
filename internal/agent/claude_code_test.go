@@ -312,12 +312,12 @@ func TestBuildClaudeTextSessionResult(t *testing.T) {
 	}
 }
 
-func TestClaudeCodeEffectiveModelName_PassesThroughExplicitModel(t *testing.T) {
+func TestClaudeCodeAppliedModelName_PassesThroughExplicitModel(t *testing.T) {
 	t.Parallel()
 
 	ag := NewClaudeCodeAgent(Config{ModelName: "claude-sonnet-4-20250514"})
-	if got := ag.effectiveModelName(context.Background()); got != "claude-sonnet-4-20250514" {
-		t.Fatalf("effectiveModelName() = %q, want claude-sonnet-4-20250514", got)
+	if got := ag.appliedModelName(context.Background()); got != "claude-sonnet-4-20250514" {
+		t.Fatalf("appliedModelName() = %q, want claude-sonnet-4-20250514", got)
 	}
 }
 

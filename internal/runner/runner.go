@@ -499,24 +499,52 @@ func buildReportInput(
 	evalCfg *config.EvalConfig,
 	resolved credential.ResolvedAgentConfig,
 ) report.Input {
-	engineName := resolved.Engine
-	provider := resolved.Provider
-	modelName := resolved.Model
-	if engineName == "" {
-		engineName = evalCfg.Engine.Name
-		provider = evalCfg.Engine.Model.Provider
-		modelName = evalCfg.Engine.Model.Name
+	if resolved.Engine == "" {
+		resolved = credential.ResolvedAgentConfig{
+			Role:        credential.AgentRoleRunner,
+			Engine:      evalCfg.Engine.Name,
+			Version:     evalCfg.Engine.Version,
+			Entry:       evalCfg.Engine.Entry,
+			Provider:    evalCfg.Engine.Model.Provider,
+			Model:       evalCfg.Engine.Model.Name,
+			BaseURL:     evalCfg.Engine.Model.BaseURL,
+			Kwargs:      evalCfg.Engine.Kwargs,
+			ModelParams: evalCfg.Engine.Model.Params,
+		}
 	}
-	if provider != "" && modelName != "" {
-		modelName = provider + "/" + modelName
+	resolved = agent.ResolveAdapterConfig(resolved)
+	requested := &report.AgentConfiguration{
+		Role:     string(resolved.Role),
+		Engine:   resolved.Engine,
+		Protocol: resolved.Protocol,
+		Provider: resolved.Provider,
+		Model:    resolved.Model,
+		Version:  resolved.Version,
+	}
+	applied := &report.AgentConfiguration{
+		Role:     string(resolved.Role),
+		Engine:   resolved.Engine,
+		Protocol: resolved.Protocol,
+		Provider: resolved.AppliedProvider,
+		Model:    resolved.AppliedModel,
+	}
+	// Keep the legacy top-level model_name requested-value semantics for report
+	// compatibility. Consumers that need invocation identity should use the
+	// explicit applied_configuration object. Runtime identity is recorded only
+	// when an agent explicitly reports it.
+	modelName := resolved.Model
+	if resolved.Provider != "" && modelName != "" {
+		modelName = resolved.Provider + "/" + modelName
 	}
 	input := report.Input{
-		SkillName:     skillName,
-		SchemaVersion: evalCfg.SchemaVersion,
-		EngineName:    engineName,
-		ModelName:     modelName,
-		StartTime:     startTime,
-		EndTime:       endTime,
+		SkillName:              skillName,
+		SchemaVersion:          evalCfg.SchemaVersion,
+		EngineName:             resolved.Engine,
+		ModelName:              modelName,
+		RequestedConfiguration: requested,
+		AppliedConfiguration:   applied,
+		StartTime:              startTime,
+		EndTime:                endTime,
 	}
 
 	for _, caseID := range caseIDs {
@@ -535,8 +563,43 @@ func buildReportInput(
 		}
 	}
 	input.OverallTokens = input.TotalTokens + input.JudgeTokens
+	input.ObservedConfiguration = observedRunnerConfiguration(grouped, caseIDs)
 
 	return input
+}
+
+// observedRunnerConfiguration returns a run-level model only when every
+// executed runner session explicitly reported the same non-empty value. A
+// missing or mixed observation cannot safely describe the entire run.
+func observedRunnerConfiguration(grouped map[string]*caseResults, caseIDs []string) *report.AgentConfiguration {
+	observed := ""
+	seen := false
+	for _, caseID := range caseIDs {
+		results := grouped[caseID]
+		if results == nil {
+			continue
+		}
+		for _, result := range []*evaluator.EvalResult{results.withSkill, results.withoutSkill} {
+			if result == nil {
+				continue
+			}
+			seen = true
+			if result.SessionResult == nil || result.Model == "" {
+				return nil
+			}
+			if observed == "" {
+				observed = result.Model
+				continue
+			}
+			if result.Model != observed {
+				return nil
+			}
+		}
+	}
+	if !seen || observed == "" {
+		return nil
+	}
+	return &report.AgentConfiguration{Model: observed}
 }
 
 func evalResultToCaseResult(res *evaluator.EvalResult) report.CaseResult {
@@ -553,6 +616,7 @@ func evalResultToCaseResult(res *evaluator.EvalResult) report.CaseResult {
 		Configuration: res.Configuration,
 		Prompt:        res.Prompt,
 		Response:      responseContent(res),
+		ObservedModel: res.Model,
 		TurnResults:   evalTurnResultsToReport(res.TurnResults),
 	}
 	judgeSession := res.JudgeSession

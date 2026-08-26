@@ -24,24 +24,30 @@ Before entering adapter construction, produce one resolved value **per agent rol
 
 ```go
 type ResolvedAgentConfig struct {
-    Role        AgentRole
-    Engine      string
-    Version     string
-    Entry       string
-    Provider    string
-    Model       string
-    APIKey      string
-    BaseURL     string
-    Kwargs      map[string]string
-    ModelParams map[string]string
+    Role           AgentRole
+    Engine         string
+    Version        string
+    Entry          string
+    Protocol       string
+    Provider       string
+    Model          string // requested model
+    AppliedProvider string
+    AppliedModel    string
+    AppliedAPIKey   string
+    AppliedBaseURL  string
+    APIKey         string
+    BaseURL        string
+    Kwargs         map[string]string
+    ModelParams    map[string]string
+    Warnings       []string
 }
 ```
 
 This value is the boundary between raw YAML/CLI/credential inputs and adapter
 construction. Map fields are cloned while resolving, so later mutations of the
-loaded eval config do not alter a resolved runner or judge configuration. It
-does not require every adapter to consume every field; capability validation
-remains adapter-specific.
+loaded eval config do not alter a resolved runner or judge configuration.
+Protocol, applied model, and warnings are filled by the subsequent adapter
+capability pass.
 
 ## Two Pipelines
 
@@ -175,14 +181,20 @@ Examples:
 Rules:
 
 - Env vars only override the configuration corresponding to the current role's final provider
-- Do not treat "every env var found during scanning" as "effective configuration for the current role"
+- Do not treat "every env var found during scanning" as configuration adopted for the current role
 - When the provider is empty, skip the `${PROVIDER}_*` lookup and let the agent handle special-case fallbacks itself
 - Do not maintain extra special-case env-var names for any provider in the resolver; agent-specific variables like `QODER_PERSONAL_ACCESS_TOKEN` should be consumed by the agent itself
 - Logs must distinguish between "which global credentials were discovered" and "which provider's parameter set was actually adopted by the current role"
 
 ## Agent Consumption Rules
 
-The unified layer is responsible for producing `ResolvedAgentConfig`, but **how to consume unsupported settings remains up to each adapter**. The historical non-Qoder `auto` normalization is centralized during resolution so the factory does not reinterpret raw configuration.
+The unified credential layer produces the requested `ResolvedAgentConfig`.
+`agent.ResolveAdapterConfig` then applies the selected adapter's declared
+protocol and capability contract once, before construction. It records
+`AppliedModel` separately and reports unsupported explicit settings instead
+of leaving each adapter to reinterpret the same raw values during execution.
+The historical non-Qoder `auto` normalization remains in credential resolution
+for compatibility.
 
 ### claude-code
 

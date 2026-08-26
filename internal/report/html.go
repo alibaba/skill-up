@@ -61,6 +61,10 @@ type embeddedReportData struct {
 	SkillName          string           `json:"skill_name"`
 	EngineName         string           `json:"engine_name"`
 	ModelName          string           `json:"model_name"`
+	Protocol           string           `json:"protocol"`
+	RequestedModel     string           `json:"requested_model"`
+	AppliedModel       string           `json:"applied_model"`
+	ObservedModel      string           `json:"observed_model"`
 	StartTime          string           `json:"start_time"`
 	EvaluationWallTime string           `json:"evaluation_wall_time"`
 	AgentTokens        int              `json:"agent_tokens"`
@@ -273,6 +277,10 @@ func (r *HTMLReporter) buildTemplateData(in Input) (htmlReportData, error) {
 		SkillName:          in.SkillName,
 		EngineName:         in.EngineName,
 		ModelName:          in.ModelName,
+		Protocol:           configurationProtocol(in),
+		RequestedModel:     agentConfigurationModel(in.RequestedConfiguration),
+		AppliedModel:       agentConfigurationModel(in.AppliedConfiguration),
+		ObservedModel:      agentConfigurationModel(in.ObservedConfiguration),
 		StartTime:          in.StartTime.Format(time.RFC3339),
 		EvaluationWallTime: fmt.Sprintf("%.1fs", in.TotalDuration().Seconds()),
 		AgentTokens:        in.TotalTokens,
@@ -300,6 +308,16 @@ func (r *HTMLReporter) buildTemplateData(in Input) (htmlReportData, error) {
 		LogoDataURI:      logoDataURI,
 		EmbeddedDataJSON: template.JS(jsonBytes), //nolint:gosec // trusted internal data, not user input
 	}, nil
+}
+
+func configurationProtocol(in Input) string {
+	if in.AppliedConfiguration != nil {
+		return in.AppliedConfiguration.Protocol
+	}
+	if in.RequestedConfiguration != nil {
+		return in.RequestedConfiguration.Protocol
+	}
+	return ""
 }
 
 func statusIcon(s judge.Status) template.HTML {

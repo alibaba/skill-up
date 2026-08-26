@@ -36,18 +36,33 @@ func (r *MarkdownReporter) Write(_ context.Context, in Input) error {
 
 func writeMarkdownHeader(sb *strings.Builder, in Input) {
 	fmt.Fprintf(sb, "# Skill Report: %s\n\n", markdownText(in.SkillName))
-	wroteMetadata := false
 	if in.EngineName != "" {
 		fmt.Fprintf(sb, "- **Engine**: %s\n", markdownText(in.EngineName))
-		wroteMetadata = true
 	}
 	if in.ModelName != "" {
 		fmt.Fprintf(sb, "- **Model**: %s\n", markdownText(in.ModelName))
-		wroteMetadata = true
 	}
-	if wroteMetadata {
-		sb.WriteString("\n")
+	if protocol := configurationProtocol(in); protocol != "" {
+		fmt.Fprintf(sb, "- **Protocol**: %s\n", markdownText(protocol))
 	}
+	if requested := agentConfigurationModel(in.RequestedConfiguration); requested != "" {
+		fmt.Fprintf(sb, "- **Requested Model**: %s\n", markdownText(requested))
+	}
+	if in.AppliedConfiguration != nil {
+		applied := agentConfigurationModel(in.AppliedConfiguration)
+		if applied == "" && in.RequestedConfiguration != nil && in.RequestedConfiguration.Model != "" {
+			applied = "none (delegated to local/default selection)"
+		}
+		if applied != "" {
+			fmt.Fprintf(sb, "- **Applied Model**: %s\n", markdownText(applied))
+		}
+	}
+	observed := agentConfigurationModel(in.ObservedConfiguration)
+	if observed == "" {
+		observed = "unknown"
+	}
+	fmt.Fprintf(sb, "- **Observed Model**: %s\n", markdownText(observed))
+	sb.WriteString("\n")
 }
 
 func writeMarkdownSummary(sb *strings.Builder, in Input) {

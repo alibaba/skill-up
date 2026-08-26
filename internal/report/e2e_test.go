@@ -55,8 +55,15 @@ func buildRealisticInput() Input {
 		SchemaVersion: "v1alpha1",
 		EngineName:    "codex",
 		ModelName:     "openai/gpt-5.4",
-		StartTime:     start,
-		EndTime:       end,
+		RequestedConfiguration: &AgentConfiguration{
+			Role: "runner", Engine: "codex", Protocol: "openai", Provider: "openai", Model: "gpt-5.4",
+		},
+		AppliedConfiguration: &AgentConfiguration{
+			Role: "runner", Engine: "codex", Protocol: "openai", Provider: "openai", Model: "gpt-5.4",
+		},
+		ObservedConfiguration: &AgentConfiguration{Model: "gpt-5.4"},
+		StartTime:             start,
+		EndTime:               end,
 		CaseResults: []CaseResult{
 			{
 				CaseID:     "identify-null-bug",
@@ -219,6 +226,7 @@ func TestE2E_JSONReporter_FullPipeline(t *testing.T) {
 	if parsed.EngineName != "codex" {
 		t.Fatalf("engine_name: want 'codex', got %q", parsed.EngineName)
 	}
+	assertReportConfigurations(t, parsed)
 
 	// All 4 cases preserved.
 	if len(parsed.CaseResults) != 4 {
@@ -261,6 +269,16 @@ func TestE2E_JSONReporter_FullPipeline(t *testing.T) {
 	}
 	if errorCase.Grading != nil {
 		t.Fatal("ERROR case should NOT have grading")
+	}
+}
+
+func assertReportConfigurations(t *testing.T, parsed Input) {
+	t.Helper()
+	if parsed.RequestedConfiguration == nil || parsed.AppliedConfiguration == nil || parsed.ObservedConfiguration == nil {
+		t.Fatalf("requested/applied/observed configuration missing: %+v", parsed)
+	}
+	if parsed.RequestedConfiguration.Model != "gpt-5.4" || parsed.AppliedConfiguration.Protocol != "openai" || parsed.ObservedConfiguration.Model != "gpt-5.4" {
+		t.Fatalf("requested/applied/observed configuration = %+v / %+v / %+v", parsed.RequestedConfiguration, parsed.AppliedConfiguration, parsed.ObservedConfiguration)
 	}
 }
 
@@ -411,6 +429,11 @@ func TestE2E_HTMLReporter_FullPipeline(t *testing.T) {
 	}
 	if !strings.Contains(content, "gpt-5.4") {
 		t.Fatal("HTML should contain model name")
+	}
+	for _, want := range []string{`"protocol":"openai"`, `"requested_model":"openai/gpt-5.4"`, `"applied_model":"openai/gpt-5.4"`, `"observed_model":"gpt-5.4"`} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("HTML should contain configuration field %s", want)
+		}
 	}
 }
 

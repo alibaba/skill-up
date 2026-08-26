@@ -438,11 +438,67 @@ func TestBuildReportInput_UsesResolvedRunnerIdentity(t *testing.T) {
 		Engine:   "codex",
 		Provider: "dashscope",
 		Model:    "qwen3.6-plus",
+		BaseURL:  "https://dashscope.example.com/v1",
 	}
 
 	input := buildReportInput("s", map[string]*caseResults{}, nil, time.Time{}, time.Time{}, evalCfg, resolved)
 	if input.EngineName != "codex" || input.ModelName != "dashscope/qwen3.6-plus" {
 		t.Fatalf("report identity = %s/%s, want resolved codex/dashscope/qwen3.6-plus", input.EngineName, input.ModelName)
+	}
+	if input.RequestedConfiguration == nil || input.AppliedConfiguration == nil {
+		t.Fatalf("report configurations missing: %+v", input)
+	}
+	if input.RequestedConfiguration.Model != "qwen3.6-plus" || input.AppliedConfiguration.Model != "qwen3.6-plus" || input.AppliedConfiguration.Protocol != "openai" {
+		t.Fatalf("report requested/applied configuration = %+v / %+v", input.RequestedConfiguration, input.AppliedConfiguration)
+	}
+	if input.ObservedConfiguration != nil {
+		t.Fatalf("ObservedConfiguration = %+v, want nil without agent-reported model", input.ObservedConfiguration)
+	}
+}
+
+func TestBuildReportInput_DistinguishesRequestedModelFromLocalFallback(t *testing.T) {
+	t.Parallel()
+
+	evalCfg := &config.EvalConfig{Engine: config.EngineConfig{Name: "codex"}}
+	resolved := credential.ResolvedAgentConfig{
+		Role:     credential.AgentRoleRunner,
+		Engine:   "codex",
+		Provider: "dashscope",
+		Model:    "qwen3.6-plus",
+	}
+	input := buildReportInput("s", map[string]*caseResults{}, nil, time.Time{}, time.Time{}, evalCfg, resolved)
+	if input.ModelName != "dashscope/qwen3.6-plus" {
+		t.Fatalf("ModelName = %q, want legacy requested identity", input.ModelName)
+	}
+	if input.RequestedConfiguration.Model != "qwen3.6-plus" || input.AppliedConfiguration.Provider != "" || input.AppliedConfiguration.Model != "" {
+		t.Fatalf("report requested/applied configuration = %+v / %+v", input.RequestedConfiguration, input.AppliedConfiguration)
+	}
+	if input.ObservedConfiguration != nil {
+		t.Fatalf("ObservedConfiguration = %+v, want nil for unobservable local fallback", input.ObservedConfiguration)
+	}
+}
+
+func TestBuildReportInput_ObservesModelOnlyWhenEverySessionAgrees(t *testing.T) {
+	t.Parallel()
+
+	evalCfg := &config.EvalConfig{Engine: config.EngineConfig{Name: "custom"}}
+	resolved := credential.ResolvedAgentConfig{Role: credential.AgentRoleRunner, Engine: "custom"}
+	grouped := map[string]*caseResults{
+		"one": {withSkill: &evaluator.EvalResult{SessionResult: &agent.SessionResult{Model: "reported-model"}}},
+		"two": {withSkill: &evaluator.EvalResult{SessionResult: &agent.SessionResult{Model: "reported-model"}}},
+	}
+	input := buildReportInput("s", grouped, []string{"one", "two"}, time.Time{}, time.Time{}, evalCfg, resolved)
+	if input.ObservedConfiguration == nil || input.ObservedConfiguration.Model != "reported-model" {
+		t.Fatalf("ObservedConfiguration = %+v, want unanimous reported model", input.ObservedConfiguration)
+	}
+	if len(input.CaseResults) != 2 || input.CaseResults[0].ObservedModel != "reported-model" {
+		t.Fatalf("case observations = %+v", input.CaseResults)
+	}
+
+	grouped["two"].withSkill.Model = ""
+	input = buildReportInput("s", grouped, []string{"one", "two"}, time.Time{}, time.Time{}, evalCfg, resolved)
+	if input.ObservedConfiguration != nil {
+		t.Fatalf("ObservedConfiguration = %+v, want nil for partial observation", input.ObservedConfiguration)
 	}
 }
 

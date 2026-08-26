@@ -15,17 +15,42 @@ type Reporter interface {
 
 // Input aggregates run results for reporting.
 type Input struct {
-	SkillName     string           `json:"skill_name"`
-	SchemaVersion string           `json:"schema_version"`
-	EngineName    string           `json:"engine_name"`
-	ModelName     string           `json:"model_name"`
-	StartTime     time.Time        `json:"start_time"`
-	EndTime       time.Time        `json:"end_time"`
-	CaseResults   []CaseResult     `json:"case_results"`
-	TotalTokens   int              `json:"total_tokens"` // tested-agent tokens across all configurations
-	JudgeTokens   int              `json:"judge_tokens"`
-	OverallTokens int              `json:"overall_tokens"`
-	Benchmark     *BenchmarkResult `json:"benchmark,omitempty"`
+	SkillName              string              `json:"skill_name"`
+	SchemaVersion          string              `json:"schema_version"`
+	EngineName             string              `json:"engine_name"`
+	ModelName              string              `json:"model_name"`
+	RequestedConfiguration *AgentConfiguration `json:"requested_configuration,omitempty"`
+	AppliedConfiguration   *AgentConfiguration `json:"applied_configuration,omitempty"`
+	ObservedConfiguration  *AgentConfiguration `json:"observed_configuration,omitempty"`
+	StartTime              time.Time           `json:"start_time"`
+	EndTime                time.Time           `json:"end_time"`
+	CaseResults            []CaseResult        `json:"case_results"`
+	TotalTokens            int                 `json:"total_tokens"` // tested-agent tokens across all configurations
+	JudgeTokens            int                 `json:"judge_tokens"`
+	OverallTokens          int                 `json:"overall_tokens"`
+	Benchmark              *BenchmarkResult    `json:"benchmark,omitempty"`
+}
+
+// AgentConfiguration is a credential-free configuration snapshot. Requested
+// and applied snapshots describe skill-up's inputs and invocation. An observed
+// snapshot contains only values explicitly reported by the agent runtime.
+type AgentConfiguration struct {
+	Role     string `json:"role,omitempty"`
+	Engine   string `json:"engine,omitempty"`
+	Protocol string `json:"protocol,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Version  string `json:"version,omitempty"`
+}
+
+func agentConfigurationModel(configuration *AgentConfiguration) string {
+	if configuration == nil || configuration.Model == "" {
+		return ""
+	}
+	if configuration.Provider == "" {
+		return configuration.Model
+	}
+	return configuration.Provider + "/" + configuration.Model
 }
 
 // TotalDuration calculates the total wall-clock duration from StartTime to EndTime.
@@ -114,10 +139,11 @@ type CaseResult struct {
 	Error             string            `json:"error,omitempty"`
 	Grading           *judge.Result     `json:"grading"`
 	JudgeSkills       []judge.SkillInfo `json:"judge_skills,omitempty"`
-	Configuration     string            `json:"configuration,omitempty"` // "with_skill" or "without_skill"
-	Prompt            string            `json:"prompt,omitempty"`        // input prompt sent to the agent
-	Response          string            `json:"response,omitempty"`      // agent final message
-	TurnResults       []CaseTurnResult  `json:"turn_results,omitempty"`  // per-turn outcomes; nil for single-turn
+	Configuration     string            `json:"configuration,omitempty"`  // "with_skill" or "without_skill"
+	Prompt            string            `json:"prompt,omitempty"`         // input prompt sent to the agent
+	Response          string            `json:"response,omitempty"`       // agent final message
+	ObservedModel     string            `json:"observed_model,omitempty"` // model explicitly reported by the agent
+	TurnResults       []CaseTurnResult  `json:"turn_results,omitempty"`   // per-turn outcomes; nil for single-turn
 }
 
 // CaseTurnResult holds the outcome of a single turn for reporting purposes.

@@ -283,6 +283,31 @@ skill-up import ./evals/evals.json --output ./new-evals
 
 `outputs/workspace/` 子目录仅在配置了 `collect_artifacts` 时出现，详见[编写评测 → 采集 workspace 产物](writing-evals.md#采集-workspace-产物collect_artifacts)。
 
+### result.json 中的配置标识
+
+每轮迭代的 `result.json` 会保留兼容字段 `engine_name`，并保持
+`model_name` 记录请求值的历史语义，
+并新增不包含凭据的对象：
+
+- `requested_configuration`：按 YAML、CLI 和凭据优先级解析后的 engine、
+  provider 命名空间、model 与 version；
+- `applied_configuration`：skill-up 实际传给 CLI 的适配器协议与 model。
+  若 applied model 为空，表示模型选择委托给 CLI 的本地或默认设置；若
+  adapter 没有主动选择 provider，applied provider 也为空；
+- `observed_configuration`：仅当每个 runner session 都明确回报同一个
+  model 时存在。缺失表示运行时 model 未知；单个用例明确回报的值会保留在
+  `observed_model` 中。
+
+applied configuration 不能证明 CLI 最终采用了该配置，本地设置仍可能覆盖
+命令行参数或环境变量。skill-up 不会为了检查本地登录态额外发起模型请求。
+当 Codex 的自定义 provider 无法应用时，该 provider 对应的 endpoint 和
+credential 也不会注入回退到本地/默认 provider 的调用。
+
+适配器能力警告以及 requested/applied 值也会写入每个 Agent 的
+`SessionResult`；其中历史 `model` 字段仅表示 Agent 明确回报的观测值。
+API key 等凭据值
+不会进入这些字段。
+
 ### grading.json 格式
 
 每个用例的评估结果（Anthropic 兼容格式）：

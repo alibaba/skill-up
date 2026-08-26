@@ -44,17 +44,23 @@ const (
 // available. Mutable data is cloned during construction so later mutations of
 // EvalConfig cannot change an already resolved value.
 type ResolvedAgentConfig struct {
-	Role    AgentRole
-	Engine  string
-	Version string
-	Entry   string
+	Role     AgentRole
+	Engine   string
+	Version  string
+	Entry    string
+	Protocol string
 
-	Provider    string
-	Model       string
-	APIKey      string
-	BaseURL     string
-	Kwargs      map[string]string
-	ModelParams map[string]string
+	Provider        string
+	Model           string
+	AppliedProvider string
+	AppliedModel    string
+	AppliedAPIKey   string
+	AppliedBaseURL  string
+	APIKey          string
+	BaseURL         string
+	Kwargs          map[string]string
+	ModelParams     map[string]string
+	Warnings        []string
 
 	// Custom carries the custom engine config when the engine name does not
 	// match a built-in agent. It is nil for built-in agents.

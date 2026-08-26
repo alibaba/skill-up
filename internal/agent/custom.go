@@ -161,7 +161,8 @@ type transportOutcome struct {
 
 // Run executes the custom engine for a single case: it builds the shared
 // session input, selects the transport, runs it, and assembles the result.
-func (a *CustomAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (*SessionResult, error) {
+func (a *CustomAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (finalResult *SessionResult, finalErr error) {
+	defer func() { a.annotateSessionResult(finalResult) }()
 	custom := a.Cfg.Custom
 	if custom == nil {
 		return a.errorResult(0), errors.New("custom engine config is missing")
@@ -545,7 +546,7 @@ func (a *CustomAgent) parseSessionResult(ctx context.Context, rt Runtime, opts E
 	// Stderr / Transcript content above.
 	res := &SessionResult{
 		Engine:       firstNonEmpty(a.maskAPIKey(parsed.Engine), a.Name()),
-		Model:        firstNonEmpty(a.maskAPIKey(parsed.Model), formatAgentModel(a.Cfg.ModelProvider, a.Cfg.ModelName)),
+		Model:        a.maskAPIKey(parsed.Model),
 		ExitCode:     *parsed.ExitCode,
 		DurationMs:   parsed.DurationMs,
 		Turns:        turns,

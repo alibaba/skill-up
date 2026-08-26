@@ -107,7 +107,8 @@ func (a *ClaudeCodeAgent) CheckCredentials(ctx context.Context) error {
 
 // Run executes the claude-code agent with the given messages via stream-json.
 // It streams messages to stdin and parses stream-json output to build the transcript.
-func (a *ClaudeCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (*SessionResult, error) {
+func (a *ClaudeCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (finalResult *SessionResult, finalErr error) {
+	defer func() { a.annotateSessionResult(finalResult) }()
 	if err := requireBashTargetShell(rt); err != nil {
 		return nil, fmt.Errorf("%s: %w", a.Name(), err)
 	}
@@ -149,10 +150,10 @@ func (a *ClaudeCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions,
 	}
 	cmd, promptDelivery, err := deliverPrompt(ctx, rt, opts, instruction, promptCommandBuilder{
 		Inline: func(prompt string) string {
-			return buildClaudePrintCmd(sessionID, a.effectiveModelName(ctx), prompt)
+			return buildClaudePrintCmd(sessionID, a.appliedModelName(ctx), prompt)
 		},
 		StdinFile: func(path string) string {
-			return buildClaudePrintStdinCmd(sessionID, a.effectiveModelName(ctx), path)
+			return buildClaudePrintStdinCmd(sessionID, a.appliedModelName(ctx), path)
 		},
 	})
 	if err != nil {
@@ -193,7 +194,7 @@ func (a *ClaudeCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions,
 	return sessionResult, nil
 }
 
-func (a *ClaudeCodeAgent) effectiveModelName(_ context.Context) string {
+func (a *ClaudeCodeAgent) appliedModelName(_ context.Context) string {
 	return strings.TrimSpace(a.Cfg.ModelName)
 }
 
@@ -453,7 +454,8 @@ func (a *ClaudeCodeAgent) buildSessionResult(ctx context.Context, rt Runtime, op
 // RunTurn resumes an existing Claude Code session and sends a single user
 // message. If sessionID is empty, it starts a new session (first turn).
 // This implements the SessionResumer interface for multi-turn evaluation.
-func (a *ClaudeCodeAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, message transcript.Message, sessionID string) (*SessionResult, error) {
+func (a *ClaudeCodeAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, message transcript.Message, sessionID string) (finalResult *SessionResult, finalErr error) {
+	defer func() { a.annotateSessionResult(finalResult) }()
 	if sessionID == "" {
 		// First turn — delegate to Run which creates a new session.
 		return a.Run(ctx, rt, opts, []transcript.Message{message})
@@ -480,7 +482,7 @@ func (a *ClaudeCodeAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOpti
 			Artifacts:  &SessionArtifacts{},
 		}, err
 	}
-	cmd := buildClaudeResumeCmd(sessionID, a.effectiveModelName(ctx), instruction)
+	cmd := buildClaudeResumeCmd(sessionID, a.appliedModelName(ctx), instruction)
 
 	result, err := rt.Exec(ctx, cmd, opts)
 	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result)

@@ -61,13 +61,13 @@ func TestCustomAgent_RunLocal_PromptPreservesSerializedCorrection(t *testing.T) 
 func TestCustomAgent_RunLocal_StdoutSessionResult(t *testing.T) {
 	t.Parallel()
 	rt := newCustomTestRuntime(t)
-	ag := customLocalAgent(&config.CustomEngineConfig{
+	ag := NewCustomAgent(Config{Name: "my-agent", ModelName: "applied-model", Custom: &config.CustomEngineConfig{
 		Transport: "local",
 		Local: &config.CustomLocalConfig{
 			Command: "sh",
 			Args:    []string{"-c", `echo '{"exit_code":0,"final_message":"done","turns":2}'`},
 		},
-	})
+	}})
 
 	res, err := ag.Run(context.Background(), rt, ExecOptions{AgentMetadata: &runtime.AgentMetadata{CaseID: "c1", Variant: "with_skill"}}, userMessages())
 	if err != nil {
@@ -78,6 +78,29 @@ func TestCustomAgent_RunLocal_StdoutSessionResult(t *testing.T) {
 	}
 	if res.Engine != "my-agent" {
 		t.Errorf("engine = %q, want my-agent", res.Engine)
+	}
+	if res.AppliedModel != "applied-model" || res.Model != "" {
+		t.Fatalf("applied/observed model = %q/%q, want applied-model/unknown", res.AppliedModel, res.Model)
+	}
+}
+
+func TestCustomAgent_RunLocal_PreservesReportedObservedModel(t *testing.T) {
+	t.Parallel()
+	rt := newCustomTestRuntime(t)
+	ag := NewCustomAgent(Config{Name: "my-agent", ModelName: "applied-model", Custom: &config.CustomEngineConfig{
+		Transport: "local",
+		Local: &config.CustomLocalConfig{
+			Command: "sh",
+			Args:    []string{"-c", `echo '{"exit_code":0,"final_message":"done","model":"observed-model"}'`},
+		},
+	}})
+
+	res, err := ag.Run(context.Background(), rt, ExecOptions{}, userMessages())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.AppliedModel != "applied-model" || res.Model != "observed-model" {
+		t.Fatalf("applied/observed model = %q/%q, want applied-model/observed-model", res.AppliedModel, res.Model)
 	}
 }
 

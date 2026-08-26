@@ -13,7 +13,8 @@ claim that every current precedence rule is ideal.
 | Provider | The namespace used to look up model, credential, and endpoint configuration. |
 | Model name | The upstream model identifier. It may contain `/` when the upstream service uses an opaque slashed identifier. |
 | Requested configuration | Values supplied by eval YAML, CLI flags, environment variables, or the credential file. |
-| Effective configuration | Values the adapter actually passes to the agent CLI after adapter-specific normalization. |
+| Applied configuration | Values skill-up passes to the agent CLI after adapter-specific normalization. Local CLI settings may still override them. |
+| Observed configuration | Values explicitly reported by the running agent. Missing values are unknown, not inferred from the applied configuration. |
 | Local-login delegation | No credential is injected; the agent CLI may use its existing local login state. This does not prove that the login is valid. |
 
 The engine determines the protocol. For example, `provider: dashscope` with a
@@ -47,14 +48,62 @@ The runner path resolves values in these stages:
    provider-scoped model environment variable currently overrides the YAML
    model; provider environment credentials override the credential file.
 5. Preserve explicit CLI `--model` and `--api-key` precedence.
-6. Pass the resolved value to the selected adapter, which constructs its
-   command and environment.
+6. Apply the selected adapter's declared protocol and capability contract.
+   Keep the requested model intact, compute the applied model once, remove
+   unsupported kwargs, and emit warnings for ignored or invalid explicit
+   settings before case execution.
+7. Pass the applied value to the selected adapter, which constructs its
+   command and environment without repeating model normalization.
 
 Runner and judge roles use the same resolution flow. Until an explicit judge
 engine schema is introduced, the judge inherits the runner engine lifecycle and
 kwargs, while resolving its provider/model and credentials as a separate role.
-Reports use the resolved runner engine/model identity rather than reconstructing
-it from a CLI-mutated eval config.
+Reports use the resolved runner identity rather than reconstructing it from a
+CLI-mutated eval config. `result.json` retains the legacy `engine_name` and
+`model_name` fields while also recording credential-free
+`requested_configuration`, `applied_configuration`, and optional
+`observed_configuration` objects. Per-session results carry the requested and
+applied values, capability warnings, and an observed `model` only when the
+agent explicitly reports it. An absent observation remains unknown; skill-up
+does not probe authentication or spend tokens to infer local CLI state.
+An applied provider is recorded only when the adapter actively selects that
+provider. If Codex falls back to local provider selection, both the applied
+provider and model are empty and credentials resolved for the rejected provider
+are not injected into the fallback invocation.
+
+## Model connection boundary
+
+Provider configuration, a resolved model connection, and an agent's native
+configuration are related but distinct layers:
+
+1. Provider configuration is static input. It may contain credentials and
+   protocol-specific endpoints for a named namespace such as `dashscope`.
+2. A resolved model connection selects one `(provider, protocol)` combination,
+   preserves the source of each selected value, and records whether auth and
+   routing are injected or delegated to agent-local state.
+3. The adapter materializes that connection as CLI flags, environment
+   variables, or native agent configuration. Native configuration files and
+   local login databases remain owned by the agent and may be opaque to
+   skill-up.
+
+`ResolvedAgentConfig` currently spans the first two steps and the capability
+pass computes what skill-up can apply. A later protocol-aware resolver may
+introduce an internal `ResolvedModelConnection`, but it should not be confused
+with observed runtime state: it describes the connection selected for the
+adapter, not proof of the provider, model, or credential ultimately used by the
+agent.
+
+This layering is informed by Harbor's
+[`ProviderAccess`, `ModelConnectionSpec`, and `ResolvedModelConnection`](https://github.com/harbor-framework/harbor/blob/71180a2e6fb40626b661c13f261b1d44517ad91a/src/harbor/agents/model_connection.py),
+while retaining skill-up's different compatibility constraints. In particular,
+skill-up must not infer the provider from an opaque model ID, fan one credential
+out to unrelated provider aliases, or treat a resolved connection as an
+observation. Explicit empty values must also remain distinguishable from absent
+values where an empty value intentionally suppresses inherited configuration.
+
+Native agent configuration support, if added later, belongs after connection
+resolution. It must use the same adapter materialization boundary rather than
+becoming a second provider/model/credential resolver.
 
 ## Legacy slashed model compatibility
 
@@ -93,13 +142,13 @@ These translations are covered by `action/main_test.py`. Any future explicit
 
 ## Known gaps for later phases
 
-- Protocol and adapter capabilities are not yet declared on the resolved value.
 - Nested provider endpoints are flattened before the adapter protocol is known.
 - Provider-scoped `MODEL` currently overrides an explicit YAML model.
-- Adapters may ignore unsupported explicit values rather than failing before
-  case execution.
-- Reports use the resolved runner identity but do not yet distinguish every
-  requested value from the adapter's effective configuration.
+- `engine.version`, `engine.entry`, and `engine.model.params` now produce
+  warnings when ineffective, but their final implementation/removal is deferred
+  to the installation and schema phases.
+- The actual installed CLI version is not yet recorded as observed runtime
+  configuration.
 
 See [Issue #196](https://github.com/alibaba/skill-up/issues/196) for the staged
 cleanup plan.

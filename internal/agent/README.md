@@ -46,6 +46,7 @@ Both are parsed by **`parseSessionFile`** in `internal/agent/claude_code.go` (`c
 ```
 internal/agent/
 ├── agent.go           # Core interface definitions: Agent, SessionResult, BaseAgent
+├── capabilities.go    # Adapter protocol/capability declarations and applied config resolution
 ├── factory.go         # DetectAgent / DetectAgentWithResolvedConfig factory functions
 ├── claude_code.go     # ClaudeCodeAgent implementation
 ├── qodercli.go        # QoderCLIAgent implementation
@@ -100,19 +101,52 @@ type Agent interface {
 
 ```go
 type SessionResult struct {
-    Engine       string
-    Model        string
-    ExitCode     int
-    DurationMs   int64
-    Turns        int
-    InputTokens  int
-    OutputTokens int
-    FinalMessage string
-    Stderr       string
-    Transcript   transcript.Transcript
-    Artifacts    *SessionArtifacts
+    Engine          string
+    AppliedProtocol string
+    RequestedProvider string
+    AppliedProvider string
+    RequestedModel  string
+    AppliedModel    string
+    Model           string // agent-reported observed model; empty means unknown
+    Warnings        []string
+    ExitCode       int
+    DurationMs     int64
+    Turns          int
+    InputTokens    int
+    OutputTokens   int
+    FinalMessage   string
+    Stderr         string
+    Transcript     transcript.Transcript
+    Artifacts      *SessionArtifacts
 }
 ```
+
+## Adapter capability resolution
+
+`ResolveAdapterConfig` runs after YAML/CLI/credential resolution and before
+agent construction. It keeps the requested model intact, records the model
+that skill-up will forward as `AppliedModel`, and emits warnings for
+explicit settings that the selected adapter does not consume.
+
+Applied values describe the invocation, not the CLI's final runtime choice.
+Local configuration may override them. `SessionResult.Model` remains empty
+unless the agent explicitly reports a model.
+Provider-scoped credentials are carried separately as applied values so a
+rejected Codex provider cannot leak its key or endpoint into local fallback.
+
+| Adapter | Protocol | Model behavior | Base URL | Supported kwargs |
+|---------|----------|----------------|----------|------------------|
+| Claude Code | `anthropic` | pass through | yes | none |
+| Codex | `openai` | requires a usable Codex provider configuration | yes | `bypass_sandbox`, JSONL size limits |
+| QoderCLI | `qoder` | `lite`, `efficient`, `auto`, `performance`, `ultimate` | no | `edition` |
+| Qwen Code | `openai` | pass through | yes | none |
+| Custom Engine | `custom` | pass through | no; use `engine.custom.http.url` | none; use `engine.custom.kwargs` |
+
+Unsupported kwargs and invalid supported-kwarg values are removed from the
+adapter input after producing an actionable warning. `engine.version`,
+`engine.entry`, and `engine.model.params` are also reported as currently
+ineffective; version lifecycle enforcement is intentionally deferred to the
+installation phase of issue #196.
 
 ### SessionArtifacts
 
