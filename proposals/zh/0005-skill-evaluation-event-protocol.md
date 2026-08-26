@@ -3,7 +3,7 @@ title: Skill 评测事件日志协议
 authors:
   - "JHWang-1997"
 creation-date: 2026-08-18
-last-updated: 2026-08-19
+last-updated: 2026-08-26
 status: draft
 ---
 
@@ -47,9 +47,9 @@ status: draft
 本提案为 skill-up 定义一个轻量、版本化的评测事件日志。首个序列化格式为
 JSON Lines，每个以换行结束的记录包含一条独立事件。
 
-进度上报是第一个使用场景，而不是协议边界。同一日志未来可通过文件、回调、进
-程内或远程订阅者承载生命周期、摘要、诊断和产物事件。现有 stdout 继续作为独
-立的、面向人的界面。
+进度上报是第一个使用场景，而不是协议边界。同一日志未来可以承载生命周期、摘
+要、诊断和产物事件。V1 有意只标准化本地 JSONL 文件 Sink；远程投递留待后续单
+独设计。现有 stdout 继续作为独立的、面向人的界面。
 
 ## 动机
 
@@ -66,27 +66,39 @@ SUP-0005 采用这一原则，但不复制 BEP 的 protobuf 编码或完整事�
 - 定义通用事件日志，而不是只服务 Case 进度的文件。
 - 提供稳定的调用标识和事件顺序。
 - 让消费方能够发现缺口、重放和被截断的事件流。
+- 让公共信封与每个事件 Payload 分别独立版本化。
 - 按任务描述 Benchmark；一个源 Case 可以展开为多个配置任务。
+- 提供周期性的 invocation 级进度快照和存活更新。
+- 携带有大小限制、带命名空间的关联属性，同时不削弱类型化事件 Payload。
 - 使事件生产独立于具体 Sink 和传输方式。
-- 首版只覆盖 CI 所需的最小 run、iteration、case 生命周期。
+- 首版只覆盖 CI 所需的最小 run、progress、iteration、case 生命周期。
 
 ### 非目标
 
 - 在本 PR 中实现 `--event-log` 或修改运行时行为。
-- 定义远程事件服务、鉴权、重试或保留策略。
+- 定义远程事件服务、回调、OTLP 适配器、鉴权、重试、确认、排队或保留策略。
 - 在 v1 中定义 summary、diagnostic、artifact、turn、retry、judge 或 tool
   事件；协议只为它们预留扩展空间。
+- 定义 task 级执行阶段、预计剩余时间、动态任务发现或任务计划更新。
 - 传输 prompt、模型响应、transcript、凭据或产物内容。
 - 完整复制 Bazel BEP 的图结构或 protobuf schema。
+- 采用 CloudEvents 作为 v1 传输格式；未来适配器可以映射记录，而无需改变本协
+  议的有序日志契约。
 
 ## 需求
 
 - 每个完整记录都是一个合法 JSON 对象，并以 `\n` 结尾。
-- 每条事件都包含数字 schema 版本、连续序号、稳定 invocation ID、时间戳、事
-  件类型和类型化 payload。
-- 到达可控收尾阶段的调用恰好发出一条终止 `run_finished` 事件，包括存在失败
-  Case 的已完成调用，以及以调用级错误或取消结束的调用。
-- 消费方必须兼容受支持 schema 大版本中的未知事件类型和 payload 字段。
+- 每条事件都包含数字协议版本和事件版本、连续序号、稳定 invocation ID、时间
+  戳、事件类型和类型化 Payload。
+- 可选的事件属性是有大小限制的字符串对，不得承载核心事件语义或敏感
+  评测内容。
+- 启用事件的 invocation 一旦发出 `run_started`，可控收尾时就恰好发出一条结束
+  生命周期的 `run_finished` 事件，包括存在失败 Case 的已完成运行，以及以调用
+  级错误或取消结束的运行。
+- 可控收尾的事件流恰好包含一个 `last_event: true`；该标记属于信封，不与某种
+  事件类型永久绑定。
+- 在受支持的协议大版本中，消费方必须兼容未知的可选信封字段、事件类型、事件
+  版本、属性和 Payload 字段。
 - 基础事件 schema 不得包含敏感评测内容。
 - 评测任务并发执行时，事件发射必须安全。
 
@@ -100,8 +112,9 @@ SUP-0005 采用这一原则，但不复制 BEP 的 protobuf 编码或完整事�
 skill-up run --event-log ./events.jsonl
 ```
 
-该名称描述持久抽象，而不是首个消费场景。CI 可从 Case 事件推导进度；未来集成
-可以订阅其他事件族，无需再增加一个输出参数或改变核心发布边界。
+该名称描述持久抽象，而不是首个消费场景。CI 可以消费类型化进度快照和 Case 生
+命周期事件；未来事件族可以复用同一个文件和 Publisher 边界，无需再增加输出参
+数。
 
 ### 事件信封
 
@@ -109,37 +122,64 @@ skill-up run --event-log ./events.jsonl
 
 ```json
 {
-  "schema_version": 1,
+  "protocol_version": 1,
+  "event_version": 1,
   "sequence_number": 3,
   "invocation_id": "018f8f20-7a7d-7d90-a192-4f5ec8f07a2a",
   "time": "2026-08-19T10:01:10.451Z",
   "event": "case_completed",
+  "attributes": {
+    "com.alibaba.aone.eval_task_id": "123456"
+  },
   "payload": {}
 }
 ```
 
 | 字段 | JSON 类型 | 是否必填 | 约束 |
 | --- | --- | --- | --- |
-| `schema_version` | integer | 是 | 本规范中必须为 `1` |
+| `protocol_version` | integer | 是 | 公共信封和有序日志的大版本；本规范中必须为 `1` |
+| `event_version` | integer | 是 | 该事件类型 Payload 的大版本，范围为 `[1, 9007199254740991]`；本规范定义的每种核心事件都必须为 `1` |
 | `sequence_number` | integer | 是 | invocation 全局连续顺序，范围为 `[1, 9007199254740991]` |
 | `invocation_id` | string | 是 | 同一次 `skill-up run` 所有事件共享的稳定 UUID |
-| `time` | string | 是 | 使用 `Z` 时区偏移的 UTC RFC 3339 时间戳 |
+| `time` | string | 是 | 生产方创建事件的时间，采用带 `Z` 时区偏移的 UTC RFC 3339 格式 |
 | `event` | string | 是 | 本注册表或兼容 v1 扩展中的非空事件类型 |
-| `last_event` | boolean | 否 | 出现时必须为 `true` 且仅用于 `run_finished`；不得为 `null` |
+| `last_event` | boolean | 否 | 出现时必须为 `true`，只能位于最终记录，且不得为 `null` |
+| `attributes` | object | 否 | 与本事件关联的不透明属性；键和值都只能是字符串；不得为 `null` |
 | `payload` | object | 是 | 包含对应事件字段的非空对象 |
 
 （`invocation_id`、`sequence_number`）是事件用于排序和去重的稳定标识。V1
-刻意不包含 event ID、parent ID 或图关系。
+刻意不包含 event ID、parent ID、subject 或图关系。每个文件由一个生产方创建一
+次 invocation，因此对于本地有序日志 Profile，该组合标识已经足够。跨传输信
+封映射有意留给引入对应传输方式的提案定义。
+
+`attributes` 承载不透明的跨系统关联信息，例如 Eval 任务 ID、CI 构建 ID、请求
+ID、重试次数或 Trace Context。V1 CLI 属性是 invocation 默认值：Publisher 将
+它们原样复制到每条事件。传输字段本身仍是 event-scoped，因此消费方不得依赖同
+一 invocation 内每条事件的属性值完全相同；未来生产方可以在不改变信封的情况
+下增加事件局部属性。Key 必须带有命名空间，例如
+`com.alibaba.aone.eval_task_id`，并匹配
+`^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)+$`。`skill-up.*` 命名空间保留给本
+项目的生产方定义属性，`--event-attribute` 会拒绝该前缀。其他扩展所有方应使
+用自己控制的反向 DNS 前缀。核心事件语义绝不能依赖属性，中继方必须原样保留未
+知属性。属性不得承载进度计数、阶段、结果、Prompt、模型输出、凭据或其他敏感
+数据。V1 限制每条事件最多包含 32 个属性；UTF-8 Key 最多 128 字节，UTF-8
+Value 最多 1024 字节，序列化后的整个 attributes 对象最多 16 KiB。空 Key 或
+空 Value 非法。
+
+本注册表中的核心事件名称保留给 skill-up。扩展事件类型必须使用由扩展所有方控
+制的点分命名空间，并匹配与属性 Key 相同的小写 Token 模式，例如
+`com.example.evaluation.cached`。
 
 ### 首批事件类型
 
 | 事件 | 必填 payload 字段 |
 | --- | --- |
 | `run_started` | `engine`、`skill_name`、`task_total`、`iterations_total` |
+| `run_progress` | `phase`、`task_total`、`completed_tasks`、`running_tasks`、`passed`、`failed`、`errored`、`skipped`、`elapsed_ms` |
 | `iteration_started` | `iteration` |
 | `case_started` | `task_id`、`iteration`、`case_id`、`configuration`、`task_index`、`task_total`、`title` |
-| `case_completed` | `task_id`、`iteration`、`case_id`、`configuration`、`task_index`、`task_total`、`completed_tasks`、`status`、`duration_ms`；可选 `pass_rate` |
-| `iteration_completed` | `iteration`、`completed_tasks`、`passed`、`failed`、`errored`、`skipped`、`duration_ms` |
+| `case_completed` | `task_id`、`iteration`、`case_id`、`configuration`、`task_index`、`task_total`、`title`、`completed_tasks`、`status`、`duration_ms`；可选 `pass_rate` |
+| `iteration_completed` | `iteration`、`invocation_completed_tasks`、`passed`、`failed`、`errored`、`skipped`、`duration_ms` |
 | `run_finished` | `status`、`completed_tasks`、`passed`、`failed`、`errored`、`skipped`、`duration_ms` |
 
 ### Payload 字段定义
@@ -152,30 +192,47 @@ skill-up run --event-log ./events.jsonl
 | --- | --- | --- | --- |
 | `run_started` | `engine` | string | 非空的最终引擎名称 |
 | `run_started` | `skill_name` | string | 非空的最终 Skill 名称 |
-| `run_started`、Case 事件 | `task_total` | integer | invocation 全局最终总数，范围为 `[1, 9007199254740991]` |
+| `run_started`、`run_progress`、Case 事件 | `task_total` | integer | invocation 全局最终总数，范围为 `[1, 9007199254740991]` |
 | `run_started` | `iterations_total` | integer | 本次 invocation 计划的 iteration 数量，至少为 `1` |
+| `run_progress` | `phase` | string | 非空的 Run 级阶段 Token；v1 生产方使用 `preparing`、`executing` 或 `finalizing`；消费方必须把未知值映射为未知阶段 |
+| `run_progress` | `running_tasks` | integer | 当前快照中 invocation 全局正在执行的任务数，范围为 `[0, task_total]` |
+| `run_progress` | `elapsed_ms` | integer | 当前快照中 invocation 已运行的非负毫秒数 |
 | Iteration 和 Case 事件 | `iteration` | integer | 实际 iteration 编号，至少为 `1`；向已有工作区追加时可从大于 `1` 开始 |
 | Case 事件 | `task_id` | string | 非空，在 invocation 内稳定且唯一 |
 | Case 事件 | `case_id` | string | 非空的源 Case 标识 |
 | Case 事件 | `configuration` | string | 必须为 `with_skill` 或 `without_skill` |
 | Case 事件 | `task_index` | integer | invocation 全局稳定计划索引，范围为 `[1, task_total]` |
 | Case 事件 | `title` | string | 人类可读的 Case 标题 |
-| 完成事件 | `completed_tasks` | integer | invocation 全局累计终态任务数，范围为 `[0, task_total]` |
+| `run_progress`、Case 完成事件和 Run 完成事件 | `completed_tasks` | integer | invocation 全局累计终态任务数，范围为 `[0, task_total]` |
+| `iteration_completed` | `invocation_completed_tasks` | integer | iteration 完成时 invocation 全局累计终态任务数，范围为 `[0, task_total]` |
 | `case_completed` | `status` | string | 必须为 `PASS`、`FAIL`、`ERROR` 或 `SKIP` |
 | `case_completed` | `pass_rate` | number | 可选的有限数值，范围为 `[0, 1]`；不可用时省略 |
-| 完成事件 | `duration_ms` | integer | 非负的毫秒耗时 |
-| Iteration 和 Run 完成事件 | `passed`、`failed`、`errored`、`skipped` | integer | 非负任务数；在 `iteration_completed` 中仅统计当前 iteration，在 `run_finished` 中统计整个 invocation |
+| Case、Iteration 和 Run 完成事件 | `duration_ms` | integer | 非负的毫秒耗时 |
+| `run_progress`、Iteration 和 Run 完成事件 | `passed`、`failed`、`errored`、`skipped` | integer | 非负任务数；在 `run_progress` 和 `run_finished` 中统计整个 invocation，在 `iteration_completed` 中仅统计当前 iteration |
 | `run_finished` | `status` | string | 必须为 `COMPLETED`、`ERROR` 或 `CANCELLED` |
 
-每个 `duration_ms` 都是对应 started 与 completed/finished 生命周期边界之间，基
-于单调时钟计算的墙上时间。Case 耗时覆盖 `case_started` 之后的全部工作，包括
-Agent 执行和 Judge；它不是现有仅包含 Agent 耗时的
-`EvalResult.DurationMs`。由于任务可以并发，Iteration 和 Run 耗时不是子任务耗
-时之和。
+每个 `duration_ms` 和 `elapsed_ms` 都基于单调时钟计算。Case 耗时覆盖
+`case_started` 之后的全部工作，包括 Agent 执行和 Judge；它不是现有仅包含
+Agent 耗时的 `EvalResult.DurationMs`。由于任务可以并发，Iteration 和 Run 耗
+时不是子任务耗时之和。
+
+每条 `run_progress` 都是累计的、可替换的运行态快照，并满足：
+
+```text
+completed_tasks == passed + failed + errored + skipped
+completed_tasks + running_tasks <= task_total
+```
+
+Emitter 会在 Run 阶段变化、任务开始或完成时发布快照；Run 保持活跃时，即使数
+值没有变化也会周期发布。未发生变化的周期快照就是存活心跳；v1 不增加单独的心
+跳事件或标记。首个实现使用固定的 30 秒周期。该周期是生产方策略，而不是传输
+schema 字段。消费方在判断停滞时应记录并使用自己的接收时间，而不应假设生产
+方时钟已经同步。超时表示进度不确定或中断；不得据此合成 Case 结果。
 
 `COMPLETED` 是生命周期状态，表示所有计划任务都已进入 Case 终态；它不表示所
 有 Case 都通过，也不单独保证命令退出码为零。`ERROR` 表示调用级错误阻止了正
-常完成；`CANCELLED` 表示调用因取消而停止。Case 结果以各状态计数为准。
+常完成；`CANCELLED` 表示调用因取消而停止。进度快照不是最终评测结论；完整报
+告仍是评测结果的权威来源，事件日志描述的是运行生命周期和增量状态。
 
 ### 内部事件模型
 
@@ -189,12 +246,13 @@ API；其中 JSON tag 和传输值具有规范性：
 type Type string
 
 const (
-    SchemaVersion  uint64 = 1
-    MaxSafeInteger uint64 = 9007199254740991
+    ProtocolVersion uint64 = 1
+    MaxSafeInteger  uint64 = 9007199254740991
 )
 
 const (
     EventRunStarted         Type = "run_started"
+    EventRunProgress        Type = "run_progress"
     EventIterationStarted   Type = "iteration_started"
     EventCaseStarted        Type = "case_started"
     EventCaseCompleted      Type = "case_completed"
@@ -205,6 +263,7 @@ const (
 type Configuration string
 type CaseStatus string
 type RunStatus string
+type RunPhase string
 
 const (
     ConfigurationWithSkill    Configuration = "with_skill"
@@ -218,20 +277,27 @@ const (
     RunStatusCompleted RunStatus = "COMPLETED"
     RunStatusError     RunStatus = "ERROR"
     RunStatusCancelled RunStatus = "CANCELLED"
+
+    RunPhasePreparing  RunPhase = "preparing"
+    RunPhaseExecuting  RunPhase = "executing"
+    RunPhaseFinalizing RunPhase = "finalizing"
 )
 
 type Payload interface {
     eventType() Type
+    eventVersion() uint64
 }
 
 type Event struct {
-    SchemaVersion  uint64    `json:"schema_version"`
-    SequenceNumber uint64    `json:"sequence_number"`
-    InvocationID   string    `json:"invocation_id"`
-    Time           time.Time `json:"time"`
-    Type           Type      `json:"event"`
-    LastEvent      bool      `json:"last_event,omitempty"`
-    Payload        Payload   `json:"payload"`
+    ProtocolVersion uint64            `json:"protocol_version"`
+    EventVersion    uint64            `json:"event_version"`
+    SequenceNumber  uint64            `json:"sequence_number"`
+    InvocationID    string            `json:"invocation_id"`
+    Time            time.Time         `json:"time"`
+    Type            Type              `json:"event"`
+    LastEvent       bool              `json:"last_event,omitempty"`
+    Attributes     map[string]string `json:"attributes,omitempty"`
+    Payload         Payload           `json:"payload"`
 }
 
 type RunStartedPayload struct {
@@ -239,6 +305,15 @@ type RunStartedPayload struct {
     SkillName       string `json:"skill_name"`
     TaskTotal       uint64 `json:"task_total"`
     IterationsTotal uint64 `json:"iterations_total"`
+}
+
+type RunProgressPayload struct {
+    Phase          RunPhase `json:"phase"`
+    TaskTotal      uint64   `json:"task_total"`
+    CompletedTasks uint64   `json:"completed_tasks"`
+    RunningTasks   uint64   `json:"running_tasks"`
+    ResultCounts
+    ElapsedMS uint64 `json:"elapsed_ms"`
 }
 
 type IterationStartedPayload struct {
@@ -275,8 +350,8 @@ type ResultCounts struct {
 }
 
 type IterationCompletedPayload struct {
-    Iteration      uint64 `json:"iteration"`
-    CompletedTasks uint64 `json:"completed_tasks"`
+    Iteration                uint64 `json:"iteration"`
+    InvocationCompletedTasks uint64 `json:"invocation_completed_tasks"`
     ResultCounts
     DurationMS uint64 `json:"duration_ms"`
 }
@@ -290,11 +365,12 @@ type RunFinishedPayload struct {
 ```
 
 `PassRate` 使用指针，因为零是合法值，而不可用值必须省略。构造函数和
-Publisher 在发布前校验安全整数范围和枚举值。`Payload.eventType` 让 Publisher
-推导 `Event.Type`，避免 payload 与事件类型不匹配。只有 Publisher 可以设置公
-共信封字段和 `LastEvent`，调用方不能覆盖。Publisher 为 invocation 生成一个
-UUID，并在序列化前把时间转换为 UTC，使 `time.Time` 按要求编码为 `Z` 时区偏
-移。
+Publisher 在发布前校验安全整数范围和枚举值。`Payload.eventType` 和
+`eventVersion` 让 Publisher 推导 `Event.Type` 和 `Event.EventVersion`，避免
+Payload 与事件类型或版本不匹配。Publisher 对 invocation 属性校验并复制一
+次，随后把副本视为不可变，并附加到每条事件。只有 Publisher 可以设置其余信封
+字段和 `LastEvent`，调用方不能覆盖。Publisher 为 invocation 生成一个 UUID，
+并把时间转换为 UTC，使 `time.Time` 按要求编码为 `Z` 时区偏移。
 
 ### 任务进度模型
 
@@ -306,17 +382,20 @@ UUID，并在序列化前把时间转换为 UTC，使 `time.Time` 按要求编�
 iteration-1/case-1/with_skill
 ```
 
-任务规划在 `run_started` 前完成。该事件恰好发出一次，并且位于所有 Iteration
-或 Case 事件之前；其中的 `task_total` 是 Case 过滤、Benchmark 配置展开和
-iteration 展开后的最终值。
+任务规划在 `run_started` 前完成。该事件恰好发出一次，并且位于所有进度、
+Iteration 或 Case 事件之前；其中的 `task_total` 是 Case 过滤、Benchmark 配置
+展开和 iteration 展开后的最终值。V1 有意只覆盖成功规划之后的评测执行；配置
+和规划失败通过命令结果体现，而不使用更早的 invocation 事件。
 
 每个计划任务获得一个 invocation 全局、稳定且从 `1` 开始的 `task_index`；该索
 引与并发任务实际开始或完成的顺序无关。`completed_tasks` 是 invocation 全局计
 数，从 `0` 开始，并在任务发出终态 `case_completed` 时恰好增加一次。因此实现
 不能直接透传每个 iteration 都会重置的 `ProgressObserver` 索引。
 
-`iteration_completed` 中的状态计数只覆盖当前 iteration，`run_finished` 中的计数
-覆盖整个 invocation。每个 `run_finished` 都满足：
+`run_progress` 和 `run_finished` 中的计数覆盖整个 invocation。
+`iteration_completed` 中的状态计数只覆盖当前 iteration，而其中名称明确的
+`invocation_completed_tasks` 字段报告同一时刻的全局进度。每个
+`run_finished` 都满足：
 
 ```text
 completed_tasks == passed + failed + errored + skipped
@@ -329,8 +408,9 @@ completed_tasks == task_total
 ```
 
 以 `ERROR` 或 `CANCELLED` 可控收尾的调用可以满足
-`completed_tasks < task_total`。即使启用 Benchmark、多 iteration 和并行执行，
-CI 也能据此展示无歧义的进度。
+`completed_tasks < task_total`。即使启用 Benchmark、多 iteration 和并行执
+行，CI 也能据此展示无歧义的任务进度。除非产品界面针对每个 `case_id` 单独聚合
+了全部展开任务，否则不得把 `task_total` 标示为源 Case 总数。
 
 ### 任务规划与生命周期 Emitter
 
@@ -353,10 +433,13 @@ Case ID 已经过不得包含路径分隔符的校验。并发执行时，任务
 二份任务列表，从而避免事件总数和实际工作发生偏差。
 
 invocation 级生命周期 Emitter 位于通用 Publisher 之上。它持有任务计划、互斥
-锁、已开始/已完成任务集合、invocation 计数和每个 iteration 的计数。建议提供：
+锁、已开始/已完成任务集合、invocation 计数、每个 iteration 的计数、当前 Run
+阶段、invocation 开始时间和周期进度循环。建议提供：
 
 ```go
 Start(ctx, engine, skillName)
+SetPhase(ctx, phase)
+Heartbeat(ctx)
 IterationStarted(ctx, iteration)
 CaseStarted(ctx, plannedTask)
 CaseCompleted(ctx, plannedTask, status, passRate, duration)
@@ -364,51 +447,92 @@ IterationCompleted(ctx, iteration, duration)
 Finish(ctx, runStatus, duration)
 ```
 
-Emitter 把每次生命周期状态变更和事件发布一起串行化。如果在发布顺序之外递增
-`completed_tasks`，可能出现较大的序号反而带有更小计数，因此不能只使用原子计
-数。Emitter 还会拒绝重复开始或完成、未知任务、`run_started` 前的事件，以及
-`run_finished` 后的事件。
+Emitter 在同一排序锁下串行化每次生命周期状态变更、对应的生命周期事件和由此
+产生的进度快照。如果在发布顺序之外递增 `completed_tasks`，可能出现较大的序
+号反而带有更小计数。Emitter 还会拒绝重复开始或完成、未知任务、
+`run_started` 前的事件，以及 `run_finished` 后的生命周期事件。
 
-每个计划 iteration 在自身所有 Case 事件前恰好发出一条 `iteration_started`。
-只有该 iteration 的所有计划任务都进入 Case 终态后，才发出
-`iteration_completed`；中断的 iteration 可以没有该事件。每个已开始任务恰好
-发出一条 `case_started`，随后恰好发出一条 `case_completed`，包括映射为
-`ERROR` 或 `SKIP` 的任务。因调用错误或取消而从未开始的任务不发出任何 Case
-事件。
+每个计划 iteration 在自身所有 Case 事件前发出一条 `iteration_started`。只有
+该 iteration 的所有计划任务都进入 Case 终态后，才发出
+`iteration_completed`；中断的 iteration 可以没有该事件。到达任务级结果的任
+务恰好发出一条 `case_started`，随后恰好发出一条 `case_completed`，包括映射
+为 `ERROR` 或 `SKIP` 的结果。invocation 级错误或取消可能在
+`case_completed` 之前中断活动任务；从未开始的任务不发出任何 Case 事件。
+
+`Start` 发出 `run_started` 和一条处于 `preparing` 阶段的初始
+`run_progress` 快照。`SetPhase`、`CaseStarted` 和 `CaseCompleted` 在状态变更
+后发出新的 `run_progress`；`Heartbeat` 只发出一条内容未变化的快照。进度循环
+每 30 秒调用一次 `Heartbeat`，直到 `Finish` 开始，并且不创建单独的事件类
+型。
 
 `CaseCompleted` 恰好一次地递增 invocation 和 iteration 计数。
-`IterationCompleted` 和 `Finish` 从 Emitter 状态生成 payload 计数，不接受调用
-方传入的计数。`Finish(COMPLETED)` 校验所有计划任务都已完成；`ERROR` 和
-`CANCELLED` 允许存在未完成任务。现有 `ProgressObserver` 保持不变，只负责终
-端 UI，不作为协议身份或汇总进度的数据源。
+`IterationCompleted`、进度快照和 `Finish` 从 Emitter 状态生成 Payload 计
+数，不接受调用方传入的计数。`Finish` 首先停止心跳、进入 `finalizing`、清除因
+invocation 取消或错误而已不再执行的活动任务且不把它们计为完成，然后发出最终
+进度快照。`Finish(COMPLETED)` 校验所有计划任务都已完成；`ERROR` 和
+`CANCELLED` 允许存在未完成任务。v1 随后通过 `PublishLast` 发布
+`run_finished`。通用 Publisher 仍允许未来调用方以普通方式发布
+`run_finished`，并把最终标记放在后续非生命周期记录上；生命周期 Emitter 保持
+关闭。
+
+现有 `ProgressObserver` 保持不变，只负责终端 UI，不作为协议身份或汇总进度的
+数据源。
 
 ### 事件流示例
 
-下例在 Benchmark 模式下评测一个源 Case，因此生成两个任务。JSONL 文件中每个
-对象各占一个物理行。
+下例在 Benchmark 模式下评测一个源 Case，因此生成两个任务。第二个任务运行时
+间足够长，因而发出了一条内容未变化的周期进度心跳。JSONL 文件中每个对象各占
+一个物理行。
 
 ```jsonl
-{"schema_version":1,"sequence_number":1,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.000Z","event":"run_started","payload":{"engine":"qodercli","skill_name":"my-skill","task_total":2,"iterations_total":1}}
-{"schema_version":1,"sequence_number":2,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.001Z","event":"iteration_started","payload":{"iteration":1}}
-{"schema_version":1,"sequence_number":3,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.002Z","event":"case_started","payload":{"task_id":"iteration-1/case-1/with_skill","iteration":1,"case_id":"case-1","configuration":"with_skill","task_index":1,"task_total":2,"title":"Basic flow"}}
-{"schema_version":1,"sequence_number":4,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:01:10.451Z","event":"case_completed","payload":{"task_id":"iteration-1/case-1/with_skill","iteration":1,"case_id":"case-1","configuration":"with_skill","task_index":1,"task_total":2,"completed_tasks":1,"status":"FAIL","pass_rate":0.5,"duration_ms":70449}}
-{"schema_version":1,"sequence_number":5,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:01:10.452Z","event":"case_started","payload":{"task_id":"iteration-1/case-1/without_skill","iteration":1,"case_id":"case-1","configuration":"without_skill","task_index":2,"task_total":2,"title":"Basic flow"}}
-{"schema_version":1,"sequence_number":6,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:02:05.118Z","event":"case_completed","payload":{"task_id":"iteration-1/case-1/without_skill","iteration":1,"case_id":"case-1","configuration":"without_skill","task_index":2,"task_total":2,"completed_tasks":2,"status":"PASS","pass_rate":1.0,"duration_ms":54666}}
-{"schema_version":1,"sequence_number":7,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:02:05.900Z","event":"iteration_completed","payload":{"iteration":1,"completed_tasks":2,"passed":1,"failed":1,"errored":0,"skipped":0,"duration_ms":125898}}
-{"schema_version":1,"sequence_number":8,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:02:05.901Z","event":"run_finished","last_event":true,"payload":{"status":"COMPLETED","completed_tasks":2,"passed":1,"failed":1,"errored":0,"skipped":0,"duration_ms":125901}}
+{"protocol_version":1,"event_version":1,"sequence_number":1,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.000Z","event":"run_started","payload":{"engine":"qodercli","skill_name":"my-skill","task_total":2,"iterations_total":1}}
+{"protocol_version":1,"event_version":1,"sequence_number":2,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.001Z","event":"run_progress","payload":{"phase":"preparing","task_total":2,"completed_tasks":0,"running_tasks":0,"passed":0,"failed":0,"errored":0,"skipped":0,"elapsed_ms":1}}
+{"protocol_version":1,"event_version":1,"sequence_number":3,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.002Z","event":"run_progress","payload":{"phase":"executing","task_total":2,"completed_tasks":0,"running_tasks":0,"passed":0,"failed":0,"errored":0,"skipped":0,"elapsed_ms":2}}
+{"protocol_version":1,"event_version":1,"sequence_number":4,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.003Z","event":"iteration_started","payload":{"iteration":1}}
+{"protocol_version":1,"event_version":1,"sequence_number":5,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.004Z","event":"case_started","payload":{"task_id":"iteration-1/case-1/with_skill","iteration":1,"case_id":"case-1","configuration":"with_skill","task_index":1,"task_total":2,"title":"Basic flow"}}
+{"protocol_version":1,"event_version":1,"sequence_number":6,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.005Z","event":"run_progress","payload":{"phase":"executing","task_total":2,"completed_tasks":0,"running_tasks":1,"passed":0,"failed":0,"errored":0,"skipped":0,"elapsed_ms":5}}
+{"protocol_version":1,"event_version":1,"sequence_number":7,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:10.004Z","event":"case_completed","payload":{"task_id":"iteration-1/case-1/with_skill","iteration":1,"case_id":"case-1","configuration":"with_skill","task_index":1,"task_total":2,"title":"Basic flow","completed_tasks":1,"status":"FAIL","pass_rate":0.5,"duration_ms":10000}}
+{"protocol_version":1,"event_version":1,"sequence_number":8,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:10.005Z","event":"run_progress","payload":{"phase":"executing","task_total":2,"completed_tasks":1,"running_tasks":0,"passed":0,"failed":1,"errored":0,"skipped":0,"elapsed_ms":10005}}
+{"protocol_version":1,"event_version":1,"sequence_number":9,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:10.006Z","event":"case_started","payload":{"task_id":"iteration-1/case-1/without_skill","iteration":1,"case_id":"case-1","configuration":"without_skill","task_index":2,"task_total":2,"title":"Basic flow"}}
+{"protocol_version":1,"event_version":1,"sequence_number":10,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:10.007Z","event":"run_progress","payload":{"phase":"executing","task_total":2,"completed_tasks":1,"running_tasks":1,"passed":0,"failed":1,"errored":0,"skipped":0,"elapsed_ms":10007}}
+{"protocol_version":1,"event_version":1,"sequence_number":11,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:40.007Z","event":"run_progress","payload":{"phase":"executing","task_total":2,"completed_tasks":1,"running_tasks":1,"passed":0,"failed":1,"errored":0,"skipped":0,"elapsed_ms":40007}}
+{"protocol_version":1,"event_version":1,"sequence_number":12,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:50.006Z","event":"case_completed","payload":{"task_id":"iteration-1/case-1/without_skill","iteration":1,"case_id":"case-1","configuration":"without_skill","task_index":2,"task_total":2,"title":"Basic flow","completed_tasks":2,"status":"PASS","pass_rate":1.0,"duration_ms":40000}}
+{"protocol_version":1,"event_version":1,"sequence_number":13,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:50.007Z","event":"run_progress","payload":{"phase":"executing","task_total":2,"completed_tasks":2,"running_tasks":0,"passed":1,"failed":1,"errored":0,"skipped":0,"elapsed_ms":50007}}
+{"protocol_version":1,"event_version":1,"sequence_number":14,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:50.008Z","event":"iteration_completed","payload":{"iteration":1,"invocation_completed_tasks":2,"passed":1,"failed":1,"errored":0,"skipped":0,"duration_ms":50005}}
+{"protocol_version":1,"event_version":1,"sequence_number":15,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:50.009Z","event":"run_progress","payload":{"phase":"finalizing","task_total":2,"completed_tasks":2,"running_tasks":0,"passed":1,"failed":1,"errored":0,"skipped":0,"elapsed_ms":50009}}
+{"protocol_version":1,"event_version":1,"sequence_number":16,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:50.010Z","event":"run_finished","last_event":true,"payload":{"status":"COMPLETED","completed_tasks":2,"passed":1,"failed":1,"errored":0,"skipped":0,"duration_ms":50010}}
 ```
 
 ### 消费规则
 
-- 在解释任何其他字段前，先解析足够的信封内容以读取 `schema_version`。v1 消费
-  方必须拒绝或隔离大版本缺失、格式错误、混用或不受支持的 invocation。
+- 在解释任何事件 Payload 前，先解析足够的信封内容以读取
+  `protocol_version`。v1 消费方必须拒绝或隔离协议大版本缺失、格式错误、混用
+  或不受支持的 invocation。
 - 按 `invocation_id` 分组，并按 `sequence_number` 处理事件。
 - 将缺失序号识别为缺口，并用（`invocation_id`、`sequence_number`）对重放去重。
-- 在受支持的大版本内，忽略未知事件类型及未知 payload 字段。
+- 在受支持的协议版本内，忽略未知的可选信封字段、未知事件类型、不支持的
+  `event_version` 值和未知 Payload 字段。即使忽略 Payload，也仍要处理
+  `sequence_number` 和 `last_event` 等已知信封字段。
+- 对于受支持的 `run_progress` 版本，保留其计数，但把未知 `phase` Token 渲染
+  为未知阶段；`phase` 有意设计为开放值。
+- 解释事件时忽略未知属性。透明中间方使用相同的（`invocation_id`、
+  `sequence_number`）身份重新发出事件时，必须保留完整的语义记录，包括未知信
+  封字段、Payload 字段和属性；经过转换的记录不得复用原始身份。
 - 不假设并发任务按声明顺序产生事件。
-- 只有带 `last_event: true` 的 `run_finished` 才能证明事件流正常结束；进程崩溃
-  可能只留下合法前缀。
+- 把唯一一条带 `last_event: true` 的记录视为生产方已经完成逻辑事件流的证明。
+  它必须具有最大的序号，且其后不得存在任何记录。V1 把该标记放在
+  `run_finished` 上，但通用消费方不得将该标记永久绑定到这种事件类型。
 - 只解析以换行结束的记录；尾部记录未结束时应缓冲或忽略，等待更多字节。
+- 把文件中间完整但格式错误的记录视为事件流损坏，而不是跳过它并静默闭合序号
+  缺口。
+
+`run_progress` 是运行态快照，而不是结果账本。消费方可以用它展示进度和识别生
+产方停滞，但最终报告仍是详细评测结果的权威来源。如果报告与事件日志不一致，
+消费方应展示该不一致，并使用报告中的结果数据。
+
+消费方必须区分四种结果：`run_finished` 结束 Run 生命周期，`last_event` 结束逻
+辑事件流，最终报告承载详细评测结果，而进程退出码还反映 Case 结果策略和请求的
+Sink 投递情况。V1 通常会同时产生这些结果，但它们不是彼此的别名。
 
 ### Sink 与传输模型
 
@@ -420,33 +544,37 @@ type EventSink interface {
 }
 ```
 
-具体 Publisher API 应提供 `Publish`、`Err` 和 `Close`。`Publish` 接收强类型
-`Payload`，构造一条完整封装的事件，执行扇出，并按 Sink 记录粘性错误。
-`Err` 返回这些错误的 `errors.Join` 汇总且不清除状态。`Close` 关闭同时实现
-`io.Closer` 的 Sink，把关闭错误记录到同一汇总中，并且可重复调用。生命周期调
-用点可以记录当前事件返回的错误，但命令收尾时必须使用 `Err`。Payload 以只包
-含标量字段的值保存，每个 Sink 都收到同一条不可变事件的副本。
+具体 Publisher API 提供 `Publish`、`PublishLast`、`Err` 和 `Close`。两个发布
+方法都接收强类型 `Payload`，并构造一条完整封装的不可变事件。
+`PublishLast` 设置 `last_event: true`，并在该记录后永久关闭发布，从而让一个组
+件独占唯一最终标记。`Err` 返回粘性的发布/关闭错误且不清除状态，`Close` 可重
+复调用。生命周期调用点可以记录当前事件返回的错误，但命令收尾时必须使用
+`Err`。
 
-CLI 可以把一条事件扇出到 JSONL 文件 Sink、UI 适配器、回调、OTLP 适配器、
-socket 或未来远程发布器。现有 stdout 格式保持不变，也不属于事件日志兼容契约。
+Publisher 对 invocation 的不可变属性校验一次，并把它们复制到每条事件。事件
+类型和事件版本来自类型化 Payload；调用方不能把任意类型字符串与无关的
+Payload 组合。
 
 invocation 级 Publisher 或 Dispatcher 负责事件身份和顺序。它将并发发布串行化，
-在同一排序临界区内只分配一次 `invocation_id`、下一个连续
-`sequence_number` 和 `time`，再把同一个不可变、完整封装的 `Event` 传递给每
-个 Sink。扇出顺序与 `sequence_number` 一致；Sink 只负责传输或序列化，不得
-分配或修改事件身份。
+只分配一次 `invocation_id`、下一个连续 `sequence_number` 和 `time`。Sink 只
+负责传输或序列化事件，不得分配或修改事件身份。
 
-JSONL 是 v1 序列化；文件是首个建议 Sink，而不是协议本身。
+V1 标准化一个同步的本地 JSONL 文件 Sink。`EventSink` 边界让序列化与生命周期
+状态保持分离，但 v1 不对投递、重试、扇出、回调、Socket 或 OTLP 作出承诺。任
+何远程或多 Sink 传输都需要单独提案。现有 stdout 格式保持不变，也不属于事件
+日志兼容契约。
 
 ### JSONL 文件语义
 
-后续 JSONL 文件 Sink 必须：
+JSONL 文件 Sink 必须：
 
 - 启动时只创建或截断一次指定路径；
-- 在 Sink 写入锁内序列化已完整封装的事件、追加 `\n` 并写入完整记录；
-- 每条记录执行一次 `Write`，并让完整记录及时可见；
+- 编码 UTF-8 JSON Lines，在 Sink 写入锁内序列化已完整封装的事件、追加 `\n`
+  并写入完整字节切片；
+- 处理短写且不交错记录，并让完整记录及时可见；
 - 不对每条事件执行 `fsync`，也不依赖延迟的缓冲 flush；
-- 只保证每个以换行结束的记录都是合法 JSON。
+- 拒绝序列化后超过 1 MiB 的事件，并把错误记录为粘性 Sink 失败；
+- 只保证每个成功写入且以换行结束的记录都是合法 JSON。
 
 并发读取进程可能观察到部分写入的最后一条记录，特别是在进程崩溃或磁盘失败
 后。因此消费方不得把未以换行结束的尾部记录解析为完整事件。
@@ -456,46 +584,57 @@ JSONL 是 v1 序列化；文件是首个建议 Sink，而不是协议本身。
 只有 `skill-up run` 新增参数：
 
 ```text
---event-log <path>   Write v1 evaluation events as JSON Lines to path
+--event-log <path>             Write v1 evaluation events as JSON Lines to path
+--event-attribute <key=value>  Attach a namespaced string attribute (repeatable)
 ```
 
 v1 命令契约如下：
 
-- 参数可选、接收一个路径值，并且没有配置文件或环境变量形式；
+- 两个参数都是可选的，并且都没有配置文件或环境变量形式；
 - 空值和 `-` 非法；stdout 继续面向人类，永不作为事件传输通道；
 - 相对路径以进程工作目录为基准解析；
-- 父目录必须已存在；命令以受进程 umask 影响的 `0644` 模式创建文件，或在启动
-  时恰好截断一次已有文件；
+- 父目录必须已存在；命令以受进程 umask 影响的 `0600` 模式创建文件，或者在不
+  改变已有文件权限的情况下将其截断一次；
 - 不要求文件扩展名，每个文件只包含一次 invocation；
 - 规范化后的路径不得位于任何计划执行的 `iteration-N` 目录中，因为 Runner
   会在评测前删除并重建这些目录；
 - v1 中 `--event-log` 与 `--dry-run` 互斥，因为 dry-run 不执行任何生命周期任
   务；
+- `--event-attribute` 要求同时指定 `--event-log`；每个值在第一个 `=` 处分
+  隔，且必须包含该分隔符；Key 和 Value 都不得为空；重复 Key 非法；同时还要
+  拒绝保留的 `skill-up.*` 前缀，并满足事件信封章节中的命名空间和大小规则；
 - 未指定参数时，事件发布为 no-op，现有 stdout、报告和退出行为保持不变。
 
-计划和路径校验必须在打开文件前完成，防止无效计划截断已有事件日志。成功打开
-文件并发布 `run_started` 后，事件日志才算启动完成。打开失败时不产生事件流。
-如果 `run_started` 扇出失败，命令会尝试向所有仍然健康的 Sink 发布状态为
-`ERROR` 的 `run_finished`，关闭 Publisher，然后在加载凭据或调用 Agent 前退
-出。
+计划、路径和属性校验必须在打开文件前完成，防止无效计划截断已有事件日志。成
+功打开文件并发布 `run_started` 后，事件日志才算启动完成。打开失败时不产生事
+件流。如果首条记录无法写入，命令关闭 Publisher，并在加载凭据或调用 Agent 前
+退出；它不会假装失败文件包含完整的终止事件流。
 
 ### 命令执行流程
 
 `runEval` 应重构为一条明确的收尾路径：
 
-1. 解析参数，加载并校验配置，应用 Case 过滤和命令行覆盖。
+1. 解析参数和属性，加载并校验配置，应用 Case 过滤和命令行覆盖。
 2. 拒绝 dry-run/event-log 冲突，然后构建不可变任务计划。
 3. 校验并打开请求的 JSONL Sink，创建 Publisher 和生命周期 Emitter，发布
-   `run_started`。首条事件失败时采用上述启动收尾行为。
-4. 加载凭据并创建 Agent。从这一步开始，所有可控失败都产生状态为 `ERROR` 的
-   `run_finished`。
-5. 执行计划中的 iteration；Runner 发出 iteration 边界，Evaluator 使用计划元
-   数据发出 Case 边界。
-6. 所有计划任务都进入 Case 终态时选择 `COMPLETED`；遇到
+   `run_started` 和初始 `preparing` 进度快照。首条记录失败时采用上述启动行
+   为。
+4. 加载凭据并创建 Agent。从这一步开始，所有可控失败都会开始收尾并产生状态
+   为 `ERROR` 的 `run_finished`。
+5. 进入 `executing`，执行计划中的 iteration，并在阶段和 Case 变化后以及工作
+   活跃期间每 30 秒发出进度。
+6. 停止心跳，进入 `finalizing`，清除因 invocation 取消/错误而已不再活动的任
+   务且不把它们计为完成；当所有计划任务都进入 Case 终态时选择
+   `COMPLETED`；遇到
    `context.Canceled` 或 `context.DeadlineExceeded` 时选择 `CANCELLED`；其他
    调用级失败选择 `ERROR`。
-7. 恰好发布一次 `run_finished`，关闭所有 Sink，并使用 `errors.Join` 合并评测
-   错误、Case 结果错误、Publisher 错误和关闭错误。
+7. 通过 `PublishLast` 发布 `run_finished`，关闭文件，并使用 `errors.Join` 合
+   并评测错误、Case 结果错误、Publisher 错误和关闭错误。
+
+步骤 6 和 7 使用一个新建、有时间上限的收尾 Context，而不是已经取消的
+invocation Context。这样可控取消仍有机会记录最终快照和 `run_finished`；收尾
+超时会成为粘性 Publisher 错误。具体超时时间是实现策略，而不是传输契约的一部
+分。
 
 只要所有计划任务都执行过，Case 失败和 Case 错误不会把 `COMPLETED` 改成其他
 状态；现有 `exitStatusError` 仍会让相关 `with_skill` 结果使命令失败。Sink 错
@@ -506,54 +645,76 @@ v1 命令契约如下：
 ### 失败语义
 
 - 无法创建或打开显式请求的事件日志时，启动失败。
-- 即使前面的 Sink 失败，扇出仍会为当前事件尝试所有健康 Sink。Sink 失败按 Sink
-  记录并保持粘性；它不会阻止其他健康 Sink 接收当前事件、后续事件或
-  `run_finished`。v1 不要求重试已失败的 Sink。
+- 第一次 JSONL 写入失败是粘性的，并会禁用该 Sink，防止部分或有缺口的文件在
+  后续获得会造成误导的最终标记。V1 不重试，也不声称后续记录到达了失败的
+  Sink。
 - Sink 在运行中失败后，评测可以继续生成报告。所有粘性 Sink 错误最终汇总到命
   令错误中，并使命令在收尾后以非零状态退出。
-- 失败的 Sink 不得被报告为完整事件流；仅告警后成功退出会让 CI 错信不完整进
-  度。
+- 写入失败会留下不完整的逻辑事件流。仅由 `Close` 报告的失败可能发生在消费方
+  已观察到逻辑完整事件流之后，并且无法撤回其最终标记。两种情况下 CLI 都以非
+  零退出；CI 只有同时看到逻辑完整的文件和成功的命令结果，才能认为事件投递成
+  功。
+- `last_event: true` 表示生产方在逻辑上完成了事件流；它不保证 `fsync` 持久
+  性，也不保证整个命令以零退出。
 - `COMPLETED` 不是退出码的别名。已完成的运行仍可能因为 `with_skill` Case 失
   败或出错，或请求的 Sink 失败而非零退出。`ERROR`、`CANCELLED` 和任一粘
   性 Sink 错误都要求非零退出。
 
 ### 说明/约束/注意事项
 
-- v1 内新增可选事件类型或 payload 字段属于兼容扩展。
+- `protocol_version` 对信封和有序日志规则进行版本化；`event_version` 对某一种
+  事件类型的 Payload 进行版本化。
 - 事件时间用于诊断；顺序由 `sequence_number` 定义。
-- 未来事件族可以包含摘要、诊断和产物引用，但默认不包含敏感内容。
-- V1 不预告未来子事件，也不要求 DAG。
+- 进度消费方应从观察到一条完整记录的时刻开始计算陈旧时间，而不是使用生产方
+  的墙上时间 `time`。
+- 未来事件族可以包含摘要、诊断和产物引用。只有在 `run_finished` 被有意设置
+  为非最终事件，并且后续恰好有一条记录持有 `last_event` 时，这些事件才能位于
+  `run_finished` 之后。
+- V1 不预告未来子事件、不要求 DAG、不描述 task 级阶段，也不估算剩余时间。
 
 ### 风险与缓解
 
-- **过早锁定 schema。** 保持信封足够小、每种事件使用独立 payload，并要求消费
-  方忽略增量字段。
+- **过早锁定 schema。** 分别对信封和每种事件 Payload 进行版本化、保持两者足
+  够小，并要求消费方忽略增量字段。
 - **进度含义模糊。** 统计展开后的任务，而不是源 Case。
+- **错误的存活信号。** 以有上限的频率发出周期快照，并要求消费方使用本地观察
+  时间判断停滞。
 - **重复、缺失或截断投递。** 提供调用标识、序号、终止语义和尾部记录规则。
-- **敏感数据泄露。** 基础 schema 不包含 prompt、响应、transcript、凭据或产物
-  内容。
+- **敏感或过量上下文。** 基础 schema 不包含 Prompt、响应、transcript、凭据
+  或产物内容；属性只能是字符串，且有大小限制。
 
 ## 设计细节
 
-本次文档 PR 固定 v1 信封、生命周期注册表、消费规则和 Sink 抽象。后续实现再决
-定包位置和具体类型，但必须保持这些契约。
+本次文档 PR 固定 v1 信封、生命周期注册表、消费规则和本地文件 Sink 契约。后
+续实现再决定包位置和具体类型，但必须保持这些契约。后续实现还应为每个受支持
+的（`protocol_version`、`event`、`event_version`）元组发布机器可读的 JSON
+Schema。
 
-首个实现预计增加 `--event-log`、并发安全 JSONL 文件 Sink、`EventSink` 扇出，
-并在 run、iteration、case 生命周期边界发布事件。它不得继续为
-`ProgressObserver` 增加位置参数。
+下面的 Go 结构和文件位置是不具规范性的实现草图。传输字段、生命周期不变量、
+CLI 行为和可观察的失败语义具有规范性；实现可以采用不同的代码组织方式，只要
+保持这些契约即可。
+
+Schema Bundle 必须分层：公共信封 Schema 允许未知的可选信封字段、事件类型和
+事件版本，而已知元组的 Schema 校验其已知 Payload 字段，同时允许未知的可选
+Payload 字段。封闭的顶层 `oneOf` 如果拒绝其他合法的未知事件，就会违反前向兼
+容契约。
+
+首个实现预计增加 `--event-log`、可重复的 `--event-attribute`、并发安全 JSONL
+文件 Sink、`run_progress` 快照与心跳，以及 run、iteration、case 生命周期边界
+事件。它不得继续为 `ProgressObserver` 增加位置参数。
 
 建议的实现边界为：
 
 | 位置 | 职责 |
 | --- | --- |
-| `internal/evalevent/event.go` | 信封、事件类型、枚举和强类型 payload |
-| `internal/evalevent/publisher.go` | 序号分配、有序扇出、按 Sink 粘性错误和关闭错误汇总 |
-| `internal/evalevent/lifecycle.go` | 生命周期状态机、任务去重、累计和每 iteration 计数 |
+| `internal/evalevent/event.go` | 信封、事件类型、枚举和强类型 Payload |
+| `internal/evalevent/publisher.go` | 协议/事件版本、属性复制、序号分配、`PublishLast`、粘性错误和关闭错误汇总 |
+| `internal/evalevent/lifecycle.go` | 生命周期状态机、进度心跳、任务去重、累计和每 iteration 计数 |
 | `internal/evalevent/jsonl.go` | 不缓冲、换行结尾的文件 Sink |
 | `internal/evaluator/plan.go` | 由执行和事件共享的确定性展开任务元数据 |
 | `internal/runner/runner.go` | invocation 和 iteration 边界；执行不可变任务计划 |
 | `internal/evaluator/evaluator.go` | Case 边界以及结果到事件状态的映射 |
-| `internal/cli/run.go` | 参数校验、Sink 生命周期、终止状态选择和最终错误组合 |
+| `internal/cli/run.go` | Event Log/属性参数校验、Sink 生命周期、终止状态选择和最终错误组合 |
 
 `internal/evalevent` 除标准库和 UUID 生成外不依赖其他包；它不得导入 CLI、
 Runner、Evaluator、Judge、Report 或 UI 包。Runner/Evaluator 适配器在边界把领
@@ -564,21 +725,26 @@ Runner、Evaluator、Judge、Report 或 UI 包。Runner/Evaluator 适配器在�
 针对本次纯文档 PR：
 
 - 使用 JSON 解析器校验所有示例行；
-- 校验连续序号、字段类型约束、任务总数、累计进度、终态不变量和唯一终止事件；
+- 校验连续序号、协议/事件版本、字段类型约束、任务总数、进度不变量、心跳示例、
+  终态不变量和唯一 `last_event` 标记；
 - 校验中英文事件表一致。
 
-未来实现必须补充序列化、不支持大版本拒绝、并发 Publisher 排序、扇出间事件身
-份一致、按 Sink 粘性失败、尾部残缺记录、Benchmark、多 iteration 和端到端消
-费测试。命令测试还必须覆盖参数帮助、空路径和 `-`、dry-run 冲突、相对路径解
-析、已有文件截断、父目录不存在、iteration 工作区冲突、启动写入失败、终止关
-闭失败，以及未指定参数时行为不变。生命周期测试必须覆盖 `run_started` 后的凭
-据失败、Case 失败但状态为 `COMPLETED`、取消、部分完成的 `ERROR`，以及恰好
-一条终止事件。
+未来实现必须补充序列化、不支持的协议拒绝、未知信封/事件/版本跳过、属性校验和
+透明中继保留、并发 Publisher 排序、粘性 Sink 失败、中间格式错误记录、尾部残
+缺记录、UTF-8 和记录大小限制、Benchmark、多 iteration、假时钟心跳和端到端
+消费测试。命令测试还必须覆盖参数帮助、可重复属性、空路径和 `-`、dry-run 冲
+突、相对路径解析、
+`0600` 创建模式、已有文件截断、父目录不存在、iteration 工作区冲突、启动写入
+失败、终止关闭失败，以及未指定参数时行为不变。生命周期测试必须覆盖
+`run_started` 后的凭据失败、Case 失败但状态为 `COMPLETED`、取消后没有剩余活
+动任务、invocation Context 取消后的终止事件发布、部分完成的 `ERROR`、并发
+Case 下的进度，以及恰好一个通用 `last_event` 标记。
 
 ## 缺点
 
 - 在代码实现前定义事件契约，会提前产生兼容性承诺。
 - 相比只发射 Case 计数，公共信封更冗长。
+- 每事件版本和重复进度快照会增加少量传输与实现复杂度。
 - JSONL 易于检查，但不如二进制协议紧凑。
 - 即使评测报告成功生成，粘性 Sink 错误仍会使命令失败。
 
@@ -590,8 +756,19 @@ Runner、Evaluator、Judge、Report 或 UI 包。Runner/Evaluator 适配器在�
 - **使用最终报告。** 适合已完成结果，但无法增量消费。
 - **仅使用 OTLP。** 适合可观测平台，但对简单 CI 消费过重，也不是产品事件契
   约。
+- **每条记录都使用 CloudEvents。** 它的标准信封、扩展和 SDK 生态对路由事件
+  很有用，但没有定义本协议的有序 JSONL 容器、连续序号、缺口或最终标记规则。
+  因此 v1 选择更小的直接本地契约，代价是无法立即获得 CloudEvents SDK/Router
+  兼容性。任何未来适配器提案都必须定义完整的映射和保留规则；当前属性 Key 不
+  承诺直接映射为 CloudEvents 扩展属性。
 - **完整复制 Bazel BEP 和 protobuf。** 成熟且表达力强，但对 skill-up v1 过
   于复杂。
+- **增加独立心跳事件。** 这样能明确表达存活性，但重复 `run_progress` 更简单，
+  并能让较晚开始的消费方获得完整的当前快照。
+- **把进度放在信封属性中。** 并非每条事件都需要进度，而不透明字符串会丢失数
+  字校验和快照不变量；类型化 `run_progress` Payload 能让公共信封保持通用。
+- **增加 `stream_finished`。** 第二个终止事件可以分离事件流和 Run 生命周期，
+  但通用 `last_event` 标记用更少的事件类型提供了所需扩展性。
 
 ## 所需基础设施
 
@@ -599,12 +776,22 @@ Runner、Evaluator、Judge、Report 或 UI 包。Runner/Evaluator 适配器在�
 
 ## 升级与迁移策略
 
-Schema 版本 `1` 只做增量演进：生产者可以增加事件类型或可选 payload 字段，
-消费方必须忽略无法理解的内容。重命名、删除、改变既有字段的含义或类型，需要
-提升 `schema_version` 大版本。
+只有信封或有序日志语义发生不兼容变更时，才改变 `protocol_version`。在同一版
+本内增加可选信封字段是兼容变更；删除字段，或改变现有字段的含义、类型或必填
+状态时，应提升协议版本。消费方必须先校验版本，再解释任何 Payload。协议版本
+缺失、混用或不受支持时，应拒绝或隔离整个 invocation，而不能把它当作未知 v1
+事件。
 
-消费方必须先校验大版本，再解释信封剩余部分或 payload。不受支持的大版本必须
-被拒绝或隔离，不能作为兼容的未知 v1 事件处理。
+每种事件类型的 `event_version` 独立演进。在同一版本中增加可选 Payload 字段是
+兼容变更。重命名、删除、改变字段含义/类型或把可选字段改为必填，只增加对应事
+件类型的版本。消费方不支持某个事件/版本组合时，忽略其 Payload，但仍检查序号
+和 `last_event`。
+
+核心事件名称保留给 skill-up。第三方事件类型和属性使用命名空间，因此扩展不需
+要提升协议版本。`run_progress.phase` 是开放 Token：增加阶段不提升事件版本，
+旧消费方将其渲染为未知。`configuration`、Case `status` 和 Run `status` 集合
+是封闭的；为其中任一集合增加传输值时，应提升受影响的事件版本。未知枚举值绝
+不能被静默映射为已有含义。
 
 首个实现将在
 [GitHub Issue #206](https://github.com/alibaba/skill-up/issues/206) 中单独跟踪。
