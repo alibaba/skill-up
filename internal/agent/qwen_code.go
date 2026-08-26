@@ -318,6 +318,7 @@ type qwenSessionMessage struct {
 
 type qwenSessionPart struct {
 	Text             string                `json:"text,omitempty"`
+	Thought          bool                  `json:"thought,omitempty"`
 	FunctionCall     *qwenFunctionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *qwenFunctionResponse `json:"functionResponse,omitempty"`
 }
@@ -406,6 +407,11 @@ func appendQwenMessageParts(messages *[]transcript.Message, ev qwenSessionEvent,
 	var textParts []string
 	for _, p := range ev.Message.Parts {
 		switch {
+		case p.Thought:
+			// Qwen records hidden reasoning as ordinary text parts annotated with
+			// thought=true. Keep those parts out of the user-visible transcript and
+			// FinalMessage while preserving tool calls and the final answer.
+			continue
 		case p.FunctionCall != nil:
 			*messages = append(*messages, transcript.Message{
 				Role: transcript.RoleToolCall,

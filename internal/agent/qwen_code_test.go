@@ -242,6 +242,37 @@ func TestParseQwenSessionFile(t *testing.T) {
 	}
 }
 
+func TestParseQwenSessionFile_SkipsThoughtText(t *testing.T) {
+	t.Parallel()
+
+	lines := []string{
+		`{"type":"user","message":{"role":"user","parts":[{"text":"List the files."}]}}`,
+		`{"type":"assistant","message":{"role":"model","parts":[{"text":"I should inspect the workspace.","thought":true}]}}`,
+		`{"type":"assistant","message":{"role":"model","parts":[{"functionCall":{"id":"call_1","name":"run_shell_command","args":{"command":"ls"}}}]}}`,
+		`{"type":"user","message":{"role":"user","parts":[{"functionResponse":{"id":"call_1","name":"run_shell_command","response":{"output":"a.txt"}}}]}}`,
+		`{"type":"assistant","message":{"role":"model","parts":[{"text":"The workspace contains a.txt."}]}}`,
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	trans, finalMsg, _, _ := parseQwenSessionFile(path)
+
+	if finalMsg != "The workspace contains a.txt." {
+		t.Fatalf("unexpected final message: %q", finalMsg)
+	}
+	if len(trans) != 4 {
+		t.Fatalf("expected user, tool call, tool result, and final answer; got %d messages: %#v", len(trans), trans)
+	}
+	for _, msg := range trans {
+		if strings.Contains(msg.Content, "inspect the workspace") {
+			t.Fatalf("thought text leaked into transcript: %#v", trans)
+		}
+	}
+}
+
 func TestParseQwenSessionFile_Missing(t *testing.T) {
 	t.Parallel()
 	trans, finalMsg, inTok, outTok := parseQwenSessionFile(filepath.Join(t.TempDir(), "nope.jsonl"))
