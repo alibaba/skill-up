@@ -3,7 +3,7 @@ title: "Skill Evaluation Event Log Protocol"
 authors:
   - "JHWang-1997"
 creation-date: 2026-08-18
-last-updated: 2026-08-26
+last-updated: 2026-08-31
 status: draft
 ---
 
@@ -223,7 +223,7 @@ optional field with no value is omitted rather than encoded as `null`.
 | `run_progress` | `running_tasks` | integer | Invocation-wide number of tasks actively executing at this snapshot, in `[0, task_total]` |
 | `run_progress` | `elapsed_ms` | integer | Non-negative invocation elapsed duration at this snapshot |
 | iteration and case events | `iteration` | integer | Actual iteration number, at least `1`; it may start above `1` when appending to an existing workspace |
-| case events | `task_id` | string | Non-empty, stable, and unique within the invocation |
+| case events | `task_id` | string | Opaque, non-empty correlation ID that is stable and unique within the invocation; consumers must not parse it |
 | case events | `case_id` | string | Non-empty source case identifier |
 | case events | `configuration` | string | Exactly `with_skill` or `without_skill` |
 | case events | `task_index` | integer | Stable invocation-wide planned index in `[1, task_total]` |
@@ -415,11 +415,18 @@ required `Z` offset.
 
 A task is one (`iteration`, `case_id`, `configuration`) tuple. Benchmark mode
 therefore creates two tasks from one source case. `task_id` is stable and
-unique within the invocation; a readable form is:
+unique within the invocation. Consumers correlate task events using
+(`invocation_id`, `task_id`) and use the explicit tuple fields for task
+semantics; they must not parse structure from `task_id`.
+
+For example, a producer may assign this opaque ID:
 
 ```text
-iteration-1/case-1/with_skill
+task-1
 ```
+
+This representation is non-normative and is not part of the wire compatibility
+contract.
 
 Planning completes before `run_started`. The event is emitted exactly once
 before any progress, iteration, or case event, and its `task_total` is final
@@ -468,17 +475,20 @@ opening the event stream. The plan resolves:
 - one global `task_index`, `task_id`, and `task_total` for every expanded task.
 
 Plan order is deterministic: iteration number ascending, filtered case order,
-then `with_skill` before `without_skill`. The canonical v1 task ID is:
+then `with_skill` before `without_skill`. The planner assigns an opaque
+`task_id` while constructing the immutable plan. The initial implementation may
+derive it from the global index, for example:
 
 ```text
-iteration-<iteration>/<case_id>/<configuration>
+task-<task_index>
 ```
 
-Case IDs are already validated not to contain path separators. Task start and
-completion events may appear in any order under concurrency, but their planned
-identity never changes. The runner must execute this plan rather than
-recompute a second task list; event totals and actual work therefore cannot
-drift apart.
+That representation is an implementation detail, not a wire contract. This
+protocol adds no lexical restriction to `case_id` and neither depends on nor
+changes command-level artifact-path validation. Task start and completion
+events may appear in any order under concurrency, but their planned identity
+never changes. The runner must execute this plan rather than recompute a second
+task list; event totals and actual work therefore cannot drift apart.
 
 An invocation-scoped lifecycle emitter sits above the generic publisher. It
 owns the plan, a mutex, started/completed task sets, invocation counts,
@@ -543,14 +553,14 @@ the JSONL file.
 {"protocol_version":1,"event_version":1,"sequence_number":2,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.001Z","event":"run_progress","payload":{"phase":"preparing","task_total":2,"completed_tasks":0,"running_tasks":0,"passed":0,"failed":0,"errored":0,"skipped":0,"elapsed_ms":1}}
 {"protocol_version":1,"event_version":1,"sequence_number":3,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.002Z","event":"run_progress","payload":{"phase":"executing","task_total":2,"completed_tasks":0,"running_tasks":0,"passed":0,"failed":0,"errored":0,"skipped":0,"elapsed_ms":2}}
 {"protocol_version":1,"event_version":1,"sequence_number":4,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.003Z","event":"iteration_started","payload":{"iteration":1}}
-{"protocol_version":1,"event_version":1,"sequence_number":5,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.004Z","event":"case_started","payload":{"task_id":"iteration-1/case-1/with_skill","iteration":1,"case_id":"case-1","configuration":"with_skill","task_index":1,"task_total":2,"title":"Basic flow"}}
+{"protocol_version":1,"event_version":1,"sequence_number":5,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.004Z","event":"case_started","payload":{"task_id":"task-1","iteration":1,"case_id":"case-1","configuration":"with_skill","task_index":1,"task_total":2,"title":"Basic flow"}}
 {"protocol_version":1,"event_version":1,"sequence_number":6,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.005Z","event":"run_progress","payload":{"phase":"executing","task_total":2,"completed_tasks":0,"running_tasks":1,"passed":0,"failed":0,"errored":0,"skipped":0,"elapsed_ms":5}}
-{"protocol_version":1,"event_version":1,"sequence_number":7,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:10.004Z","event":"case_completed","payload":{"task_id":"iteration-1/case-1/with_skill","iteration":1,"case_id":"case-1","configuration":"with_skill","task_index":1,"task_total":2,"title":"Basic flow","completed_tasks":1,"status":"FAIL","pass_rate":0.5,"duration_ms":10000}}
+{"protocol_version":1,"event_version":1,"sequence_number":7,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:10.004Z","event":"case_completed","payload":{"task_id":"task-1","iteration":1,"case_id":"case-1","configuration":"with_skill","task_index":1,"task_total":2,"title":"Basic flow","completed_tasks":1,"status":"FAIL","pass_rate":0.5,"duration_ms":10000}}
 {"protocol_version":1,"event_version":1,"sequence_number":8,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:10.005Z","event":"run_progress","payload":{"phase":"executing","task_total":2,"completed_tasks":1,"running_tasks":0,"passed":0,"failed":1,"errored":0,"skipped":0,"elapsed_ms":10005}}
-{"protocol_version":1,"event_version":1,"sequence_number":9,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:10.006Z","event":"case_started","payload":{"task_id":"iteration-1/case-1/without_skill","iteration":1,"case_id":"case-1","configuration":"without_skill","task_index":2,"task_total":2,"title":"Basic flow"}}
+{"protocol_version":1,"event_version":1,"sequence_number":9,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:10.006Z","event":"case_started","payload":{"task_id":"task-2","iteration":1,"case_id":"case-1","configuration":"without_skill","task_index":2,"task_total":2,"title":"Basic flow"}}
 {"protocol_version":1,"event_version":1,"sequence_number":10,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:10.007Z","event":"run_progress","payload":{"phase":"executing","task_total":2,"completed_tasks":1,"running_tasks":1,"passed":0,"failed":1,"errored":0,"skipped":0,"elapsed_ms":10007}}
 {"protocol_version":1,"event_version":1,"sequence_number":11,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:40.007Z","event":"run_progress","payload":{"phase":"executing","task_total":2,"completed_tasks":1,"running_tasks":1,"passed":0,"failed":1,"errored":0,"skipped":0,"elapsed_ms":40007}}
-{"protocol_version":1,"event_version":1,"sequence_number":12,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:50.006Z","event":"case_completed","payload":{"task_id":"iteration-1/case-1/without_skill","iteration":1,"case_id":"case-1","configuration":"without_skill","task_index":2,"task_total":2,"title":"Basic flow","completed_tasks":2,"status":"PASS","pass_rate":1.0,"duration_ms":40000}}
+{"protocol_version":1,"event_version":1,"sequence_number":12,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:50.006Z","event":"case_completed","payload":{"task_id":"task-2","iteration":1,"case_id":"case-1","configuration":"without_skill","task_index":2,"task_total":2,"title":"Basic flow","completed_tasks":2,"status":"PASS","pass_rate":1.0,"duration_ms":40000}}
 {"protocol_version":1,"event_version":1,"sequence_number":13,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:50.007Z","event":"run_progress","payload":{"phase":"executing","task_total":2,"completed_tasks":2,"running_tasks":0,"passed":1,"failed":1,"errored":0,"skipped":0,"elapsed_ms":50007}}
 {"protocol_version":1,"event_version":1,"sequence_number":14,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:50.008Z","event":"iteration_completed","payload":{"iteration":1,"invocation_completed_tasks":2,"passed":1,"failed":1,"errored":0,"skipped":0,"duration_ms":50005}}
 {"protocol_version":1,"event_version":1,"sequence_number":15,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:50.009Z","event":"run_progress","payload":{"phase":"finalizing","task_total":2,"completed_tasks":2,"running_tasks":0,"passed":1,"failed":1,"errored":0,"skipped":0,"elapsed_ms":50009}}
@@ -630,7 +640,9 @@ V1 standardizes one synchronous local JSONL file sink. The `EventSink` boundary
 keeps serialization separate from lifecycle state, but v1 makes no delivery,
 retry, fan-out, callback, socket, or OTLP promise. Any remote or multi-sink
 transport requires a separate proposal. Existing stdout formatting stays
-unchanged and is not part of the event-log compatibility contract.
+unchanged and is not part of the event-log compatibility contract. The Context
+may prevent publication before a write begins, but it does not make an in-flight
+synchronous file write interruptible.
 
 ### JSONL File Semantics
 
@@ -702,7 +714,8 @@ invoked; it does not pretend that the failed file contains a terminal stream.
    lifecycle emitter, and publish `run_started` plus the initial `preparing`
    progress snapshot. A first-record failure uses the startup behavior above.
 4. Load credentials and construct the agent. Any graceful failure from this
-   point starts finalization and produces `run_finished` with `ERROR`.
+   point starts best-effort finalization and attempts to produce `run_finished`
+   with `ERROR`.
 5. Enter `executing`, execute the planned iterations, and emit progress after
    phase and case changes plus every 30 seconds while work is active.
 6. Stop the heartbeat, enter `finalizing`, clear tasks that are no longer
@@ -714,11 +727,13 @@ invoked; it does not pretend that the failed file contains a terminal stream.
 7. Publish `run_finished` through `PublishLast`, close the file, and combine
    evaluation, case-result, publisher, and close errors with `errors.Join`.
 
-Steps 6 and 7 use a fresh, bounded finalization context rather than an already
-cancelled invocation context. This gives graceful cancellation a chance to
-record its final snapshot and `run_finished`; a finalization timeout becomes a
-sticky publisher error. The exact timeout is implementation policy rather than
-part of the wire contract.
+Steps 6 and 7 must not reuse an already cancelled invocation context. They use
+a fresh context so graceful cancellation can make a best-effort attempt to
+record the final snapshot and `run_finished`. V1 does not guarantee a
+wall-clock finalization bound: cancellation cannot interrupt a synchronous
+file write already in progress. CI must retain its outer job or process
+timeout. An interruptible or asynchronous sink requires a separate transport
+proposal.
 
 Case failures and case errors do not change `COMPLETED` when every planned
 task ran; the existing `exitStatusError` still makes a relevant `with_skill`
@@ -734,6 +749,9 @@ contract.
 - The first JSONL write failure is sticky and disables that sink, preventing a
   partial or gapped file from later acquiring a misleading final marker. V1
   does not retry or claim that later records reached the failed sink.
+- A synchronous file write that stalls without returning may prevent
+  finalization and leave the stream without `run_finished` or `last_event`. V1
+  does not replace the surrounding CI job or process timeout.
 - Evaluation may continue after a mid-run sink failure so reports can still be
   produced. All sticky sink errors are aggregated into the final command error
   and force a non-zero exit status after finalization.
@@ -835,16 +853,18 @@ unknown envelope/event/version skipping, attribute validation and transparent
 relay preservation, concurrent publisher ordering, sticky sink failure,
 malformed middle records, partial trailing records, UTF-8 and record-size
 limits, benchmark, multi-iteration, fake-clock heartbeat, and end-to-end
-consumer tests. Command tests must
-additionally cover flag help, repeated attributes, empty and `-` paths, dry-run
-incompatibility, relative-path resolution, create mode `0600`, existing-file
-truncation, missing parent directories, iteration-workspace collision, startup
-write failure, terminal close failure, and absence of behavioral changes when
-the flag is omitted. Lifecycle tests must cover credential failure after
-`run_started`, case failure with `COMPLETED`, cancellation with no remaining
-active tasks, terminal publication after invocation-context cancellation,
-partially completed `ERROR`, progress under concurrent cases, and exactly one
-generic `last_event` marker.
+consumer tests. Planner and lifecycle-emitter tests must verify that opaque task
+identity remains decoupled from source Case IDs containing path separators,
+percent signs, and non-ASCII text. Command tests must additionally cover flag
+help, repeated attributes, empty and `-` paths, dry-run incompatibility,
+relative-path resolution, create mode `0600`, existing-file truncation, missing
+parent directories, iteration-workspace collision, startup write failure,
+terminal close failure, and absence of behavioral changes when the flag is
+omitted. Lifecycle tests must cover credential failure after `run_started`,
+case failure with `COMPLETED`, cancellation with no remaining active tasks,
+terminal publication after invocation-context cancellation, partially
+completed `ERROR`, progress under concurrent cases, and exactly one generic
+`last_event` marker.
 
 ## Drawbacks
 
@@ -854,6 +874,8 @@ generic `last_event` marker.
 - Per-event versions and repeated progress snapshots add a small amount of
   wire and implementation complexity.
 - JSONL is easy to inspect but less compact than a binary protocol.
+- A stalled synchronous file write can block finalization; v1 relies on the
+  surrounding job or process timeout for that failure mode.
 - A sticky sink error can make the command fail even when evaluation reports
   were produced successfully.
 

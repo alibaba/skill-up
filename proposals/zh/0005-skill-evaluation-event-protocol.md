@@ -3,7 +3,7 @@ title: Skill 评测事件日志协议
 authors:
   - "JHWang-1997"
 creation-date: 2026-08-18
-last-updated: 2026-08-26
+last-updated: 2026-08-31
 status: draft
 ---
 
@@ -198,7 +198,7 @@ Value 最多 1024 字节，序列化后的整个 attributes 对象最多 16 KiB�
 | `run_progress` | `running_tasks` | integer | 当前快照中 invocation 全局正在执行的任务数，范围为 `[0, task_total]` |
 | `run_progress` | `elapsed_ms` | integer | 当前快照中 invocation 已运行的非负毫秒数 |
 | Iteration 和 Case 事件 | `iteration` | integer | 实际 iteration 编号，至少为 `1`；向已有工作区追加时可从大于 `1` 开始 |
-| Case 事件 | `task_id` | string | 非空，在 invocation 内稳定且唯一 |
+| Case 事件 | `task_id` | string | 不透明、非空，在 invocation 内稳定且唯一的关联 ID；消费方不得解析其结构 |
 | Case 事件 | `case_id` | string | 非空的源 Case 标识 |
 | Case 事件 | `configuration` | string | 必须为 `with_skill` 或 `without_skill` |
 | Case 事件 | `task_index` | integer | invocation 全局稳定计划索引，范围为 `[1, task_total]` |
@@ -375,12 +375,17 @@ Payload 与事件类型或版本不匹配。Publisher 对 invocation 属性校�
 ### 任务进度模型
 
 一个任务是（`iteration`、`case_id`、`configuration`）元组。因此 Benchmark
-模式会把一个源 Case 展开为两个任务。`task_id` 在 invocation 内稳定且唯一，可
-读形式为：
+模式会把一个源 Case 展开为两个任务。`task_id` 在 invocation 内稳定且唯一。
+消费方使用（`invocation_id`、`task_id`）关联任务事件，并使用显式元组字段理解
+任务语义；不得从 `task_id` 中解析结构。
+
+例如，生产方可以分配以下不透明 ID：
 
 ```text
-iteration-1/case-1/with_skill
+task-1
 ```
+
+该表示形式是非规范示例，不属于传输格式兼容契约。
 
 任务规划在 `run_started` 前完成。该事件恰好发出一次，并且位于所有进度、
 Iteration 或 Case 事件之前；其中的 `task_total` 是 Case 过滤、Benchmark 配置
@@ -422,15 +427,17 @@ completed_tasks == task_total
 - 每个展开任务的全局 `task_index`、`task_id` 和 `task_total`。
 
 计划顺序固定为：iteration 编号升序、过滤后 Case 顺序，然后先 `with_skill` 后
-`without_skill`。v1 规范任务 ID 为：
+`without_skill`。Planner 在构造不可变计划时分配不透明 `task_id`。首个实现可以
+从全局索引派生，例如：
 
 ```text
-iteration-<iteration>/<case_id>/<configuration>
+task-<task_index>
 ```
 
-Case ID 已经过不得包含路径分隔符的校验。并发执行时，任务开始和完成事件可以按
-任意顺序出现，但计划身份始终不变。Runner 必须执行这份计划，不能再重新计算第
-二份任务列表，从而避免事件总数和实际工作发生偏差。
+该表示形式是实现细节，不属于传输格式契约。本协议不对 `case_id` 增加词法限制，
+也不依赖或改变命令层的产物路径校验。并发执行时，任务开始和完成事件可以按任
+意顺序出现，但计划身份始终不变。Runner 必须执行这份计划，不能再重新计算第二
+份任务列表，从而避免事件总数和实际工作发生偏差。
 
 invocation 级生命周期 Emitter 位于通用 Publisher 之上。它持有任务计划、互斥
 锁、已开始/已完成任务集合、invocation 计数、每个 iteration 的计数、当前 Run
@@ -489,14 +496,14 @@ invocation 取消或错误而已不再执行的活动任务且不把它们计为
 {"protocol_version":1,"event_version":1,"sequence_number":2,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.001Z","event":"run_progress","payload":{"phase":"preparing","task_total":2,"completed_tasks":0,"running_tasks":0,"passed":0,"failed":0,"errored":0,"skipped":0,"elapsed_ms":1}}
 {"protocol_version":1,"event_version":1,"sequence_number":3,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.002Z","event":"run_progress","payload":{"phase":"executing","task_total":2,"completed_tasks":0,"running_tasks":0,"passed":0,"failed":0,"errored":0,"skipped":0,"elapsed_ms":2}}
 {"protocol_version":1,"event_version":1,"sequence_number":4,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.003Z","event":"iteration_started","payload":{"iteration":1}}
-{"protocol_version":1,"event_version":1,"sequence_number":5,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.004Z","event":"case_started","payload":{"task_id":"iteration-1/case-1/with_skill","iteration":1,"case_id":"case-1","configuration":"with_skill","task_index":1,"task_total":2,"title":"Basic flow"}}
+{"protocol_version":1,"event_version":1,"sequence_number":5,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.004Z","event":"case_started","payload":{"task_id":"task-1","iteration":1,"case_id":"case-1","configuration":"with_skill","task_index":1,"task_total":2,"title":"Basic flow"}}
 {"protocol_version":1,"event_version":1,"sequence_number":6,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.005Z","event":"run_progress","payload":{"phase":"executing","task_total":2,"completed_tasks":0,"running_tasks":1,"passed":0,"failed":0,"errored":0,"skipped":0,"elapsed_ms":5}}
-{"protocol_version":1,"event_version":1,"sequence_number":7,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:10.004Z","event":"case_completed","payload":{"task_id":"iteration-1/case-1/with_skill","iteration":1,"case_id":"case-1","configuration":"with_skill","task_index":1,"task_total":2,"title":"Basic flow","completed_tasks":1,"status":"FAIL","pass_rate":0.5,"duration_ms":10000}}
+{"protocol_version":1,"event_version":1,"sequence_number":7,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:10.004Z","event":"case_completed","payload":{"task_id":"task-1","iteration":1,"case_id":"case-1","configuration":"with_skill","task_index":1,"task_total":2,"title":"Basic flow","completed_tasks":1,"status":"FAIL","pass_rate":0.5,"duration_ms":10000}}
 {"protocol_version":1,"event_version":1,"sequence_number":8,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:10.005Z","event":"run_progress","payload":{"phase":"executing","task_total":2,"completed_tasks":1,"running_tasks":0,"passed":0,"failed":1,"errored":0,"skipped":0,"elapsed_ms":10005}}
-{"protocol_version":1,"event_version":1,"sequence_number":9,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:10.006Z","event":"case_started","payload":{"task_id":"iteration-1/case-1/without_skill","iteration":1,"case_id":"case-1","configuration":"without_skill","task_index":2,"task_total":2,"title":"Basic flow"}}
+{"protocol_version":1,"event_version":1,"sequence_number":9,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:10.006Z","event":"case_started","payload":{"task_id":"task-2","iteration":1,"case_id":"case-1","configuration":"without_skill","task_index":2,"task_total":2,"title":"Basic flow"}}
 {"protocol_version":1,"event_version":1,"sequence_number":10,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:10.007Z","event":"run_progress","payload":{"phase":"executing","task_total":2,"completed_tasks":1,"running_tasks":1,"passed":0,"failed":1,"errored":0,"skipped":0,"elapsed_ms":10007}}
 {"protocol_version":1,"event_version":1,"sequence_number":11,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:40.007Z","event":"run_progress","payload":{"phase":"executing","task_total":2,"completed_tasks":1,"running_tasks":1,"passed":0,"failed":1,"errored":0,"skipped":0,"elapsed_ms":40007}}
-{"protocol_version":1,"event_version":1,"sequence_number":12,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:50.006Z","event":"case_completed","payload":{"task_id":"iteration-1/case-1/without_skill","iteration":1,"case_id":"case-1","configuration":"without_skill","task_index":2,"task_total":2,"title":"Basic flow","completed_tasks":2,"status":"PASS","pass_rate":1.0,"duration_ms":40000}}
+{"protocol_version":1,"event_version":1,"sequence_number":12,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:50.006Z","event":"case_completed","payload":{"task_id":"task-2","iteration":1,"case_id":"case-1","configuration":"without_skill","task_index":2,"task_total":2,"title":"Basic flow","completed_tasks":2,"status":"PASS","pass_rate":1.0,"duration_ms":40000}}
 {"protocol_version":1,"event_version":1,"sequence_number":13,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:50.007Z","event":"run_progress","payload":{"phase":"executing","task_total":2,"completed_tasks":2,"running_tasks":0,"passed":1,"failed":1,"errored":0,"skipped":0,"elapsed_ms":50007}}
 {"protocol_version":1,"event_version":1,"sequence_number":14,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:50.008Z","event":"iteration_completed","payload":{"iteration":1,"invocation_completed_tasks":2,"passed":1,"failed":1,"errored":0,"skipped":0,"duration_ms":50005}}
 {"protocol_version":1,"event_version":1,"sequence_number":15,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:50.009Z","event":"run_progress","payload":{"phase":"finalizing","task_total":2,"completed_tasks":2,"running_tasks":0,"passed":1,"failed":1,"errored":0,"skipped":0,"elapsed_ms":50009}}
@@ -562,7 +569,8 @@ invocation 级 Publisher 或 Dispatcher 负责事件身份和顺序。它将并�
 V1 标准化一个同步的本地 JSONL 文件 Sink。`EventSink` 边界让序列化与生命周期
 状态保持分离，但 v1 不对投递、重试、扇出、回调、Socket 或 OTLP 作出承诺。任
 何远程或多 Sink 传输都需要单独提案。现有 stdout 格式保持不变，也不属于事件
-日志兼容契约。
+日志兼容契约。Context 可以在写入开始前阻止发布，但不能让已经进行中的同步文
+件写入变得可中断。
 
 ### JSONL 文件语义
 
@@ -619,8 +627,8 @@ v1 命令契约如下：
 3. 校验并打开请求的 JSONL Sink，创建 Publisher 和生命周期 Emitter，发布
    `run_started` 和初始 `preparing` 进度快照。首条记录失败时采用上述启动行
    为。
-4. 加载凭据并创建 Agent。从这一步开始，所有可控失败都会开始收尾并产生状态
-   为 `ERROR` 的 `run_finished`。
+4. 加载凭据并创建 Agent。从这一步开始，所有可控失败都会开始尽力收尾，并尝试
+   产生状态为 `ERROR` 的 `run_finished`。
 5. 进入 `executing`，执行计划中的 iteration，并在阶段和 Case 变化后以及工作
    活跃期间每 30 秒发出进度。
 6. 停止心跳，进入 `finalizing`，清除因 invocation 取消/错误而已不再活动的任
@@ -631,10 +639,10 @@ v1 命令契约如下：
 7. 通过 `PublishLast` 发布 `run_finished`，关闭文件，并使用 `errors.Join` 合
    并评测错误、Case 结果错误、Publisher 错误和关闭错误。
 
-步骤 6 和 7 使用一个新建、有时间上限的收尾 Context，而不是已经取消的
-invocation Context。这样可控取消仍有机会记录最终快照和 `run_finished`；收尾
-超时会成为粘性 Publisher 错误。具体超时时间是实现策略，而不是传输契约的一部
-分。
+步骤 6 和 7 不得复用已经取消的 invocation Context，而使用新的 Context，使可
+控取消能够尽力写入最终快照和 `run_finished`。V1 不保证收尾耗时上界：同步文
+件写入一旦开始，Context 取消不能中断该写入。CI 必须保留外层任务或进程超时。
+可中断或异步 Sink 需要另行设计传输方案。
 
 只要所有计划任务都执行过，Case 失败和 Case 错误不会把 `COMPLETED` 改成其他
 状态；现有 `exitStatusError` 仍会让相关 `with_skill` 结果使命令失败。Sink 错
@@ -648,6 +656,8 @@ invocation Context。这样可控取消仍有机会记录最终快照和 `run_fi
 - 第一次 JSONL 写入失败是粘性的，并会禁用该 Sink，防止部分或有缺口的文件在
   后续获得会造成误导的最终标记。V1 不重试，也不声称后续记录到达了失败的
   Sink。
+- 同步文件写入如果一直阻塞而不返回，可能阻止收尾，并使事件流缺少
+  `run_finished` 或 `last_event`。V1 不能代替外层 CI 任务或进程超时。
 - Sink 在运行中失败后，评测可以继续生成报告。所有粘性 Sink 错误最终汇总到命
   令错误中，并使命令在收尾后以非零状态退出。
 - 写入失败会留下不完整的逻辑事件流。仅由 `Close` 报告的失败可能发生在消费方
@@ -732,13 +742,14 @@ Runner、Evaluator、Judge、Report 或 UI 包。Runner/Evaluator 适配器在�
 未来实现必须补充序列化、不支持的协议拒绝、未知信封/事件/版本跳过、属性校验和
 透明中继保留、并发 Publisher 排序、粘性 Sink 失败、中间格式错误记录、尾部残
 缺记录、UTF-8 和记录大小限制、Benchmark、多 iteration、假时钟心跳和端到端
-消费测试。命令测试还必须覆盖参数帮助、可重复属性、空路径和 `-`、dry-run 冲
-突、相对路径解析、
-`0600` 创建模式、已有文件截断、父目录不存在、iteration 工作区冲突、启动写入
-失败、终止关闭失败，以及未指定参数时行为不变。生命周期测试必须覆盖
-`run_started` 后的凭据失败、Case 失败但状态为 `COMPLETED`、取消后没有剩余活
-动任务、invocation Context 取消后的终止事件发布、部分完成的 `ERROR`、并发
-Case 下的进度，以及恰好一个通用 `last_event` 标记。
+消费测试。Planner 和生命周期 Emitter 测试必须验证不透明任务身份与包含路径分
+隔符、百分号和非 ASCII 文本的源 Case ID 解耦。命令测试还必须覆盖参数帮助、
+可重复属性、空路径和 `-`、dry-run 冲突、相对路径解析、`0600` 创建模式、已有文
+件截断、父目录不存在、iteration 工作区冲突、启动写入失败、终止关闭失败，以及
+未指定参数时行为不变。生命周期测试必须覆盖 `run_started` 后的凭据失败、Case
+失败但状态为 `COMPLETED`、取消后没有剩余活动任务、invocation Context 取消后
+的终止事件发布、部分完成的 `ERROR`、并发 Case 下的进度，以及恰好一个通用
+`last_event` 标记。
 
 ## 缺点
 
@@ -746,6 +757,7 @@ Case 下的进度，以及恰好一个通用 `last_event` 标记。
 - 相比只发射 Case 计数，公共信封更冗长。
 - 每事件版本和重复进度快照会增加少量传输与实现复杂度。
 - JSONL 易于检查，但不如二进制协议紧凑。
+- 同步文件写入停滞时可能阻塞收尾；v1 依赖外层任务或进程超时处理该故障模式。
 - 即使评测报告成功生成，粘性 Sink 错误仍会使命令失败。
 
 ## 备选方案
