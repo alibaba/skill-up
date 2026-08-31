@@ -15,17 +15,17 @@ import (
 )
 
 // Protocol identifies the wire protocol selected by an agent adapter.
-type Protocol string
+type Protocol = credential.Protocol
 
 const (
 	// ProtocolAnthropic is the Anthropic-compatible messages protocol.
-	ProtocolAnthropic Protocol = "anthropic"
+	ProtocolAnthropic = credential.ProtocolAnthropic
 	// ProtocolOpenAI is the OpenAI-compatible protocol used by Codex and Qwen Code.
-	ProtocolOpenAI Protocol = "openai"
+	ProtocolOpenAI = credential.ProtocolOpenAI
 	// ProtocolQoder is Qoder CLI's managed local protocol and authentication flow.
-	ProtocolQoder Protocol = "qoder"
+	ProtocolQoder = credential.ProtocolQoder
 	// ProtocolCustom delegates protocol behavior to a custom engine definition.
-	ProtocolCustom Protocol = "custom"
+	ProtocolCustom = credential.ProtocolCustom
 )
 
 // ModelPolicy describes how an adapter handles an explicitly requested model.
