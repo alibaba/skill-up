@@ -137,10 +137,11 @@ inputs. Its current translation is part of the public compatibility surface:
 - absent credentials are not synthesized, preserving agent-local login flows.
 
 These translations are covered by `action/main_test.py`. The Action now checks
-the installed CLI's static `run --help` output: new CLIs receive separate
-`--provider` and opaque `--model` arguments, while older CLIs retain the folded
-`provider/model` translation. Tagged Actions and historical commands therefore
-remain valid.
+the installed CLI's static `run --help` output: new CLIs with an explicit engine
+receive separate `--provider` and opaque `--model` arguments. Older CLIs and
+engine-deferred runs retain their historical translation because the Action
+cannot choose a protocol-specific provider endpoint before reading eval YAML.
+Tagged Actions and historical commands therefore remain valid.
 
 ## Known gaps for later phases
 

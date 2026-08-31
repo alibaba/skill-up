@@ -319,9 +319,10 @@ def build_skill_up_argv(skill_up_command, engine, model, provider, parallelism,
         argv += ["--engine", engine]
     elif api_key:
         argv += ["--api-key", api_key]
-    if explicit_provider_supported and provider:
+    use_explicit_provider = explicit_provider_supported and provider and engine
+    if use_explicit_provider:
         argv += ["--provider", provider]
-    model_ref = model if explicit_provider_supported and provider else compose_model_ref(
+    model_ref = model if use_explicit_provider else compose_model_ref(
         provider, model, engine
     )
     if model_ref:
@@ -492,9 +493,9 @@ def main():
     if inputs.engine:
         run_env.update(engine_env(inputs.engine, inputs.api_key, base_url))
         run_env.update(engine_model_env(inputs.engine, inputs.model))
-        run_env.update(provider_env(inputs.provider, inputs.api_key, base_url))
     else:
         run_env.update(unified_base_url_env(inputs.provider, inputs.base_url))
+    run_env.update(provider_env(inputs.provider, inputs.api_key, base_url))
 
     print("Running: " + " ".join(shlex.quote(a) for a in mask_argv_for_log(argv)),
           flush=True)
