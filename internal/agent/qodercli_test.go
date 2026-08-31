@@ -215,12 +215,14 @@ func TestQoderCLIRun_MergesConfiguredEnvVars(t *testing.T) {
 	ag := NewQoderCLIAgent(Config{
 		EnvVars: map[string]string{
 			"QODER_TEST_FLAG": "cfg-flag",
+			qoderSessionIDEnv: "stale-parent-session",
 		},
 	})
 
 	_, err := ag.Run(context.Background(), rt, ExecOptions{
 		Env: map[string]string{
-			"EXTRA_FLAG": "1",
+			"EXTRA_FLAG":      "1",
+			qoderSessionIDEnv: "runtime-session-override",
 		},
 	}, []transcript.Message{{
 		Role:    transcript.RoleUser,
@@ -238,6 +240,33 @@ func TestQoderCLIRun_MergesConfiguredEnvVars(t *testing.T) {
 	}
 	if rt.lastExecEnv[qoderExposeTokenUsageEnv] != qoderExposeTokenUsageEnabled {
 		t.Fatalf("expected %s to default to true, got %q", qoderExposeTokenUsageEnv, rt.lastExecEnv[qoderExposeTokenUsageEnv])
+	}
+	if resultID := rt.lastExecEnv[qoderSessionIDEnv]; resultID == "" ||
+		resultID == "stale-parent-session" || resultID == "runtime-session-override" {
+		t.Fatalf("expected %s to be assigned", qoderSessionIDEnv)
+	}
+}
+
+func TestQoderCLIRun_AssignsDistinctSessions(t *testing.T) {
+	t.Parallel()
+
+	rt := &qoderTestRuntime{
+		workspace:  t.TempDir(),
+		execResult: runtime.ExecResult{Stdout: "ok\n", ExitCode: 0},
+	}
+	ag := NewQoderCLIAgent(Config{})
+	message := []transcript.Message{{Role: transcript.RoleUser, Content: "hello", Turn: 1}}
+
+	first, err := ag.Run(context.Background(), rt, ExecOptions{}, message)
+	if err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	second, err := ag.Run(context.Background(), rt, ExecOptions{}, message)
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if first.SessionID == "" || second.SessionID == "" || first.SessionID == second.SessionID {
+		t.Fatalf("session IDs = %q, %q; want distinct non-empty IDs", first.SessionID, second.SessionID)
 	}
 }
 
@@ -271,6 +300,12 @@ func TestQoderCLIRun_CNEditionUsesCNCommandAndEnv(t *testing.T) {
 	}
 	if got := rt.lastExecEnv[qoderCNExposeTokenUsageEnv]; got != qoderExposeTokenUsageEnabled {
 		t.Fatalf("%s = %q, want true", qoderCNExposeTokenUsageEnv, got)
+	}
+	if got := rt.lastExecEnv[qoderCNSessionIDEnv]; got == "" {
+		t.Fatalf("expected %s to be assigned", qoderCNSessionIDEnv)
+	}
+	if _, exists := rt.lastExecEnv[qoderSessionIDEnv]; exists {
+		t.Fatalf("global %s must not be injected for CN", qoderSessionIDEnv)
 	}
 	if _, exists := rt.lastExecEnv[qoderExposeTokenUsageEnv]; exists {
 		t.Fatalf("global %s must not be injected for CN", qoderExposeTokenUsageEnv)
@@ -312,7 +347,7 @@ func TestQoderCLIRun_ParsesJSONUsage(t *testing.T) {
 	rt := &qoderTestRuntime{
 		workspace: t.TempDir(),
 		execResult: runtime.ExecResult{
-			Stdout: `{"type":"result","subtype":"success","result":"OK.","usage":{"input_tokens":100,"cache_read_input_tokens":20,"cache_creation_input_tokens":3,"output_tokens":7},"session_id":"qoder-session-json"}`,
+			Stdout: `{"type":"result","subtype":"success","result":"OK.","usage":{"input_tokens":100,"cache_read_input_tokens":20,"cache_creation_input_tokens":3,"output_tokens":7},"session_id":"${QODER_SESSION_ID}"}`,
 		},
 	}
 	ag := NewQoderCLIAgent(Config{})
@@ -331,8 +366,8 @@ func TestQoderCLIRun_ParsesJSONUsage(t *testing.T) {
 	if result.FinalMessage != "OK." {
 		t.Fatalf("FinalMessage = %q, want OK.", result.FinalMessage)
 	}
-	if result.SessionID != "qoder-session-json" {
-		t.Fatalf("SessionID = %q, want qoder-session-json", result.SessionID)
+	if result.SessionID == "" || result.SessionID != rt.lastExecEnv[qoderSessionIDEnv] {
+		t.Fatalf("SessionID = %q, launcher env = %q", result.SessionID, rt.lastExecEnv[qoderSessionIDEnv])
 	}
 	if got := result.Transcript.FinalAssistantMessage(); got != "OK." {
 		t.Fatalf("final transcript message = %q, want OK.", got)
@@ -477,6 +512,40 @@ func TestQoderCLIRunTurn_ResumeUsesCorrectFlag(t *testing.T) {
 	}
 	if rt.lastExecEnv[qoderExposeTokenUsageEnv] != qoderExposeTokenUsageEnabled {
 		t.Fatalf("expected %s to default to true, got %q", qoderExposeTokenUsageEnv, rt.lastExecEnv[qoderExposeTokenUsageEnv])
+	}
+	if got := rt.lastExecEnv[qoderSessionIDEnv]; got != "" {
+		t.Fatalf("%s = %q, want no resume-time session selection env", qoderSessionIDEnv, got)
+	}
+	if !strings.HasPrefix(rt.agentCommand, "unset QODER_SESSION_ID QODERCN_SESSION_ID; qodercli ") {
+		t.Fatalf("resume command must clear inherited session selection env: %q", rt.agentCommand)
+	}
+}
+
+func TestQoderCLIRunTurn_ResumeClearsInheritedSessionEnv(t *testing.T) {
+	t.Parallel()
+
+	rt := &qoderTestRuntime{
+		workspace:  t.TempDir(),
+		execResult: runtime.ExecResult{Stdout: "resumed answer\n", ExitCode: 0},
+	}
+	ag := NewQoderCLIAgent(Config{
+		EnvVars: map[string]string{
+			qoderSessionIDEnv:   "stale-global-session",
+			qoderCNSessionIDEnv: "stale-cn-session",
+		},
+	})
+
+	_, err := ag.RunTurn(context.Background(), rt, ExecOptions{
+		Env: map[string]string{qoderSessionIDEnv: "runtime-override"},
+	}, transcript.Message{Role: transcript.RoleUser, Content: "follow up", Turn: 2}, "resume-target")
+	if err != nil {
+		t.Fatalf("RunTurn (resume): %v", err)
+	}
+	if !strings.HasPrefix(rt.agentCommand, "unset QODER_SESSION_ID QODERCN_SESSION_ID; qodercli ") {
+		t.Fatalf("resume command must clear inherited session selection env: %q", rt.agentCommand)
+	}
+	if !strings.Contains(rt.agentCommand, "-r 'resume-target'") {
+		t.Fatalf("resume command must select only the explicit resume target: %q", rt.agentCommand)
 	}
 }
 
@@ -744,7 +813,13 @@ func (r *qoderTestRuntime) Exec(_ context.Context, command string, opts runtime.
 		strings.Contains(command, "qoder.com.cn/qoder-cli-cn/install.sh") {
 		r.lastExecEnv = mapsClone(opts.Env)
 	}
-	return r.execResult, nil
+	result := r.execResult
+	for _, sessionEnv := range []string{qoderSessionIDEnv, qoderCNSessionIDEnv} {
+		if sessionID := opts.Env[sessionEnv]; sessionID != "" {
+			result.Stdout = strings.ReplaceAll(result.Stdout, "${"+sessionEnv+"}", sessionID)
+		}
+	}
+	return result, nil
 }
 func (r *qoderTestRuntime) Workspace() string { return r.workspace }
 func (r *qoderTestRuntime) RequiresProcessSandbox() bool {

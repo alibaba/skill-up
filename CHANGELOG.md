@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   artifact lookup. `QODER_CN_ACCESS_TOKEN` is accepted as a local secret-manager
   input alias and forwarded to qodercn as `QODERCN_PERSONAL_ACCESS_TOKEN`.
 
+### Fixed
+- The built-in `qodercli` engine now assigns one native Qoder session ID per
+  evaluation run and exports it as `QODER_SESSION_ID` (or
+  `QODERCN_SESSION_ID`). Qoder and its Bash tool subprocesses therefore share
+  the same conversation identity, while resumed turns retain that identity and
+  independent cases cannot inherit a stale parent session.
+
 ## [0.9.1] - 2026-08-20
 
 ### Fixed
