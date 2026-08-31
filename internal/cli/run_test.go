@@ -46,6 +46,7 @@ func newRunPhaseTestCommand(t *testing.T) *cobra.Command {
 	cmd.Flags().String("output-dir", "", "")
 	cmd.Flags().String("engine", "", "")
 	cmd.Flags().String(runtimeFlagName, "", "")
+	cmd.Flags().String("provider", "", "")
 	cmd.Flags().String("model", "", "")
 	cmd.Flags().String("api-key", "", "")
 	cmd.Flags().Int("parallelism", 0, "")
@@ -142,6 +143,55 @@ cases:
 
 	if _, err := captureStdout(t, func() error { return runEval(cmd, []string{root}) }); err != nil {
 		t.Fatalf("explicit --model should bypass stale YAML model reference: %v", err)
+	}
+}
+
+func TestRunEvalCLIProviderSkipsOnlySupersededYAMLProviderReference(t *testing.T) {
+	t.Setenv("MISSING_PROVIDER", "")
+	t.Setenv("MODEL_NAME", "resolved-model")
+	root := t.TempDir()
+	writeAutoModeSkill(t, root)
+	evalsDir := filepath.Join(root, "evals")
+	casesDir := filepath.Join(evalsDir, "cases")
+	if err := os.MkdirAll(casesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	evalYAML := `schema_version: v1alpha1
+environment:
+  type: none
+engine:
+  name: claude_code
+  model:
+    provider: "${MISSING_PROVIDER:?must set}"
+    name: "${MODEL_NAME}"
+cases:
+  files:
+    - evals/cases/basic.yaml
+`
+	if err := os.WriteFile(filepath.Join(evalsDir, "eval.yaml"), []byte(evalYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(casesDir, "basic.yaml"), []byte("id: basic\ninput:\n  prompt: hello\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newRunPhaseTestCommand(t)
+	if err := cmd.Flags().Set("dry-run", testFlagBoolTrue); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("provider", "dashscope"); err != nil {
+		t.Fatal(err)
+	}
+
+	var uiOut bytes.Buffer
+	origUIOutput := ui.Output
+	ui.Output = &uiOut
+	t.Cleanup(func() { ui.Output = origUIOutput })
+	if _, err := captureStdout(t, func() error { return runEval(cmd, []string{root}) }); err != nil {
+		t.Fatalf("explicit --provider should bypass stale YAML provider resolution: %v", err)
+	}
+	if !strings.Contains(uiOut.String(), "model: dashscope/resolved-model") {
+		t.Fatalf("UI output = %q, want resolved provider/model", uiOut.String())
 	}
 }
 
@@ -245,6 +295,29 @@ func TestLoadCredentialsAndAgentAppliesCLIModelAndAPIKey(t *testing.T) {
 	}
 	if params.Model != "gpt-5" || params.Provider != "openai" || params.APIKey != "sk-test" {
 		t.Fatalf("runner params = %+v, want resolved openai/gpt-5 with cli API key", params)
+	}
+}
+
+func TestLoadCredentialsAndAgentPreservesOpaqueModelWithExplicitProvider(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	cmd := newRunPhaseTestCommand(t)
+	if err := cmd.Flags().Set("provider", "dashscope"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("model", "org/model"); err != nil {
+		t.Fatal(err)
+	}
+	evalCfg := &config.EvalConfig{Engine: config.EngineConfig{
+		Name:  "codex",
+		Model: config.ModelConfig{Provider: "openai", Name: "yaml-model"},
+	}}
+	_, _, params, err := loadCredentialsAndAgent(cmd, evalCfg)
+	if err != nil {
+		t.Fatalf("loadCredentialsAndAgent returned error: %v", err)
+	}
+	if params.Provider != "dashscope" || params.Model != "org/model" {
+		t.Fatalf("runner params = %+v, want dashscope with opaque org/model", params)
 	}
 }
 
@@ -1629,8 +1702,14 @@ func TestApplyRunConfigOverrides_RejectsInvalidParallelism(t *testing.T) {
 func TestRequestedModelRef_PrefersRawCLIValue(t *testing.T) {
 	t.Parallel()
 	model := config.ModelConfig{Provider: "yaml-provider", Name: "yaml-model"}
-	if got := requestedModelRef(model, "opaque/model"); got != "opaque/model" {
+	if got := requestedModelRef(model, "", "opaque/model"); got != "opaque/model" {
 		t.Fatalf("requestedModelRef() = %q, want opaque/model", got)
+	}
+	if got := requestedModelRef(model, "dashscope", "opaque/model"); got != "dashscope/opaque/model" {
+		t.Fatalf("requestedModelRef() = %q, want dashscope/opaque/model", got)
+	}
+	if got := requestedModelRef(model, "dashscope", ""); got != "dashscope/yaml-model" {
+		t.Fatalf("requestedModelRef() = %q, want dashscope/yaml-model", got)
 	}
 }
 

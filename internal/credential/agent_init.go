@@ -74,8 +74,9 @@ type ResolvedAgentConfig struct {
 
 // CLIOverrides contains explicit runner-only command-line overrides.
 type CLIOverrides struct {
-	Model  string
-	APIKey string
+	Provider string
+	Model    string
+	APIKey   string
 }
 
 type agentResolveInput struct {
@@ -174,12 +175,14 @@ func resolveResolvedAgentConfig(in agentResolveInput) ResolvedAgentConfig {
 		params.BaseURLSource = in.valueSource
 	}
 
-	applyCLIModelOverride(&params, in.cli.Model, in.resolver)
+	applyCLIModelOverride(&params, in.cli.Provider, in.cli.Model, in.resolver)
 	applyFallback(&params, in.fallback)
 	resolveProviderScopedFields(&params, in.resolver)
 	applyFallbackCredentials(&params, in.fallback)
 	applyCLIAPIKeyOverride(&params, in.cli.APIKey)
-	normalizeLegacyModel(&params)
+	if in.cli.Provider == "" || in.cli.Model == "" {
+		normalizeLegacyModel(&params)
+	}
 	logResolvedAgentConfig(params)
 
 	return params
@@ -213,16 +216,27 @@ func applyFallbackCredentials(params *ResolvedAgentConfig, fallback *ResolvedAge
 	}
 }
 
-func applyCLIModelOverride(params *ResolvedAgentConfig, cliModel string, resolver *Resolver) {
-	if cliModel != "" {
-		params.Provider, params.Model = ResolveModelRef(cliModel, resolver)
-		if params.Provider != "" {
-			params.ProviderSource = ValueSourceCLI
-		} else {
-			params.ProviderSource = ""
+func applyCLIModelOverride(params *ResolvedAgentConfig, cliProvider, cliModel string, resolver *Resolver) {
+	if cliProvider != "" {
+		params.Provider = cliProvider
+		params.ProviderSource = ValueSourceCLI
+		if cliModel != "" {
+			params.Model = cliModel
+			params.ModelSource = ValueSourceCLI
 		}
-		params.ModelSource = ValueSourceCLI
+		return
 	}
+	if cliModel == "" {
+		return
+	}
+
+	params.Provider, params.Model = ResolveModelRef(cliModel, resolver)
+	if params.Provider != "" {
+		params.ProviderSource = ValueSourceCLI
+	} else {
+		params.ProviderSource = ""
+	}
+	params.ModelSource = ValueSourceCLI
 }
 
 func applyCLIAPIKeyOverride(params *ResolvedAgentConfig, cliAPIKey string) {

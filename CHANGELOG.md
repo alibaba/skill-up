@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `skill-up run` now accepts an explicit `--provider`. With it, `--model` is
+  treated as an opaque model identifier; the historical `provider/model` form
+  remains supported when the new flag is absent. The root GitHub Action uses
+  the separate flag when supported and falls back for older installed CLIs.
 - Agent adapters now declare their protocol, model, endpoint, and kwarg
   capabilities. Explicit unsupported settings are surfaced before case
   execution. Requested and applied model configuration is recorded separately

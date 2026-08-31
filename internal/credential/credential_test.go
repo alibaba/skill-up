@@ -30,6 +30,52 @@ func resolveRunnerConfigForTest(
 	}, resolver, CLIOverrides{Model: cliModel, APIKey: cliAPIKey})
 }
 
+func TestResolveRunnerConfig_ExplicitProviderPreservesOpaqueCLIModel(t *testing.T) {
+	t.Setenv("DASHSCOPE_API_KEY", "dashscope-env-key")
+	resolved := ResolveRunnerConfig(config.EngineConfig{
+		Name:  "codex",
+		Model: config.ModelConfig{Provider: "openai", Name: "yaml-model"},
+	}, nil, CLIOverrides{
+		Provider: testProviderDashscope,
+		Model:    "org/model",
+	})
+
+	if resolved.Provider != testProviderDashscope || resolved.Model != "org/model" {
+		t.Fatalf("resolved model = %q/%q, want dashscope with opaque org/model", resolved.Provider, resolved.Model)
+	}
+	if resolved.ProviderSource != ValueSourceCLI || resolved.ModelSource != ValueSourceCLI {
+		t.Fatalf("CLI sources not retained: %#v", resolved)
+	}
+	if resolved.APIKey != "dashscope-env-key" || resolved.APIKeySource != ValueSourceEnv {
+		t.Fatalf("provider credentials were not resolved from explicit CLI provider: %#v", resolved)
+	}
+}
+
+func TestResolveRunnerConfig_ExplicitProviderKeepsConfiguredModel(t *testing.T) {
+	resolved := ResolveRunnerConfig(config.EngineConfig{
+		Name:  "codex",
+		Model: config.ModelConfig{Provider: "openai", Name: "yaml-model"},
+	}, nil, CLIOverrides{Provider: testProviderDashscope})
+
+	if resolved.Provider != testProviderDashscope || resolved.ProviderSource != ValueSourceCLI {
+		t.Fatalf("explicit provider not applied: %#v", resolved)
+	}
+	if resolved.Model != "yaml-model" || resolved.ModelSource != ValueSourceConfig {
+		t.Fatalf("configured model should remain active: %#v", resolved)
+	}
+}
+
+func TestResolveRunnerConfig_ExplicitProviderTreatsAutoAsOpaqueModel(t *testing.T) {
+	resolved := ResolveRunnerConfig(config.EngineConfig{Name: "codex"}, nil, CLIOverrides{
+		Provider: "gateway",
+		Model:    "auto",
+	})
+
+	if resolved.Provider != "gateway" || resolved.Model != "auto" {
+		t.Fatalf("explicit provider/model should remain opaque: %#v", resolved)
+	}
+}
+
 func TestMaskAPIKey(t *testing.T) {
 	t.Parallel()
 

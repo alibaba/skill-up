@@ -141,7 +141,10 @@ func TestResolveCustomEngineConfigWithOptions_SkipsSupersededModelIdentity(t *te
 		},
 	}
 
-	err := ResolveCustomEngineConfigWithOptions(cfg, ResolveCustomEngineOptions{SkipModelIdentity: true})
+	err := ResolveCustomEngineConfigWithOptions(cfg, ResolveCustomEngineOptions{
+		SkipModelProvider: true,
+		SkipModelName:     true,
+	})
 	if err != nil {
 		t.Fatalf("explicit CLI model should bypass stale YAML model resolution: %v", err)
 	}
@@ -150,6 +153,31 @@ func TestResolveCustomEngineConfigWithOptions_SkipsSupersededModelIdentity(t *te
 	}
 	if got := cfg.Engine.Model.BaseURL; got != "https://resolved.example.test" {
 		t.Fatalf("active YAML base URL = %q, want resolved value", got)
+	}
+}
+
+func TestResolveCustomEngineConfigWithOptions_SkipsOnlySupersededProvider(t *testing.T) {
+	t.Setenv("MISSING_PROVIDER", "")
+	t.Setenv("MODEL_NAME", "resolved-model")
+	cfg := &EvalConfig{
+		Engine: EngineConfig{
+			Name: "claude_code",
+			Model: ModelConfig{
+				Provider: "${MISSING_PROVIDER:?must set}",
+				Name:     "${MODEL_NAME}",
+			},
+		},
+	}
+
+	err := ResolveCustomEngineConfigWithOptions(cfg, ResolveCustomEngineOptions{SkipModelProvider: true})
+	if err != nil {
+		t.Fatalf("explicit CLI provider should bypass stale YAML provider resolution: %v", err)
+	}
+	if cfg.Engine.Model.Provider != "${MISSING_PROVIDER:?must set}" {
+		t.Fatalf("superseded YAML provider was mutated: %q", cfg.Engine.Model.Provider)
+	}
+	if got := cfg.Engine.Model.Name; got != "resolved-model" {
+		t.Fatalf("active YAML model name = %q, want resolved-model", got)
 	}
 }
 
