@@ -88,29 +88,34 @@ providers:
     anthropic:
       api_key: ""
       base_url: ""
+    openai:
+      api_key: null
+      base_url: null
 `)
 
 	providerConfig, ok := resolver.GetProviderConfiguration("empty_endpoint")
 	if !ok {
 		t.Fatal("provider configuration not found")
 	}
-	endpoint := providerConfig.Endpoints[ProtocolAnthropic]
-	if !endpoint.APIKey.Set || endpoint.APIKey.Value != "" || !endpoint.BaseURL.Set || endpoint.BaseURL.Value != "" {
-		t.Fatalf("explicit empty endpoint values were not retained: %#v", endpoint)
-	}
+	for _, protocol := range []Protocol{ProtocolAnthropic, ProtocolOpenAI} {
+		endpoint := providerConfig.Endpoints[protocol]
+		if !endpoint.APIKey.Set || endpoint.APIKey.Value != "" || !endpoint.BaseURL.Set || endpoint.BaseURL.Value != "" {
+			t.Fatalf("explicit empty %s endpoint values were not retained: %#v", protocol, endpoint)
+		}
 
-	resolved := resolver.ResolveModelConnection(ModelConnectionSpec{
-		Provider: "empty_endpoint",
-		Protocol: ProtocolAnthropic,
-	})
-	if resolved.APIKey != "" || resolved.BaseURL != "" || !resolved.APIKeySet || !resolved.BaseURLSet {
-		t.Fatalf("explicit empty values did not suppress flat inheritance: %#v", resolved)
-	}
-	if resolved.APIKeySource != ValueSourceResolver || resolved.BaseURLSource != ValueSourceResolver {
-		t.Fatalf("explicit empty sources were not retained: %#v", resolved)
-	}
-	if resolved.AuthMode != AuthModeAgentLocal || resolved.RoutingMode != RoutingModeAgentLocal {
-		t.Fatalf("modes = %q/%q, want delegated agent-local state", resolved.AuthMode, resolved.RoutingMode)
+		resolved := resolver.ResolveModelConnection(ModelConnectionSpec{
+			Provider: "empty_endpoint",
+			Protocol: protocol,
+		})
+		if resolved.APIKey != "" || resolved.BaseURL != "" || !resolved.APIKeySet || !resolved.BaseURLSet {
+			t.Fatalf("explicit empty %s values did not suppress flat inheritance: %#v", protocol, resolved)
+		}
+		if resolved.APIKeySource != ValueSourceResolver || resolved.BaseURLSource != ValueSourceResolver {
+			t.Fatalf("explicit empty %s sources were not retained: %#v", protocol, resolved)
+		}
+		if resolved.AuthMode != AuthModeAgentLocal || resolved.RoutingMode != RoutingModeAgentLocal {
+			t.Fatalf("%s modes = %q/%q, want delegated agent-local state", protocol, resolved.AuthMode, resolved.RoutingMode)
+		}
 	}
 }
 

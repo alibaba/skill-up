@@ -131,9 +131,35 @@ type providerFileConfig struct {
 	Anthropic *providerEndpointFileConfig `yaml:"anthropic,omitempty"`
 }
 
+func (p *providerFileConfig) UnmarshalYAML(node *yaml.Node) error {
+	type plainProviderFileConfig providerFileConfig
+	var decoded plainProviderFileConfig
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*p = providerFileConfig(decoded)
+	return decodeOptionalFileValues(node, map[string]*optionalFileValue{
+		"api_key":  &p.APIKey,
+		"base_url": &p.BaseURL,
+	})
+}
+
 type providerEndpointFileConfig struct {
 	BaseURL optionalFileValue `yaml:"base_url"`
 	APIKey  optionalFileValue `yaml:"api_key,omitempty"`
+}
+
+func (p *providerEndpointFileConfig) UnmarshalYAML(node *yaml.Node) error {
+	type plainProviderEndpointFileConfig providerEndpointFileConfig
+	var decoded plainProviderEndpointFileConfig
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*p = providerEndpointFileConfig(decoded)
+	return decodeOptionalFileValues(node, map[string]*optionalFileValue{
+		"api_key":  &p.APIKey,
+		"base_url": &p.BaseURL,
+	})
 }
 
 type optionalFileValue struct {
@@ -143,11 +169,26 @@ type optionalFileValue struct {
 
 func (v *optionalFileValue) UnmarshalYAML(node *yaml.Node) error {
 	v.set = true
-	if node.Tag == "!!null" {
-		v.value = ""
-		return nil
-	}
 	return node.Decode(&v.value)
+}
+
+func decodeOptionalFileValues(node *yaml.Node, fields map[string]*optionalFileValue) error {
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		field, ok := fields[node.Content[i].Value]
+		if !ok {
+			continue
+		}
+		field.set = true
+		valueNode := node.Content[i+1]
+		if valueNode.Tag == "!!null" {
+			field.value = ""
+			continue
+		}
+		if err := valueNode.Decode(&field.value); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Resolver) loadFromFile(path string) error {
