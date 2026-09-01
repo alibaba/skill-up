@@ -100,19 +100,20 @@ event DAG.
 
 ## Requirements
 
-- Each complete record is one valid JSON object terminated by `\n`.
+- Each complete record is one valid JSON object terminated by `\n`; member
+  names are unique within every object in the record.
 - Every event has a numeric protocol version and event version, contiguous
   sequence number, stable invocation ID, timestamp, event type, and typed
   payload.
 - Optional event attributes are bounded string pairs, never core event
   semantics or sensitive evaluation content.
-- Once an event-enabled invocation has emitted `run_started`, graceful
-  finalization emits exactly one lifecycle-ending `run_finished` event,
-  including completed runs with failed cases and runs that end with an
-  invocation-level error or cancellation.
-- A gracefully finalized stream contains exactly one `last_event: true`; the
-  marker belongs to the envelope and is not permanently tied to one event
-  type.
+- After event-log startup succeeds, graceful finalization makes exactly one
+  attempt to publish a lifecycle-ending `run_finished` event, including
+  completed runs with failed cases and runs that end with an invocation-level
+  error or cancellation.
+- A stream whose final publication succeeds contains exactly one
+  `last_event: true`; the marker belongs to the envelope and is not permanently
+  tied to one event type.
 - Consumers remain compatible with unknown optional envelope fields, event
   types, event versions, attributes, and payload fields within a supported
   protocol major version.
@@ -583,6 +584,11 @@ periodic progress heartbeat whose phase and counters remain unchanged while
 
 ### Consumer Rules
 
+- Require [JSON member names](https://www.rfc-editor.org/rfc/rfc8259.html#section-4)
+  to be unique within every object after JSON string escapes are decoded. A
+  complete newline-terminated record with duplicate member names at any depth
+  is malformed and corrupts the stream; reject it before interpreting its
+  envelope or payload.
 - Parse enough of the envelope to read `protocol_version` before interpreting
   any event payload. A v1 consumer must reject or quarantine an invocation
   with a missing, malformed, mixed, or unsupported protocol major version.
@@ -630,6 +636,7 @@ positional parameters to `ProgressObserver`:
 ```go
 type EventSink interface {
     Publish(context.Context, Event) error
+    Close() error
 }
 ```
 
@@ -637,9 +644,17 @@ The concrete publisher API provides `Publish`, `PublishLast`, `Err`, and
 `Close`. Both publish methods accept a typed `Payload` and construct one fully
 enveloped immutable event. `PublishLast` sets `last_event: true` and permanently
 closes publication after that record, which gives one component ownership of
-the single final marker. `Err` returns the sticky publication/close error
-without clearing it, and `Close` is idempotent. Lifecycle call sites may log a
-returned current-event error but must use `Err` during command finalization.
+the single final marker; it does not close the transport. A successfully
+constructed Publisher owns its Sink, so callers must not publish to or close
+that Sink directly. `Publisher.Close` is idempotent and closes the underlying
+Sink at most once. The command must call it on every controlled path after
+Publisher construction, including after a publication failure. It records any
+close error alongside the sticky publication error and returns their aggregate.
+`EventSink.Close` reports only a close-time failure; it does not repeat an error
+already returned by `Publish`. `Err` returns the accumulated error without
+clearing it and, after close, matches the `Close` result. Command finalization
+therefore aggregates the result of `Publisher.Close` once rather than joining
+separate Publisher and Sink-close errors.
 
 The publisher validates an invocation's immutable attributes once and copies
 them onto every event. Event type and event version come from the typed payload;
@@ -668,10 +683,10 @@ The JSONL file sink must:
 - handle short writes without interleaving records and make completed records
   promptly visible;
 - avoid `fsync` on every event and avoid a delayed buffered flush;
-- reject a serialized event larger than 1 MiB and record the error as a sticky
-  sink failure; and
+- reject a serialized event larger than 1 MiB and return an error that the
+  Publisher records as a sticky sink failure; and
 - guarantee only that each successfully written newline-terminated record is
-  valid JSON.
+  valid JSON with unique member names in every object.
 
 A concurrently reading process may observe a partial final write, especially
 after a crash or disk failure. Consumers therefore must not parse an
@@ -693,9 +708,13 @@ The v1 command contract is:
 - an empty value and `-` are rejected; stdout remains human-readable and is
   never an event transport;
 - a relative path is resolved against the process working directory;
-- the parent directory must already exist; the command creates the file with
-  mode `0600` subject to the process umask, or truncates an existing file once
-  without changing that file's existing permissions;
+- the parent directory must already exist; on POSIX hosts the command creates a
+  new file with mode `0600` subject to the process umask, following
+  [`os.OpenFile`](https://pkg.go.dev/os#OpenFile) semantics; on Windows a new
+  file uses the
+  [default security descriptor inherited from its parent directory](https://learn.microsoft.com/en-us/windows/win32/fileio/file-security-and-access-rights),
+  and v1 makes no `0600`-equivalent ACL guarantee; truncating an existing file
+  does not change its mode or ACL, and v1 does not modify ACLs;
 - no filename extension is required and one file contains one invocation;
 - the canonicalized path must not resolve inside any scheduled
   `iteration-N` directory, because the runner deletes and recreates those
@@ -711,10 +730,12 @@ The v1 command contract is:
 
 Planning plus path and attribute validation occur before the file is opened,
 so an invalid plan cannot truncate an existing event log. Successful open and
-publication of `run_started` complete event-log startup. An open failure stops
-without an event stream. If the first record cannot be written, the command
-closes the publisher and stops before credentials are loaded or an agent is
-invoked; it does not pretend that the failed file contains a terminal stream.
+publication of both `run_started` and the initial `preparing` `run_progress`
+snapshot complete event-log startup. An open failure stops without an event
+stream. If either startup publication fails, the command closes the Publisher
+and stops before credentials are loaded or an agent is invoked; it does not
+attempt `run_finished`. The file is an incomplete stream: it may be empty, end
+in a partial write, or contain only a complete `run_started` prefix.
 
 ### Command Execution Flow
 
@@ -726,7 +747,8 @@ invoked; it does not pretend that the failed file contains a terminal stream.
    immutable task plan.
 3. Validate and open the requested JSONL sink, create the publisher and
    lifecycle emitter, and publish `run_started` plus the initial `preparing`
-   progress snapshot. A first-record failure uses the startup behavior above.
+   progress snapshot. Failure of either publication uses the startup behavior
+   above.
 4. Load credentials and construct the agent. Any graceful failure from this
    point starts best-effort finalization and attempts to produce `run_finished`
    with `ERROR`.
@@ -738,8 +760,9 @@ invoked; it does not pretend that the failed file contains a terminal stream.
    terminal status,
    `CANCELLED` for `context.Canceled` or `context.DeadlineExceeded`, and
    `ERROR` for other invocation-level failures.
-7. Publish `run_finished` through `PublishLast`, close the file, and combine
-   evaluation, case-result, publisher, and close errors with `errors.Join`.
+7. Publish `run_finished` through `PublishLast`, call `Publisher.Close`, and
+   combine evaluation, case-result, and the aggregate Publisher error returned
+   by `Close` with `errors.Join`.
 
 Steps 6 and 7 must not reuse an already cancelled invocation context. They use
 a fresh context so graceful cancellation can make a best-effort attempt to
@@ -759,16 +782,19 @@ contract.
 
 ### Failure Semantics
 
-- Failure to create or open an explicitly requested event log fails startup.
+- Failure to create or open an explicitly requested event log, or to publish
+  either startup event, fails startup. A startup publication failure closes the
+  Publisher, starts no evaluation work, and makes no final-event attempt.
 - The first JSONL write failure is sticky and disables that sink, preventing a
   partial or gapped file from later acquiring a misleading final marker. V1
   does not retry or claim that later records reached the failed sink.
 - A synchronous file write that stalls without returning may prevent
   finalization and leave the stream without `run_finished` or `last_event`. V1
   does not replace the surrounding CI job or process timeout.
-- Evaluation may continue after a mid-run sink failure so reports can still be
-  produced. All sticky sink errors are aggregated into the final command error
-  and force a non-zero exit status after finalization.
+- Only after event-log startup succeeds may evaluation continue after a sink
+  failure so reports can still be produced. All sticky sink errors are
+  aggregated into the final command error and force a non-zero exit status
+  after finalization.
 - A write failure leaves an incomplete logical stream. A failure reported only
   by `Close` may occur after a consumer has already observed a logically
   complete stream and cannot retract its final marker. In either case the CLI
@@ -865,20 +891,25 @@ For this documentation-only PR:
 Future implementations must add serialization, unsupported protocol rejection,
 unknown envelope/event/version skipping, attribute validation and transparent
 relay preservation, concurrent publisher ordering, sticky sink failure,
-malformed middle records, partial trailing records, UTF-8 and record-size
-limits, benchmark, multi-iteration, fake-clock heartbeat, and end-to-end
-consumer tests. Planner and lifecycle-emitter tests must verify that opaque task
-identity remains decoupled from source Case IDs containing path separators,
-percent signs, and non-ASCII text. Command tests must additionally cover flag
-help, repeated attributes, empty and `-` paths, dry-run incompatibility,
-relative-path resolution, create mode `0600`, existing-file truncation, missing
-parent directories, iteration-workspace collision, startup write failure,
-terminal close failure, and absence of behavioral changes when the flag is
-omitted. Lifecycle tests must cover credential failure after `run_started`,
-case failure with `COMPLETED`, cancellation with no remaining active tasks,
-terminal publication after invocation-context cancellation, partially
-completed `ERROR`, progress under concurrent cases, and exactly one generic
-`last_event` marker.
+idempotent Publisher close, underlying Sink close after publication failure,
+combined publication/close errors, duplicate member names in envelope and
+nested objects (including escape-equivalent names), malformed middle records,
+partial trailing records, UTF-8 and record-size limits, benchmark,
+multi-iteration, fake-clock heartbeat, and end-to-end consumer tests. Planner
+and lifecycle-emitter tests must verify that opaque task identity remains
+decoupled from source Case IDs containing path separators, percent signs, and
+non-ASCII text. Command tests must additionally cover flag help, repeated
+attributes, empty and `-` paths, dry-run incompatibility, relative-path
+resolution, POSIX create mode `0600`, cross-platform create/truncate behavior,
+existing-file permission preservation, missing parent directories,
+iteration-workspace collision, separate failures of the first and second
+startup publications, one underlying Sink close and no final-event attempt for
+each startup failure, terminal close failure, and absence of behavioral changes
+when the flag is omitted. Lifecycle tests must cover credential failure after
+successful event-log startup, case failure with `COMPLETED`, cancellation with
+no remaining active tasks, terminal publication after invocation-context
+cancellation, partially completed `ERROR`, progress under concurrent cases,
+and exactly one generic `last_event` marker.
 
 ## Drawbacks
 
