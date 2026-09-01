@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-01
+
 ### Added
 - Agent adapters now declare their protocol, model, endpoint, and kwarg
   capabilities. Explicit unsupported settings are surfaced before case
@@ -18,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Skill/MCP execution, multi-turn session resume, token usage, and transcript
   artifact lookup. `QODER_CN_ACCESS_TOKEN` is accepted as a local secret-manager
   input alias and forwarded to qodercn as `QODERCN_PERSONAL_ACCESS_TOKEN`.
+
+### Fixed
+- Qwen Code transcripts now exclude assistant text parts marked as hidden
+  thoughts, preventing internal reasoning from replacing or contaminating the
+  visible final response consumed by reports and judges.
 
 ## [0.9.1] - 2026-08-20
 
@@ -521,6 +528,7 @@ The `v0.5.0` release tag is available at
   project and delivers the end-to-end capability to declare eval environments,
   run cases and emit structured reports as described in [README.md](README.md).
 
+[0.10.0]: https://github.com/alibaba/skill-up/releases/tag/v0.10.0
 [0.9.1]: https://github.com/alibaba/skill-up/releases/tag/v0.9.1
 [0.9.0]: https://github.com/alibaba/skill-up/releases/tag/v0.9.0
 [0.8.0]: https://github.com/alibaba/skill-up/releases/tag/v0.8.0
