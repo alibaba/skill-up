@@ -3,7 +3,7 @@ title: "Skill Evaluation Event Log Protocol"
 authors:
   - "JHWang-1997"
 creation-date: 2026-08-18
-last-updated: 2026-08-31
+last-updated: 2026-09-01
 status: draft
 ---
 
@@ -142,14 +142,26 @@ Every event uses this envelope:
 {
   "protocol_version": 1,
   "event_version": 1,
-  "sequence_number": 3,
+  "sequence_number": 7,
   "invocation_id": "018f8f20-7a7d-7d90-a192-4f5ec8f07a2a",
   "time": "2026-08-19T10:01:10.451Z",
   "event": "case_completed",
   "attributes": {
     "com.alibaba.aone.eval_task_id": "123456"
   },
-  "payload": {}
+  "payload": {
+    "task_id": "task-1",
+    "iteration": 1,
+    "case_id": "case-1",
+    "configuration": "with_skill",
+    "task_index": 1,
+    "task_total": 2,
+    "title": "Basic flow",
+    "completed_tasks": 1,
+    "status": "PASS",
+    "pass_rate": 1.0,
+    "duration_ms": 10000
+  }
 }
 ```
 
@@ -251,10 +263,11 @@ completed_tasks + running_tasks <= task_total
 ```
 
 The emitter publishes a snapshot when the run phase changes, when a task
-starts or completes, and periodically while the run remains active even if no
-value changed. An unchanged periodic snapshot is the liveness heartbeat; v1
-does not add a separate heartbeat event or flag. The first implementation uses
-a fixed interval of 30 seconds. The interval is producer policy, not a
+starts or completes, and periodically while the run remains active even if the
+phase and counters have not changed. A periodic snapshot with the same phase
+and counters but a refreshed `elapsed_ms` is the liveness heartbeat; v1 does
+not add a separate heartbeat event or flag. The first implementation uses a
+fixed interval of 30 seconds. The interval is producer policy, not a
 wire-schema field. Consumers should record their own receive time and use that,
 rather than trusting producer clock synchronization, for stall detection. A
 timeout means progress is uncertain or interrupted; it must not synthesize a
@@ -524,7 +537,8 @@ task before `case_completed`; tasks never started emit neither case event.
 `Start` emits `run_started` and an initial `run_progress` snapshot in the
 `preparing` phase. `SetPhase`, `CaseStarted`, and `CaseCompleted` emit their
 state transition and then a fresh `run_progress`; `Heartbeat` emits only an
-unchanged snapshot. The progress loop calls `Heartbeat` every 30 seconds until
+updated snapshot with the current phase and counters and a refreshed
+`elapsed_ms`. The progress loop calls `Heartbeat` every 30 seconds until
 `Finish` begins, without creating a separate event type.
 
 `CaseCompleted` increments invocation and iteration counts exactly once.
@@ -545,8 +559,8 @@ it is not a source of protocol identity or aggregate progress.
 
 This compact example evaluates one source case with benchmark mode enabled,
 so it produces two tasks. The second task runs long enough to emit one
-unchanged periodic progress heartbeat. Every object is one physical line in
-the JSONL file.
+periodic progress heartbeat whose phase and counters remain unchanged while
+`elapsed_ms` advances. Every object is one physical line in the JSONL file.
 
 ```jsonl
 {"protocol_version":1,"event_version":1,"sequence_number":1,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.000Z","event":"run_started","payload":{"engine":"qodercli","skill_name":"my-skill","task_total":2,"iterations_total":1}}

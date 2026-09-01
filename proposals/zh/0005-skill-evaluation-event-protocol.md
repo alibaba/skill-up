@@ -3,7 +3,7 @@ title: Skill 评测事件日志协议
 authors:
   - "JHWang-1997"
 creation-date: 2026-08-18
-last-updated: 2026-08-31
+last-updated: 2026-09-01
 status: draft
 ---
 
@@ -124,14 +124,26 @@ skill-up run --event-log ./events.jsonl
 {
   "protocol_version": 1,
   "event_version": 1,
-  "sequence_number": 3,
+  "sequence_number": 7,
   "invocation_id": "018f8f20-7a7d-7d90-a192-4f5ec8f07a2a",
   "time": "2026-08-19T10:01:10.451Z",
   "event": "case_completed",
   "attributes": {
     "com.alibaba.aone.eval_task_id": "123456"
   },
-  "payload": {}
+  "payload": {
+    "task_id": "task-1",
+    "iteration": 1,
+    "case_id": "case-1",
+    "configuration": "with_skill",
+    "task_index": 1,
+    "task_total": 2,
+    "title": "Basic flow",
+    "completed_tasks": 1,
+    "status": "PASS",
+    "pass_rate": 1.0,
+    "duration_ms": 10000
+  }
 }
 ```
 
@@ -223,11 +235,12 @@ completed_tasks == passed + failed + errored + skipped
 completed_tasks + running_tasks <= task_total
 ```
 
-Emitter 会在 Run 阶段变化、任务开始或完成时发布快照；Run 保持活跃时，即使数
-值没有变化也会周期发布。未发生变化的周期快照就是存活心跳；v1 不增加单独的心
-跳事件或标记。首个实现使用固定的 30 秒周期。该周期是生产方策略，而不是传输
-schema 字段。消费方在判断停滞时应记录并使用自己的接收时间，而不应假设生产
-方时钟已经同步。超时表示进度不确定或中断；不得据此合成 Case 结果。
+Emitter 会在 Run 阶段变化、任务开始或完成时发布快照；Run 保持活跃时，即使阶
+段和计数没有变化也会周期发布。阶段和计数保持不变、但 `elapsed_ms` 已刷新的周
+期快照就是存活心跳；v1 不增加单独的心跳事件或标记。首个实现使用固定的 30 秒
+周期。该周期是生产方策略，而不是传输 schema 字段。消费方在判断停滞时应记录
+并使用自己的接收时间，而不应假设生产方时钟已经同步。超时表示进度不确定或中
+断；不得据此合成 Case 结果。
 
 `COMPLETED` 是生命周期状态，表示所有计划任务都已进入 Case 终态；它不表示所
 有 Case 都通过，也不单独保证命令退出码为零。`ERROR` 表示调用级错误阻止了正
@@ -468,9 +481,9 @@ Emitter 在同一排序锁下串行化每次生命周期状态变更、对应的
 
 `Start` 发出 `run_started` 和一条处于 `preparing` 阶段的初始
 `run_progress` 快照。`SetPhase`、`CaseStarted` 和 `CaseCompleted` 在状态变更
-后发出新的 `run_progress`；`Heartbeat` 只发出一条内容未变化的快照。进度循环
-每 30 秒调用一次 `Heartbeat`，直到 `Finish` 开始，并且不创建单独的事件类
-型。
+后发出新的 `run_progress`；`Heartbeat` 只发出一条新快照，其中当前阶段和计数
+保持不变，`elapsed_ms` 刷新。进度循环每 30 秒调用一次 `Heartbeat`，直到
+`Finish` 开始，并且不创建单独的事件类型。
 
 `CaseCompleted` 恰好一次地递增 invocation 和 iteration 计数。
 `IterationCompleted`、进度快照和 `Finish` 从 Emitter 状态生成 Payload 计
@@ -488,8 +501,8 @@ invocation 取消或错误而已不再执行的活动任务且不把它们计为
 ### 事件流示例
 
 下例在 Benchmark 模式下评测一个源 Case，因此生成两个任务。第二个任务运行时
-间足够长，因而发出了一条内容未变化的周期进度心跳。JSONL 文件中每个对象各占
-一个物理行。
+间足够长，因而发出了一条阶段和计数保持不变、`elapsed_ms` 已刷新的周期进度心
+跳。JSONL 文件中每个对象各占一个物理行。
 
 ```jsonl
 {"protocol_version":1,"event_version":1,"sequence_number":1,"invocation_id":"018f8f20-7a7d-7d90-a192-4f5ec8f07a2a","time":"2026-08-19T10:00:00.000Z","event":"run_started","payload":{"engine":"qodercli","skill_name":"my-skill","task_total":2,"iterations_total":1}}
