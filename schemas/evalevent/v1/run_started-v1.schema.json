@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/alibaba/skill-up/schemas/evalevent/v1/run_started-v1.schema.json",
+  "$id": "https://raw.githubusercontent.com/alibaba/skill-up/main/schemas/evalevent/v1/run_started-v1.schema.json",
   "title": "run_started event v1",
   "allOf": [
     { "$ref": "envelope.schema.json" },

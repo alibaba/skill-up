@@ -74,8 +74,12 @@ func NewPublisher(cfg PublisherConfig) (*Publisher, error) {
 	invocationID := cfg.InvocationID
 	if invocationID == "" {
 		invocationID = uuid.NewString()
-	} else if _, err := uuid.Parse(invocationID); err != nil {
-		return nil, fmt.Errorf("invalid invocation ID: %w", err)
+	} else {
+		parsedID, err := uuid.Parse(invocationID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid invocation ID: %w", err)
+		}
+		invocationID = parsedID.String()
 	}
 	now := cfg.Now
 	if now == nil {

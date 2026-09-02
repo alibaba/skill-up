@@ -105,6 +105,21 @@ func TestPublisherSnapshotsPointerPayload(t *testing.T) {
 	}
 }
 
+func TestPublisherCanonicalizesConfiguredInvocationID(t *testing.T) {
+	t.Parallel()
+
+	publisher, err := NewPublisher(PublisherConfig{
+		Sink:         newRecordingSink(),
+		InvocationID: "018f8f207a7d7d90a1924f5ec8f07a2a",
+	})
+	if err != nil {
+		t.Fatalf("NewPublisher() error = %v", err)
+	}
+	if got, want := publisher.InvocationID(), "018f8f20-7a7d-7d90-a192-4f5ec8f07a2a"; got != want {
+		t.Fatalf("InvocationID() = %q, want %q", got, want)
+	}
+}
+
 func TestPublisherStickyFailureAndIdempotentClose(t *testing.T) {
 	t.Parallel()
 

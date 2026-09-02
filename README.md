@@ -309,6 +309,28 @@ separate Action release tag process is introduced, use a post-refresh commit SHA
 for an immutable reference or `@main` when intentionally following Action
 updates.
 
+## Project Structure
+
+```text
+skill-up/
+├── cmd/skill-up/          # CLI entry point
+├── internal/              # Private implementation packages
+│   ├── cli/               # Commands and flags
+│   ├── evaluator/         # Case execution and judging orchestration
+│   ├── evalevent/         # Evaluation event model, lifecycle, publisher, and JSONL sink
+│   ├── runner/            # End-to-end run orchestration
+│   └── report/            # JSON, JUnit, HTML, and benchmark reports
+├── pkg/                   # Publicly importable APIs
+├── schemas/evalevent/     # Versioned evaluation event JSON Schemas
+├── skills/skill-upper/    # Distributable workflow Skill
+├── docs/                  # VitePress documentation
+├── e2e/                   # End-to-end tests and fixtures
+└── examples/              # Example evaluations and fixtures
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md#directory-overview) for the complete
+directory map and architectural responsibilities.
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).

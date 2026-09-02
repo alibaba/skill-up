@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/alibaba/skill-up/schemas/evalevent/v1/envelope.schema.json",
+  "$id": "https://raw.githubusercontent.com/alibaba/skill-up/main/schemas/evalevent/v1/envelope.schema.json",
   "title": "skill-up evaluation event envelope v1",
   "type": "object",
   "required": [

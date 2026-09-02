@@ -2,12 +2,15 @@ package evalevent
 
 import (
 	"encoding/json"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"testing"
 )
+
+const schemaBaseURL = "https://raw.githubusercontent.com/alibaba/skill-up/main/schemas/evalevent/v1/"
 
 func TestV1SchemasMatchCoreEventRegistry(t *testing.T) {
 	t.Parallel()
@@ -31,12 +34,17 @@ func TestV1SchemasMatchCoreEventRegistry(t *testing.T) {
 		t.Fatalf("schema file count = %d, want %d", len(entries), len(wantRequired)+1)
 	}
 	for eventType, required := range wantRequired {
-		path := filepath.Join(dir, string(eventType)+"-v1.schema.json")
+		filename := string(eventType) + "-v1.schema.json"
+		path := filepath.Join(dir, filename)
 		doc := readSchema(t, path)
+		if got, want := schemaStringField(t, doc, "$id"), schemaBaseURL+filename; got != want {
+			t.Errorf("%s $id = %q, want %q", path, got, want)
+		}
 		allOf := schemaArray(t, doc, "allOf")
 		if len(allOf) != 2 {
 			t.Fatalf("%s allOf count = %d, want 2", path, len(allOf))
 		}
+		assertEnvelopeReference(t, path, doc, schemaObject(t, allOf[0]))
 		eventSchema := schemaObject(t, allOf[1])
 		properties := schemaObjectField(t, eventSchema, "properties")
 		if got := schemaObjectField(t, properties, "protocol_version")["const"]; got != float64(ProtocolVersion) {
@@ -66,6 +74,9 @@ func TestV1EnvelopeSchemaIsOpenAndRequiresFinalMarkerToBeTrue(t *testing.T) {
 	t.Parallel()
 
 	doc := readSchema(t, filepath.Join(schemaDirectory(t), "envelope.schema.json"))
+	if got, want := schemaStringField(t, doc, "$id"), schemaBaseURL+"envelope.schema.json"; got != want {
+		t.Errorf("envelope $id = %q, want %q", got, want)
+	}
 	if !schemaBoolField(t, doc, "additionalProperties") {
 		t.Fatal("envelope schema must allow unknown optional fields")
 	}
@@ -81,6 +92,21 @@ func TestV1EnvelopeSchemaIsOpenAndRequiresFinalMarkerToBeTrue(t *testing.T) {
 	}
 	if got := schemaObjectField(t, properties, "payload")["type"]; got != "object" {
 		t.Errorf("payload type = %v, want object", got)
+	}
+}
+
+func assertEnvelopeReference(t *testing.T, path string, doc, reference map[string]any) {
+	t.Helper()
+	base, err := url.Parse(schemaStringField(t, doc, "$id"))
+	if err != nil {
+		t.Fatalf("parse %s $id: %v", path, err)
+	}
+	resolved, err := base.Parse(schemaStringField(t, reference, "$ref"))
+	if err != nil {
+		t.Fatalf("resolve %s envelope reference: %v", path, err)
+	}
+	if got, want := resolved.String(), schemaBaseURL+"envelope.schema.json"; got != want {
+		t.Errorf("%s envelope reference resolves to %q, want %q", path, got, want)
 	}
 }
 
@@ -148,6 +174,15 @@ func schemaBoolField(t *testing.T, object map[string]any, field string) bool {
 	value, ok := object[field].(bool)
 	if !ok {
 		t.Fatalf("schema field %q has type %T, want boolean", field, object[field])
+	}
+	return value
+}
+
+func schemaStringField(t *testing.T, object map[string]any, field string) string {
+	t.Helper()
+	value, ok := object[field].(string)
+	if !ok {
+		t.Fatalf("schema field %q has type %T, want string", field, object[field])
 	}
 	return value
 }
