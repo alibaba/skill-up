@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.10.0] - 2026-09-01
 
 ### Added
+- `skill-up run` now accepts an explicit `--provider`. With it, `--model` is
+  treated as an opaque model identifier; the historical `provider/model` form
+  remains supported when the new flag is absent. The root GitHub Action uses
+  the separate flag for explicit engines when supported, and preserves its
+  historical routing for older CLIs or engine-deferred runs.
 - Agent adapters now declare their protocol, model, endpoint, and kwarg
   capabilities. Explicit unsupported settings are surfaced before case
   execution. Requested and applied model configuration is recorded separately

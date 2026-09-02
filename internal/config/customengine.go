@@ -172,10 +172,12 @@ func ResolveCustomEngineConfig(cfg *EvalConfig) error {
 // ResolveCustomEngineOptions controls which raw engine fields are relevant to
 // the current invocation.
 type ResolveCustomEngineOptions struct {
-	// SkipModelIdentity leaves engine.model.provider/name untouched when an
-	// explicit CLI model has already superseded those YAML fields. BaseURL and
-	// Params remain active and are still resolved.
-	SkipModelIdentity bool
+	// SkipModelProvider leaves engine.model.provider untouched when an explicit
+	// CLI provider or legacy provider/model override supersedes it.
+	SkipModelProvider bool
+	// SkipModelName leaves engine.model.name untouched when an explicit CLI
+	// model supersedes it. BaseURL and Params remain active and are resolved.
+	SkipModelName bool
 }
 
 // ResolveCustomEngineConfigWithOptions resolves and validates the active
@@ -332,12 +334,14 @@ func resolveHTTPEnv(h *customengine.HTTPConfig) []string {
 // resolveModelEnv resolves env references in engine.model string values.
 func resolveModelEnv(model *ModelConfig, opts ResolveCustomEngineOptions) []string {
 	var errs []string
-	if !opts.SkipModelIdentity {
+	if !opts.SkipModelProvider {
 		if v, err := resolveEnvRefs(model.Provider); err != nil {
 			errs = append(errs, fmt.Sprintf("engine.model.provider: %s", err))
 		} else {
 			model.Provider = v
 		}
+	}
+	if !opts.SkipModelName {
 		if v, err := resolveEnvRefs(model.Name); err != nil {
 			errs = append(errs, fmt.Sprintf("engine.model.name: %s", err))
 		} else {

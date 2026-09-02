@@ -38,6 +38,7 @@ class ActionConfigurationContractTest(unittest.TestCase):
                 mock.patch.object(ACTION.shutil, "which", return_value="/usr/bin/skill-up"),
                 mock.patch.object(ACTION, "_run"),
                 mock.patch.object(ACTION, "get_skill_up_version", return_value=(0, 7, 0)),
+                mock.patch.object(ACTION, "command_supports_explicit_provider", return_value=True),
                 mock.patch.object(ACTION.subprocess, "run", final_run),
                 mock.patch.dict(ACTION.os.environ, {"GITHUB_WORKSPACE": workspace}, clear=True),
                 mock.patch("builtins.print"),
@@ -52,8 +53,8 @@ class ActionConfigurationContractTest(unittest.TestCase):
 
         engine_flag_index = argv.index("--engine")
         self.assertEqual(
-            argv[engine_flag_index:engine_flag_index + 4],
-            ["--engine", "codex", "--model", "dashscope/qwen3.6-plus"],
+            argv[engine_flag_index:engine_flag_index + 6],
+            ["--engine", "codex", "--provider", "dashscope", "--model", "qwen3.6-plus"],
         )
         self.assertEqual(run_env["OPENAI_MODEL"], "qwen3.6-plus")
         self.assertEqual(run_env["OPENAI_API_KEY"], "secret")
@@ -66,6 +67,55 @@ class ActionConfigurationContractTest(unittest.TestCase):
             run_env["DASHSCOPE_BASE_URL"],
             "https://dashscope.aliyuncs.com/compatible-mode/v1",
         )
+
+    def test_main_preserves_legacy_routing_when_engine_comes_from_yaml(self):
+        inputs = SimpleNamespace(
+            engine="",
+            model="qwen3.6-plus",
+            provider="dashscope",
+            api_key="secret",
+            base_url="",
+            open_sandbox_api_key="",
+            skill_target="evals/eval.yaml",
+            skill_up_version="0.7.0",
+            skill_up_command="skill-up run",
+            parallelism="",
+            agent_install_command="",
+        )
+        final_run = mock.Mock(return_value=SimpleNamespace(returncode=0))
+
+        with tempfile.TemporaryDirectory() as workspace:
+            with (
+                mock.patch.object(ACTION, "parse_inputs", return_value=inputs),
+                mock.patch.object(ACTION.shutil, "which", return_value="/usr/bin/skill-up"),
+                mock.patch.object(ACTION, "_run"),
+                mock.patch.object(ACTION, "get_skill_up_version", return_value=(0, 7, 0)),
+                mock.patch.object(ACTION, "command_supports_explicit_provider", return_value=True),
+                mock.patch.object(ACTION.subprocess, "run", final_run),
+                mock.patch.dict(ACTION.os.environ, {"GITHUB_WORKSPACE": workspace}, clear=True),
+                mock.patch("builtins.print"),
+                self.assertRaises(SystemExit) as exit_context,
+            ):
+                ACTION.main()
+
+        self.assertEqual(exit_context.exception.code, 0)
+        argv = final_run.call_args.args[0]
+        run_env = final_run.call_args.kwargs["env"]
+        self.assertNotIn("--engine", argv)
+        self.assertNotIn("--provider", argv)
+        self.assertEqual(argv[2:6], [
+            "--api-key", "secret", "--model", "qwen3.6-plus",
+        ])
+        self.assertEqual(
+            run_env["OPENAI_BASE_URL"],
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        )
+        self.assertEqual(
+            run_env["ANTHROPIC_BASE_URL"],
+            "https://dashscope.aliyuncs.com/apps/anthropic",
+        )
+        self.assertNotIn("DASHSCOPE_BASE_URL", run_env)
+        self.assertEqual(run_env["DASHSCOPE_API_KEY"], "secret")
 
     def test_protocol_selects_provider_endpoint(self):
         cases = [
@@ -126,6 +176,57 @@ class ActionConfigurationContractTest(unittest.TestCase):
                 "OPENAI_BASE_URL": "https://gateway.example/v1",
             },
         )
+
+    def test_new_cli_receives_separate_provider_and_opaque_model(self):
+        argv = ACTION.build_skill_up_argv(
+            "skill-up run",
+            "codex",
+            "org/model",
+            "dashscope",
+            "",
+            "/tmp/reports",
+            "evals/eval.yaml",
+            explicit_provider_supported=True,
+        )
+
+        self.assertEqual(argv[:8], [
+            "skill-up", "run", "--engine", "codex",
+            "--provider", "dashscope", "--model", "org/model",
+        ])
+
+    def test_old_cli_keeps_legacy_provider_model_translation(self):
+        argv = ACTION.build_skill_up_argv(
+            "skill-up run",
+            "codex",
+            "qwen3.6-plus",
+            "dashscope",
+            "",
+            "/tmp/reports",
+            "evals/eval.yaml",
+            explicit_provider_supported=False,
+        )
+
+        self.assertEqual(argv[:6], [
+            "skill-up", "run", "--engine", "codex",
+            "--model", "dashscope/qwen3.6-plus",
+        ])
+
+    def test_detects_explicit_provider_from_run_help(self):
+        completed = SimpleNamespace(stdout="Flags:\n  --provider string\n")
+        with mock.patch.object(ACTION.subprocess, "run", return_value=completed) as run:
+            self.assertTrue(ACTION.command_supports_explicit_provider("skill-up run"))
+        run.assert_called_once_with(
+            ["skill-up", "run", "--help"],
+            env=ACTION.os.environ,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+    def test_provider_reference_in_other_help_text_is_not_feature_support(self):
+        completed = SimpleNamespace(stdout="  --model string  opaque with --provider\n")
+        with mock.patch.object(ACTION.subprocess, "run", return_value=completed):
+            self.assertFalse(ACTION.command_supports_explicit_provider("skill-up run"))
 
     def test_empty_engine_delegates_to_eval_yaml(self):
         argv = ACTION.build_skill_up_argv(

@@ -106,7 +106,8 @@ func init() {
 	runCmd.Flags().String("output-dir", "", "Directory for report/artifact outputs. Default: <skill-name>-workspace alongside the skill directory")
 	runCmd.Flags().String("engine", "", "Override engine name")
 	runCmd.Flags().String(runtimeFlagName, "", "Override environment.type (none, opensandbox, docker)")
-	runCmd.Flags().String("model", "", "Override model (accepts either a bare model name or provider/name)")
+	runCmd.Flags().String("provider", "", "Override model provider; when set, --model is treated as an opaque model name")
+	runCmd.Flags().String("model", "", "Override model (opaque when --provider is set; otherwise also accepts legacy provider/name)")
 	runCmd.Flags().String("api-key", "", "API key for the model provider")
 	runCmd.Flags().Int("parallelism", 0, "Override cases.parallelism. Must be between 1 and 256 when specified")
 	runCmd.Flags().Bool("baseline", false, "Override benchmark.enabled to true for this run")
@@ -200,18 +201,20 @@ func loadAndPrepareConfig(ctx context.Context, cmd *cobra.Command, args []string
 		return nil, nil, nil, err
 	}
 	modelFlag, _ := cmd.Flags().GetString("model")
+	providerFlag, _ := cmd.Flags().GetString("provider")
 	// The loader defers engine.custom env resolution and validation until the
 	// final engine name is known (it can be changed by --engine); process it
 	// now so an override is never blocked by an unrelated custom block. A CLI
-	// model supersedes the YAML provider/name, so stale references in those two
-	// fields are not expanded. Base URL and model params remain active.
+	// model supersedes the YAML provider/name, while a provider-only override
+	// supersedes just the YAML provider. Base URL and model params remain active.
 	if err := config.ResolveCustomEngineConfigWithOptions(evalCfg, config.ResolveCustomEngineOptions{
-		SkipModelIdentity: modelFlag != "",
+		SkipModelProvider: providerFlag != "" || modelFlag != "",
+		SkipModelName:     modelFlag != "",
 	}); err != nil {
 		return nil, nil, nil, fmt.Errorf("engine config: %w", err)
 	}
 
-	modelRef := requestedModelRef(evalCfg.Engine.Model, modelFlag)
+	modelRef := requestedModelRef(evalCfg.Engine.Model, providerFlag, modelFlag)
 	span.SetAttributes(
 		attribute.Int("skill_up.cases.count", len(cases)),
 		attribute.String("skill_up.engine", evalCfg.Engine.Name),
@@ -244,6 +247,7 @@ func loadCredentialsAndAgent(cmd *cobra.Command, evalCfg *config.EvalConfig) (ag
 	ui.Blank()
 	ui.Step("🔑", "Loading credentials...")
 	cliModel, _ := cmd.Flags().GetString("model")
+	cliProvider, _ := cmd.Flags().GetString("provider")
 	cliAPIKey, _ := cmd.Flags().GetString("api-key")
 
 	resolver := credential.NewResolver(credential.DefaultConfPath())
@@ -254,7 +258,7 @@ func loadCredentialsAndAgent(cmd *cobra.Command, evalCfg *config.EvalConfig) (ag
 	runnerConfig := credential.ResolveRunnerConfig(
 		evalCfg.Engine,
 		resolver,
-		credential.CLIOverrides{Model: cliModel, APIKey: cliAPIKey},
+		credential.CLIOverrides{Provider: cliProvider, Model: cliModel, APIKey: cliAPIKey},
 	)
 	runnerConfig = agent.ResolveAdapterConfig(runnerConfig)
 	agent.LogAdapterConfig(cmd.Context(), runnerConfig)
@@ -615,9 +619,15 @@ func formatModelRef(provider, name string) string {
 	}
 }
 
-func requestedModelRef(model config.ModelConfig, cliModel string) string {
+func requestedModelRef(model config.ModelConfig, cliProvider, cliModel string) string {
 	if cliModel != "" {
+		if cliProvider != "" {
+			return formatModelRef(cliProvider, cliModel)
+		}
 		return cliModel
+	}
+	if cliProvider != "" {
+		return formatModelRef(cliProvider, model.Name)
 	}
 	return formatModelRef(model.Provider, model.Name)
 }

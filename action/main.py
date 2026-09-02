@@ -243,6 +243,28 @@ def get_skill_up_version(env=None):
     return parse_skill_up_version(result.stdout)
 
 
+def command_supports_explicit_provider(skill_up_command, env=None):
+    """Return whether the selected skill-up run command exposes --provider."""
+    parts = shlex.split(skill_up_command)
+    if not parts or parts[0] != "skill-up":
+        return False
+    run_env = os.environ if not env else {**os.environ, **env}
+    try:
+        result = subprocess.run(
+            parts + ["--help"],
+            env=run_env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+    return any(
+        line.strip() == "--provider" or line.strip().startswith("--provider ")
+        for line in result.stdout.splitlines()
+    )
+
+
 def validate_parallelism(value):
     """Validate parallelism: empty is fine (omit flag); else 1-256 integer."""
     if value is None or value == "":
@@ -280,7 +302,8 @@ def mask_argv_for_log(argv):
 
 def build_skill_up_argv(skill_up_command, engine, model, provider, parallelism,
                         output_dir, skill_target, api_key="",
-                        bypass_codex_sandbox=False):
+                        bypass_codex_sandbox=False,
+                        explicit_provider_supported=False):
     """Assemble the skill-up argv. skill-up-command must start with ``skill-up``.
 
     engine="" : do not append --engine (let eval.yaml declare it) and pass the
@@ -296,7 +319,12 @@ def build_skill_up_argv(skill_up_command, engine, model, provider, parallelism,
         argv += ["--engine", engine]
     elif api_key:
         argv += ["--api-key", api_key]
-    model_ref = compose_model_ref(provider, model, engine)
+    use_explicit_provider = explicit_provider_supported and provider and engine
+    if use_explicit_provider:
+        argv += ["--provider", provider]
+    model_ref = model if use_explicit_provider else compose_model_ref(
+        provider, model, engine
+    )
     if model_ref:
         argv += ["--model", model_ref]
     norm = validate_parallelism(parallelism)
@@ -422,6 +450,9 @@ def main():
     _run("skill-up --version", env=path_env)
     skill_up_version = get_skill_up_version(env=path_env)
     bypass_codex_sandbox = version_supports_bypass_sandbox(skill_up_version)
+    explicit_provider_supported = command_supports_explicit_provider(
+        inputs.skill_up_command, env=path_env
+    )
     if bypass_codex_sandbox:
         print("skill-up >= 0.2.3 detected; will pass --engine-kwarg "
               "bypass_sandbox=true to work around Landlock-restricted images.")
@@ -448,7 +479,8 @@ def main():
                                    inputs.parallelism,
                                    output_dir, inputs.skill_target,
                                    api_key=inputs.api_key,
-                                   bypass_codex_sandbox=bypass_codex_sandbox)
+                                   bypass_codex_sandbox=bypass_codex_sandbox,
+                                   explicit_provider_supported=explicit_provider_supported)
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         sys.exit(2)
@@ -461,9 +493,9 @@ def main():
     if inputs.engine:
         run_env.update(engine_env(inputs.engine, inputs.api_key, base_url))
         run_env.update(engine_model_env(inputs.engine, inputs.model))
-        run_env.update(provider_env(inputs.provider, inputs.api_key, base_url))
     else:
         run_env.update(unified_base_url_env(inputs.provider, inputs.base_url))
+    run_env.update(provider_env(inputs.provider, inputs.api_key, base_url))
 
     print("Running: " + " ".join(shlex.quote(a) for a in mask_argv_for_log(argv)),
           flush=True)

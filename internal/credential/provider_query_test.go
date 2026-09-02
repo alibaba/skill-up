@@ -10,6 +10,8 @@ import (
 	"github.com/alibaba/skill-up/internal/logging"
 )
 
+const testProviderDashscope = "dashscope"
+
 // -- HasProvider --
 
 func TestHasProvider_EmptyNameReturnsFalse(t *testing.T) {
@@ -24,7 +26,7 @@ func TestHasProvider_NilReceiverFallsBackToEnv(t *testing.T) {
 	// Not parallel: depends on env state for "dashscope" and the absence of
 	// env footprint for the unconfigured probe.
 	t.Setenv("DASHSCOPE_API_KEY", "sk-test")
-	if !(*Resolver)(nil).HasProvider("dashscope") {
+	if !(*Resolver)(nil).HasProvider(testProviderDashscope) {
 		t.Fatalf("nil receiver should still see env-configured provider")
 	}
 }
@@ -44,7 +46,7 @@ func TestHasProvider_TrueWhenResolverHasEntry(t *testing.T) {
 
 func TestHasProvider_TrueWhenAPIKeyEnvSet(t *testing.T) {
 	t.Setenv("DASHSCOPE_API_KEY", "sk-test")
-	if !(&Resolver{}).HasProvider("dashscope") {
+	if !(&Resolver{}).HasProvider(testProviderDashscope) {
 		t.Fatalf("HasProvider returned false when DASHSCOPE_API_KEY is set")
 	}
 }
@@ -95,7 +97,7 @@ func TestHasProvider_QoderPATDoesNotLeakToOtherProviders(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if (&Resolver{}).HasProvider("dashscope") {
+	if (&Resolver{}).HasProvider(testProviderDashscope) {
 		t.Fatalf("qoder PAT must not register dashscope as configured")
 	}
 }
@@ -160,7 +162,7 @@ func TestResolveModelRef_NoSlashReturnsBareName(t *testing.T) {
 func TestResolveModelRef_SplitsWhenProviderConfigured(t *testing.T) {
 	t.Setenv("DASHSCOPE_API_KEY", "sk-test")
 	p, n := ResolveModelRef("dashscope/claude-sonnet-4-6", nil)
-	if p != "dashscope" || n != "claude-sonnet-4-6" {
+	if p != testProviderDashscope || n != "claude-sonnet-4-6" {
 		t.Fatalf("ResolveModelRef configured = (%q, %q), want (dashscope, claude-sonnet-4-6)", p, n)
 	}
 }

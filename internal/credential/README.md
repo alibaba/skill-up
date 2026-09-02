@@ -16,7 +16,7 @@ Consolidate information scattered across the following sources into agent initia
 
 - `engine.model` in the eval config
 - The judge agent model setting in the judge config
-- CLI overrides such as `--model` and `--api-key`
+- CLI overrides such as `--provider`, `--model`, and `--api-key`
 - The global credential configuration file
 - Process environment variables
 
@@ -86,9 +86,10 @@ The recommended priority order follows.
 
 ### provider
 
-1. Explicit configuration on the agent role itself
-2. If this is a judge agent without independent configuration, reuse the runner agent provider
-3. When no provider is set, do not perform provider-scoped credential lookups
+1. Explicit runner CLI `--provider`
+2. Explicit configuration on the agent role itself
+3. If this is a judge agent without independent configuration, reuse the runner agent provider
+4. When no provider is set, do not perform provider-scoped credential lookups
 
 The provider is a precondition for environment-variable and credential-file lookups. When it is missing, do not fabricate a provider just to apply the generic logic.
 
@@ -96,7 +97,9 @@ The provider is a precondition for environment-variable and credential-file look
 
 Once `provider` is determined, `model` should follow the same provider-scoped resolution as `api-key` / `base-url`.
 
-1. CLI `--model` overrides the current role's model
+1. CLI `--model` overrides the current role's model. With `--provider`, it is
+   opaque; without `--provider`, a known/configured `provider/name` prefix is
+   accepted for compatibility.
 2. Explicit configuration on the agent role itself
 3. If the current role has a provider, prefer the provider-scoped environment variable, e.g. `${PROVIDER}_MODEL`
 4. If this is a judge agent without independent configuration, reuse the runner agent model
@@ -154,7 +157,8 @@ Where:
 Recommended execution order:
 
 1. Copy the role's YAML values and clone its kwargs/model params
-2. Resolve a raw CLI `--model` once, including legacy slash disambiguation
+2. Apply an explicit CLI `--provider`; when present, preserve the complete CLI
+   `--model`, otherwise resolve the legacy slashed model form once
 3. For the judge agent, fill missing fields from the resolved runner config
 4. If the final provider is non-empty, uniformly read `${PROVIDER}_MODEL` / `${PROVIDER}_API_KEY` / `${PROVIDER}_BASE_URL`
 5. If the `api-key` / `base-url` env var is missing, read from the resolver's credential configuration
@@ -326,10 +330,12 @@ The resolution pipeline described in this document is implemented in `agent_init
 - `resolveResolvedAgentConfig()` — shared resolution logic used by both pipelines
 
 The CLI no longer tentatively splits `--model` into `evalCfg` and later
-collapses it. `ResolveRunnerConfig()` receives the raw flag and makes the slash
-decision once, after provider configuration is available. The resulting value
-is passed directly to `agent.DetectAgentWithResolvedConfig()` and is also used
-for report engine/model identity.
+collapses it. `ResolveRunnerConfig()` receives the raw flags. An explicit
+`--provider` overrides YAML and makes the complete `--model` value opaque;
+otherwise the resolver makes the historical slash decision once, after
+provider configuration is available. The resulting value is passed directly
+to `agent.DetectAgentWithResolvedConfig()` and is also used for report
+engine/model identity.
 
 `Resolver.Load()` emits "global discovery" logs (discovered providers from .env and config file). These are distinct from the per-role `[AGENT_CONFIG]` logs emitted by `logResolvedAgentConfig()` in `agent_init.go`, which describe the final resolved parameters and their sources for each agent role.
 
