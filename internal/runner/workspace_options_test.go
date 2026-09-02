@@ -538,6 +538,16 @@ func (s evaluatorStub) EvaluateAll(ctx context.Context, cases []*config.CaseConf
 	return s.evaluateAll(ctx, cases)
 }
 
+func (s evaluatorStub) EvaluatePlan(ctx context.Context, tasks []evaluator.PlannedTask) ([]evaluator.EvalResult, error) {
+	cases := make([]*config.CaseConfig, 0, len(tasks))
+	for _, task := range tasks {
+		if task.Configuration == evaluator.ConfigurationWithSkill {
+			cases = append(cases, task.Case)
+		}
+	}
+	return s.evaluateAll(ctx, cases)
+}
+
 type runnerTestAgent struct{}
 
 func (a *runnerTestAgent) Name() string { return "test-agent" }

@@ -37,13 +37,31 @@ import (
 
 var newEvaluator = evaluator.NewEvaluator
 
+// IterationObserver receives iteration lifecycle notifications.
+type IterationObserver interface {
+	OnIterationStart(ctx context.Context, iteration evaluator.IterationPlan)
+	OnIterationComplete(ctx context.Context, iteration evaluator.IterationPlan, results []evaluator.EvalResult)
+}
+
 // EvaluateOptions controls evaluation behavior.
 type EvaluateOptions struct {
-	DeleteWorkspace bool
-	OutputDir       string
-	Iteration       int
-	Formats         []string
-	Observer        evaluator.ProgressObserver
+	DeleteWorkspace   bool
+	OutputDir         string
+	Iteration         int
+	Formats           []string
+	Observer          evaluator.ProgressObserver
+	TaskObserver      evaluator.TaskObserver
+	IterationObserver IterationObserver
+}
+
+// ExecutionPlan contains the immutable invocation metadata and expanded tasks.
+type ExecutionPlan struct {
+	SkillDir     string
+	SkillName    string
+	ReportName   string
+	WorkspaceDir string
+	CaseCount    int
+	TaskPlan     evaluator.Plan
 }
 
 // Runner coordinates eval execution end-to-end.
@@ -93,15 +111,8 @@ func (r *Runner) Workspace() *report.IterationWorkspace {
 	return r.workspace
 }
 
-// Evaluate runs all cases through evaluator and agent, returns results.
-func (r *Runner) Evaluate(ctx context.Context, cases []*config.CaseConfig, ag agent.Agent, opts EvaluateOptions) ([]evaluator.EvalResult, error) {
-	ctx, span := observability.Tracer().Start(ctx, "runner.evaluate")
-	defer span.End()
-	span.SetAttributes(
-		attribute.Int("skill_up.cases.count", len(cases)),
-		attribute.String("skill_up.engine", ag.Name()),
-	)
-
+// BuildExecutionPlan resolves workspace metadata and expands all invocation tasks.
+func (r *Runner) BuildExecutionPlan(cases []*config.CaseConfig, opts EvaluateOptions) ExecutionPlan {
 	skillDir := r.loader.SkillDir()
 	cleanDir, _ := filepath.Abs(filepath.Clean(skillDir))
 	skillName := filepath.Base(cleanDir)
@@ -118,8 +129,6 @@ func (r *Runner) Evaluate(ctx context.Context, cases []*config.CaseConfig, ag ag
 	if name, ok := r.loader.SkillName(); ok {
 		reportName = name
 	}
-	concurrency := r.evalCfg.Cases.Parallelism
-
 	workspaceDir := opts.OutputDir
 	if workspaceDir == "" {
 		// Default workspace sits alongside the skill directory, not inside it,
@@ -133,48 +142,90 @@ func (r *Runner) Evaluate(ctx context.Context, cases []*config.CaseConfig, ag ag
 		runCount = 1
 		startIteration = nextIterationNumber(workspaceDir)
 	}
+	configurations := []string{evaluator.ConfigurationWithSkill}
+	if r.evalCfg.Benchmark.Enabled {
+		configurations = append(configurations, evaluator.ConfigurationWithoutSkill)
+	}
+
+	return ExecutionPlan{
+		SkillDir:     skillDir,
+		SkillName:    skillName,
+		ReportName:   reportName,
+		WorkspaceDir: workspaceDir,
+		CaseCount:    len(cases),
+		TaskPlan: evaluator.BuildPlan(
+			cases,
+			startIteration,
+			runCount,
+			configurations,
+		),
+	}
+}
+
+// Evaluate runs all cases through evaluator and agent, returns results.
+func (r *Runner) Evaluate(ctx context.Context, cases []*config.CaseConfig, ag agent.Agent, opts EvaluateOptions) ([]evaluator.EvalResult, error) {
+	return r.EvaluatePlan(ctx, r.BuildExecutionPlan(cases, opts), ag, opts)
+}
+
+// EvaluatePlan executes a previously built invocation plan.
+func (r *Runner) EvaluatePlan(ctx context.Context, plan ExecutionPlan, ag agent.Agent, opts EvaluateOptions) ([]evaluator.EvalResult, error) {
+	ctx, span := observability.Tracer().Start(ctx, "runner.evaluate")
+	defer span.End()
 	span.SetAttributes(
-		attribute.Int("skill_up.iteration.start", startIteration),
+		attribute.Int("skill_up.cases.count", plan.CaseCount),
+		attribute.String("skill_up.engine", ag.Name()),
+	)
+
+	runCount := len(plan.TaskPlan.Iterations)
+	span.SetAttributes(
+		attribute.Int("skill_up.iteration.start", plan.TaskPlan.StartIteration),
 		attribute.Int("skill_up.iteration.count", runCount),
 	)
-	allResults := make([]evaluator.EvalResult, 0, len(cases)*runCount)
-	for i := range runCount {
+	allResults := make([]evaluator.EvalResult, 0, plan.TaskPlan.TaskTotal)
+	for _, iteration := range plan.TaskPlan.Iterations {
 		iterationStartTime := r.now()
-		runNumber := startIteration + i
-		if err := r.setupWorkspace(ctx, workspaceDir, skillName, runNumber); err != nil {
+		runNumber := iteration.Number
+		if err := r.setupWorkspace(ctx, plan.WorkspaceDir, plan.SkillName, runNumber); err != nil {
 			return allResults, fmt.Errorf("failed to init workspace for run %d: %w", runNumber, err)
+		}
+		if opts.IterationObserver != nil {
+			opts.IterationObserver.OnIterationStart(ctx, iteration)
 		}
 
 		if runCount == 1 {
-			logging.DebugContextf(ctx, "Runner: running %d case(s) with agent %s", len(cases), ag.Name())
+			logging.DebugContextf(ctx, "Runner: running %d case(s) with agent %s", plan.CaseCount, ag.Name())
 		} else {
-			logging.DebugContextf(ctx, "Runner: running %d case(s) with agent %s (run %d/%d)", len(cases), ag.Name(), runNumber, runCount)
+			logging.DebugContextf(ctx, "Runner: running %d case(s) with agent %s (run %d/%d)", plan.CaseCount, ag.Name(), runNumber, runCount)
 		}
-		logging.DebugContextf(ctx, "Runner: benchmark=%t concurrency=%d output_dir=%s iteration=%d", r.evalCfg.Benchmark.Enabled, concurrency, workspaceDir, runNumber)
+		logging.DebugContextf(ctx, "Runner: benchmark=%t concurrency=%d output_dir=%s iteration=%d", r.evalCfg.Benchmark.Enabled, r.evalCfg.Cases.Parallelism, plan.WorkspaceDir, runNumber)
 
 		ev := newEvaluator(evaluator.EvalOptions{
-			SkillName:       reportName,
-			SkillDir:        skillDir,
+			SkillName:       plan.ReportName,
+			SkillDir:        plan.SkillDir,
 			EvalCfg:         r.evalCfg,
 			Loader:          r.loader,
 			Resolver:        r.resolver,
 			Agent:           ag,
 			RunnerConfig:    r.runnerConfig,
 			OutputDir:       r.workspace.IterationDir(),
-			Concurrency:     concurrency,
+			Concurrency:     r.evalCfg.Cases.Parallelism,
 			DeleteWorkspace: opts.DeleteWorkspace,
 			WithBaseline:    r.evalCfg.Benchmark.Enabled,
 			Observer:        opts.Observer,
+			TaskObserver:    opts.TaskObserver,
 		})
 
-		results, err := ev.EvaluateAll(ctx, cases)
+		results, err := ev.EvaluatePlan(ctx, iteration.Tasks)
 		if err != nil {
 			return allResults, err
+		}
+		if opts.IterationObserver != nil {
+			opts.IterationObserver.OnIterationComplete(ctx, iteration, results)
 		}
 		allResults = append(allResults, results...)
 		iterationEndTime := r.now()
 
-		if err := r.WriteResults(ctx, results, reportName, skillDir, runNumber, opts.Formats, iterationStartTime, iterationEndTime); err != nil {
+		if err := r.WriteResults(ctx, results, plan.ReportName, plan.SkillDir, runNumber, opts.Formats, iterationStartTime, iterationEndTime); err != nil {
 			logging.WarnContextf(ctx, "Runner: failed to write results for run %d: %v", runNumber, err)
 		}
 	}

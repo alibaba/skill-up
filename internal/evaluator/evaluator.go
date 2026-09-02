@@ -46,6 +46,13 @@ type ProgressObserver interface {
 	OnCaseComplete(index, total int, caseID string, status judge.Status, passRate float64)
 }
 
+// TaskObserver receives stable planned-task lifecycle notifications.
+// Implementations must be safe for concurrent use.
+type TaskObserver interface {
+	OnTaskStart(ctx context.Context, task PlannedTask)
+	OnTaskComplete(ctx context.Context, task PlannedTask, result EvalResult)
+}
+
 // EvalOptions controls evaluation behavior.
 type EvalOptions struct {
 	WithBaseline bool
@@ -60,8 +67,9 @@ type EvalOptions struct {
 	Agent           agent.Agent
 	RunnerConfig    credential.ResolvedAgentConfig
 
-	EvalCfg  *config.EvalConfig
-	Observer ProgressObserver
+	EvalCfg      *config.EvalConfig
+	Observer     ProgressObserver
+	TaskObserver TaskObserver
 }
 
 // EvalResult holds the complete evaluation output for a single case execution.
@@ -115,11 +123,6 @@ type EvalResult struct {
 // Deprecated: Use EvalResult instead.
 type CaseResult = EvalResult
 
-type task struct {
-	caseCfg    *config.CaseConfig
-	configName string
-}
-
 type workspaceDiffState struct {
 	enabled     bool
 	baselineRev string
@@ -128,6 +131,7 @@ type workspaceDiffState struct {
 // Evaluator orchestrates the evaluation pipeline for test cases.
 type Evaluator interface {
 	EvaluateAll(ctx context.Context, cases []*config.CaseConfig) ([]EvalResult, error)
+	EvaluatePlan(ctx context.Context, tasks []PlannedTask) ([]EvalResult, error)
 }
 
 // defaultEvaluator is the default implementation of Evaluator.
@@ -146,6 +150,7 @@ type defaultEvaluator struct {
 	fixtures        *fixtureRegistry
 	deleteWorkspace bool
 	observer        ProgressObserver
+	taskObserver    TaskObserver
 	mcpOnce         sync.Once
 	mcpCfg          runtime.MCPConfig
 	mcpEnv          map[string]string
@@ -178,15 +183,26 @@ func NewEvaluator(opts EvalOptions) Evaluator {
 		fixtures:        newFixtureRegistry(),
 		deleteWorkspace: opts.DeleteWorkspace,
 		observer:        opts.Observer,
+		taskObserver:    opts.TaskObserver,
 	}
 }
 
 // EvaluateAll executes all cases through the evaluation pipeline and returns results.
 func (e *defaultEvaluator) EvaluateAll(ctx context.Context, cases []*config.CaseConfig) ([]EvalResult, error) {
+	configurations := []string{ConfigurationWithSkill}
+	if e.withBaseline {
+		configurations = append(configurations, ConfigurationWithoutSkill)
+	}
+	plan := BuildPlan(cases, 1, 1, configurations)
+	return e.EvaluatePlan(ctx, plan.Iterations[0].Tasks)
+}
+
+// EvaluatePlan executes pre-expanded tasks through the evaluation pipeline and returns results.
+func (e *defaultEvaluator) EvaluatePlan(ctx context.Context, tasks []PlannedTask) ([]EvalResult, error) {
 	ctx, span := observability.Tracer().Start(ctx, "evaluator.evaluate_all")
 	defer span.End()
 	span.SetAttributes(
-		attribute.Int("skill_up.cases.count", len(cases)),
+		attribute.Int("skill_up.cases.count", plannedCaseCount(tasks)),
 		attribute.Int("skill_up.concurrency", e.concurrency),
 		attribute.Bool("skill_up.baseline.enabled", e.withBaseline),
 	)
@@ -194,19 +210,6 @@ func (e *defaultEvaluator) EvaluateAll(ctx context.Context, cases []*config.Case
 	if e.ag != nil {
 		if err := e.ag.CheckCredentials(ctx); err != nil {
 			return nil, fmt.Errorf("agent credential check failed: %w", err)
-		}
-	}
-
-	configCount := 1
-	if e.withBaseline {
-		configCount = 2
-	}
-
-	tasks := make([]task, 0, len(cases)*configCount)
-	for _, c := range cases {
-		tasks = append(tasks, task{caseCfg: c, configName: "with_skill"})
-		if e.withBaseline {
-			tasks = append(tasks, task{caseCfg: c, configName: "without_skill"})
 		}
 	}
 
@@ -219,26 +222,42 @@ func (e *defaultEvaluator) EvaluateAll(ctx context.Context, cases []*config.Case
 		wg.Add(1)
 		sem <- struct{}{}
 		caseNum := i + 1
-		go func(idx int, tk task, cn int) {
+		go func(idx int, plannedTask PlannedTask, cn int) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			if e.observer != nil {
-				e.observer.OnCaseStart(cn, totalCases, tk.caseCfg.ID, tk.caseCfg.Title)
+				e.observer.OnCaseStart(cn, totalCases, plannedTask.Case.ID, plannedTask.Case.Title)
 			}
-			results[idx] = e.executeCase(ctx, tk.caseCfg, tk.configName, nil, nil)
+			if e.taskObserver != nil {
+				e.taskObserver.OnTaskStart(ctx, plannedTask)
+			}
+			results[idx] = e.executeCase(ctx, plannedTask.Case, plannedTask.Configuration, nil, nil)
 			if e.observer != nil {
 				res := results[idx]
 				passRate := float64(-1)
 				if res.Grading != nil {
 					passRate = res.Grading.Summary.PassRate
 				}
-				e.observer.OnCaseComplete(cn, totalCases, tk.caseCfg.ID, res.Status, passRate)
+				e.observer.OnCaseComplete(cn, totalCases, plannedTask.Case.ID, res.Status, passRate)
+			}
+			if e.taskObserver != nil {
+				e.taskObserver.OnTaskComplete(ctx, plannedTask, results[idx])
 			}
 		}(i, t, caseNum)
 	}
 	wg.Wait()
 
 	return results, nil
+}
+
+func plannedCaseCount(tasks []PlannedTask) int {
+	count := 0
+	for _, task := range tasks {
+		if task.Configuration == ConfigurationWithSkill {
+			count++
+		}
+	}
+	return count
 }
 
 func casePromptAndTurnsTotal(caseCfg *config.CaseConfig) (string, int) {
