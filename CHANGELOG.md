@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `skill-up run` now supports `--event-log <path>` for a live, ordered v1
+  JSONL evaluation event stream and repeatable `--event-attribute <key=value>`
+  values for bounded invocation correlation metadata. Existing runs are
+  unchanged unless the event log is explicitly enabled.
+
 ## [0.10.0] - 2026-09-01
 
 ### Added

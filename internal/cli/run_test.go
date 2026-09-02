@@ -59,6 +59,8 @@ func newRunPhaseTestCommand(t *testing.T) *cobra.Command {
 	cmd.Flags().Int("iteration", 0, "")
 	cmd.Flags().Bool("no-delete", false, "")
 	cmd.Flags().Bool("dry-run", false, "")
+	cmd.Flags().String(eventLogFlagName, "", "")
+	cmd.Flags().StringArray(eventAttributeFlagName, nil, "")
 	return cmd
 }
 
