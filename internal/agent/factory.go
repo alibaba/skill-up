@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/alibaba/skill-up/internal/agentkind"
@@ -36,7 +37,10 @@ func DetectAgent(engineName string, cfg Config) (Agent, error) {
 // DetectAgentWithResolvedConfig maps a resolved role configuration into the
 // selected adapter without reinterpreting raw YAML or CLI values.
 func DetectAgentWithResolvedConfig(params credential.ResolvedAgentConfig) (Agent, error) {
-	params = ResolveAdapterConfig(params)
+	connection := params.AppliedConnection
+	if connection.Protocol == "" {
+		return nil, fmt.Errorf("agent config for engine %q was not materialized", params.Engine)
+	}
 	engineName := params.Engine
 	cfg := Config{
 		Name:               engineName,
@@ -45,11 +49,11 @@ func DetectAgentWithResolvedConfig(params credential.ResolvedAgentConfig) (Agent
 		ModelName:          params.AppliedModel,
 		RequestedModelName: params.Model,
 		RequestedProvider:  params.Provider,
-		ModelProvider:      params.AppliedProvider,
-		Protocol:           params.Protocol,
+		ModelProvider:      connection.Provider,
+		Protocol:           string(connection.Protocol),
 		Warnings:           params.Warnings,
-		APIKey:             params.AppliedAPIKey,
-		BaseURL:            params.AppliedBaseURL,
+		APIKey:             connection.APIKey,
+		BaseURL:            connection.BaseURL,
 		EnvVars:            make(map[string]string),
 		Kwargs:             params.Kwargs,
 		Custom:             params.Custom,

@@ -2,10 +2,13 @@ package agent
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/logging"
 )
@@ -102,7 +105,7 @@ func TestResolveAdapterConfig_ModelPolicies(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := ResolveAdapterConfig(tt.params)
+			got := ResolveAdapterConfig(tt.params, nil)
 			if got.Protocol != string(tt.wantProtocol) || got.AppliedProvider != tt.wantProvider || got.AppliedModel != tt.wantApplied {
 				t.Fatalf("ResolveAdapterConfig() protocol/provider/model = %q/%q/%q, want %q/%q/%q", got.Protocol, got.AppliedProvider, got.AppliedModel, tt.wantProtocol, tt.wantProvider, tt.wantApplied)
 			}
@@ -116,17 +119,146 @@ func TestResolveAdapterConfig_ModelPolicies(t *testing.T) {
 	}
 }
 
+func TestResolveAdapterConfig_SelectsConnectionForAdapterProtocol(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "credentials.yaml")
+	content := []byte(`
+providers:
+  adapter_gateway:
+    api_key: flat-key
+    base_url: https://flat.example.test
+    openai:
+      api_key: openai-key
+      base_url: https://openai.example.test/v1
+    anthropic:
+      api_key: anthropic-key
+      base_url: https://anthropic.example.test
+`)
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatalf("write credentials: %v", err)
+	}
+	resolver := credential.NewResolver(path)
+	if err := resolver.Load(); err != nil {
+		t.Fatalf("load credentials: %v", err)
+	}
+
+	tests := []struct {
+		engine   string
+		protocol credential.Protocol
+		apiKey   string
+		baseURL  string
+		provider string
+	}{
+		{engine: "codex", protocol: credential.ProtocolOpenAI, apiKey: "openai-key", baseURL: "https://openai.example.test/v1", provider: "adapter_gateway"},
+		{engine: "claude_code", protocol: credential.ProtocolAnthropic, apiKey: "anthropic-key", baseURL: "https://anthropic.example.test", provider: "adapter_gateway"}, //nolint:gosec // test credential
+	}
+	for _, tt := range tests {
+		t.Run(tt.engine, func(t *testing.T) {
+			t.Parallel()
+			got := ResolveAdapterConfig(credential.ResolvedAgentConfig{
+				Engine:        tt.engine,
+				Provider:      tt.provider,
+				APIKey:        "flat-key",
+				BaseURL:       "https://flat.example.test",
+				APIKeySource:  credential.ValueSourceResolver,
+				BaseURLSource: credential.ValueSourceResolver,
+			}, resolver)
+			connection := got.AppliedConnection
+			if connection.Protocol != tt.protocol || connection.APIKey != tt.apiKey || connection.BaseURL != tt.baseURL {
+				t.Fatalf("applied connection = %#v, want %s endpoint", connection, tt.protocol)
+			}
+			if connection.Provider != tt.provider || connection.AuthMode != credential.AuthModeInjected || connection.RoutingMode != credential.RoutingModeExplicit {
+				t.Fatalf("applied connection metadata = %#v", connection)
+			}
+		})
+	}
+}
+
+func TestResolveAdapterConfig_PreservesExplicitEmptyConnectionDelegation(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "credentials.yaml")
+	if err := os.WriteFile(path, []byte(`
+providers:
+  local_gateway:
+    api_key: flat-key
+    base_url: https://flat.example.test
+    anthropic:
+      api_key: ""
+      base_url: ""
+`), 0o600); err != nil {
+		t.Fatalf("write credentials: %v", err)
+	}
+	resolver := credential.NewResolver(path)
+	if err := resolver.Load(); err != nil {
+		t.Fatalf("load credentials: %v", err)
+	}
+
+	got := ResolveAdapterConfig(credential.ResolvedAgentConfig{
+		Engine:   "claude_code",
+		Provider: "local_gateway",
+	}, resolver)
+	connection := got.AppliedConnection
+	if connection.APIKey != "" || connection.BaseURL != "" || !connection.APIKeySet || !connection.BaseURLSet {
+		t.Fatalf("explicit empty connection was not preserved: %#v", connection)
+	}
+	if connection.AuthMode != credential.AuthModeAgentLocal || connection.RoutingMode != credential.RoutingModeAgentLocal {
+		t.Fatalf("delegated modes = %q/%q", connection.AuthMode, connection.RoutingMode)
+	}
+}
+
+func TestResolveAdapterConfig_InheritedJudgeKeepsRunnerProtocolConnection(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "credentials.yaml")
+	if err := os.WriteFile(path, []byte(`
+providers:
+  judge_gateway:
+    openai:
+      api_key: openai-key
+      base_url: https://openai.example.test/v1
+    anthropic:
+      api_key: anthropic-key
+      base_url: https://anthropic.example.test
+`), 0o600); err != nil {
+		t.Fatalf("write credentials: %v", err)
+	}
+	resolver := credential.NewResolver(path)
+	if err := resolver.Load(); err != nil {
+		t.Fatalf("load credentials: %v", err)
+	}
+
+	runner := credential.ResolveRunnerConfig(config.EngineConfig{
+		Name: "claude_code",
+		Model: config.ModelConfig{
+			Provider: "judge_gateway",
+			Name:     "claude-sonnet-4-6",
+		},
+	}, resolver, credential.CLIOverrides{})
+	runner = ResolveAdapterConfig(runner, resolver)
+	judge := credential.ResolveJudgeConfig(config.JudgeConfig{Type: "agent_judge"}, runner, resolver)
+	judge = ResolveAdapterConfig(judge, resolver)
+
+	if judge.AppliedConnection.Protocol != credential.ProtocolAnthropic || judge.AppliedConnection.APIKey != "anthropic-key" || judge.AppliedConnection.BaseURL != "https://anthropic.example.test" {
+		t.Fatalf("judge connection = %#v, want inherited Anthropic connection", judge.AppliedConnection)
+	}
+}
+
 func TestResolveAdapterConfig_CodexFallbackDoesNotForwardProviderCredential(t *testing.T) {
 	t.Parallel()
 
 	got := ResolveAdapterConfig(credential.ResolvedAgentConfig{ //nolint:gosec // dummy test credential
 		Engine: "codex", Provider: testDashscopeProvider, APIKey: "dashscope-test-key",
-	})
+	}, nil)
 	if got.Provider != testDashscopeProvider || got.APIKey != "dashscope-test-key" {
 		t.Fatalf("requested provider credential was mutated: %+v", got)
 	}
 	if got.AppliedProvider != "" || got.AppliedModel != "" || got.AppliedAPIKey != "" || got.AppliedBaseURL != "" {
 		t.Fatalf("fallback applied config = provider %q model %q key %q baseURL %q, want all omitted", got.AppliedProvider, got.AppliedModel, got.AppliedAPIKey, got.AppliedBaseURL)
+	}
+	if got.AppliedConnection.Provider != "" || got.AppliedConnection.APIKeySet || got.AppliedConnection.BaseURLSet || got.AppliedConnection.APIKeySource != "" || got.AppliedConnection.BaseURLSource != "" {
+		t.Fatalf("fallback applied connection retained rejected provider configuration: %#v", got.AppliedConnection)
 	}
 	if !containsWarning(got.Warnings, "provider-scoped credential are omitted") {
 		t.Fatalf("Warnings = %v, want provider fallback warning even without a model", got.Warnings)
@@ -150,7 +282,7 @@ func TestResolveAdapterConfig_ValidatesExplicitSettingsWithoutAliasing(t *testin
 		ModelParams: map[string]string{"reasoning": "high"},
 	}
 
-	got := ResolveAdapterConfig(params)
+	got := ResolveAdapterConfig(params, nil)
 	for _, key := range []string{KwargBypassSandbox, KwargMaxJSONLRecordBytes, "typo"} {
 		if _, ok := got.Kwargs[key]; ok {
 			t.Fatalf("invalid or unsupported kwarg %q was not removed: %v", key, got.Kwargs)
@@ -181,7 +313,7 @@ func TestResolveAdapterConfig_QoderNormalizesUnsupportedEdition(t *testing.T) {
 	got := ResolveAdapterConfig(credential.ResolvedAgentConfig{
 		Engine: "qodercli",
 		Kwargs: map[string]string{KwargEdition: "enterprise"},
-	})
+	}, nil)
 	if got.Kwargs[KwargEdition] != qoderEditionGlobal {
 		t.Fatalf("edition = %q, want %q", got.Kwargs[KwargEdition], qoderEditionGlobal)
 	}
@@ -197,7 +329,7 @@ func TestResolveAdapterConfig_CustomRejectsUnusedTopLevelSettings(t *testing.T) 
 		Engine:  "custom-agent",
 		BaseURL: "https://unused.example.test",
 		Kwargs:  map[string]string{"profile": "unused"},
-	})
+	}, nil)
 	if got.AppliedBaseURL != "" || len(got.Kwargs) != 0 {
 		t.Fatalf("custom applied unused top-level settings: baseURL=%q kwargs=%v", got.AppliedBaseURL, got.Kwargs)
 	}
@@ -241,7 +373,7 @@ func TestLogAdapterConfig_DoesNotExposeCredentialsOrEndpoint(t *testing.T) {
 		Model:    "gpt-5.4",
 		APIKey:   "secret-api-key",
 		BaseURL:  "https://user:secret@example.test/v1",
-	})
+	}, nil)
 	output := captureStdout(t, func() { LogAdapterConfig(context.Background(), params) })
 	for _, forbidden := range []string{"secret-api-key", "user:secret", "example.test"} {
 		if strings.Contains(output, forbidden) {

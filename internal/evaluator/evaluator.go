@@ -826,7 +826,7 @@ func (e *defaultEvaluator) resolveJudgeAgent(ctx context.Context, judgeCfg confi
 	judgeAgent := runAgent
 	if e.evalCfg.Engine.Name != "" {
 		resolvedJudge := credential.ResolveJudgeConfig(judgeCfg, e.runnerConfig, e.resolver)
-		resolvedJudge = agent.ResolveAdapterConfig(resolvedJudge)
+		resolvedJudge = agent.ResolveAdapterConfig(resolvedJudge, e.resolver)
 		agent.LogAdapterConfig(ctx, resolvedJudge)
 		var err error
 		judgeAgent, err = agentDetectWithResolvedConfig(resolvedJudge)

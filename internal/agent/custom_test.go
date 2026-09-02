@@ -911,7 +911,7 @@ func TestDetectAgentWithResolvedConfig_KeepsAutoModelForCustom(t *testing.T) {
 		Transport: "local",
 		Local:     &config.CustomLocalConfig{Command: "/opt/agent"},
 	}
-	ag, err := DetectAgentWithResolvedConfig(credential.ResolvedAgentConfig{
+	ag, err := detectMaterializedAgentForTest(credential.ResolvedAgentConfig{
 		Engine: "my-agent",
 		Model:  modelAuto,
 		Custom: custom,
