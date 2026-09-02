@@ -41,16 +41,18 @@ func DefaultConfPath() string {
 
 // Resolver resolves credentials for model providers.
 type Resolver struct {
-	mu       sync.RWMutex
-	confPath string
-	creds    map[string]*config.APIKeyConfig
+	mu        sync.RWMutex
+	confPath  string
+	creds     map[string]*config.APIKeyConfig
+	providers map[string]ProviderConfiguration
 }
 
 // NewResolver creates a new credential resolver.
 func NewResolver(confPath string) *Resolver {
 	return &Resolver{
-		confPath: confPath,
-		creds:    make(map[string]*config.APIKeyConfig),
+		confPath:  confPath,
+		creds:     make(map[string]*config.APIKeyConfig),
+		providers: make(map[string]ProviderConfiguration),
 	}
 }
 
@@ -117,24 +119,76 @@ func (r *Resolver) logEffectiveConfig() {
 }
 
 type configFile struct {
-	SchemaVersion string                    `yaml:"schema_version"`
-	Providers     map[string]ProviderConfig `yaml:"providers"`
+	SchemaVersion string                        `yaml:"schema_version"`
+	Providers     map[string]providerFileConfig `yaml:"providers"`
 }
 
-// ProviderConfig holds configuration for a provider's endpoints.
-// Supports both flat format (api_key, base_url directly) and nested format (openai, anthropic).
-type ProviderConfig struct {
-	APIKey  string `yaml:"api_key,omitempty"`
-	BaseURL string `yaml:"base_url,omitempty"`
+type providerFileConfig struct {
+	APIKey  optionalFileValue `yaml:"api_key,omitempty"`
+	BaseURL optionalFileValue `yaml:"base_url,omitempty"`
 
-	OpenAI    *ProviderEndpointConfig `yaml:"openai,omitempty"`
-	Anthropic *ProviderEndpointConfig `yaml:"anthropic,omitempty"`
+	OpenAI    *providerEndpointFileConfig `yaml:"openai,omitempty"`
+	Anthropic *providerEndpointFileConfig `yaml:"anthropic,omitempty"`
 }
 
-// ProviderEndpointConfig holds configuration for a single endpoint.
-type ProviderEndpointConfig struct {
-	BaseURL string `yaml:"base_url"`
-	APIKey  string `yaml:"api_key,omitempty"`
+func (p *providerFileConfig) UnmarshalYAML(node *yaml.Node) error {
+	type plainProviderFileConfig providerFileConfig
+	var decoded plainProviderFileConfig
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*p = providerFileConfig(decoded)
+	return decodeOptionalFileValues(node, map[string]*optionalFileValue{
+		"api_key":  &p.APIKey,
+		"base_url": &p.BaseURL,
+	})
+}
+
+type providerEndpointFileConfig struct {
+	BaseURL optionalFileValue `yaml:"base_url"`
+	APIKey  optionalFileValue `yaml:"api_key,omitempty"`
+}
+
+func (p *providerEndpointFileConfig) UnmarshalYAML(node *yaml.Node) error {
+	type plainProviderEndpointFileConfig providerEndpointFileConfig
+	var decoded plainProviderEndpointFileConfig
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*p = providerEndpointFileConfig(decoded)
+	return decodeOptionalFileValues(node, map[string]*optionalFileValue{
+		"api_key":  &p.APIKey,
+		"base_url": &p.BaseURL,
+	})
+}
+
+type optionalFileValue struct {
+	value string
+	set   bool
+}
+
+func (v *optionalFileValue) UnmarshalYAML(node *yaml.Node) error {
+	v.set = true
+	return node.Decode(&v.value)
+}
+
+func decodeOptionalFileValues(node *yaml.Node, fields map[string]*optionalFileValue) error {
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		field, ok := fields[node.Content[i].Value]
+		if !ok {
+			continue
+		}
+		field.set = true
+		valueNode := node.Content[i+1]
+		if valueNode.Tag == "!!null" {
+			field.value = ""
+			continue
+		}
+		if err := valueNode.Decode(&field.value); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Resolver) loadFromFile(path string) error {
@@ -149,32 +203,56 @@ func (r *Resolver) loadFromFile(path string) error {
 	}
 
 	for name, p := range cfg.Providers {
+		providerConfig := ProviderConfiguration{
+			Provider:  name,
+			APIKey:    fileConnectionValue(p.APIKey),
+			BaseURL:   fileConnectionValue(p.BaseURL),
+			Endpoints: map[Protocol]ProviderEndpointConfig{},
+		}
+		if p.OpenAI != nil {
+			providerConfig.Endpoints[ProtocolOpenAI] = ProviderEndpointConfig{
+				APIKey:  fileConnectionValue(p.OpenAI.APIKey),
+				BaseURL: fileConnectionValue(p.OpenAI.BaseURL),
+			}
+		}
+		if p.Anthropic != nil {
+			providerConfig.Endpoints[ProtocolAnthropic] = ProviderEndpointConfig{
+				APIKey:  fileConnectionValue(p.Anthropic.APIKey),
+				BaseURL: fileConnectionValue(p.Anthropic.BaseURL),
+			}
+		}
+		r.providers[name] = providerConfig
+
 		cred := &config.APIKeyConfig{
 			Provider: name,
 		}
 
-		if p.APIKey != "" {
-			cred.APIKey = p.APIKey
+		if p.APIKey.value != "" {
+			cred.APIKey = p.APIKey.value
 		}
-		if p.BaseURL != "" {
-			cred.BaseURL = p.BaseURL
+		if p.BaseURL.value != "" {
+			cred.BaseURL = p.BaseURL.value
 		}
 
 		if p.OpenAI != nil {
 			if cred.BaseURL == "" {
-				cred.BaseURL = p.OpenAI.BaseURL
+				cred.BaseURL = p.OpenAI.BaseURL.value
 			}
-			if cred.APIKey == "" && p.OpenAI.APIKey != "" {
-				cred.APIKey = p.OpenAI.APIKey
+			if cred.APIKey == "" && p.OpenAI.APIKey.value != "" {
+				cred.APIKey = p.OpenAI.APIKey.value
 			}
 		}
 		if p.Anthropic != nil {
-			if cred.APIKey == "" && p.Anthropic.APIKey != "" {
-				cred.APIKey = p.Anthropic.APIKey
+			if cred.APIKey == "" && p.Anthropic.APIKey.value != "" {
+				cred.APIKey = p.Anthropic.APIKey.value
 			}
 		}
 		r.creds[name] = cred
 	}
 
 	return nil
+}
+
+func fileConnectionValue(value optionalFileValue) ConnectionValue {
+	return ConnectionValue{Value: value.value, Source: ValueSourceResolver, Set: value.set}
 }
