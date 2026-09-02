@@ -50,6 +50,7 @@ skill-up/
 │   ├── credential/          # Model credential resolution (CLI / env vars / user config)
 │   ├── runtime/             # Eval runtime: none / opensandbox
 │   ├── agent/               # Agent Engine adapters (claude_code, codex, custom)
+│   ├── evalevent/           # Internal evaluation event protocol and JSONL publisher
 │   ├── judge/               # Evaluators: rule_based, agent_judge, script
 │   ├── report/              # Report output: JSON, JUnit, HTML
 │   ├── runner/              # End-to-end orchestration (config → environment → cases → report)
@@ -63,6 +64,7 @@ skill-up/
 │       ├── references/      #     Reference docs for CLI, schema, judges, migration
 │       └── evals/           #     Evals for the skill-upper Skill itself
 ├── docs/                    # VitePress documentation site (guide/, zh/, user-manual/, .vitepress/, public/)
+├── schemas/evalevent/       # Versioned JSON Schemas for the evaluation event protocol
 ├── .githooks/               # Git hooks (commit message, pre-commit checks); see "Engineering Constraints" below
 ├── .github/workflows/       # CI (build & test) and Release (GoReleaser)
 ├── Makefile                 # Common build and check commands
@@ -106,6 +108,11 @@ skill-up/
 - **Meaning**: Invokes each Agent Engine, turning prompts and workspace constraints into a session execution and collecting a contract-compliant `SessionResult` (with transcript).
 - **Relation to design**: Corresponds to the "Engine Adapter" and the custom Engine contract.
 
+### `internal/evalevent/`
+
+- **Meaning**: Defines the internal typed evaluation event envelope and payloads, invocation lifecycle state, publisher, and JSONL sink. It is not a public stable API.
+- **Relation to design**: Implements the producer-side protocol defined by SUP-0005 without coupling it to CLI, runner, evaluator, report, or UI packages.
+
 ### `internal/judge/`
 
 - **Meaning**: Performs evaluation on top of Engine output: `rule_based`, `agent_judge`, `script`, producing results aligned with `grading.json`.
@@ -146,6 +153,11 @@ skill-up/
 
 - **Meaning**: VitePress-powered documentation site (English `guide/`, Chinese `zh/guide/`, legacy `user-manual/`); built and deployed to GitHub Pages by `.github/workflows/docs.yml`. Not part of `go build`.
 - **Maintenance advice**: User-visible behavior changes should be reflected in the relevant pages under `docs/guide/` and `docs/zh/guide/` (and the legacy `docs/user-manual/` where applicable) in the same commit.
+
+### `schemas/evalevent/`
+
+- **Meaning**: Publishes the common envelope schema and one schema for every supported evaluation event/version tuple.
+- **Maintenance advice**: Keep the schema bundle aligned with SUP-0005 and `internal/evalevent`; known event schemas must remain forward-compatible with additive fields.
 
 ### `.github/workflows/`
 

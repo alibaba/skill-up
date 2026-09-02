@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/alibaba/skill-up/main/schemas/evalevent/v1/run_progress-v1.schema.json",
+  "title": "run_progress event v1",
+  "allOf": [
+    { "$ref": "envelope.schema.json" },
+    {
+      "type": "object",
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "event_version": { "const": 1 },
+        "event": { "const": "run_progress" },
+        "payload": {
+          "type": "object",
+          "required": [
+            "phase", "task_total", "completed_tasks", "running_tasks",
+            "passed", "failed", "errored", "skipped", "elapsed_ms"
+          ],
+          "properties": {
+            "phase": {
+              "type": "string",
+              "minLength": 1,
+              "examples": ["preparing", "executing", "finalizing"]
+            },
+            "task_total": { "$ref": "envelope.schema.json#/$defs/positiveInteger" },
+            "completed_tasks": { "$ref": "envelope.schema.json#/$defs/safeInteger" },
+            "running_tasks": { "$ref": "envelope.schema.json#/$defs/safeInteger" },
+            "passed": { "$ref": "envelope.schema.json#/$defs/safeInteger" },
+            "failed": { "$ref": "envelope.schema.json#/$defs/safeInteger" },
+            "errored": { "$ref": "envelope.schema.json#/$defs/safeInteger" },
+            "skipped": { "$ref": "envelope.schema.json#/$defs/safeInteger" },
+            "elapsed_ms": { "$ref": "envelope.schema.json#/$defs/safeInteger" }
+          },
+          "additionalProperties": true
+        }
+      }
+    }
+  ]
+}
