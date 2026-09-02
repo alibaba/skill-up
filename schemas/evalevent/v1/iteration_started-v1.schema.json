@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alibaba/skill-up/schemas/evalevent/v1/iteration_started-v1.schema.json",
+  "title": "iteration_started event v1",
+  "allOf": [
+    { "$ref": "envelope.schema.json" },
+    {
+      "type": "object",
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "event_version": { "const": 1 },
+        "event": { "const": "iteration_started" },
+        "payload": {
+          "type": "object",
+          "required": ["iteration"],
+          "properties": {
+            "iteration": { "$ref": "envelope.schema.json#/$defs/positiveInteger" }
+          },
+          "additionalProperties": true
+        }
+      }
+    }
+  ]
+}

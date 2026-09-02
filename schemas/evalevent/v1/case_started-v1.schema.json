@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alibaba/skill-up/schemas/evalevent/v1/case_started-v1.schema.json",
+  "title": "case_started event v1",
+  "allOf": [
+    { "$ref": "envelope.schema.json" },
+    {
+      "type": "object",
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "event_version": { "const": 1 },
+        "event": { "const": "case_started" },
+        "payload": {
+          "type": "object",
+          "required": [
+            "task_id", "iteration", "case_id", "configuration",
+            "task_index", "task_total", "title"
+          ],
+          "properties": {
+            "task_id": { "type": "string", "minLength": 1 },
+            "iteration": { "$ref": "envelope.schema.json#/$defs/positiveInteger" },
+            "case_id": { "type": "string", "minLength": 1 },
+            "configuration": { "$ref": "envelope.schema.json#/$defs/configuration" },
+            "task_index": { "$ref": "envelope.schema.json#/$defs/positiveInteger" },
+            "task_total": { "$ref": "envelope.schema.json#/$defs/positiveInteger" },
+            "title": { "type": "string" }
+          },
+          "additionalProperties": true
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alibaba/skill-up/schemas/evalevent/v1/case_completed-v1.schema.json",
+  "title": "case_completed event v1",
+  "allOf": [
+    { "$ref": "envelope.schema.json" },
+    {
+      "type": "object",
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "event_version": { "const": 1 },
+        "event": { "const": "case_completed" },
+        "payload": {
+          "type": "object",
+          "required": [
+            "task_id", "iteration", "case_id", "configuration",
+            "task_index", "task_total", "title", "completed_tasks",
+            "status", "duration_ms"
+          ],
+          "properties": {
+            "task_id": { "type": "string", "minLength": 1 },
+            "iteration": { "$ref": "envelope.schema.json#/$defs/positiveInteger" },
+            "case_id": { "type": "string", "minLength": 1 },
+            "configuration": { "$ref": "envelope.schema.json#/$defs/configuration" },
+            "task_index": { "$ref": "envelope.schema.json#/$defs/positiveInteger" },
+            "task_total": { "$ref": "envelope.schema.json#/$defs/positiveInteger" },
+            "title": { "type": "string" },
+            "completed_tasks": { "$ref": "envelope.schema.json#/$defs/safeInteger" },
+            "status": { "$ref": "envelope.schema.json#/$defs/caseStatus" },
+            "pass_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+            "duration_ms": { "$ref": "envelope.schema.json#/$defs/safeInteger" }
+          },
+          "additionalProperties": true
+        }
+      }
+    }
+  ]
+}

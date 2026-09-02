@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alibaba/skill-up/schemas/evalevent/v1/run_started-v1.schema.json",
+  "title": "run_started event v1",
+  "allOf": [
+    { "$ref": "envelope.schema.json" },
+    {
+      "type": "object",
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "event_version": { "const": 1 },
+        "event": { "const": "run_started" },
+        "payload": {
+          "type": "object",
+          "required": ["engine", "skill_name", "task_total", "iterations_total"],
+          "properties": {
+            "engine": { "type": "string", "minLength": 1 },
+            "skill_name": { "type": "string", "minLength": 1 },
+            "task_total": { "$ref": "envelope.schema.json#/$defs/positiveInteger" },
+            "iterations_total": { "$ref": "envelope.schema.json#/$defs/positiveInteger" }
+          },
+          "additionalProperties": true
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alibaba/skill-up/schemas/evalevent/v1/iteration_completed-v1.schema.json",
+  "title": "iteration_completed event v1",
+  "allOf": [
+    { "$ref": "envelope.schema.json" },
+    {
+      "type": "object",
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "event_version": { "const": 1 },
+        "event": { "const": "iteration_completed" },
+        "payload": {
+          "type": "object",
+          "required": [
+            "iteration", "invocation_completed_tasks", "passed", "failed",
+            "errored", "skipped", "duration_ms"
+          ],
+          "properties": {
+            "iteration": { "$ref": "envelope.schema.json#/$defs/positiveInteger" },
+            "invocation_completed_tasks": { "$ref": "envelope.schema.json#/$defs/safeInteger" },
+            "passed": { "$ref": "envelope.schema.json#/$defs/safeInteger" },
+            "failed": { "$ref": "envelope.schema.json#/$defs/safeInteger" },
+            "errored": { "$ref": "envelope.schema.json#/$defs/safeInteger" },
+            "skipped": { "$ref": "envelope.schema.json#/$defs/safeInteger" },
+            "duration_ms": { "$ref": "envelope.schema.json#/$defs/safeInteger" }
+          },
+          "additionalProperties": true
+        }
+      }
+    }
+  ]
+}
