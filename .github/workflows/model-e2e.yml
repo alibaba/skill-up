@@ -128,6 +128,7 @@ jobs:
           OPENAI_BASE_URL: https://dashscope.aliyuncs.com/compatible-mode/v1
           OPENAI_MODEL: qwen3.6-plus
           DASHSCOPE_MODEL: qwen3.6-plus
+          QODER_ENV: prod-us
           QODER_PERSONAL_ACCESS_TOKEN: ${{ secrets.QODER_ACCESS_TOKEN }}
 
       - name: Upload e2e workspace artifacts
