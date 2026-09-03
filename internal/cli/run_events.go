@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -101,6 +103,9 @@ func runEvalWithEventLog(
 	loader *config.Loader,
 	eventOptions evaluationEventOptions,
 ) error {
+	restoreSignalContext := installEvaluationSignalContext(cmd)
+	defer restoreSignalContext()
+
 	evaluateOpts, err := evaluateOptionsFromFlags(cmd)
 	if err != nil {
 		return err
@@ -157,6 +162,16 @@ func runEvalWithEventLog(
 	passed, failed, errored := countResultStatus(results)
 	ui.Summary(passed, failed, errored)
 	return errors.Join(exitStatusError(cmd.ErrOrStderr(), results), finalErr)
+}
+
+func installEvaluationSignalContext(cmd *cobra.Command) func() {
+	parent := cmd.Context()
+	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+	cmd.SetContext(ctx)
+	return func() {
+		stop()
+		cmd.SetContext(parent)
+	}
 }
 
 func executePlannedEvaluation(
@@ -330,7 +345,7 @@ func validateEvaluationEventLogPath(path string, plan runner.ExecutionPlan) (str
 	if err != nil {
 		return "", fmt.Errorf("resolve evaluation workspace: %w", err)
 	}
-	if canonicalPath == workspacePath {
+	if pathsReferToSameFile(canonicalPath, workspacePath) {
 		return "", fmt.Errorf("--event-log path %q conflicts with the evaluation workspace", path)
 	}
 	for _, iteration := range plan.TaskPlan.Iterations {
@@ -413,11 +428,39 @@ func canonicalizePotentialPath(path string) (string, error) {
 }
 
 func pathWithin(parent, child string) bool {
+	if existingDirectoryContains(parent, child) {
+		return true
+	}
 	relative, err := filepath.Rel(parent, child)
 	if err != nil || filepath.IsAbs(relative) {
 		return false
 	}
 	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)))
+}
+
+func existingDirectoryContains(parent, child string) bool {
+	parentInfo, err := os.Stat(parent)
+	if err != nil || !parentInfo.IsDir() {
+		return false
+	}
+	for current := child; ; current = filepath.Dir(current) {
+		currentInfo, currentErr := os.Stat(current)
+		if currentErr == nil && currentInfo.IsDir() && os.SameFile(parentInfo, currentInfo) {
+			return true
+		}
+		if next := filepath.Dir(current); next == current {
+			return false
+		}
+	}
+}
+
+func pathsReferToSameFile(left, right string) bool {
+	if left == right {
+		return true
+	}
+	leftInfo, leftErr := os.Stat(left)
+	rightInfo, rightErr := os.Stat(right)
+	return leftErr == nil && rightErr == nil && os.SameFile(leftInfo, rightInfo)
 }
 
 type evaluationEventAdapter struct {

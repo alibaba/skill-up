@@ -192,6 +192,40 @@ func TestValidateEvaluationEventLogPathInsideIteration(t *testing.T) {
 	}
 }
 
+func TestValidateEvaluationEventLogPathInsideCaseInsensitiveIteration(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	actualIteration := filepath.Join(workspace, "Iteration-1")
+	if err := os.MkdirAll(actualIteration, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	scheduledIteration := filepath.Join(workspace, "iteration-1")
+	actualInfo, err := os.Stat(actualIteration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduledInfo, err := os.Stat(scheduledIteration)
+	if os.IsNotExist(err) {
+		t.Skip("filesystem is case-sensitive")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(actualInfo, scheduledInfo) {
+		t.Skip("filesystem resolves case variants to different directories")
+	}
+
+	_, err = validateEvaluationEventLogPath(
+		filepath.Join(actualIteration, "events.jsonl"),
+		eventPathTestPlan(workspace),
+	)
+	if err == nil || !strings.Contains(err.Error(), "inside scheduled iteration directory") {
+		t.Fatalf("error = %v, want case-insensitive iteration conflict", err)
+	}
+}
+
 func TestValidateEvaluationEventLogPathWorkspaceCollision(t *testing.T) {
 	t.Parallel()
 
