@@ -93,11 +93,17 @@ func (r *Runner) InitWorkspace(outputDir, skillName string, iteration int) error
 }
 
 func (r *Runner) setupWorkspace(ctx context.Context, outputDir, skillName string, iteration int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	ws, err := report.NewIterationWorkspace(outputDir, skillName, iteration)
 	if err != nil {
 		return fmt.Errorf("failed to create iteration workspace: %w", err)
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := os.RemoveAll(ws.IterationDir()); err != nil {
 		return fmt.Errorf("failed to clean iteration workspace: %w", err)
 	}
@@ -183,6 +189,9 @@ func (r *Runner) EvaluatePlan(ctx context.Context, plan ExecutionPlan, ag agent.
 	)
 	allResults := make([]evaluator.EvalResult, 0, plan.TaskPlan.TaskTotal)
 	for _, iteration := range plan.TaskPlan.Iterations {
+		if err := ctx.Err(); err != nil {
+			return allResults, err
+		}
 		iterationStartTime := r.now()
 		runNumber := iteration.Number
 		if err := r.setupWorkspace(ctx, plan.WorkspaceDir, plan.SkillName, runNumber); err != nil {
@@ -217,6 +226,9 @@ func (r *Runner) EvaluatePlan(ctx context.Context, plan ExecutionPlan, ag agent.
 
 		results, err := ev.EvaluatePlan(ctx, iteration.Tasks)
 		if err != nil {
+			return allResults, err
+		}
+		if err := ctx.Err(); err != nil {
 			return allResults, err
 		}
 		if opts.IterationObserver != nil {

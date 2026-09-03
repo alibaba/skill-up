@@ -46,6 +46,28 @@ func TestRunner_InitWorkspace(t *testing.T) {
 	}
 }
 
+func TestRunner_SetupWorkspacePreservesArtifactsWhenCancelled(t *testing.T) {
+	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.ResolvedAgentConfig{})
+	tmpDir := t.TempDir()
+	artifactPath := filepath.Join(tmpDir, "iteration-1", "keep.txt")
+	if err := os.MkdirAll(filepath.Dir(artifactPath), 0o755); err != nil {
+		t.Fatalf("create iteration directory: %v", err)
+	}
+	if err := os.WriteFile(artifactPath, []byte("keep"), 0o600); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := r.setupWorkspace(ctx, tmpDir, "test-skill", 1)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("setupWorkspace error = %v, want context.Canceled", err)
+	}
+	if data, readErr := os.ReadFile(artifactPath); readErr != nil || string(data) != "keep" {
+		t.Fatalf("artifact changed after cancelled setup: data=%q err=%v", data, readErr)
+	}
+}
+
 func TestRunner_WriteResults_WithSkillOnly(t *testing.T) {
 	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.ResolvedAgentConfig{})
 

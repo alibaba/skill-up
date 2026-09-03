@@ -153,9 +153,10 @@ func runEvalWithEventLog(
 		evaluateOpts,
 		stream.adapter,
 	)
-	finalErr := stream.finish(context.WithoutCancel(cmd.Context()), eventRunStatus(cmd.Context(), evalErr))
-	if evalErr != nil {
-		return errors.Join(evalErr, finalErr)
+	invocationErr := joinDistinctErrors(evalErr, cmd.Context().Err())
+	finalErr := stream.finish(context.WithoutCancel(cmd.Context()), eventRunStatus(cmd.Context(), invocationErr))
+	if invocationErr != nil {
+		return errors.Join(invocationErr, finalErr)
 	}
 
 	ui.Separator()

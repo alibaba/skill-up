@@ -2,6 +2,7 @@ package evaluator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -150,9 +151,61 @@ func TestEvaluatePlanNotifiesTaskAndProgressObservers(t *testing.T) {
 	}
 }
 
+func TestEvaluatePlanStopsSchedulingAfterCancellation(t *testing.T) {
+	t.Parallel()
+
+	cases := []*config.CaseConfig{
+		{ID: "case-1", Title: "Case 1", Input: config.Input{Prompt: "one"}},
+		{ID: "case-2", Title: "Case 2", Input: config.Input{Prompt: "two"}},
+		{ID: "case-3", Title: "Case 3", Input: config.Input{Prompt: "three"}},
+	}
+	plan := BuildPlan(cases, 1, 1, []string{ConfigurationWithSkill})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	taskObserver := &cancelOnFirstTaskStartObserver{
+		recordingTaskObserver: &recordingTaskObserver{},
+		cancel:                cancel,
+	}
+	e := newTestEvaluator(EvalOptions{
+		Concurrency: 1,
+		Agent:       &mockAgent{name: "test", output: "ok"},
+		EvalCfg: &config.EvalConfig{
+			Environment: config.Environment{Type: "none"},
+		},
+		TaskObserver: taskObserver,
+	})
+
+	results, err := e.EvaluatePlan(ctx, plan.Iterations[0].Tasks)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("EvaluatePlan error = %v, want context.Canceled", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("len(results) = %d, want only the scheduled task", len(results))
+	}
+	wantTaskEvents := []string{
+		"start:task-1:1:with_skill",
+		"complete:task-1:1:with_skill",
+	}
+	if got := taskObserver.snapshot(); !equalStrings(got, wantTaskEvents) {
+		t.Fatalf("task events = %v, want %v", got, wantTaskEvents)
+	}
+}
+
 type recordingTaskObserver struct {
 	mu     sync.Mutex
 	events []string
+}
+
+type cancelOnFirstTaskStartObserver struct {
+	*recordingTaskObserver
+
+	cancel context.CancelFunc
+	once   sync.Once
+}
+
+func (o *cancelOnFirstTaskStartObserver) OnTaskStart(_ context.Context, task PlannedTask) {
+	o.record("start", task)
+	o.once.Do(o.cancel)
 }
 
 func (o *recordingTaskObserver) OnTaskStart(_ context.Context, task PlannedTask) {

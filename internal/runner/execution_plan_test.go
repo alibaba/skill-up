@@ -2,9 +2,11 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 
@@ -118,6 +120,72 @@ func TestEvaluatePlanForwardsIterationAndGlobalTaskBoundaries(t *testing.T) {
 	}
 }
 
+func TestEvaluatePlanStopsBeforeFutureIterationAfterCancellation(t *testing.T) {
+	root := t.TempDir()
+	skillDir := filepath.Join(root, "test-skill")
+	evalsDir := filepath.Join(skillDir, "evals")
+	if err := os.MkdirAll(evalsDir, 0o755); err != nil {
+		t.Fatalf("create evals directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: test-skill\n---\n"), 0o600); err != nil {
+		t.Fatalf("write SKILL.md: %v", err)
+	}
+
+	workspaceDir := filepath.Join(root, "workspace")
+	futureArtifact := filepath.Join(workspaceDir, "iteration-2", "keep.txt")
+	if err := os.MkdirAll(filepath.Dir(futureArtifact), 0o755); err != nil {
+		t.Fatalf("create future iteration directory: %v", err)
+	}
+	if err := os.WriteFile(futureArtifact, []byte("keep"), 0o600); err != nil {
+		t.Fatalf("write future iteration artifact: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	origNewEvaluator := newEvaluator
+	t.Cleanup(func() { newEvaluator = origNewEvaluator })
+	evaluateCalls := 0
+	newEvaluator = func(evaluator.EvalOptions) evaluator.Evaluator {
+		return evaluatorStub{evaluateAll: func(context.Context, []*config.CaseConfig) ([]evaluator.EvalResult, error) {
+			evaluateCalls++
+			cancel()
+			return []evaluator.EvalResult{{CaseID: "case-1", Configuration: evaluator.ConfigurationWithSkill}}, nil
+		}}
+	}
+
+	r := NewRunner(&config.EvalConfig{
+		Environment: config.Environment{Type: "none"},
+		Cases:       config.CasesConfig{Parallelism: 1},
+	}, config.NewLoader(filepath.Join(evalsDir, "eval.yaml")), nil, credential.ResolvedAgentConfig{})
+	observer := &recordingExecutionObserver{}
+	opts := EvaluateOptions{
+		OutputDir:         workspaceDir,
+		Iteration:         2,
+		IterationObserver: observer,
+	}
+	plan := r.BuildExecutionPlan([]*config.CaseConfig{{
+		ID:    "case-1",
+		Title: "Case 1",
+	}}, opts)
+
+	results, err := r.EvaluatePlan(ctx, plan, &runnerTestAgent{}, opts)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("EvaluatePlan error = %v, want context.Canceled", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("len(results) = %d, want no completed iterations", len(results))
+	}
+	if evaluateCalls != 1 {
+		t.Fatalf("evaluator calls = %d, want 1", evaluateCalls)
+	}
+	if got, want := observer.snapshot(), []string{"iteration-start:1"}; !equalStringSlices(got, want) {
+		t.Fatalf("observer events = %v, want %v", got, want)
+	}
+	if data, readErr := os.ReadFile(futureArtifact); readErr != nil || string(data) != "keep" {
+		t.Fatalf("future iteration artifact changed: data=%q err=%v", data, readErr)
+	}
+}
+
 type recordingExecutionObserver struct {
 	mu     sync.Mutex
 	events []string
@@ -152,13 +220,5 @@ func (o *recordingExecutionObserver) snapshot() []string {
 }
 
 func equalStringSlices(got, want []string) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	for i := range got {
-		if got[i] != want[i] {
-			return false
-		}
-	}
-	return true
+	return slices.Equal(got, want)
 }
