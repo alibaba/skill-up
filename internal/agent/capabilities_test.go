@@ -245,6 +245,81 @@ providers:
 	}
 }
 
+func TestResolveAdapterConfig_JudgeProviderConnectionIsolation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		fields  string
+		apiKey  string
+		baseURL string
+		keySet  bool
+		urlSet  bool
+	}{
+		{"flat", "    api_key: judge-key\n    base_url: https://judge.example.test\n", "judge-key", "https://judge.example.test", true, true},
+		{"protocol", "    api_key: flat-key\n    base_url: https://flat.example.test\n    PROTOCOL:\n      api_key: judge-key\n      base_url: https://judge.example.test\n", "judge-key", "https://judge.example.test", true, true},
+		{"missing_key", "    base_url: https://judge.example.test\n", "", "https://judge.example.test", false, true},
+		{"missing_endpoint", "    api_key: judge-key\n", "judge-key", "", true, false},
+		{"missing_both", "    {}\n", "", "", false, false},
+		{"explicit_empty", "    api_key: flat-key\n    base_url: https://flat.example.test\n    PROTOCOL:\n      api_key: \"\"\n      base_url: \"\"\n", "", "", true, true},
+	}
+	for _, engine := range []string{"claude_code", "qwen_code"} {
+		for _, tt := range tests {
+			t.Run(engine+"/"+tt.name, func(t *testing.T) {
+				t.Parallel()
+				protocol := CapabilitiesForEngine(engine).Protocol
+				path := filepath.Join(t.TempDir(), "credentials.yaml")
+				data := "providers:\n  isolated_judge:\n" + strings.ReplaceAll(tt.fields, "PROTOCOL", string(protocol))
+				if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				resolver := credential.NewResolver(path)
+				if err := resolver.Load(); err != nil {
+					t.Fatal(err)
+				}
+				runner := credential.ResolveRunnerConfig(config.EngineConfig{
+					Name:  engine,
+					Model: config.ModelConfig{Provider: "isolated_runner", Name: "runner-model", BaseURL: "https://runner.example.test"},
+				}, resolver, credential.CLIOverrides{APIKey: "runner-key"})
+				runner = ResolveAdapterConfig(runner, resolver)
+				judge := credential.ResolveJudgeConfig(config.JudgeConfig{Type: "agent_judge", Model: "isolated_judge/judge-model"}, runner, resolver)
+				judge = ResolveAdapterConfig(judge, resolver)
+				connection := judge.AppliedConnection
+				if connection.Provider != "isolated_judge" || connection.Protocol != protocol || connection.APIKey != tt.apiKey || connection.BaseURL != tt.baseURL || connection.APIKeySet != tt.keySet || connection.BaseURLSet != tt.urlSet || judge.APIKeySource == credential.ValueSourceRunner || judge.BaseURLSource == credential.ValueSourceRunner {
+					t.Fatalf("unexpected judge connection: %#v", connection)
+				}
+				if (connection.AuthMode == credential.AuthModeInjected) != (tt.apiKey != "") || (connection.RoutingMode == credential.RoutingModeExplicit) != (tt.baseURL != "") {
+					t.Fatalf("unexpected auth/routing modes: %s/%s", connection.AuthMode, connection.RoutingMode)
+				}
+				assertJudgeAdapterEnvironment(t, judge, tt.apiKey, tt.baseURL)
+			})
+		}
+	}
+}
+
+func assertJudgeAdapterEnvironment(t *testing.T, judge credential.ResolvedAgentConfig, apiKey, baseURL string) {
+	t.Helper()
+	ag, err := DetectAgentWithResolvedConfig(judge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var env map[string]string
+	var keyEnv, urlEnv string
+	switch a := ag.(type) {
+	case *ClaudeCodeAgent:
+		keyEnv, urlEnv = credential.EnvAnthropicAPIKey, credential.EnvAnthropicBaseURL
+		env = a.credentialEnvVars(keyEnv, urlEnv)
+	case *QwenCodeAgent:
+		keyEnv, urlEnv = credential.EnvOpenAIAPIKey, credential.EnvOpenAIBaseURL
+		env = a.credentialEnvVars(keyEnv, urlEnv)
+	default:
+		t.Fatalf("unexpected agent type %T", ag)
+	}
+	if env[keyEnv] != apiKey || env[urlEnv] != baseURL {
+		t.Fatal("adapter environment does not match the independent judge connection")
+	}
+}
+
 func TestResolveAdapterConfig_CodexFallbackDoesNotForwardProviderCredential(t *testing.T) {
 	t.Parallel()
 

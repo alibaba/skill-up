@@ -71,6 +71,9 @@ Its configuration decisions should be handled separately from the runner agent:
 
 - If the judge has independent configuration, prefer the judge's own provider/model/api-key/base-url
 - If no independent configuration is provided, reuse the runner agent's final result
+- Inherit the runner key and endpoint only when the resolved providers match.
+  A different judge provider resolves its own connection; missing values do not
+  fall back to the runner key or endpoint.
 
 It is recommended to treat the judge agent as a separate parameter resolution pipeline rather than "borrowing some fields" from the runner agent's initialization.
 

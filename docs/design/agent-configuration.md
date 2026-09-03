@@ -58,6 +58,9 @@ The runner path resolves values in these stages:
 Runner and judge roles use the same resolution flow. Until an explicit judge
 engine schema is introduced, the judge inherits the runner engine lifecycle and
 kwargs, while resolving its provider/model and credentials as a separate role.
+Connection inheritance is limited to the same provider namespace. A judge that
+selects a different provider resolves its own key and endpoint by protocol;
+missing values delegate to agent-local state, never to the runner connection.
 Reports use the resolved runner identity rather than reconstructing it from a
 CLI-mutated eval config. `result.json` retains the legacy `engine_name` and
 `model_name` fields while also recording credential-free

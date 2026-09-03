@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while absent credentials and endpoints continue to delegate to agent-local
   login and routing.
 
+### Fixed
+- Agent judges selecting a different provider no longer inherit runner credentials
+  or endpoints, preventing judge keys from being sent to a runner endpoint.
+
 ## [0.10.0] - 2026-09-01
 
 ### Added

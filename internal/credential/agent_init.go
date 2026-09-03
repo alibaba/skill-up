@@ -205,14 +205,15 @@ func applyFallback(params *ResolvedAgentConfig, fallback *ResolvedAgentConfig) {
 		params.Model = fallback.Model
 		params.ModelSource = ValueSourceRunner
 	}
-	if params.BaseURL == "" && fallback.BaseURL != "" {
+	// Connection values belong to a provider namespace, unlike engine lifecycle.
+	if params.Provider == fallback.Provider && params.BaseURL == "" && fallback.BaseURL != "" {
 		params.BaseURL = fallback.BaseURL
 		params.BaseURLSource = ValueSourceRunner
 	}
 }
 
 func applyFallbackCredentials(params *ResolvedAgentConfig, fallback *ResolvedAgentConfig) {
-	if fallback == nil {
+	if fallback == nil || params.Provider != fallback.Provider {
 		return
 	}
 	if params.APIKey == "" && fallback.APIKey != "" {
