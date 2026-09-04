@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Agent execution now performs a side-effect-free binary and version preflight
+  before each case. Host runtimes are never modified; isolated Claude Code,
+  Codex, and Qwen Code runtimes honor concrete `engine.version` selections,
+  and detected CLI versions are recorded as observed report metadata. The
+  preflight does not validate login state or make model requests.
 - Agent adapters now consume one protocol-aware model connection selected from
   provider configuration. OpenAI- and Anthropic-compatible endpoints under the
   same provider no longer pass through the legacy flattened credential view,

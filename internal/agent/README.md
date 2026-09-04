@@ -108,6 +108,7 @@ type SessionResult struct {
     RequestedModel  string
     AppliedModel    string
     Model           string // agent-reported observed model; empty means unknown
+    Version         string // CLI version returned by static runtime inspection
     Warnings        []string
     ExitCode       int
     DurationMs     int64
@@ -145,10 +146,17 @@ rejected Codex provider cannot leak its key or endpoint into local fallback.
 | Custom Engine | `custom` | pass through | no; use `engine.custom.http.url` | none; use `engine.custom.kwargs` |
 
 Unsupported kwargs and invalid supported-kwarg values are removed from the
-adapter input after producing an actionable warning. `engine.version`,
-`engine.entry`, and `engine.model.params` are also reported as currently
-ineffective; version lifecycle enforcement is intentionally deferred to the
-installation phase of issue #196.
+adapter input after producing an actionable warning. `engine.entry` and
+`engine.model.params` are also reported as currently ineffective.
+
+Before a case runs, `Preflight` invokes the adapter's availability check and,
+for built-in CLI agents, a static `--version` command. It never checks login
+state or makes a model request. A `none` runtime only validates the existing
+host binary and never installs or upgrades it. Isolated runtimes install a
+configured version first for Claude Code, Codex, and Qwen Code, then validate
+and record the detected version. QoderCLI still reports its detected version,
+but its installer cannot select a requested version, so the capability layer
+warns and omits that constraint.
 
 ### SessionArtifacts
 

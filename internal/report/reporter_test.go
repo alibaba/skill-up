@@ -548,11 +548,12 @@ func TestMarkdownReporter_DistinguishesRequestedAppliedAndObservedModel(t *testi
 	path := filepath.Join(dir, "report.md")
 	input := sampleInput()
 	input.RequestedConfiguration = &AgentConfiguration{
-		Role: "runner", Engine: "qoder-cli", Protocol: "qoder", Provider: "dashscope", Model: "qwen3.6-plus",
+		Role: "runner", Engine: "qoder-cli", Protocol: "qoder", Provider: "dashscope", Model: "qwen3.6-plus", Version: "1.2.3",
 	}
 	input.AppliedConfiguration = &AgentConfiguration{
 		Role: "runner", Engine: "qoder-cli", Protocol: "qoder",
 	}
+	input.ObservedConfiguration = &AgentConfiguration{Version: "1.2.4"}
 	if err := (&MarkdownReporter{OutputPath: path}).Write(context.Background(), input); err != nil {
 		t.Fatalf("MarkdownReporter.Write failed: %v", err)
 	}
@@ -566,6 +567,8 @@ func TestMarkdownReporter_DistinguishesRequestedAppliedAndObservedModel(t *testi
 		"- **Requested Model**: dashscope/qwen3.6-plus",
 		"- **Applied Model**: none (delegated to local/default selection)",
 		"- **Observed Model**: unknown",
+		"- **Requested Version**: 1.2.3",
+		"- **Observed Version**: 1.2.4",
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, content)

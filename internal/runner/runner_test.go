@@ -17,6 +17,8 @@ import (
 	"github.com/alibaba/skill-up/internal/report"
 )
 
+const testObservedVersion = "1.2.3"
+
 func TestNewRunner(t *testing.T) {
 	evalCfg := &config.EvalConfig{
 		Judge: config.JudgeConfig{Type: "rule_based"},
@@ -436,6 +438,7 @@ func TestBuildReportInput_UsesResolvedRunnerIdentity(t *testing.T) {
 	}
 	resolved := credential.ResolvedAgentConfig{
 		Engine:   "codex",
+		Version:  testObservedVersion,
 		Provider: "dashscope",
 		Model:    "qwen3.6-plus",
 		BaseURL:  "https://dashscope.example.com/v1",
@@ -450,6 +453,9 @@ func TestBuildReportInput_UsesResolvedRunnerIdentity(t *testing.T) {
 	}
 	if input.RequestedConfiguration.Model != "qwen3.6-plus" || input.AppliedConfiguration.Model != "qwen3.6-plus" || input.AppliedConfiguration.Protocol != "openai" {
 		t.Fatalf("report requested/applied configuration = %+v / %+v", input.RequestedConfiguration, input.AppliedConfiguration)
+	}
+	if input.RequestedConfiguration.Version != testObservedVersion || input.AppliedConfiguration.Version != testObservedVersion {
+		t.Fatalf("report requested/applied versions = %q / %q", input.RequestedConfiguration.Version, input.AppliedConfiguration.Version)
 	}
 	if input.ObservedConfiguration != nil {
 		t.Fatalf("ObservedConfiguration = %+v, want nil without agent-reported model", input.ObservedConfiguration)
@@ -484,21 +490,38 @@ func TestBuildReportInput_ObservesModelOnlyWhenEverySessionAgrees(t *testing.T) 
 	evalCfg := &config.EvalConfig{Engine: config.EngineConfig{Name: "custom"}}
 	resolved := credential.ResolvedAgentConfig{Role: credential.AgentRoleRunner, Engine: "custom"}
 	grouped := map[string]*caseResults{
-		"one": {withSkill: &evaluator.EvalResult{SessionResult: &agent.SessionResult{Model: "reported-model"}}},
-		"two": {withSkill: &evaluator.EvalResult{SessionResult: &agent.SessionResult{Model: "reported-model"}}},
+		"one": {withSkill: &evaluator.EvalResult{SessionResult: &agent.SessionResult{Model: "reported-model", Version: testObservedVersion}}},
+		"two": {withSkill: &evaluator.EvalResult{SessionResult: &agent.SessionResult{Model: "reported-model", Version: testObservedVersion}}},
 	}
 	input := buildReportInput("s", grouped, []string{"one", "two"}, time.Time{}, time.Time{}, evalCfg, resolved)
-	if input.ObservedConfiguration == nil || input.ObservedConfiguration.Model != "reported-model" {
-		t.Fatalf("ObservedConfiguration = %+v, want unanimous reported model", input.ObservedConfiguration)
+	if input.ObservedConfiguration == nil || input.ObservedConfiguration.Model != "reported-model" || input.ObservedConfiguration.Version != testObservedVersion {
+		t.Fatalf("ObservedConfiguration = %+v, want unanimous reported model and version", input.ObservedConfiguration)
 	}
-	if len(input.CaseResults) != 2 || input.CaseResults[0].ObservedModel != "reported-model" {
+	if len(input.CaseResults) != 2 || input.CaseResults[0].ObservedModel != "reported-model" || input.CaseResults[0].ObservedVersion != testObservedVersion {
 		t.Fatalf("case observations = %+v", input.CaseResults)
 	}
 
 	grouped["two"].withSkill.Model = ""
 	input = buildReportInput("s", grouped, []string{"one", "two"}, time.Time{}, time.Time{}, evalCfg, resolved)
+	if input.ObservedConfiguration == nil || input.ObservedConfiguration.Model != "" || input.ObservedConfiguration.Version != testObservedVersion {
+		t.Fatalf("ObservedConfiguration = %+v, want only unanimous version", input.ObservedConfiguration)
+	}
+
+	grouped["two"].withSkill.Version = ""
+	input = buildReportInput("s", grouped, []string{"one", "two"}, time.Time{}, time.Time{}, evalCfg, resolved)
 	if input.ObservedConfiguration != nil {
-		t.Fatalf("ObservedConfiguration = %+v, want nil for partial observation", input.ObservedConfiguration)
+		t.Fatalf("ObservedConfiguration = %+v, want nil for partial model and version observations", input.ObservedConfiguration)
+	}
+}
+
+func TestBuildReportInput_DoesNotApplyUnsupportedVersion(t *testing.T) {
+	t.Parallel()
+
+	evalCfg := &config.EvalConfig{Engine: config.EngineConfig{Name: "qodercli"}}
+	resolved := credential.ResolvedAgentConfig{Role: credential.AgentRoleRunner, Engine: "qodercli", Version: testObservedVersion}
+	input := buildReportInput("s", map[string]*caseResults{}, nil, time.Time{}, time.Time{}, evalCfg, resolved)
+	if input.RequestedConfiguration.Version != testObservedVersion || input.AppliedConfiguration.Version != "" {
+		t.Fatalf("report requested/applied versions = %q / %q", input.RequestedConfiguration.Version, input.AppliedConfiguration.Version)
 	}
 }
 

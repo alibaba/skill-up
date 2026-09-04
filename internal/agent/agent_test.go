@@ -559,6 +559,54 @@ func TestDetectAgentWithResolvedConfig_RequiresMaterialization(t *testing.T) {
 	}
 }
 
+func TestDetectAgentRejectsNonConcreteSupportedVersion(t *testing.T) {
+	t.Parallel()
+
+	for _, version := range []string{"latest", "2.1", "1.2.3.4"} {
+		_, err := DetectAgent("codex", Config{Version: version})
+		if err == nil || !strings.Contains(err.Error(), "exact semantic version") {
+			t.Fatalf("DetectAgent version %q error = %v, want exact semantic version error", version, err)
+		}
+	}
+}
+
+func TestInstalledVersionGuardMatchesCompleteVersion(t *testing.T) {
+	t.Parallel()
+
+	guard := installedVersionGuard("example", "1.2.3")
+	if guard == "" {
+		t.Fatal("installedVersionGuard returned an empty guard")
+	}
+	for _, test := range []struct {
+		name    string
+		version string
+		want    bool
+	}{
+		{name: "exact", version: "1.2.3", want: true},
+		{name: "v prefix", version: "v1.2.3", want: true},
+		{name: "prerelease", version: "1.2.3-beta.1", want: false},
+		{name: "build metadata", version: "1.2.3+build.1", want: false},
+		{name: "four part", version: "1.2.3.4", want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			cmd := "example() { printf '%s\\n' " + shellQuote(test.version) + "; }; " + guard + "; exit 1"
+			rt := &runtime.NoneRuntime{}
+			if err := rt.Create(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = rt.Close() }()
+			result, err := rt.Exec(context.Background(), cmd, ExecOptions{})
+			if err != nil {
+				t.Fatalf("execute guard: %v", err)
+			}
+			if got := result.ExitCode == 0; got != test.want {
+				t.Fatalf("guard match for %q = %v, want %v", test.version, got, test.want)
+			}
+		})
+	}
+}
+
 func TestDetectAgentWithResolvedConfig_ConsumesAppliedConnection(t *testing.T) {
 	t.Parallel()
 

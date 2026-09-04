@@ -81,6 +81,9 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	if cfg.Engine.Name == "" {
 		errs = append(errs, "engine.name is required")
 	}
+	if cfg.Engine.Version != "" && agentkind.SupportsVersion(cfg.Engine.Name) && !agentkind.IsExactVersion(cfg.Engine.Version) {
+		errs = append(errs, fmt.Sprintf("engine.version for %q must be an exact semantic version, got %q", cfg.Engine.Name, cfg.Engine.Version))
+	}
 
 	// engine.custom validation is deferred to ResolveCustomEngineConfig, which
 	// runs after CLI overrides settle the final engine name.
@@ -105,6 +108,24 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 		return fmt.Errorf("validation errors:\n  - %s", strings.Join(errs, "\n  - "))
 	}
 
+	return nil
+}
+
+// ValidateEvalConfigBeforeEngineOverride validates suite-wide fields while
+// deferring the engine-dependent version rule until a CLI override is applied.
+func (v *Validator) ValidateEvalConfigBeforeEngineOverride(cfg *EvalConfig) error {
+	deferred := *cfg
+	deferred.Engine = cfg.Engine
+	deferred.Engine.Version = ""
+	return v.ValidateEvalConfig(&deferred)
+}
+
+// ValidateEngineVersion validates engine.version after the final engine name
+// is known, including any CLI engine override.
+func (v *Validator) ValidateEngineVersion(engine EngineConfig) error {
+	if engine.Version != "" && agentkind.SupportsVersion(engine.Name) && !agentkind.IsExactVersion(engine.Version) {
+		return fmt.Errorf("validation errors:\n  - engine.version for %q must be an exact semantic version, got %q", engine.Name, engine.Version)
+	}
 	return nil
 }
 

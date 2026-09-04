@@ -88,6 +88,7 @@ skills:
 # ========== 5. Agent Engine ==========
 engine:
   name: claude_code               # claude_code / codex / qodercli（也兼容 qoder-cli）/ qwen_code（也兼容 qwen-code、qwen）
+  version: 2.1.0                  # 可选的 CLI 具体版本；语义见下文
   # kwargs:
   #   edition: cn                 # qodercli 可选：global（默认）/ cn
   model:
@@ -134,6 +135,17 @@ report:
 `SKILL.md`，确保安装后的目录仍是有效 Skill。`judge.skills` 同样支持这两个字段。
 
 `cases.parallelism` 是配置文件中的默认用例并行数；临时运行时可以用 `skill-up run --parallelism N` 覆盖它，不需要修改 `eval.yaml`。命令行覆盖值必须在 1 到 256 之间。
+
+### Engine 版本生命周期
+
+每个用例执行前，skill-up 会静态检查 CLI 是否安装，并通过 `--version`
+读取版本；该过程不会验证登录状态，也不会发起模型请求。使用
+`environment.type: none` 时，skill-up 不会修改宿主机安装，配置的具体
+`engine.version` 必须与现有 CLI 匹配。在隔离 runtime 中，Claude Code、
+Codex 和 Qwen Code 会先安装指定版本再校验。QoderCLI 的实际版本仍会记录到
+报告，但其安装器不支持选择 `engine.version`，显式配置会被警告并忽略。
+对支持版本选择的 adapter，`engine.version` 必须是完整、精确的语义化版本
+（例如 `2.1.0` 或 `2.1.0-beta.1`）；`latest`、`^2.1.0` 等 tag 或范围不受支持。
 
 ### 采集 workspace 产物（`collect_artifacts`）
 

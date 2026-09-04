@@ -88,6 +88,7 @@ skills:
 # ========== 5. Agent Engine ==========
 engine:
   name: claude_code               # claude_code / codex / qodercli (also accepts qoder-cli) / qwen_code (also accepts qwen-code, qwen)
+  version: 2.1.0                  # Optional concrete CLI version; see version lifecycle below
   model:
     provider: anthropic
     name: claude-sonnet-4-6
@@ -135,6 +136,21 @@ list is provided, include `SKILL.md` explicitly so the installed directory
 remains a valid Skill. The same fields are supported by `judge.skills`.
 
 `cases.parallelism` is the file-level default. To override it for a single run, use `skill-up run --parallelism N` without modifying `eval.yaml`. Allowed range: **1 to 256**.
+
+### Engine version lifecycle
+
+Before each case, skill-up checks that the selected CLI is installed and reads
+its version with a static `--version` command. This does not validate login or
+make a model request. With `environment.type: none`, skill-up never changes the
+host installation; a configured concrete `engine.version` must already match.
+In an isolated runtime, Claude Code, Codex, and Qwen Code install the requested
+version before validation. QoderCLI versions are observed in reports, but its
+installer does not support selecting `engine.version`, so an explicit value is
+ignored with a warning.
+
+For supported adapters, `engine.version` must be one exact semantic version
+(for example, `2.1.0` or `2.1.0-beta.1`); tags and ranges such as `latest` or
+`^2.1.0` are rejected.
 
 ### Engine kwargs (agent-specific switches)
 

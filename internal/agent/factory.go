@@ -14,6 +14,9 @@ func DetectAgent(engineName string, cfg Config) (Agent, error) {
 	if cfg.Name == "" {
 		cfg.Name = engineName
 	}
+	if cfg.Version != "" && agentkind.SupportsVersion(engineName) && !agentkind.IsExactVersion(cfg.Version) {
+		return nil, fmt.Errorf("engine.version for %q must be an exact semantic version, got %q", engineName, cfg.Version)
+	}
 
 	switch engineName {
 	case agentkind.QoderCLIAlias, agentkind.QoderAlias, agentkind.QoderCLI:

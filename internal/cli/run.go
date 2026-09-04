@@ -200,6 +200,9 @@ func loadAndPrepareConfig(ctx context.Context, cmd *cobra.Command, args []string
 	if err := applyRunConfigOverrides(evalCfg, cmd); err != nil { //nolint:contextcheck // ctx accessed via cmd.Context() inside helpers
 		return nil, nil, nil, err
 	}
+	if err := config.NewValidator().ValidateEngineVersion(evalCfg.Engine); err != nil {
+		return nil, nil, nil, fmt.Errorf("validation failed: %w", err)
+	}
 	modelFlag, _ := cmd.Flags().GetString("model")
 	providerFlag, _ := cmd.Flags().GetString("provider")
 	// The loader defers engine.custom env resolution and validation until the
@@ -839,7 +842,7 @@ func loadFromEvalYAML(evalPath string) (string, []*config.CaseConfig, *config.Ev
 	// blocks a filtered run. `skill-up validate` still validates the whole
 	// suite (eval + every case) via ValidateAll.
 	validator := config.NewValidator()
-	if err := validator.ValidateEvalConfig(result.Eval); err != nil {
+	if err := validator.ValidateEvalConfigBeforeEngineOverride(result.Eval); err != nil {
 		return "", nil, nil, nil, fmt.Errorf("validation failed: %w", err)
 	}
 

@@ -53,6 +53,13 @@ func agentConfigurationModel(configuration *AgentConfiguration) string {
 	return configuration.Provider + "/" + configuration.Model
 }
 
+func agentConfigurationVersion(configuration *AgentConfiguration) string {
+	if configuration == nil {
+		return ""
+	}
+	return configuration.Version
+}
+
 // TotalDuration calculates the total wall-clock duration from StartTime to EndTime.
 // Falls back to summing individual case durations if StartTime/EndTime are not set.
 func (in Input) TotalDuration() time.Duration {
@@ -139,11 +146,12 @@ type CaseResult struct {
 	Error             string            `json:"error,omitempty"`
 	Grading           *judge.Result     `json:"grading"`
 	JudgeSkills       []judge.SkillInfo `json:"judge_skills,omitempty"`
-	Configuration     string            `json:"configuration,omitempty"`  // "with_skill" or "without_skill"
-	Prompt            string            `json:"prompt,omitempty"`         // input prompt sent to the agent
-	Response          string            `json:"response,omitempty"`       // agent final message
-	ObservedModel     string            `json:"observed_model,omitempty"` // model explicitly reported by the agent
-	TurnResults       []CaseTurnResult  `json:"turn_results,omitempty"`   // per-turn outcomes; nil for single-turn
+	Configuration     string            `json:"configuration,omitempty"`    // "with_skill" or "without_skill"
+	Prompt            string            `json:"prompt,omitempty"`           // input prompt sent to the agent
+	Response          string            `json:"response,omitempty"`         // agent final message
+	ObservedModel     string            `json:"observed_model,omitempty"`   // model explicitly reported by the agent
+	ObservedVersion   string            `json:"observed_version,omitempty"` // CLI version reported by static runtime inspection
+	TurnResults       []CaseTurnResult  `json:"turn_results,omitempty"`     // per-turn outcomes; nil for single-turn
 }
 
 // CaseTurnResult holds the outcome of a single turn for reporting purposes.

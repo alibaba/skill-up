@@ -11,6 +11,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/alibaba/skill-up/internal/agentkind"
 	"github.com/alibaba/skill-up/internal/observability"
 	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
@@ -168,6 +169,8 @@ func (a *CLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messag
 // the way a real shell would.
 var commandVRegexp = regexp.MustCompile(`^\s*command\s+-v\s+(\S+)(\s.*)?$`)
 
+var semanticVersionRegexp = regexp.MustCompile(`(?:^|[^0-9A-Za-z.+-])v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)(?:$|[^0-9A-Za-z.+-])`)
+
 // checkCommandForOS adapts a POSIX `command -v X` availability check to the
 // target OS. Windows cmd.exe has no `command` builtin; `where` is the
 // equivalent. Common POSIX-only redirect targets (`/dev/null`) are rewritten
@@ -208,4 +211,47 @@ func (a *CLIAgent) Check(ctx context.Context, rt Runtime) error {
 	}
 
 	return nil
+}
+
+// InspectRuntime executes the agent's static version command and returns the
+// normalized version token. It does not inspect authentication or login state.
+func (a *CLIAgent) InspectRuntime(ctx context.Context, rt Runtime) (RuntimeObservation, error) {
+	if a.Cfg.VersionCmd == "" {
+		return RuntimeObservation{}, nil
+	}
+	versionCmd := checkCommandForOS(a.Cfg.VersionCmd, rt.Shell().GOOS)
+	result, err := rt.Exec(ctx, versionCmd, a.mergeExecOptionsEnv(ctx, ExecOptions{}, nil, nil))
+	if err != nil {
+		return RuntimeObservation{}, fmt.Errorf("version check failed: %w", err)
+	}
+	if result.ExitCode != 0 {
+		return RuntimeObservation{}, fmt.Errorf("version check failed for %s (exit %d): %s", a.Name(), result.ExitCode, result.Stderr)
+	}
+	detected := normalizeVersionOutput(result.Stdout + "\n" + result.Stderr)
+	if detected == "" {
+		if normalizedConfiguredVersion(a.Cfg.Version) != "" {
+			return RuntimeObservation{}, fmt.Errorf("version check for %s returned no version", a.Name())
+		}
+		return RuntimeObservation{}, nil
+	}
+	if expected := normalizedConfiguredVersion(a.Cfg.Version); expected != "" && detected != expected {
+		return RuntimeObservation{}, fmt.Errorf("agent %s version mismatch: found %s, want %s", a.Name(), detected, expected)
+	}
+	return RuntimeObservation{Version: detected}, nil
+}
+
+func normalizeVersionOutput(output string) string {
+	match := semanticVersionRegexp.FindStringSubmatch(output)
+	if len(match) < 2 || !agentkind.IsExactVersion(match[1]) {
+		return ""
+	}
+	return match[1]
+}
+
+func normalizedConfiguredVersion(version string) string {
+	version = strings.TrimSpace(version)
+	if !agentkind.IsExactVersion(version) {
+		return ""
+	}
+	return strings.TrimPrefix(version, "v")
 }

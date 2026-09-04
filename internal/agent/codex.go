@@ -94,6 +94,9 @@ func NewCodexAgent(cfg Config) *CodexAgent {
 	if cfg.CheckCmd == "" {
 		cfg.CheckCmd = "command -v codex"
 	}
+	if cfg.VersionCmd == "" {
+		cfg.VersionCmd = "codex --version"
+	}
 	if cfg.SkillPath == "" {
 		cfg.SkillPath = ".codex/skills"
 	}
@@ -114,7 +117,7 @@ func (a *CodexAgent) Install(ctx context.Context, rt Runtime) error {
 
 	installCmd := a.Cfg.InstallCmd
 	if installCmd == "" {
-		installCmd = defaultCodexInstallCmd()
+		installCmd = defaultCodexInstallCmdForVersion(a.Cfg.Version)
 	}
 
 	execResult, err := rt.Exec(ctx, installCmd, opts)
@@ -245,13 +248,17 @@ func buildCodexMCPRemoteBridgeScript(server runtime.MCPServerConfig) (string, er
 	return script.String(), nil
 }
 
-func defaultCodexInstallCmd() string {
+func defaultCodexInstallCmdForVersion(configuredVersion string) string {
+	version := strings.TrimSpace(configuredVersion)
+	if version == "" {
+		version = codexDefaultVersion
+	}
 	lines := []string{
 		"set -e",
-		"if command -v codex >/dev/null 2>&1 && codex --version 2>/dev/null | grep -q " + shellQuote(codexDefaultVersion) + "; then exit 0; fi",
+		installedVersionGuard("codex", version),
 	}
 	lines = append(lines, nodeBootstrapLines(agentNodeDefaultVersion)...)
-	lines = append(lines, "npm install -g --include=optional "+shellQuote("@openai/codex@"+codexDefaultVersion))
+	lines = append(lines, "npm install -g --include=optional "+shellQuote(versionedPackage("@openai/codex", version)))
 	return strings.Join(lines, "\n")
 }
 
