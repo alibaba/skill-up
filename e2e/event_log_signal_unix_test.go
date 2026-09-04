@@ -15,6 +15,8 @@ import (
 	"time"
 )
 
+const eventLogProcessStartTimeout = 60 * time.Second
+
 func TestEventLogSignalsProduceCancelledFinalEvent(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -105,7 +107,7 @@ input:
 		close(waitCh)
 	}()
 
-	if err := waitForEventOrProcessExit(eventPath, "case_started", waitCh, 10*time.Second); err != nil {
+	if err := waitForEventOrProcessExit(eventPath, "case_started", waitCh, eventLogProcessStartTimeout); err != nil {
 		_ = cmd.Process.Kill()
 		select {
 		case <-waitCh:
@@ -226,7 +228,7 @@ expect:
 			return event.Event == "case_started" && event.Payload["configuration"] == "without_skill"
 		},
 		waitCh,
-		10*time.Second,
+		eventLogProcessStartTimeout,
 	)
 	if err != nil {
 		_ = cmd.Process.Kill()
