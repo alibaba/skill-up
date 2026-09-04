@@ -50,17 +50,18 @@ type ResolvedAgentConfig struct {
 	Entry    string
 	Protocol string
 
-	Provider        string
-	Model           string
-	AppliedProvider string
-	AppliedModel    string
-	AppliedAPIKey   string
-	AppliedBaseURL  string
-	APIKey          string
-	BaseURL         string
-	Kwargs          map[string]string
-	ModelParams     map[string]string
-	Warnings        []string
+	Provider          string
+	Model             string
+	AppliedProvider   string
+	AppliedModel      string
+	AppliedAPIKey     string
+	AppliedBaseURL    string
+	AppliedConnection ResolvedModelConnection `json:"-" yaml:"-"`
+	APIKey            string
+	BaseURL           string
+	Kwargs            map[string]string
+	ModelParams       map[string]string
+	Warnings          []string
 
 	// Custom carries the custom engine config when the engine name does not
 	// match a built-in agent. It is nil for built-in agents.
@@ -116,7 +117,7 @@ func ResolveJudgeConfig(judgeCfg config.JudgeConfig, runner ResolvedAgentConfig,
 		fallback = &runner
 	}
 
-	return resolveResolvedAgentConfig(agentResolveInput{
+	resolved := resolveResolvedAgentConfig(agentResolveInput{
 		role: AgentRoleJudge,
 		engine: config.EngineConfig{
 			Name:    runner.Engine,
@@ -134,6 +135,10 @@ func ResolveJudgeConfig(judgeCfg config.JudgeConfig, runner ResolvedAgentConfig,
 		fallback:    fallback,
 		resolver:    resolver,
 	})
+	if resolved.Provider == runner.Provider && runner.AppliedConnection.Protocol != "" {
+		resolved.AppliedConnection = runner.AppliedConnection
+	}
+	return resolved
 }
 
 func parseJudgeModel(value string) (provider, model string) {
@@ -200,14 +205,15 @@ func applyFallback(params *ResolvedAgentConfig, fallback *ResolvedAgentConfig) {
 		params.Model = fallback.Model
 		params.ModelSource = ValueSourceRunner
 	}
-	if params.BaseURL == "" && fallback.BaseURL != "" {
+	// Connection values belong to a provider namespace, unlike engine lifecycle.
+	if params.Provider == fallback.Provider && params.BaseURL == "" && fallback.BaseURL != "" {
 		params.BaseURL = fallback.BaseURL
 		params.BaseURLSource = ValueSourceRunner
 	}
 }
 
 func applyFallbackCredentials(params *ResolvedAgentConfig, fallback *ResolvedAgentConfig) {
-	if fallback == nil {
+	if fallback == nil || params.Provider != fallback.Provider {
 		return
 	}
 	if params.APIKey == "" && fallback.APIKey != "" {

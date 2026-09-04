@@ -124,9 +124,11 @@ type SessionResult struct {
 ## Adapter capability resolution
 
 `ResolveAdapterConfig` runs after YAML/CLI/credential resolution and before
-agent construction. It keeps the requested model intact, records the model
-that skill-up will forward as `AppliedModel`, and emits warnings for
-explicit settings that the selected adapter does not consume.
+agent construction. It selects credentials and endpoints for the adapter's
+protocol, keeps the requested model intact, records the model that skill-up will
+forward as `AppliedModel`, and emits warnings for explicit settings that the
+selected adapter does not consume. Factory construction consumes the resulting
+`AppliedConnection` rather than resolving provider configuration again.
 
 Applied values describe the invocation, not the CLI's final runtime choice.
 Local configuration may override them. `SessionResult.Model` remains empty

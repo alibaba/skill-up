@@ -95,24 +95,111 @@ func CapabilitiesForEngine(engineName string) Capabilities {
 // records the model that skill-up will forward to the CLI. It does not claim
 // that the CLI ultimately selected that model: local CLI configuration may
 // override it, and most adapters do not report their final runtime choice.
-func ResolveAdapterConfig(params credential.ResolvedAgentConfig) credential.ResolvedAgentConfig {
+func ResolveAdapterConfig(params credential.ResolvedAgentConfig, resolver *credential.Resolver) credential.ResolvedAgentConfig {
 	if params.Role == "" {
 		params.Role = credential.AgentRoleRunner
 	}
 	params.Kwargs = maps.Clone(params.Kwargs)
 	params.ModelParams = maps.Clone(params.ModelParams)
 	params.Warnings = slices.Clone(params.Warnings)
-	params.AppliedAPIKey = params.APIKey
-	params.AppliedBaseURL = params.BaseURL
 
 	capabilities := CapabilitiesForEngine(params.Engine)
 	params.Protocol = string(capabilities.Protocol)
+	connection := resolveModelConnection(params, resolver, capabilities.Protocol)
+	params.AppliedAPIKey = connection.APIKey
+	params.AppliedBaseURL = connection.BaseURL
 	params.AppliedProvider = resolveAppliedProvider(&params, capabilities)
 	params.AppliedModel = resolveAppliedModel(&params, capabilities)
 	validateBaseURL(&params, capabilities)
 	validateDeferredFields(&params, capabilities)
 	validateKwargs(&params, capabilities)
+	params.AppliedConnection = appliedModelConnection(params, connection)
 	return params
+}
+
+func resolveModelConnection(
+	params credential.ResolvedAgentConfig,
+	resolver *credential.Resolver,
+	protocol credential.Protocol,
+) credential.ResolvedModelConnection {
+	if params.AppliedConnection.Protocol == protocol {
+		return params.AppliedConnection
+	}
+	if resolver == nil {
+		resolved := credential.ResolvedModelConnection{
+			Provider:      params.Provider,
+			Protocol:      protocol,
+			APIKey:        params.APIKey,
+			BaseURL:       params.BaseURL,
+			APIKeySet:     params.APIKeySource != "" || params.APIKey != "",
+			BaseURLSet:    params.BaseURLSource != "" || params.BaseURL != "",
+			APIKeySource:  params.APIKeySource,
+			BaseURLSource: params.BaseURLSource,
+			AuthMode:      credential.AuthModeAgentLocal,
+			RoutingMode:   credential.RoutingModeAgentLocal,
+		}
+		if resolved.APIKey != "" {
+			resolved.AuthMode = credential.AuthModeInjected
+		}
+		if resolved.BaseURL != "" {
+			resolved.RoutingMode = credential.RoutingModeExplicit
+		}
+		return resolved
+	}
+
+	spec := credential.ModelConnectionSpec{
+		Provider: params.Provider,
+		Protocol: protocol,
+	}
+	if value, ok := explicitConnectionValue(params.APIKey, params.APIKeySource); ok {
+		spec.APIKey = value
+	}
+	if value, ok := explicitConnectionValue(params.BaseURL, params.BaseURLSource); ok {
+		spec.BaseURL = value
+	}
+	return resolver.ResolveModelConnection(spec)
+}
+
+func explicitConnectionValue(value string, source credential.ValueSource) (credential.ConnectionValue, bool) {
+	if source == "" && value == "" {
+		return credential.ConnectionValue{}, false
+	}
+	if source == credential.ValueSourceEnv || source == credential.ValueSourceResolver {
+		return credential.ConnectionValue{}, false
+	}
+	return credential.ExplicitConnectionValue(value, source), true
+}
+
+func appliedModelConnection(
+	params credential.ResolvedAgentConfig,
+	resolved credential.ResolvedModelConnection,
+) credential.ResolvedModelConnection {
+	apiKeyChanged := resolved.APIKey != params.AppliedAPIKey
+	baseURLChanged := resolved.BaseURL != params.AppliedBaseURL
+	resolved.Provider = params.AppliedProvider
+	resolved.APIKey = params.AppliedAPIKey
+	resolved.BaseURL = params.AppliedBaseURL
+	if apiKeyChanged {
+		resolved.APIKeySet = params.AppliedAPIKey != ""
+		if !resolved.APIKeySet {
+			resolved.APIKeySource = ""
+		}
+	}
+	if baseURLChanged {
+		resolved.BaseURLSet = params.AppliedBaseURL != ""
+		if !resolved.BaseURLSet {
+			resolved.BaseURLSource = ""
+		}
+	}
+	resolved.AuthMode = credential.AuthModeAgentLocal
+	if resolved.APIKey != "" {
+		resolved.AuthMode = credential.AuthModeInjected
+	}
+	resolved.RoutingMode = credential.RoutingModeAgentLocal
+	if resolved.BaseURL != "" {
+		resolved.RoutingMode = credential.RoutingModeExplicit
+	}
+	return resolved
 }
 
 func resolveAppliedProvider(params *credential.ResolvedAgentConfig, capabilities Capabilities) string {
@@ -125,7 +212,7 @@ func resolveAppliedProvider(params *credential.ResolvedAgentConfig, capabilities
 		params.AppliedBaseURL = ""
 		return ""
 	case ModelPolicyCodexProvider:
-		if reason := codexCustomProviderUnavailableReason(params.Provider, params.BaseURL); reason != "" {
+		if reason := codexCustomProviderUnavailableReason(params.Provider, params.AppliedBaseURL); reason != "" {
 			params.Warnings = appendUniqueWarning(params.Warnings, fmt.Sprintf(
 				"engine %q cannot apply provider %q: provider %s; the provider override, endpoint, and provider-scoped credential are omitted and local Codex settings will be used",
 				params.Engine, params.Provider, reason,
@@ -134,7 +221,7 @@ func resolveAppliedProvider(params *credential.ResolvedAgentConfig, capabilities
 			params.AppliedBaseURL = ""
 			return ""
 		}
-		if params.BaseURL == "" {
+		if params.AppliedBaseURL == "" {
 			// Codex receives no model_provider override in this case. Even an
 			// explicit provider namespace cannot prove which local provider Codex
 			// ultimately selects.
@@ -164,7 +251,7 @@ func resolveAppliedModel(params *credential.ResolvedAgentConfig, capabilities Ca
 		))
 		return ""
 	case ModelPolicyCodexProvider:
-		if reason := codexCustomProviderUnavailableReason(params.Provider, params.BaseURL); reason != "" {
+		if reason := codexCustomProviderUnavailableReason(params.Provider, params.AppliedBaseURL); reason != "" {
 			return ""
 		}
 	}
@@ -173,7 +260,7 @@ func resolveAppliedModel(params *credential.ResolvedAgentConfig, capabilities Ca
 }
 
 func validateBaseURL(params *credential.ResolvedAgentConfig, capabilities Capabilities) {
-	if params.BaseURL == "" || capabilities.SupportsBaseURL {
+	if params.AppliedBaseURL == "" || capabilities.SupportsBaseURL {
 		return
 	}
 	params.Warnings = appendUniqueWarning(params.Warnings, fmt.Sprintf(
