@@ -44,20 +44,23 @@ The runner path resolves values in these stages:
 3. Build one role-aware `ResolvedAgentConfig`. Legacy slash disambiguation is
    performed once at this point instead of mutating and later repairing the
    loaded eval config.
-4. Resolve provider-scoped `MODEL`, `API_KEY`, and `BASE_URL` values. A
-   provider-scoped model environment variable currently overrides the YAML
-   model; provider environment credentials override the credential file.
+4. Resolve the provider-scoped `MODEL` value. A provider-scoped model
+   environment variable currently overrides the YAML model.
 5. Preserve explicit CLI `--model` and `--api-key` precedence.
-6. Apply the selected adapter's declared protocol and capability contract.
+6. Apply the selected adapter's declared protocol and capability contract,
+   then resolve credentials and endpoints for that `(provider, protocol)`.
    Keep the requested model intact, compute the applied model once, remove
    unsupported kwargs, and emit warnings for ignored or invalid explicit
    settings before case execution.
-7. Pass the applied value to the selected adapter, which constructs its
-   command and environment without repeating model normalization.
+7. Pass the applied connection to the selected adapter, which constructs its
+   command and environment without repeating credential or model resolution.
 
 Runner and judge roles use the same resolution flow. Until an explicit judge
 engine schema is introduced, the judge inherits the runner engine lifecycle and
 kwargs, while resolving its provider/model and credentials as a separate role.
+Connection inheritance is limited to the same provider namespace. A judge that
+selects a different provider resolves its own key and endpoint by protocol;
+missing values delegate to agent-local state, never to the runner connection.
 Reports use the resolved runner identity rather than reconstructing it from a
 CLI-mutated eval config. `result.json` retains the legacy `engine_name` and
 `model_name` fields while also recording credential-free
@@ -86,12 +89,11 @@ configuration are related but distinct layers:
    local login databases remain owned by the agent and may be opaque to
    skill-up.
 
-`ResolvedAgentConfig` currently spans the first two steps and the capability
-pass computes what skill-up can apply. A later protocol-aware resolver may
-introduce an internal `ResolvedModelConnection`, but it should not be confused
-with observed runtime state: it describes the connection selected for the
-adapter, not proof of the provider, model, or credential ultimately used by the
-agent.
+`ResolvedAgentConfig` retains requested values and its `AppliedConnection`
+records the protocol-aware `ResolvedModelConnection` selected by the capability
+pass. The connection must not be confused with observed runtime state: it
+describes what skill-up materializes for the adapter, not proof of the provider,
+model, credential, or local login ultimately used by the agent.
 
 This layering is informed by Harbor's
 [`ProviderAccess`, `ModelConnectionSpec`, and `ResolvedModelConnection`](https://github.com/harbor-framework/harbor/blob/71180a2e6fb40626b661c13f261b1d44517ad91a/src/harbor/agents/model_connection.py),
@@ -145,7 +147,8 @@ Tagged Actions and historical commands therefore remain valid.
 
 ## Known gaps for later phases
 
-- Nested provider endpoints are flattened before the adapter protocol is known.
+- The legacy flattened credential lookup remains available to older internal
+  callers, but adapter construction uses the protocol-aware connection.
 - Provider-scoped `MODEL` currently overrides an explicit YAML model.
 - `engine.version`, `engine.entry`, and `engine.model.params` now produce
   warnings when ineffective, but their final implementation/removal is deferred

@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   values for bounded invocation correlation metadata. Existing runs are
   unchanged unless the event log is explicitly enabled.
 
+### Changed
+- Agent adapters now consume one protocol-aware model connection selected from
+  provider configuration. OpenAI- and Anthropic-compatible endpoints under the
+  same provider no longer pass through the legacy flattened credential view,
+  while absent credentials and endpoints continue to delegate to agent-local
+  login and routing.
+
+### Fixed
+- Agent judges selecting a different provider no longer inherit runner credentials
+  or endpoints, preventing judge keys from being sent to a runner endpoint.
+
 ## [0.10.0] - 2026-09-01
 
 ### Added

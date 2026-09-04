@@ -546,10 +546,48 @@ func TestProbeAndMergePATH_SkipsMergeOnEmptyStdout(t *testing.T) {
 	}
 }
 
+func detectMaterializedAgentForTest(params credential.ResolvedAgentConfig) (Agent, error) {
+	return DetectAgentWithResolvedConfig(ResolveAdapterConfig(params, nil))
+}
+
+func TestDetectAgentWithResolvedConfig_RequiresMaterialization(t *testing.T) {
+	t.Parallel()
+
+	_, err := DetectAgentWithResolvedConfig(credential.ResolvedAgentConfig{Engine: "codex"})
+	if err == nil || !strings.Contains(err.Error(), "was not materialized") {
+		t.Fatalf("error = %v, want materialization error", err)
+	}
+}
+
+func TestDetectAgentWithResolvedConfig_ConsumesAppliedConnection(t *testing.T) {
+	t.Parallel()
+
+	params := ResolveAdapterConfig(credential.ResolvedAgentConfig{
+		Engine:   "claude_code",
+		Provider: "anthropic",
+		APIKey:   "connection-key",
+		BaseURL:  "https://connection.example.test",
+	}, nil)
+	params.AppliedAPIKey = "stale-key"
+	params.AppliedBaseURL = "https://stale.example.test"
+
+	ag, err := DetectAgentWithResolvedConfig(params)
+	if err != nil {
+		t.Fatalf("DetectAgentWithResolvedConfig failed: %v", err)
+	}
+	claudeAgent, ok := ag.(*ClaudeCodeAgent)
+	if !ok {
+		t.Fatalf("agent = %T, want *ClaudeCodeAgent", ag)
+	}
+	if claudeAgent.Cfg.APIKey != "connection-key" || claudeAgent.Cfg.BaseURL != "https://connection.example.test" {
+		t.Fatalf("adapter config = key %q base URL %q, want applied connection values", claudeAgent.Cfg.APIKey, claudeAgent.Cfg.BaseURL)
+	}
+}
+
 func TestDetectAgentWithResolvedConfig_SetsTypedCredentialFields(t *testing.T) {
 	t.Parallel()
 
-	ag, err := DetectAgentWithResolvedConfig(credential.ResolvedAgentConfig{
+	ag, err := detectMaterializedAgentForTest(credential.ResolvedAgentConfig{
 		Engine:   "codex",
 		Provider: "openai",
 		Model:    "gpt-5.4",
@@ -590,7 +628,7 @@ func TestDetectAgentWithResolvedConfig_SetsTypedCredentialFields(t *testing.T) {
 func TestDetectAgentWithResolvedConfig_CodexFallbackOmitsRejectedProviderCredential(t *testing.T) {
 	t.Parallel()
 
-	ag, err := DetectAgentWithResolvedConfig(credential.ResolvedAgentConfig{ //nolint:gosec // dummy test credential
+	ag, err := detectMaterializedAgentForTest(credential.ResolvedAgentConfig{ //nolint:gosec // dummy test credential
 		Engine:   "codex",
 		Provider: testDashscopeProvider,
 		Model:    "qwen3.6-plus",
@@ -618,7 +656,7 @@ func TestDetectAgentWithResolvedConfig_QoderMapsAPIKeyToRuntimeEnv(t *testing.T)
 	token := "qoder-runtime-token" //nolint:gosec // test credential, not real
 	t.Setenv(credential.EnvQoderPersonalAccessToken, token)
 
-	ag, err := DetectAgentWithResolvedConfig(credential.ResolvedAgentConfig{
+	ag, err := detectMaterializedAgentForTest(credential.ResolvedAgentConfig{
 		Engine:   "qoder-cli",
 		Provider: "qoder",
 		Model:    "auto",
@@ -641,7 +679,7 @@ func TestDetectAgentWithResolvedConfig_QoderCNMapsKeychainAliasToOfficialEnv(t *
 	t.Setenv(credential.EnvQoderCNAccessToken, token)
 	t.Setenv(credential.EnvQoderCNPersonalAccessToken, "")
 
-	ag, err := DetectAgentWithResolvedConfig(credential.ResolvedAgentConfig{
+	ag, err := detectMaterializedAgentForTest(credential.ResolvedAgentConfig{
 		Engine:   "qoder-cli",
 		Provider: "qoder",
 		Model:    "auto",
@@ -667,7 +705,7 @@ func TestDetectAgentWithResolvedConfig_QoderCNPrefersOfficialEnv(t *testing.T) {
 	t.Setenv(credential.EnvQoderCNPersonalAccessToken, "official-token")
 	t.Setenv(credential.EnvQoderCNAccessToken, "alias-token")
 
-	ag, err := DetectAgentWithResolvedConfig(credential.ResolvedAgentConfig{
+	ag, err := detectMaterializedAgentForTest(credential.ResolvedAgentConfig{
 		Engine: "qoder-cli",
 		Kwargs: map[string]string{KwargEdition: qoderEditionCN},
 	})
@@ -686,7 +724,7 @@ func TestDetectAgentWithResolvedConfig_QoderCNPrefersOfficialEnv(t *testing.T) {
 func TestDetectAgentWithResolvedConfig_QoderIgnoresParamsAPIKey(t *testing.T) {
 	t.Parallel()
 
-	ag, err := DetectAgentWithResolvedConfig(credential.ResolvedAgentConfig{ //nolint:gosec // test dummy key
+	ag, err := detectMaterializedAgentForTest(credential.ResolvedAgentConfig{ //nolint:gosec // test dummy key
 		Engine:   "qoder-cli",
 		Provider: "anthropic",
 		Model:    "auto",
@@ -731,7 +769,7 @@ func TestUnsupportedAgentError(t *testing.T) {
 func TestDetectAgentWithResolvedConfig_UsesResolvedModelWithoutNormalization(t *testing.T) {
 	t.Parallel()
 
-	ag, err := DetectAgentWithResolvedConfig(credential.ResolvedAgentConfig{
+	ag, err := detectMaterializedAgentForTest(credential.ResolvedAgentConfig{
 		Engine: "claude-code",
 		Model:  "",
 	})
@@ -751,7 +789,7 @@ func TestDetectAgentWithResolvedConfig_UsesResolvedModelWithoutNormalization(t *
 func TestDetectAgentWithResolvedConfig_PreservesAutoForQoderCLI(t *testing.T) {
 	t.Parallel()
 
-	ag, err := DetectAgentWithResolvedConfig(credential.ResolvedAgentConfig{
+	ag, err := detectMaterializedAgentForTest(credential.ResolvedAgentConfig{
 		Engine: "qoder-cli",
 		Model:  "auto",
 	})
@@ -772,7 +810,7 @@ func TestDetectAgentWithResolvedConfig_ForwardsKwargs(t *testing.T) {
 	t.Parallel()
 
 	kwargs := map[string]string{KwargBypassSandbox: "true", "future_key": "x"}
-	ag, err := DetectAgentWithResolvedConfig(credential.ResolvedAgentConfig{
+	ag, err := detectMaterializedAgentForTest(credential.ResolvedAgentConfig{
 		Engine:   "codex",
 		Provider: "openai",
 		Model:    "gpt-5.4",

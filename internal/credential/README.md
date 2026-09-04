@@ -35,6 +35,7 @@ type ResolvedAgentConfig struct {
     AppliedModel    string
     AppliedAPIKey   string
     AppliedBaseURL  string
+    AppliedConnection ResolvedModelConnection
     APIKey         string
     BaseURL        string
     Kwargs         map[string]string
@@ -46,8 +47,8 @@ type ResolvedAgentConfig struct {
 This value is the boundary between raw YAML/CLI/credential inputs and adapter
 construction. Map fields are cloned while resolving, so later mutations of the
 loaded eval config do not alter a resolved runner or judge configuration.
-Protocol, applied model, and warnings are filled by the subsequent adapter
-capability pass.
+Protocol, applied model, applied connection, and warnings are filled by the
+subsequent adapter capability pass.
 
 ## Two Pipelines
 
@@ -70,6 +71,9 @@ Its configuration decisions should be handled separately from the runner agent:
 
 - If the judge has independent configuration, prefer the judge's own provider/model/api-key/base-url
 - If no independent configuration is provided, reuse the runner agent's final result
+- Inherit the runner key and endpoint only when the resolved providers match.
+  A different judge provider resolves its own connection; missing values do not
+  fall back to the runner key or endpoint.
 
 It is recommended to treat the judge agent as a separate parameter resolution pipeline rather than "borrowing some fields" from the runner agent's initialization.
 
@@ -194,9 +198,10 @@ Rules:
 
 The unified credential layer produces the requested `ResolvedAgentConfig`.
 `agent.ResolveAdapterConfig` then applies the selected adapter's declared
-protocol and capability contract once, before construction. It records
-`AppliedModel` separately and reports unsupported explicit settings instead
-of leaving each adapter to reinterpret the same raw values during execution.
+protocol and capability contract once, resolves a connection for that protocol,
+and passes the resulting `AppliedConnection` to construction. It records
+`AppliedModel` separately and reports unsupported explicit settings instead of
+leaving each adapter to reinterpret the same raw values during execution.
 The historical non-Qoder `auto` normalization remains in credential resolution
 for compatibility.
 

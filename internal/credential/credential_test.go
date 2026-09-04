@@ -695,6 +695,32 @@ func TestResolveJudgeConfig_ParsesIndependentJudgeModel(t *testing.T) {
 	}
 }
 
+func TestResolveJudgeConfig_ConnectionFallbackRequiresSameProvider(t *testing.T) {
+	t.Parallel()
+	for _, runnerProvider := range []string{"fallback_runner", ""} {
+		for _, judgeModel := range []string{"", "judge-model", "fallback_runner/judge-model", "fallback_judge/judge-model"} {
+			t.Run(runnerProvider+"/"+judgeModel, func(t *testing.T) {
+				t.Parallel()
+				runner := ResolvedAgentConfig{
+					Engine: "claude_code", Provider: runnerProvider, Model: "runner-model",
+					APIKey: "runner-key", BaseURL: "https://runner.example.test",
+				}
+				got := ResolveJudgeConfig(config.JudgeConfig{Model: judgeModel}, runner, nil)
+				if got.Engine != runner.Engine {
+					t.Fatal("judge did not inherit runner engine")
+				}
+				if got.Provider == runner.Provider {
+					if got.APIKey != runner.APIKey || got.BaseURL != runner.BaseURL || got.APIKeySource != ValueSourceRunner || got.BaseURLSource != ValueSourceRunner {
+						t.Fatal("same-provider judge did not inherit runner connection")
+					}
+				} else if got.APIKey != "" || got.BaseURL != "" || got.APIKeySource != "" || got.BaseURLSource != "" {
+					t.Fatal("different-provider judge inherited runner connection")
+				}
+			})
+		}
+	}
+}
+
 func TestResolveJudgeConfig_PrefersProviderScopedModelEnv(t *testing.T) {
 	t.Setenv("JUDGEPROVIDER_MODEL", "gpt-5.5-judge-env")
 

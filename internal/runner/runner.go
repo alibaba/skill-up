@@ -575,7 +575,7 @@ func buildReportInput(
 			ModelParams: evalCfg.Engine.Model.Params,
 		}
 	}
-	resolved = agent.ResolveAdapterConfig(resolved)
+	resolved = agent.ResolveAdapterConfig(resolved, nil)
 	requested := &report.AgentConfiguration{
 		Role:     string(resolved.Role),
 		Engine:   resolved.Engine,
