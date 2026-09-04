@@ -92,6 +92,18 @@ type lifecycleIteration struct {
 	completedN uint64
 }
 
+// ValidatePlan validates an immutable lifecycle plan without opening a Sink.
+func ValidatePlan(plan Plan) error {
+	tasks, iterations, taskTotal, err := snapshotPlan(plan)
+	if err != nil {
+		return err
+	}
+	if uint64(len(tasks)) != taskTotal || len(iterations) != len(plan.Iterations) {
+		return errors.New("validated plan snapshot is inconsistent")
+	}
+	return nil
+}
+
 // NewLifecycle validates and snapshots a plan without importing runner or evaluator types.
 func NewLifecycle(publisher *Publisher, plan Plan, opts LifecycleOptions) (*Lifecycle, error) {
 	if publisher == nil {

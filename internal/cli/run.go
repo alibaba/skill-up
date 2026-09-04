@@ -37,6 +37,8 @@ const (
 	runtimeFlagName        = "runtime"
 	engineKwargFlagName    = "engine-kwarg"
 	engineKwargAlias       = "ek"
+	eventLogFlagName       = "event-log"
+	eventAttributeFlagName = "event-attribute"
 )
 
 // validRuntimeTypes lists the environment.type values accepted by --runtime.
@@ -119,6 +121,8 @@ func init() {
 	runCmd.Flags().Int("iteration", 0, "Repeat selected eval cases N times for stability/flakiness sampling. Positive N writes iteration-<N> artifacts and prints a current-command summary when N > 1. 0 = auto-append one run after the last existing iteration without summarizing history")
 	runCmd.Flags().Bool("no-delete", false, "Skip cleanup of workspace after evaluation (useful for debugging)")
 	runCmd.Flags().Bool("dry-run", false, "Validate and show what would run without executing")
+	runCmd.Flags().String(eventLogFlagName, "", "Write v1 evaluation events as JSON Lines to path")
+	runCmd.Flags().StringArray(eventAttributeFlagName, nil, "Attach a namespaced string attribute to every event (can be specified multiple times)")
 }
 
 func runEval(cmd *cobra.Command, args []string) error {
@@ -140,6 +144,21 @@ func runEval(cmd *cobra.Command, args []string) error {
 	cases, evalCfg, loader, err := loadAndPrepareConfig(ctx, cmd, args, span)
 	if err != nil {
 		return err
+	}
+
+	eventOptions, err := evaluationEventOptionsFromFlags(cmd)
+	if err != nil {
+		return err
+	}
+	if eventOptions.Enabled {
+		dryRun, flagErr := cmd.Flags().GetBool("dry-run")
+		if flagErr != nil {
+			return fmt.Errorf("read --dry-run: %w", flagErr)
+		}
+		if dryRun {
+			return errors.New("--event-log cannot be used with --dry-run")
+		}
+		return runEvalWithEventLog(cmd, cases, evalCfg, loader, eventOptions)
 	}
 
 	if maybeRunDryRun(cmd, cases, evalCfg) {

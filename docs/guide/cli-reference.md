@@ -34,6 +34,8 @@ skill-up run [path] [flags]
 | `--parallelism`        | From config                   | Override `cases.parallelism`. Allowed range: 1–256                                                                                                          |
 | `--baseline`           | From config                   | Override `benchmark.enabled` to `true` for this run                                                                                                         |
 | `--api-key`            | —                             | Pass an API key (higher precedence than env vars)                                                                                                          |
+| `--event-log`          | —                             | Write an ordered v1 JSONL evaluation event stream to a local file. The parent directory must already exist                                                  |
+| `--event-attribute`    | —                             | Attach a namespaced `key=value` string attribute to every event (repeatable; requires `--event-log`)                                                        |
 | `-v, --verbose`        | `0`                           | Increase log verbosity. Default `info`; `-v` / `--verbose` / `--verbose=true` → `debug`; `-vv` / `--verbose=2` → `trace`; `--verbose=false` disables extra detail |
 
 > **Validation scope.** `run` validates the eval-level config plus **only the
@@ -73,11 +75,22 @@ skill-up run ./evals/eval.yaml --format json --format html --format junit
 # Three samples in this command, one folder per run, plus a simple flaky summary
 skill-up run ./evals/eval.yaml --iteration 3
 
+# Produce a live event stream that a CI process can tail while the run is active
+skill-up run ./evals/eval.yaml \
+  --event-log ./events.jsonl \
+  --event-attribute com.example.ci.build_id=build-123
+
 # Auto-detect mode (consumes Anthropic evals.json directly)
 skill-up run --auto
 skill-up run --auto --engine codex
 skill-up run ./my-skill/ --auto
 ```
+
+`--event-log` creates or truncates one file for the invocation. It cannot be
+used with `--dry-run`, and the file must not be placed inside a scheduled
+`iteration-N/` output directory because that directory is recreated during the
+run. Consumers should read only newline-terminated records; the final record of
+a gracefully completed stream carries `last_event: true`.
 
 ### Exit codes
 

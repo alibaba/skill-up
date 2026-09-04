@@ -207,6 +207,9 @@ func (e *defaultEvaluator) EvaluatePlan(ctx context.Context, tasks []PlannedTask
 		attribute.Bool("skill_up.baseline.enabled", e.withBaseline),
 	)
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if e.ag != nil {
 		if err := e.ag.CheckCredentials(ctx); err != nil {
 			return nil, fmt.Errorf("agent credential check failed: %w", err)
@@ -218,10 +221,28 @@ func (e *defaultEvaluator) EvaluatePlan(ctx context.Context, tasks []PlannedTask
 	totalCases := len(tasks)
 
 	var wg sync.WaitGroup
+	scheduled := 0
+
+scheduleTasks:
 	for i, t := range tasks {
-		wg.Add(1)
-		sem <- struct{}{}
+		if ctx.Err() != nil {
+			break
+		}
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			break scheduleTasks
+		}
+		// If cancellation raced with acquiring a slot, return it without
+		// launching another task.
+		if ctx.Err() != nil {
+			<-sem
+			break
+		}
+
 		caseNum := i + 1
+		wg.Add(1)
+		scheduled++
 		go func(idx int, plannedTask PlannedTask, cn int) {
 			defer wg.Done()
 			defer func() { <-sem }()
@@ -247,6 +268,10 @@ func (e *defaultEvaluator) EvaluatePlan(ctx context.Context, tasks []PlannedTask
 	}
 	wg.Wait()
 
+	results = results[:scheduled]
+	if err := ctx.Err(); err != nil {
+		return results, err
+	}
 	return results, nil
 }
 
