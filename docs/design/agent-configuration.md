@@ -35,6 +35,17 @@ The engine determines the protocol. For example, `provider: dashscope` with a
 static and do not make a model request. The first real agent run is therefore
 the first validation of a delegated local login.
 
+Before each case, skill-up runs a static runtime preflight: the adapter's
+availability check followed by its `--version` command. With `environment.type:
+none`, the host installation is never modified; a configured concrete version
+is only validated against the host CLI. In an isolated runtime, supported npm
+adapters (`claude_code`, `codex`, and `qwen_code`) install the configured
+exact semantic version before the same preflight; tags and ranges are rejected.
+QoderCLI's installer does not support version
+selection, so `engine.version` remains unsupported there, while its detected
+version is still reported. These commands do not inspect login state or make a
+model request.
+
 ## Current resolution order
 
 The runner path resolves values in these stages:
@@ -44,8 +55,8 @@ The runner path resolves values in these stages:
 3. Build one role-aware `ResolvedAgentConfig`. Legacy slash disambiguation is
    performed once at this point instead of mutating and later repairing the
    loaded eval config.
-4. Resolve the provider-scoped `MODEL` value. A provider-scoped model
-   environment variable currently overrides the YAML model.
+4. Resolve a provider-scoped `MODEL` value as a default when no explicit model
+   was selected from YAML or CLI.
 5. Preserve explicit CLI `--model` and `--api-key` precedence.
 6. Apply the selected adapter's declared protocol and capability contract,
    then resolve credentials and endpoints for that `(provider, protocol)`.
@@ -66,9 +77,10 @@ CLI-mutated eval config. `result.json` retains the legacy `engine_name` and
 `model_name` fields while also recording credential-free
 `requested_configuration`, `applied_configuration`, and optional
 `observed_configuration` objects. Per-session results carry the requested and
-applied values, capability warnings, and an observed `model` only when the
-agent explicitly reports it. An absent observation remains unknown; skill-up
-does not probe authentication or spend tokens to infer local CLI state.
+applied values, capability warnings, an observed `model` only when the agent
+explicitly reports it, and the CLI version returned by static runtime
+inspection. An absent observation remains unknown; skill-up does not probe
+authentication or spend tokens to infer local CLI state.
 An applied provider is recorded only when the adapter actively selects that
 provider. If Codex falls back to local provider selection, both the applied
 provider and model are empty and credentials resolved for the rejected provider
@@ -149,12 +161,10 @@ Tagged Actions and historical commands therefore remain valid.
 
 - The legacy flattened credential lookup remains available to older internal
   callers, but adapter construction uses the protocol-aware connection.
-- Provider-scoped `MODEL` currently overrides an explicit YAML model.
-- `engine.version`, `engine.entry`, and `engine.model.params` now produce
-  warnings when ineffective, but their final implementation/removal is deferred
-  to the installation and schema phases.
-- The actual installed CLI version is not yet recorded as observed runtime
-  configuration.
+- `engine.entry` and `engine.model.params` produce warnings when ineffective;
+  their final implementation or removal is deferred to the schema phase.
+- QoderCLI does not support selecting an installer version, so an explicit
+  `engine.version` is warned and ignored for that adapter.
 
 See [Issue #196](https://github.com/alibaba/skill-up/issues/196) for the staged
 cleanup plan.

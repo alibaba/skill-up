@@ -38,10 +38,15 @@ type mockAgent struct {
 	output       string
 	err          error
 	credErr      error
+	checkErr     error
+	inspectErr   error
+	observation  agent.RuntimeObservation
 	skillErr     error
 	runFunc      func(ctx context.Context, rt runtime.Runtime, opts agent.ExecOptions, messages []transcript.Message) (*agent.SessionResult, error)
 	runCall      atomic.Int32
 	credCall     atomic.Int32
+	checkCall    atomic.Int32
+	inspectCall  atomic.Int32
 	installCall  atomic.Int32
 	mcpCall      atomic.Int32
 	skillCall    atomic.Int32
@@ -75,7 +80,17 @@ func (m *mockAgent) InstallSkill(_ context.Context, _ runtime.Runtime, cfg runti
 	m.mu.Unlock()
 	return m.skillErr
 }
-func (m *mockAgent) Check(_ context.Context, _ runtime.Runtime) error { return nil }
+
+func (m *mockAgent) Check(_ context.Context, _ runtime.Runtime) error {
+	m.checkCall.Add(1)
+	return m.checkErr
+}
+
+func (m *mockAgent) InspectRuntime(_ context.Context, _ runtime.Runtime) (agent.RuntimeObservation, error) {
+	m.inspectCall.Add(1)
+	return m.observation, m.inspectErr
+}
+
 func (m *mockAgent) CheckCredentials(_ context.Context) error {
 	m.credCall.Add(1)
 	return m.credErr
@@ -551,7 +566,7 @@ func TestSetupCaseEnvironmentRunsSetupAndInstallsAgentMCPAndSkill(t *testing.T) 
 		},
 	})
 
-	err := e.setupCaseEnvironment(context.Background(), rt, &config.CaseConfig{ID: "case-a"}, "with_skill", ag, runtime.MCPConfig{})
+	_, err := e.setupCaseEnvironment(context.Background(), rt, &config.CaseConfig{ID: "case-a"}, "with_skill", ag, runtime.MCPConfig{})
 	if err != nil {
 		t.Fatalf("setupCaseEnvironment returned error: %v", err)
 	}
@@ -573,7 +588,7 @@ func TestSetupCaseEnvironmentRunsSetupAndInstallsAgentMCPAndSkill(t *testing.T) 
 	}
 
 	withoutSkillAgent := &mockAgent{name: "agent"}
-	if err := e.setupCaseEnvironment(context.Background(), rt, &config.CaseConfig{ID: "case-a"}, "without_skill", withoutSkillAgent, runtime.MCPConfig{}); err != nil {
+	if _, err := e.setupCaseEnvironment(context.Background(), rt, &config.CaseConfig{ID: "case-a"}, "without_skill", withoutSkillAgent, runtime.MCPConfig{}); err != nil {
 		t.Fatalf("setup without_skill returned error: %v", err)
 	}
 	if withoutSkillAgent.skillCall.Load() != 0 {
@@ -593,7 +608,7 @@ func TestSetupCaseEnvironmentReportsSetupFailures(t *testing.T) {
 			return runtime.ExecResult{ExitCode: 2, Stderr: "bad setup"}, nil
 		},
 	}
-	err := e.setupCaseEnvironment(context.Background(), rt, &config.CaseConfig{ID: "case-a"}, "with_skill", &mockAgent{name: "agent"}, runtime.MCPConfig{})
+	_, err := e.setupCaseEnvironment(context.Background(), rt, &config.CaseConfig{ID: "case-a"}, "with_skill", &mockAgent{name: "agent"}, runtime.MCPConfig{})
 	if err == nil || !strings.Contains(err.Error(), "bad setup") {
 		t.Fatalf("setup error = %v, want stderr", err)
 	}
@@ -601,7 +616,7 @@ func TestSetupCaseEnvironmentReportsSetupFailures(t *testing.T) {
 	rt.execFunc = func(context.Context, string, runtime.ExecOptions) (runtime.ExecResult, error) {
 		return runtime.ExecResult{}, errors.New("boom")
 	}
-	err = e.setupCaseEnvironment(context.Background(), rt, &config.CaseConfig{ID: "case-a"}, "with_skill", &mockAgent{name: "agent"}, runtime.MCPConfig{})
+	_, err = e.setupCaseEnvironment(context.Background(), rt, &config.CaseConfig{ID: "case-a"}, "with_skill", &mockAgent{name: "agent"}, runtime.MCPConfig{})
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("setup exec error = %v, want boom", err)
 	}
@@ -1313,8 +1328,13 @@ func TestRemoveDefaultRunSkillsBeforeJudge_RemovesOnlyDefaultTargets(t *testing.
 }
 
 func TestExecuteCase_NoJudge_DefaultPass(t *testing.T) {
+	ag := &mockAgent{
+		name:        "test",
+		output:      "hello world",
+		observation: agent.RuntimeObservation{Version: "1.2.3"},
+	}
 	e := newTestEvaluator(EvalOptions{
-		Agent: &mockAgent{name: "test", output: "hello world"},
+		Agent: ag,
 	})
 
 	caseCfg := &config.CaseConfig{
@@ -1330,6 +1350,32 @@ func TestExecuteCase_NoJudge_DefaultPass(t *testing.T) {
 	}
 	if result.FinalMessage != "hello world" {
 		t.Errorf("expected 'hello world', got %s", result.FinalMessage)
+	}
+	if result.Version != "1.2.3" {
+		t.Errorf("expected observed version 1.2.3, got %q", result.Version)
+	}
+	if ag.checkCall.Load() != 1 || ag.inspectCall.Load() != 1 {
+		t.Errorf("preflight calls check/inspect = %d/%d, want 1/1", ag.checkCall.Load(), ag.inspectCall.Load())
+	}
+}
+
+func TestExecuteCase_PreflightFailureSkipsAgentRun(t *testing.T) {
+	t.Parallel()
+
+	ag := &mockAgent{name: "test", checkErr: errors.New("not installed")}
+	e := newTestEvaluator(EvalOptions{Agent: ag})
+	result := e.executeCase(
+		context.Background(),
+		&config.CaseConfig{ID: "case-preflight", Input: config.Input{Prompt: "hello"}},
+		"with_skill",
+		&mockRuntime{workspace: t.TempDir()},
+		nil,
+	)
+	if result.Status != judge.StatusError || result.Error == nil || !strings.Contains(result.Error.Error(), "not installed") {
+		t.Fatalf("result = status %s error %v, want preflight error", result.Status, result.Error)
+	}
+	if ag.runCall.Load() != 0 {
+		t.Fatalf("Run calls = %d, want 0", ag.runCall.Load())
 	}
 }
 
@@ -2296,11 +2342,17 @@ func TestSetupCaseEnvironmentAgentInstall(t *testing.T) {
 				t.Fatal("NewEvaluator returned non-default evaluator")
 			}
 
-			if err := eval.setupCaseEnvironment(context.Background(), rt, &config.CaseConfig{ID: "case"}, "with_skill", ag, runtime.MCPConfig{}); err != nil {
+			if _, err := eval.setupCaseEnvironment(context.Background(), rt, &config.CaseConfig{ID: "case"}, "with_skill", ag, runtime.MCPConfig{}); err != nil {
 				t.Fatalf("setupCaseEnvironment returned error: %v", err)
 			}
 			if got := ag.installCall.Load(); got != tt.wantInstalls {
 				t.Fatalf("Install calls = %d, want %d", got, tt.wantInstalls)
+			}
+			if got := ag.checkCall.Load(); got != 1 {
+				t.Fatalf("Check calls = %d, want 1", got)
+			}
+			if got := ag.inspectCall.Load(); got != 1 {
+				t.Fatalf("InspectRuntime calls = %d, want 1", got)
 			}
 		})
 	}

@@ -105,6 +105,73 @@ func TestRunEvalDryRunLoadsFiltersAndSkipsAgentSetup(t *testing.T) {
 	}
 }
 
+func TestRunEvalValidatesVersionAfterEngineOverride(t *testing.T) {
+	tests := []struct {
+		name       string
+		yamlEngine string
+		cliEngine  string
+		wantErr    string
+	}{
+		{
+			name:       "supported YAML engine overridden by unsupported engine",
+			yamlEngine: "codex",
+			cliEngine:  "qodercli",
+		},
+		{
+			name:       "unsupported YAML engine overridden by supported engine",
+			yamlEngine: "qodercli",
+			cliEngine:  "codex",
+			wantErr:    "must be an exact semantic version",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeAutoModeSkill(t, root)
+			evalsDir := filepath.Join(root, "evals")
+			casesDir := filepath.Join(evalsDir, "cases")
+			if err := os.MkdirAll(casesDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			evalYAML := fmt.Sprintf(`schema_version: v1alpha1
+environment:
+  type: none
+engine:
+  name: %s
+  version: latest
+cases:
+  files:
+    - evals/cases/basic.yaml
+`, tt.yamlEngine)
+			if err := os.WriteFile(filepath.Join(evalsDir, "eval.yaml"), []byte(evalYAML), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(casesDir, "basic.yaml"), []byte("id: basic\ninput:\n  prompt: hello\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			cmd := newRunPhaseTestCommand(t)
+			if err := cmd.Flags().Set("dry-run", testFlagBoolTrue); err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Flags().Set("engine", tt.cliEngine); err != nil {
+				t.Fatal(err)
+			}
+			_, err := captureStdout(t, func() error { return runEval(cmd, []string{root}) })
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("runEval() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("runEval() error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestRunEvalCLIModelSkipsSupersededYAMLModelReference(t *testing.T) {
 	t.Setenv("MISSING_MODEL", "")
 	root := t.TempDir()

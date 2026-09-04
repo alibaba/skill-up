@@ -41,7 +41,8 @@ const (
 )
 
 // Capabilities declares the configuration surface consumed by an adapter.
-// Installation/version behavior remains intentionally deferred to issue #196 PR 5.
+// Version support describes adapter selection and enforcement; static version
+// observation is handled by the runtime preflight.
 type Capabilities struct {
 	Protocol        Protocol
 	ModelPolicy     ModelPolicy
@@ -66,12 +67,13 @@ var (
 func CapabilitiesForEngine(engineName string) Capabilities {
 	switch engineName {
 	case agentkind.ClaudeCode, agentkind.ClaudeCodeAlias:
-		return Capabilities{Protocol: ProtocolAnthropic, ModelPolicy: ModelPolicyPassthrough, SupportsBaseURL: true}
+		return Capabilities{Protocol: ProtocolAnthropic, ModelPolicy: ModelPolicyPassthrough, SupportsBaseURL: true, SupportsVersion: agentkind.SupportsVersion(engineName)}
 	case agentkind.Codex:
 		return Capabilities{
 			Protocol:        ProtocolOpenAI,
 			ModelPolicy:     ModelPolicyCodexProvider,
 			SupportsBaseURL: true,
+			SupportsVersion: agentkind.SupportsVersion(engineName),
 			SupportedKwargs: slices.Clone(codexKwargs),
 		}
 	case agentkind.QoderCLI, agentkind.QoderAlias, agentkind.QoderCLIAlias:
@@ -81,7 +83,7 @@ func CapabilitiesForEngine(engineName string) Capabilities {
 			SupportedKwargs: slices.Clone(qoderKwargs),
 		}
 	case agentkind.QwenCode, agentkind.QwenCodeAlias, agentkind.QwenAlias:
-		return Capabilities{Protocol: ProtocolOpenAI, ModelPolicy: ModelPolicyPassthrough, SupportsBaseURL: true}
+		return Capabilities{Protocol: ProtocolOpenAI, ModelPolicy: ModelPolicyPassthrough, SupportsBaseURL: true, SupportsVersion: agentkind.SupportsVersion(engineName)}
 	default:
 		return Capabilities{
 			Protocol:    ProtocolCustom,
@@ -273,7 +275,7 @@ func validateBaseURL(params *credential.ResolvedAgentConfig, capabilities Capabi
 func validateDeferredFields(params *credential.ResolvedAgentConfig, capabilities Capabilities) {
 	if params.Version != "" && !capabilities.SupportsVersion {
 		params.Warnings = appendUniqueWarning(params.Warnings, fmt.Sprintf(
-			"engine %q does not yet enforce engine.version; the configured version %q is not guaranteed",
+			"engine %q does not support engine.version; the configured version %q is ignored",
 			params.Engine, params.Version,
 		))
 	}

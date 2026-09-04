@@ -396,12 +396,23 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 		runAgent = overrideAgent
 	}
 
-	var rt runtime.Runtime
+	var (
+		rt          runtime.Runtime
+		observation agent.RuntimeObservation
+	)
 	if overrideRT != nil {
 		rt = overrideRT
+		var err error
+		observation, err = agent.Preflight(ctx, rt, runAgent)
+		if err != nil {
+			result.Status = judge.StatusError
+			result.Error = fmt.Errorf("agent %s preflight failed: %w", runAgent.Name(), err)
+			result.Configuration = configName
+			return result
+		}
 	} else {
 		var err error
-		rt, err = e.prepareRuntimeForCase(ctx, caseCfg, configName, runAgent)
+		rt, observation, err = e.prepareRuntimeForCase(ctx, caseCfg, configName, runAgent)
 		if err != nil {
 			result.Status = judge.StatusError
 			result.Error = err
@@ -430,7 +441,9 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 					MaxTurns: caseMaxTurns(e.evalCfg, caseCfg),
 				},
 			}
-			return e.executeMultiTurnCase(ctx, rt, caseCfg, configName, runAgent, agentExecOpts, startTime, judgeCfg, &result)
+			multiTurnResult := e.executeMultiTurnCase(ctx, rt, caseCfg, configName, runAgent, agentExecOpts, startTime, judgeCfg, &result)
+			multiTurnResult.Version = observation.Version
+			return multiTurnResult
 		}
 		logging.WarnContextf(
 			ctx,
@@ -471,6 +484,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	agentSpan.End()
 	finalizeArtifacts(sessionResult)
 	result.SessionResult = normalizeSessionResult(sessionResult)
+	result.Version = observation.Version
 	if sessionResult != nil && sessionResult.Artifacts != nil && len(sessionResult.Artifacts.GeneratedFiles) > 0 {
 		e.ensureArtifactsInOutputDir(ctx, rt, configName, caseCfg.ID, "agent/run", agentArtifactDir, sessionResult)
 	}
@@ -1099,56 +1113,61 @@ func mergeFileContains(a, b []config.FileContainsCheck) []config.FileContainsChe
 	return result
 }
 
-func (e *defaultEvaluator) prepareRuntimeForCase(ctx context.Context, caseCfg *config.CaseConfig, configName string, ag agent.Agent) (runtime.Runtime, error) {
+func (e *defaultEvaluator) prepareRuntimeForCase(ctx context.Context, caseCfg *config.CaseConfig, configName string, ag agent.Agent) (runtime.Runtime, agent.RuntimeObservation, error) {
 	rtCfg := e.evalCfg.Environment.ToRuntimeConfig()
 	rtCfg.Delete = e.deleteWorkspace
 	mcpCfg, mcpEnv, err := e.provisionMCPConfigForCase(caseCfg)
 	if err != nil {
-		return nil, err
+		return nil, agent.RuntimeObservation{}, err
 	}
 	rtCfg.Env = mergeEnvMaps(rtCfg.Env, mcpEnv)
 
 	rt, err := runtime.NewRuntime(rtCfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create runtime: %w", err)
+		return nil, agent.RuntimeObservation{}, fmt.Errorf("failed to create runtime: %w", err)
 	}
 	if err := rt.Create(ctx); err != nil {
 		_ = rt.Close()
-		return nil, fmt.Errorf("failed to create runtime workspace: %w", err)
+		return nil, agent.RuntimeObservation{}, fmt.Errorf("failed to create runtime workspace: %w", err)
 	}
-	if err := e.setupCaseEnvironment(ctx, rt, caseCfg, configName, ag, mcpCfg); err != nil {
+	observation, err := e.setupCaseEnvironment(ctx, rt, caseCfg, configName, ag, mcpCfg)
+	if err != nil {
 		_ = rt.Close()
-		return nil, fmt.Errorf("failed to setup case environment: %w", err)
+		return nil, agent.RuntimeObservation{}, fmt.Errorf("failed to setup case environment: %w", err)
 	}
-	return rt, nil
+	return rt, observation, nil
 }
 
-func (e *defaultEvaluator) setupCaseEnvironment(ctx context.Context, rt runtime.Runtime, caseCfg *config.CaseConfig, configName string, ag agent.Agent, mcpCfg runtime.MCPConfig) error {
+func (e *defaultEvaluator) setupCaseEnvironment(ctx context.Context, rt runtime.Runtime, caseCfg *config.CaseConfig, configName string, ag agent.Agent, mcpCfg runtime.MCPConfig) (agent.RuntimeObservation, error) { //nolint:cyclop // linear setup pipeline keeps ordering and cleanup behavior explicit
 	for i, step := range e.evalCfg.Environment.SetupSteps {
 		result, err := rt.Exec(ctx, step.Run, runtime.ExecOptions{})
 		if err != nil {
-			return fmt.Errorf("setup step %d (%q) failed: %w", i+1, step.Run, err)
+			return agent.RuntimeObservation{}, fmt.Errorf("setup step %d (%q) failed: %w", i+1, step.Run, err)
 		}
 		if result.ExitCode != 0 {
-			return fmt.Errorf("setup step %d (%q) exited with code %d: %s", i+1, step.Run, result.ExitCode, result.Stderr)
+			return agent.RuntimeObservation{}, fmt.Errorf("setup step %d (%q) exited with code %d: %s", i+1, step.Run, result.ExitCode, result.Stderr)
 		}
 	}
 
 	if e.evalCfg.Environment.Type != "none" {
 		if err := ag.Install(ctx, rt); err != nil {
-			return fmt.Errorf("failed to install agent %s: %w", ag.Name(), err)
+			return agent.RuntimeObservation{}, fmt.Errorf("failed to install agent %s: %w", ag.Name(), err)
 		}
+	}
+	observation, err := agent.Preflight(ctx, rt, ag)
+	if err != nil {
+		return agent.RuntimeObservation{}, fmt.Errorf("agent %s preflight failed: %w", ag.Name(), err)
 	}
 
 	if err := ag.InstallMCP(ctx, rt, mcpCfg); err != nil {
-		return fmt.Errorf("failed to install MCP servers: %w", err)
+		return agent.RuntimeObservation{}, fmt.Errorf("failed to install MCP servers: %w", err)
 	}
 
 	if configName != "without_skill" && e.loader != nil {
 		for _, skillRef := range e.evalCfg.Skills {
 			skillCfg := resolveSkillConfig(e.loader.SkillDir(), skillRef)
 			if err := ag.InstallSkill(ctx, rt, skillCfg); err != nil {
-				return fmt.Errorf("failed to install skill %s: %w", skillRef.Path, err)
+				return agent.RuntimeObservation{}, fmt.Errorf("failed to install skill %s: %w", skillRef.Path, err)
 			}
 			logging.DebugContextf(ctx, "Evaluator: skill installed: %s", filepath.Base(skillCfg.Source))
 		}
@@ -1157,11 +1176,11 @@ func (e *defaultEvaluator) setupCaseEnvironment(ctx context.Context, rt runtime.
 	if e.fixtures != nil && e.loader != nil && e.skillDir != "" {
 		fixtureBaseDir := e.loader.SkillDir()
 		if err := e.fixtures.UploadAll(ctx, rt, caseCfg, e.skillDir, fixtureBaseDir); err != nil {
-			return fmt.Errorf("failed to upload fixtures: %w", err)
+			return agent.RuntimeObservation{}, fmt.Errorf("failed to upload fixtures: %w", err)
 		}
 	}
 
-	return nil
+	return observation, nil
 }
 
 func resolveSkillConfig(skillDir string, ref config.SkillRef) runtime.SkillConfig {
