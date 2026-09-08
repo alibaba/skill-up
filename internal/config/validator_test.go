@@ -40,15 +40,14 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "supported engine requires exact version",
+			name: "non-exact supported version remains compatible",
 			cfg: &EvalConfig{
 				SchemaVersion: "v1alpha1",
 				Environment:   Environment{Type: "none"},
 				Engine:        EngineConfig{Name: "codex", Version: "latest"},
 				Cases:         CasesConfig{Files: []string{"evals/cases/test.yaml"}},
 			},
-			wantErr: true,
-			errMsg:  "must be an exact semantic version",
+			wantErr: false,
 		},
 		{
 			name: "unsupported qoder version remains compatible",
@@ -812,30 +811,6 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestValidator_ValidateEngineVersionAfterOverride(t *testing.T) {
-	t.Parallel()
-
-	validator := NewValidator()
-	cfg := &EvalConfig{
-		SchemaVersion: "v1alpha1",
-		Environment:   Environment{Type: "none"},
-		Engine:        EngineConfig{Name: "codex", Version: "latest"},
-		Cases:         CasesConfig{Files: []string{"evals/cases/test.yaml"}},
-	}
-
-	if err := validator.ValidateEvalConfigBeforeEngineOverride(cfg); err != nil {
-		t.Fatalf("ValidateEvalConfigBeforeEngineOverride() error = %v, want deferred version validation", err)
-	}
-	if err := validator.ValidateEngineVersion(cfg.Engine); err == nil {
-		t.Fatal("ValidateEngineVersion() error = nil, want invalid codex version")
-	}
-
-	cfg.Engine.Name = "qodercli"
-	if err := validator.ValidateEngineVersion(cfg.Engine); err != nil {
-		t.Fatalf("ValidateEngineVersion() error = %v, want unsupported qodercli version to be ignored", err)
 	}
 }
 

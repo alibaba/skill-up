@@ -144,8 +144,10 @@ report:
 `engine.version` 必须与现有 CLI 匹配。在隔离 runtime 中，Claude Code、
 Codex 和 Qwen Code 会先安装指定版本再校验。QoderCLI 的实际版本仍会记录到
 报告，但其安装器不支持选择 `engine.version`，显式配置会被警告并忽略。
-对支持版本选择的 adapter，`engine.version` 必须是完整、精确的语义化版本
-（例如 `2.1.0` 或 `2.1.0-beta.1`）；`latest`、`^2.1.0` 等 tag 或范围不受支持。
+对支持版本选择的 adapter，只有完整、精确的语义化版本（例如 `2.1.0` 或
+`2.1.0-beta.1`）才会实际应用。为保持向后兼容，`latest`、`^2.1.0` 等 tag
+或范围仍可通过配置加载，但会被警告并忽略。报告会将原始值保留为 requested
+configuration，并将 applied version 留空。
 
 ### 采集 workspace 产物（`collect_artifacts`）
 

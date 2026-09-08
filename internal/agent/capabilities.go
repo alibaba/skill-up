@@ -93,10 +93,11 @@ func CapabilitiesForEngine(engineName string) Capabilities {
 }
 
 // ResolveAdapterConfig applies an adapter's capability contract to an already
-// merged role configuration. Requested values remain intact while AppliedModel
-// records the model that skill-up will forward to the CLI. It does not claim
-// that the CLI ultimately selected that model: local CLI configuration may
-// override it, and most adapters do not report their final runtime choice.
+// merged role configuration. Requested values remain intact while applied
+// fields record the version and model that skill-up will forward to the CLI.
+// It does not claim that the CLI ultimately selected them: local CLI
+// configuration may override the model, and runtime identity is observed
+// separately.
 func ResolveAdapterConfig(params credential.ResolvedAgentConfig, resolver *credential.Resolver) credential.ResolvedAgentConfig {
 	if params.Role == "" {
 		params.Role = credential.AgentRoleRunner
@@ -273,11 +274,22 @@ func validateBaseURL(params *credential.ResolvedAgentConfig, capabilities Capabi
 }
 
 func validateDeferredFields(params *credential.ResolvedAgentConfig, capabilities Capabilities) {
-	if params.Version != "" && !capabilities.SupportsVersion {
-		params.Warnings = appendUniqueWarning(params.Warnings, fmt.Sprintf(
-			"engine %q does not support engine.version; the configured version %q is ignored",
-			params.Engine, params.Version,
-		))
+	params.AppliedVersion = ""
+	if params.Version != "" {
+		switch {
+		case !capabilities.SupportsVersion:
+			params.Warnings = appendUniqueWarning(params.Warnings, fmt.Sprintf(
+				"engine %q does not support engine.version; the configured version %q is ignored",
+				params.Engine, params.Version,
+			))
+		case !agentkind.IsExactVersion(params.Version):
+			params.Warnings = appendUniqueWarning(params.Warnings, fmt.Sprintf(
+				"engine %q requires an exact semantic version for version selection; the configured version %q is ignored",
+				params.Engine, params.Version,
+			))
+		default:
+			params.AppliedVersion = params.Version
+		}
 	}
 	if params.Entry != "" && !capabilities.SupportsEntry {
 		params.Warnings = appendUniqueWarning(params.Warnings, fmt.Sprintf(
@@ -366,8 +378,8 @@ func appendUniqueWarning(warnings []string, warning string) []string {
 func LogAdapterConfig(ctx context.Context, params credential.ResolvedAgentConfig) {
 	logging.DebugContextf(
 		ctx,
-		"AGENT_CONFIG kind=%s engine=%s protocol=%s requested.provider=%s applied.provider=%s requested.model=%s applied.model=%s",
-		params.Role, params.Engine, params.Protocol, params.Provider, params.AppliedProvider, params.Model, params.AppliedModel,
+		"AGENT_CONFIG kind=%s engine=%s protocol=%s requested.provider=%s applied.provider=%s requested.model=%s applied.model=%s requested.version=%s applied.version=%s",
+		params.Role, params.Engine, params.Protocol, params.Provider, params.AppliedProvider, params.Model, params.AppliedModel, params.Version, params.AppliedVersion,
 	)
 	for _, warning := range params.Warnings {
 		logging.WarnContextf(ctx, "AGENT_CONFIG kind=%s engine=%s warning=%s", params.Role, params.Engine, warning)

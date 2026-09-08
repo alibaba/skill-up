@@ -372,6 +372,9 @@ func TestResolveAdapterConfig_ValidatesExplicitSettingsWithoutAliasing(t *testin
 	if containsWarning(got.Warnings, "engine.version") {
 		t.Fatalf("warnings = %v, did not expect supported codex version warning", got.Warnings)
 	}
+	if got.AppliedVersion != "1.2.3" {
+		t.Fatalf("AppliedVersion = %q, want exact requested version", got.AppliedVersion)
+	}
 	if kwargs[KwargBypassSandbox] != "sensitive-invalid-value" || kwargs["typo"] != "value" {
 		t.Fatalf("ResolveAdapterConfig mutated source kwargs: %v", kwargs)
 	}
@@ -407,6 +410,23 @@ func TestResolveAdapterConfig_QoderWarnsForUnsupportedVersion(t *testing.T) {
 	got := ResolveAdapterConfig(credential.ResolvedAgentConfig{Engine: "qodercli", Version: "1.2.3"}, nil)
 	if !containsWarning(got.Warnings, "engine.version") {
 		t.Fatalf("Warnings = %v, want unsupported version warning", got.Warnings)
+	}
+	if got.AppliedVersion != "" {
+		t.Fatalf("AppliedVersion = %q, want unsupported version omitted", got.AppliedVersion)
+	}
+}
+
+func TestResolveAdapterConfig_WarnsAndIgnoresNonExactVersion(t *testing.T) {
+	t.Parallel()
+
+	for _, version := range []string{"latest", "^1.2.0", "1.2"} {
+		got := ResolveAdapterConfig(credential.ResolvedAgentConfig{Engine: "codex", Version: version}, nil)
+		if got.Version != version || got.AppliedVersion != "" {
+			t.Fatalf("version %q resolved requested/applied = %q/%q, want %q/empty", version, got.Version, got.AppliedVersion, version)
+		}
+		if !containsWarning(got.Warnings, "requires an exact semantic version") || !containsWarning(got.Warnings, "is ignored") {
+			t.Fatalf("version %q warnings = %v, want warn-and-ignore message", version, got.Warnings)
+		}
 	}
 }
 

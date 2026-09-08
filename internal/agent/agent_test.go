@@ -559,13 +559,17 @@ func TestDetectAgentWithResolvedConfig_RequiresMaterialization(t *testing.T) {
 	}
 }
 
-func TestDetectAgentRejectsNonConcreteSupportedVersion(t *testing.T) {
+func TestDetectAgentIgnoresNonConcreteSupportedVersion(t *testing.T) {
 	t.Parallel()
 
 	for _, version := range []string{"latest", "2.1", "1.2.3.4"} {
-		_, err := DetectAgent("codex", Config{Version: version})
-		if err == nil || !strings.Contains(err.Error(), "exact semantic version") {
-			t.Fatalf("DetectAgent version %q error = %v, want exact semantic version error", version, err)
+		ag, err := DetectAgent("codex", Config{Version: version})
+		if err != nil {
+			t.Fatalf("DetectAgent version %q error = %v, want nil", version, err)
+		}
+		codexAgent, ok := ag.(*CodexAgent)
+		if !ok || codexAgent.Cfg.Version != "" || !containsWarning(codexAgent.Cfg.Warnings, "is ignored") {
+			t.Fatalf("DetectAgent version %q produced %#v, want ignored version", version, ag)
 		}
 	}
 }

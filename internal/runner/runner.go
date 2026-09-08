@@ -578,9 +578,7 @@ func buildReportInput(
 		Protocol: resolved.Protocol,
 		Provider: resolved.AppliedProvider,
 		Model:    resolved.AppliedModel,
-	}
-	if agent.CapabilitiesForEngine(resolved.Engine).SupportsVersion {
-		applied.Version = resolved.Version
+		Version:  resolved.AppliedVersion,
 	}
 	// Keep the legacy top-level model_name requested-value semantics for report
 	// compatibility. Consumers that need invocation identity should use the

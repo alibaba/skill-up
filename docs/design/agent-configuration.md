@@ -40,7 +40,9 @@ availability check followed by its `--version` command. With `environment.type:
 none`, the host installation is never modified; a configured concrete version
 is only validated against the host CLI. In an isolated runtime, supported npm
 adapters (`claude_code`, `codex`, and `qwen_code`) install the configured
-exact semantic version before the same preflight; tags and ranges are rejected.
+exact semantic version before the same preflight. For compatibility, tags,
+ranges, and other non-exact selectors are retained as requested configuration
+but warned and ignored rather than passed to an installer.
 QoderCLI's installer does not support version
 selection, so `engine.version` remains unsupported there, while its detected
 version is still reported. These commands do not inspect login state or make a

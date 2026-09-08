@@ -27,6 +27,7 @@ type ResolvedAgentConfig struct {
     Role           AgentRole
     Engine         string
     Version        string
+    AppliedVersion string
     Entry          string
     Protocol       string
     Provider       string
@@ -47,8 +48,10 @@ type ResolvedAgentConfig struct {
 This value is the boundary between raw YAML/CLI/credential inputs and adapter
 construction. Map fields are cloned while resolving, so later mutations of the
 loaded eval config do not alter a resolved runner or judge configuration.
-Protocol, applied model, applied connection, and warnings are filled by the
-subsequent adapter capability pass.
+Protocol, applied version/model, applied connection, and warnings are filled by
+the subsequent adapter capability pass. `Version` retains the requested value;
+`AppliedVersion` is populated only for an exact selector supported by the
+adapter.
 
 ## Two Pipelines
 

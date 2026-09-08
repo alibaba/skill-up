@@ -148,9 +148,11 @@ version before validation. QoderCLI versions are observed in reports, but its
 installer does not support selecting `engine.version`, so an explicit value is
 ignored with a warning.
 
-For supported adapters, `engine.version` must be one exact semantic version
-(for example, `2.1.0` or `2.1.0-beta.1`); tags and ranges such as `latest` or
-`^2.1.0` are rejected.
+For supported adapters, only one exact semantic version (for example, `2.1.0`
+or `2.1.0-beta.1`) is applied. For backward compatibility, tags and ranges such
+as `latest` or `^2.1.0` are accepted but ignored with a warning. Reports retain
+the original value as requested configuration and leave the applied version
+empty.
 
 ### Engine kwargs (agent-specific switches)
 

@@ -525,6 +525,17 @@ func TestBuildReportInput_DoesNotApplyUnsupportedVersion(t *testing.T) {
 	}
 }
 
+func TestBuildReportInput_DoesNotApplyNonExactVersion(t *testing.T) {
+	t.Parallel()
+
+	evalCfg := &config.EvalConfig{Engine: config.EngineConfig{Name: "codex"}}
+	resolved := credential.ResolvedAgentConfig{Role: credential.AgentRoleRunner, Engine: "codex", Version: "latest"}
+	input := buildReportInput("s", map[string]*caseResults{}, nil, time.Time{}, time.Time{}, evalCfg, resolved)
+	if input.RequestedConfiguration.Version != "latest" || input.AppliedConfiguration.Version != "" {
+		t.Fatalf("report requested/applied versions = %q / %q", input.RequestedConfiguration.Version, input.AppliedConfiguration.Version)
+	}
+}
+
 func TestBuildReportInput_TokenAccumulation(t *testing.T) {
 	evalCfg := &config.EvalConfig{Engine: config.EngineConfig{Name: "test"}}
 	grouped := map[string]*caseResults{

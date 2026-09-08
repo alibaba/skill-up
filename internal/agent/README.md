@@ -154,7 +154,9 @@ for built-in CLI agents, a static `--version` command. It never checks login
 state or makes a model request. A `none` runtime only validates the existing
 host binary and never installs or upgrades it. Isolated runtimes install a
 configured version first for Claude Code, Codex, and Qwen Code, then validate
-and record the detected version. QoderCLI still reports its detected version,
+and record the detected version. Non-exact selectors remain accepted for
+compatibility, but the capability layer warns and omits them from applied
+configuration. QoderCLI still reports its detected version,
 but its installer cannot select a requested version, so the capability layer
 warns and omits that constraint.
 

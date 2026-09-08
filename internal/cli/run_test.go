@@ -105,12 +105,11 @@ func TestRunEvalDryRunLoadsFiltersAndSkipsAgentSetup(t *testing.T) {
 	}
 }
 
-func TestRunEvalValidatesVersionAfterEngineOverride(t *testing.T) {
+func TestRunEvalKeepsNonExactVersionCompatibleAfterEngineOverride(t *testing.T) {
 	tests := []struct {
 		name       string
 		yamlEngine string
 		cliEngine  string
-		wantErr    string
 	}{
 		{
 			name:       "supported YAML engine overridden by unsupported engine",
@@ -121,7 +120,6 @@ func TestRunEvalValidatesVersionAfterEngineOverride(t *testing.T) {
 			name:       "unsupported YAML engine overridden by supported engine",
 			yamlEngine: "qodercli",
 			cliEngine:  "codex",
-			wantErr:    "must be an exact semantic version",
 		},
 	}
 
@@ -158,15 +156,8 @@ cases:
 			if err := cmd.Flags().Set("engine", tt.cliEngine); err != nil {
 				t.Fatal(err)
 			}
-			_, err := captureStdout(t, func() error { return runEval(cmd, []string{root}) })
-			if tt.wantErr == "" {
-				if err != nil {
-					t.Fatalf("runEval() error = %v, want nil", err)
-				}
-				return
-			}
-			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("runEval() error = %v, want containing %q", err, tt.wantErr)
+			if _, err := captureStdout(t, func() error { return runEval(cmd, []string{root}) }); err != nil {
+				t.Fatalf("runEval() error = %v, want non-exact version compatibility", err)
 			}
 		})
 	}
