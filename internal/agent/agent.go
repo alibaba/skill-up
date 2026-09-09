@@ -9,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -54,7 +55,8 @@ type SessionResult struct {
 	AppliedProvider   string                  `json:"applied_provider,omitempty"`
 	RequestedModel    string                  `json:"requested_model,omitempty"`
 	AppliedModel      string                  `json:"applied_model,omitempty"`
-	Model             string                  `json:"model,omitempty"` // Agent-reported observed model; empty when unavailable.
+	Model             string                  `json:"model,omitempty"`   // Agent-reported observed model; empty when unavailable.
+	Version           string                  `json:"version,omitempty"` // CLI version observed by the static preflight.
 	Warnings          []string                `json:"warnings,omitempty"`
 	SessionID         string                  `json:"session_id,omitempty"`
 	ExitCode          int                     `json:"exit_code"`
@@ -78,6 +80,31 @@ type SessionResult struct {
 // forward between turns.
 type SessionResumer interface {
 	RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, message transcript.Message, sessionID string) (*SessionResult, error)
+}
+
+// RuntimeObservation contains metadata obtained from side-effect-free runtime
+// inspection. It does not include authentication or login state.
+type RuntimeObservation struct {
+	Version string
+}
+
+// RuntimeInspector is implemented by agents that can inspect runtime metadata
+// after the executable availability check succeeds.
+type RuntimeInspector interface {
+	InspectRuntime(ctx context.Context, rt Runtime) (RuntimeObservation, error)
+}
+
+// Preflight checks executable availability and then collects optional static
+// runtime metadata. It never probes authentication or makes a model request.
+func Preflight(ctx context.Context, rt Runtime, ag Agent) (RuntimeObservation, error) {
+	if err := ag.Check(ctx, rt); err != nil {
+		return RuntimeObservation{}, err
+	}
+	inspector, ok := ag.(RuntimeInspector)
+	if !ok {
+		return RuntimeObservation{}, nil
+	}
+	return inspector.InspectRuntime(ctx, rt)
 }
 
 // SessionArtifacts holds artifacts produced during an agent session.
@@ -432,6 +459,23 @@ func formatAgentModel(provider, model string) string {
 		return provider
 	}
 	return provider + "/" + model
+}
+
+func versionedPackage(packageName, version string) string {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return packageName
+	}
+	return packageName + "@" + version
+}
+
+func installedVersionGuard(binary, version string) string {
+	expected := normalizedConfiguredVersion(version)
+	if expected == "" {
+		return ""
+	}
+	return "if command -v " + binary + " >/dev/null 2>&1 && " + binary +
+		" --version 2>&1 | grep -Eq " + shellQuote(`(^|[^0-9A-Za-z])v?`+regexp.QuoteMeta(expected)+`([^0-9A-Za-z.+-]|$)`) + "; then exit 0; fi"
 }
 
 // shellQuote quotes a string for safe POSIX shell usage. Agent commands are

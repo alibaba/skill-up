@@ -23,20 +23,21 @@ func TestCapabilitiesForEngine(t *testing.T) {
 		protocol        Protocol
 		modelPolicy     ModelPolicy
 		supportsBaseURL bool
+		supportsVersion bool
 		kwarg           string
 		arbitraryKwargs bool
 	}{
-		{engine: "claude_code", protocol: ProtocolAnthropic, modelPolicy: ModelPolicyPassthrough, supportsBaseURL: true},
-		{engine: "codex", protocol: ProtocolOpenAI, modelPolicy: ModelPolicyCodexProvider, supportsBaseURL: true, kwarg: KwargBypassSandbox},
+		{engine: "claude_code", protocol: ProtocolAnthropic, modelPolicy: ModelPolicyPassthrough, supportsBaseURL: true, supportsVersion: true},
+		{engine: "codex", protocol: ProtocolOpenAI, modelPolicy: ModelPolicyCodexProvider, supportsBaseURL: true, supportsVersion: true, kwarg: KwargBypassSandbox},
 		{engine: "qoder-cli", protocol: ProtocolQoder, modelPolicy: ModelPolicyQoderTier, kwarg: KwargEdition},
-		{engine: "qwen", protocol: ProtocolOpenAI, modelPolicy: ModelPolicyPassthrough, supportsBaseURL: true},
+		{engine: "qwen", protocol: ProtocolOpenAI, modelPolicy: ModelPolicyPassthrough, supportsBaseURL: true, supportsVersion: true},
 		{engine: "custom-agent", protocol: ProtocolCustom, modelPolicy: ModelPolicyPassthrough},
 	}
 	for _, tt := range tests {
 		t.Run(tt.engine, func(t *testing.T) {
 			t.Parallel()
 			got := CapabilitiesForEngine(tt.engine)
-			if got.Protocol != tt.protocol || got.ModelPolicy != tt.modelPolicy || got.SupportsBaseURL != tt.supportsBaseURL || got.ArbitraryKwargs != tt.arbitraryKwargs {
+			if got.Protocol != tt.protocol || got.ModelPolicy != tt.modelPolicy || got.SupportsBaseURL != tt.supportsBaseURL || got.SupportsVersion != tt.supportsVersion || got.ArbitraryKwargs != tt.arbitraryKwargs {
 				t.Fatalf("CapabilitiesForEngine(%q) = %+v", tt.engine, got)
 			}
 			if tt.kwarg != "" && !slices.Contains(got.SupportedKwargs, tt.kwarg) {
@@ -363,10 +364,16 @@ func TestResolveAdapterConfig_ValidatesExplicitSettingsWithoutAliasing(t *testin
 			t.Fatalf("invalid or unsupported kwarg %q was not removed: %v", key, got.Kwargs)
 		}
 	}
-	for _, want := range []string{"engine.version", "engine.entry", "engine.model.params", "requires boolean", "requires positive integer", "does not support kwarg"} {
+	for _, want := range []string{"engine.entry", "engine.model.params", "requires boolean", "requires positive integer", "does not support kwarg"} {
 		if !containsWarning(got.Warnings, want) {
 			t.Fatalf("warnings = %v, want substring %q", got.Warnings, want)
 		}
+	}
+	if containsWarning(got.Warnings, "engine.version") {
+		t.Fatalf("warnings = %v, did not expect supported codex version warning", got.Warnings)
+	}
+	if got.AppliedVersion != "1.2.3" {
+		t.Fatalf("AppliedVersion = %q, want exact requested version", got.AppliedVersion)
 	}
 	if kwargs[KwargBypassSandbox] != "sensitive-invalid-value" || kwargs["typo"] != "value" {
 		t.Fatalf("ResolveAdapterConfig mutated source kwargs: %v", kwargs)
@@ -394,6 +401,32 @@ func TestResolveAdapterConfig_QoderNormalizesUnsupportedEdition(t *testing.T) {
 	}
 	if !containsWarning(got.Warnings, "does not support the configured edition") {
 		t.Fatalf("warnings = %v, want unsupported edition warning", got.Warnings)
+	}
+}
+
+func TestResolveAdapterConfig_QoderWarnsForUnsupportedVersion(t *testing.T) {
+	t.Parallel()
+
+	got := ResolveAdapterConfig(credential.ResolvedAgentConfig{Engine: "qodercli", Version: "1.2.3"}, nil)
+	if !containsWarning(got.Warnings, "engine.version") {
+		t.Fatalf("Warnings = %v, want unsupported version warning", got.Warnings)
+	}
+	if got.AppliedVersion != "" {
+		t.Fatalf("AppliedVersion = %q, want unsupported version omitted", got.AppliedVersion)
+	}
+}
+
+func TestResolveAdapterConfig_WarnsAndIgnoresNonExactVersion(t *testing.T) {
+	t.Parallel()
+
+	for _, version := range []string{"latest", "^1.2.0", "1.2"} {
+		got := ResolveAdapterConfig(credential.ResolvedAgentConfig{Engine: "codex", Version: version}, nil)
+		if got.Version != version || got.AppliedVersion != "" {
+			t.Fatalf("version %q resolved requested/applied = %q/%q, want %q/empty", version, got.Version, got.AppliedVersion, version)
+		}
+		if !containsWarning(got.Warnings, "requires an exact semantic version") || !containsWarning(got.Warnings, "is ignored") {
+			t.Fatalf("version %q warnings = %v, want warn-and-ignore message", version, got.Warnings)
+		}
 	}
 }
 

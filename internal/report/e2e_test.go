@@ -56,12 +56,12 @@ func buildRealisticInput() Input {
 		EngineName:    "codex",
 		ModelName:     "openai/gpt-5.4",
 		RequestedConfiguration: &AgentConfiguration{
-			Role: "runner", Engine: "codex", Protocol: "openai", Provider: "openai", Model: "gpt-5.4",
+			Role: "runner", Engine: "codex", Protocol: "openai", Provider: "openai", Model: "gpt-5.4", Version: "1.2.3",
 		},
 		AppliedConfiguration: &AgentConfiguration{
-			Role: "runner", Engine: "codex", Protocol: "openai", Provider: "openai", Model: "gpt-5.4",
+			Role: "runner", Engine: "codex", Protocol: "openai", Provider: "openai", Model: "gpt-5.4", Version: "1.2.3",
 		},
-		ObservedConfiguration: &AgentConfiguration{Model: "gpt-5.4"},
+		ObservedConfiguration: &AgentConfiguration{Model: "gpt-5.4", Version: "1.2.3"},
 		StartTime:             start,
 		EndTime:               end,
 		CaseResults: []CaseResult{
@@ -430,7 +430,7 @@ func TestE2E_HTMLReporter_FullPipeline(t *testing.T) {
 	if !strings.Contains(content, "gpt-5.4") {
 		t.Fatal("HTML should contain model name")
 	}
-	for _, want := range []string{`"protocol":"openai"`, `"requested_model":"openai/gpt-5.4"`, `"applied_model":"openai/gpt-5.4"`, `"observed_model":"gpt-5.4"`} {
+	for _, want := range []string{`"protocol":"openai"`, `"requested_model":"openai/gpt-5.4"`, `"applied_model":"openai/gpt-5.4"`, `"observed_model":"gpt-5.4"`, `"requested_version":"1.2.3"`, `"applied_version":"1.2.3"`, `"observed_version":"1.2.3"`} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("HTML should contain configuration field %s", want)
 		}

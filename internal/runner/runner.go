@@ -590,6 +590,7 @@ func buildReportInput(
 		Protocol: resolved.Protocol,
 		Provider: resolved.AppliedProvider,
 		Model:    resolved.AppliedModel,
+		Version:  resolved.AppliedVersion,
 	}
 	// Keep the legacy top-level model_name requested-value semantics for report
 	// compatibility. Consumers that need invocation identity should use the
@@ -631,12 +632,11 @@ func buildReportInput(
 	return input
 }
 
-// observedRunnerConfiguration returns a run-level model only when every
+// observedRunnerConfiguration returns each run-level field only when every
 // executed runner session explicitly reported the same non-empty value. A
-// missing or mixed observation cannot safely describe the entire run.
+// missing or mixed field cannot safely describe the entire run.
 func observedRunnerConfiguration(grouped map[string]*caseResults, caseIDs []string) *report.AgentConfiguration {
-	observed := ""
-	seen := false
+	var sessions []*agent.SessionResult
 	for _, caseID := range caseIDs {
 		results := grouped[caseID]
 		if results == nil {
@@ -646,41 +646,55 @@ func observedRunnerConfiguration(grouped map[string]*caseResults, caseIDs []stri
 			if result == nil {
 				continue
 			}
-			seen = true
-			if result.SessionResult == nil || result.Model == "" {
-				return nil
-			}
-			if observed == "" {
-				observed = result.Model
-				continue
-			}
-			if result.Model != observed {
-				return nil
-			}
+			sessions = append(sessions, result.SessionResult)
 		}
 	}
-	if !seen || observed == "" {
+	if len(sessions) == 0 {
 		return nil
 	}
-	return &report.AgentConfiguration{Model: observed}
+	unanimous := func(value func(*agent.SessionResult) string) string {
+		observed := ""
+		for _, session := range sessions {
+			if session == nil || value(session) == "" {
+				return ""
+			}
+			if observed == "" {
+				observed = value(session)
+				continue
+			}
+			if value(session) != observed {
+				return ""
+			}
+		}
+		return observed
+	}
+	configuration := &report.AgentConfiguration{
+		Model:   unanimous(func(session *agent.SessionResult) string { return session.Model }),
+		Version: unanimous(func(session *agent.SessionResult) string { return session.Version }),
+	}
+	if configuration.Model == "" && configuration.Version == "" {
+		return nil
+	}
+	return configuration
 }
 
 func evalResultToCaseResult(res *evaluator.EvalResult) report.CaseResult {
 	cr := report.CaseResult{
-		CaseID:        res.CaseID,
-		Title:         res.CaseName,
-		Status:        res.Status,
-		DurationMs:    res.DurationMs,
-		Turns:         res.Turns,
-		InputTokens:   res.InputTokens,
-		OutputTokens:  res.OutputTokens,
-		Grading:       res.Grading,
-		JudgeSkills:   res.JudgeSkills,
-		Configuration: res.Configuration,
-		Prompt:        res.Prompt,
-		Response:      responseContent(res),
-		ObservedModel: res.Model,
-		TurnResults:   evalTurnResultsToReport(res.TurnResults),
+		CaseID:          res.CaseID,
+		Title:           res.CaseName,
+		Status:          res.Status,
+		DurationMs:      res.DurationMs,
+		Turns:           res.Turns,
+		InputTokens:     res.InputTokens,
+		OutputTokens:    res.OutputTokens,
+		Grading:         res.Grading,
+		JudgeSkills:     res.JudgeSkills,
+		Configuration:   res.Configuration,
+		Prompt:          res.Prompt,
+		Response:        responseContent(res),
+		ObservedModel:   res.Model,
+		ObservedVersion: res.Version,
+		TurnResults:     evalTurnResultsToReport(res.TurnResults),
 	}
 	judgeSession := res.JudgeSession
 	if judgeSession == nil && res.Grading != nil {

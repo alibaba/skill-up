@@ -275,6 +275,9 @@
       else if (DATA.requested_model) meta += " | Applied model: none (local/default selection)";
       else if (DATA.model_name) meta += " | Model: " + DATA.model_name;
       meta += " | Observed model: " + (DATA.observed_model || "unknown");
+      if (DATA.requested_version) meta += " | Requested version: " + DATA.requested_version;
+      if (DATA.applied_version) meta += " | Applied version: " + DATA.applied_version;
+      if (DATA.observed_version) meta += " | Observed version: " + DATA.observed_version;
       meta += " | Started: " + DATA.start_time + " | Evaluation wall time: " + DATA.evaluation_wall_time;
       meta += " | Tested agent tokens: " + fmtInteger(DATA.agent_tokens);
       meta += " | Judge tokens: " + fmtInteger(DATA.judge_tokens);

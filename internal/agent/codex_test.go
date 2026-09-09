@@ -68,7 +68,7 @@ const (
 	testThreadID      = "abc"
 )
 
-func TestNewCodexAgent(t *testing.T) {
+func TestNewCodexAgent(t *testing.T) { //nolint:dupl // mirrors constructor defaults asserted for Qwen Code
 	t.Parallel()
 
 	ag := NewCodexAgent(Config{})
@@ -79,8 +79,20 @@ func TestNewCodexAgent(t *testing.T) {
 	if ag.Cfg.CheckCmd != "command -v codex" {
 		t.Fatalf("expected codex check cmd, got %s", ag.Cfg.CheckCmd)
 	}
+	if ag.Cfg.VersionCmd != "codex --version" {
+		t.Fatalf("expected codex version cmd, got %s", ag.Cfg.VersionCmd)
+	}
 	if ag.Cfg.SkillPath != ".codex/skills" {
 		t.Fatalf("expected codex skill path, got %s", ag.Cfg.SkillPath)
+	}
+}
+
+func TestCodexInstall_ConfiguredVersion(t *testing.T) {
+	t.Parallel()
+
+	cmd := defaultCodexInstallCmdForVersion("1.2.3")
+	if !strings.Contains(cmd, "'@openai/codex@1.2.3'") {
+		t.Fatalf("install command does not use configured version:\n%s", cmd)
 	}
 }
 

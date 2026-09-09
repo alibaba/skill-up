@@ -193,7 +193,8 @@ executeCaseOnce(caseCfg, configName, overrideRT, overrideAgent)
 │   ├── runtime.NewRuntime + Create
 │   ├── setupCaseEnvironment
 │   │   ├── execute setup_steps
-│   │   ├── inject credentials (API Key / Base URL)
+│   │   ├── ag.Install (isolated runtimes only)
+│   │   ├── agent.Preflight (binary check + static version observation)
 │   │   ├── ag.InstallMCP
 │   │   ├── ag.InstallSkill (with_skill only)
 │   │   └── fixtureRegistry.UploadAll

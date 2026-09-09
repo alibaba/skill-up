@@ -49,6 +49,9 @@ func NewQwenCodeAgent(cfg Config) *QwenCodeAgent {
 	if cfg.CheckCmd == "" {
 		cfg.CheckCmd = "command -v qwen"
 	}
+	if cfg.VersionCmd == "" {
+		cfg.VersionCmd = "qwen --version"
+	}
 	if cfg.SkillPath == "" {
 		cfg.SkillPath = ".qwen/skills"
 	}
@@ -69,7 +72,7 @@ func (a *QwenCodeAgent) Install(ctx context.Context, rt Runtime) error {
 
 	installCmd := a.Cfg.InstallCmd
 	if installCmd == "" {
-		installCmd = defaultQwenCodeInstallCmd()
+		installCmd = defaultQwenCodeInstallCmdForVersion(a.Cfg.Version)
 	}
 
 	execResult, err := rt.Exec(ctx, installCmd, opts)
@@ -100,12 +103,20 @@ func buildQwenCodeMCPInstallCmd(server runtime.MCPServerConfig) (string, error) 
 }
 
 func defaultQwenCodeInstallCmd() string {
+	return defaultQwenCodeInstallCmdForVersion("")
+}
+
+func defaultQwenCodeInstallCmdForVersion(version string) string {
 	lines := []string{
 		"set -e",
-		"if command -v qwen >/dev/null 2>&1; then exit 0; fi",
+	}
+	if guard := installedVersionGuard(qwenCodeBinary, version); guard != "" {
+		lines = append(lines, guard)
+	} else {
+		lines = append(lines, "if command -v qwen >/dev/null 2>&1; then exit 0; fi")
 	}
 	lines = append(lines, nodeBootstrapLines(agentNodeDefaultVersion)...)
-	lines = append(lines, "npm install -g "+shellQuote(qwenCodePackage))
+	lines = append(lines, "npm install -g "+shellQuote(versionedPackage(qwenCodePackage, version)))
 	return strings.Join(lines, "\n")
 }
 

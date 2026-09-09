@@ -81,7 +81,6 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	if cfg.Engine.Name == "" {
 		errs = append(errs, "engine.name is required")
 	}
-
 	// engine.custom validation is deferred to ResolveCustomEngineConfig, which
 	// runs after CLI overrides settle the final engine name.
 

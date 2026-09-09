@@ -15,7 +15,7 @@ import (
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
 
-func TestNewQwenCodeAgent(t *testing.T) {
+func TestNewQwenCodeAgent(t *testing.T) { //nolint:dupl // mirrors constructor defaults asserted for Codex
 	t.Parallel()
 
 	ag := NewQwenCodeAgent(Config{})
@@ -26,8 +26,22 @@ func TestNewQwenCodeAgent(t *testing.T) {
 	if ag.Cfg.CheckCmd != "command -v qwen" {
 		t.Fatalf("expected qwen check cmd, got %s", ag.Cfg.CheckCmd)
 	}
+	if ag.Cfg.VersionCmd != "qwen --version" {
+		t.Fatalf("expected qwen version cmd, got %s", ag.Cfg.VersionCmd)
+	}
 	if ag.Cfg.SkillPath != ".qwen/skills" {
 		t.Fatalf("expected qwen skill path, got %s", ag.Cfg.SkillPath)
+	}
+}
+
+func TestQwenCodeInstall_ConfiguredVersion(t *testing.T) {
+	t.Parallel()
+
+	cmd := defaultQwenCodeInstallCmdForVersion("1.2.3")
+	for _, want := range []string{"qwen --version", "'@qwen-code/qwen-code@1.2.3'"} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("install command missing %q:\n%s", want, cmd)
+		}
 	}
 }
 

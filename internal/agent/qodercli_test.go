@@ -28,6 +28,9 @@ func TestNewQoderCLIAgent(t *testing.T) {
 	if ag.Cfg.CheckCmd != "command -v qodercli" {
 		t.Errorf("expected CheckCmd 'command -v qodercli', got %s", ag.Cfg.CheckCmd)
 	}
+	if ag.Cfg.VersionCmd != "qodercli --version" {
+		t.Errorf("expected VersionCmd 'qodercli --version', got %s", ag.Cfg.VersionCmd)
+	}
 
 	if ag.Cfg.SkillPath != ".qoder/skills" {
 		t.Errorf("expected SkillPath '.qoder/skills', got %s", ag.Cfg.SkillPath)
@@ -44,11 +47,26 @@ func TestNewQoderCLIAgent_CNEdition(t *testing.T) {
 	if ag.Cfg.CheckCmd != "command -v qodercn" {
 		t.Fatalf("CheckCmd = %q, want qodercn", ag.Cfg.CheckCmd)
 	}
+	if ag.Cfg.VersionCmd != "qodercn --version" {
+		t.Fatalf("VersionCmd = %q, want qodercn", ag.Cfg.VersionCmd)
+	}
 	if ag.Cfg.RunCmd != `qodercn -p "%s" 2>&1` {
 		t.Fatalf("RunCmd = %q, want qodercn command", ag.Cfg.RunCmd)
 	}
 	if ag.Cfg.SkillPath != ".qoder/skills" {
 		t.Fatalf("SkillPath = %q, want shared project-level .qoder/skills", ag.Cfg.SkillPath)
+	}
+}
+
+func TestNewQoderCLIAgent_DoesNotEnforceUnsupportedVersion(t *testing.T) {
+	t.Parallel()
+
+	ag := NewQoderCLIAgent(Config{Version: "1.2.3"})
+	if ag.Cfg.Version != "" {
+		t.Fatalf("Version = %q, want unsupported version constraint omitted", ag.Cfg.Version)
+	}
+	if ag.Cfg.VersionCmd != "qodercli --version" {
+		t.Fatalf("VersionCmd = %q, want static version observation", ag.Cfg.VersionCmd)
 	}
 }
 

@@ -44,11 +44,12 @@ const (
 // available. Mutable data is cloned during construction so later mutations of
 // EvalConfig cannot change an already resolved value.
 type ResolvedAgentConfig struct {
-	Role     AgentRole
-	Engine   string
-	Version  string
-	Entry    string
-	Protocol string
+	Role           AgentRole
+	Engine         string
+	Version        string
+	AppliedVersion string
+	Entry          string
+	Protocol       string
 
 	Provider          string
 	Model             string

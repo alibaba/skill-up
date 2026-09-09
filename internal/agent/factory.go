@@ -14,6 +14,19 @@ func DetectAgent(engineName string, cfg Config) (Agent, error) {
 	if cfg.Name == "" {
 		cfg.Name = engineName
 	}
+	if cfg.Version != "" && !agentkind.SupportsVersion(engineName) {
+		cfg.Warnings = appendUniqueWarning(cfg.Warnings, fmt.Sprintf(
+			"engine %q does not support engine.version; the configured version %q is ignored",
+			engineName, cfg.Version,
+		))
+		cfg.Version = ""
+	} else if cfg.Version != "" && !agentkind.IsExactVersion(cfg.Version) {
+		cfg.Warnings = appendUniqueWarning(cfg.Warnings, fmt.Sprintf(
+			"engine %q requires an exact semantic version for version selection; the configured version %q is ignored",
+			engineName, cfg.Version,
+		))
+		cfg.Version = ""
+	}
 
 	switch engineName {
 	case agentkind.QoderCLIAlias, agentkind.QoderAlias, agentkind.QoderCLI:
@@ -44,7 +57,7 @@ func DetectAgentWithResolvedConfig(params credential.ResolvedAgentConfig) (Agent
 	engineName := params.Engine
 	cfg := Config{
 		Name:               engineName,
-		Version:            params.Version,
+		Version:            params.AppliedVersion,
 		Entry:              params.Entry,
 		ModelName:          params.AppliedModel,
 		RequestedModelName: params.Model,

@@ -62,6 +62,15 @@ func writeMarkdownHeader(sb *strings.Builder, in Input) {
 		observed = "unknown"
 	}
 	fmt.Fprintf(sb, "- **Observed Model**: %s\n", markdownText(observed))
+	if requestedVersion := agentConfigurationVersion(in.RequestedConfiguration); requestedVersion != "" {
+		fmt.Fprintf(sb, "- **Requested Version**: %s\n", markdownText(requestedVersion))
+	}
+	if appliedVersion := agentConfigurationVersion(in.AppliedConfiguration); appliedVersion != "" {
+		fmt.Fprintf(sb, "- **Applied Version**: %s\n", markdownText(appliedVersion))
+	}
+	if observedVersion := agentConfigurationVersion(in.ObservedConfiguration); observedVersion != "" {
+		fmt.Fprintf(sb, "- **Observed Version**: %s\n", markdownText(observedVersion))
+	}
 	sb.WriteString("\n")
 }
 

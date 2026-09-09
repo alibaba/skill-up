@@ -17,6 +17,11 @@
 #      otherwise the turn behaves like a brand-new conversation.
 set -euo pipefail
 
+if [[ "${1:-}" == "--version" ]]; then
+  echo "qodercli 0.0.0-test"
+  exit 0
+fi
+
 PROMPT=""
 RESUME=""
 while [[ $# -gt 0 ]]; do

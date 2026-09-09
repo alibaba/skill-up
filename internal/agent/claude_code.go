@@ -38,6 +38,7 @@ func NewClaudeCodeAgent(cfg Config) *ClaudeCodeAgent {
 		cfg.Name = "claude-code"
 	}
 	cfg.CheckCmd = "command -v claude"
+	cfg.VersionCmd = "claude --version"
 	cfg.SkillPath = ".claude/skills"
 
 	return &ClaudeCodeAgent{
@@ -56,7 +57,7 @@ func (a *ClaudeCodeAgent) Install(ctx context.Context, rt Runtime) error {
 
 	installCmd := a.Cfg.InstallCmd
 	if installCmd == "" {
-		installCmd = defaultClaudeCodeInstallCmd()
+		installCmd = defaultClaudeCodeInstallCmdForVersion(a.Cfg.Version)
 	}
 
 	execResult, err := rt.Exec(ctx, installCmd, opts)
@@ -85,12 +86,20 @@ func buildClaudeMCPInstallCmd(server runtime.MCPServerConfig) (string, error) {
 }
 
 func defaultClaudeCodeInstallCmd() string {
+	return defaultClaudeCodeInstallCmdForVersion("")
+}
+
+func defaultClaudeCodeInstallCmdForVersion(version string) string {
 	lines := []string{
 		"set -e",
-		"if command -v claude >/dev/null 2>&1; then exit 0; fi",
+	}
+	if guard := installedVersionGuard("claude", version); guard != "" {
+		lines = append(lines, guard)
+	} else {
+		lines = append(lines, "if command -v claude >/dev/null 2>&1; then exit 0; fi")
 	}
 	lines = append(lines, nodeBootstrapLines(agentNodeDefaultVersion)...)
-	lines = append(lines, "npm install -g --include=optional "+shellQuote(claudeCodePackage))
+	lines = append(lines, "npm install -g --include=optional "+shellQuote(versionedPackage(claudeCodePackage, version)))
 	return strings.Join(lines, "\n")
 }
 

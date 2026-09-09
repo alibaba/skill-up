@@ -65,6 +65,9 @@ type embeddedReportData struct {
 	RequestedModel     string           `json:"requested_model"`
 	AppliedModel       string           `json:"applied_model"`
 	ObservedModel      string           `json:"observed_model"`
+	RequestedVersion   string           `json:"requested_version"`
+	AppliedVersion     string           `json:"applied_version"`
+	ObservedVersion    string           `json:"observed_version"`
 	StartTime          string           `json:"start_time"`
 	EvaluationWallTime string           `json:"evaluation_wall_time"`
 	AgentTokens        int              `json:"agent_tokens"`
@@ -281,6 +284,9 @@ func (r *HTMLReporter) buildTemplateData(in Input) (htmlReportData, error) {
 		RequestedModel:     agentConfigurationModel(in.RequestedConfiguration),
 		AppliedModel:       agentConfigurationModel(in.AppliedConfiguration),
 		ObservedModel:      agentConfigurationModel(in.ObservedConfiguration),
+		RequestedVersion:   agentConfigurationVersion(in.RequestedConfiguration),
+		AppliedVersion:     agentConfigurationVersion(in.AppliedConfiguration),
+		ObservedVersion:    agentConfigurationVersion(in.ObservedConfiguration),
 		StartTime:          in.StartTime.Format(time.RFC3339),
 		EvaluationWallTime: fmt.Sprintf("%.1fs", in.TotalDuration().Seconds()),
 		AgentTokens:        in.TotalTokens,

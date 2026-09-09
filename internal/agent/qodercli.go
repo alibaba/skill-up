@@ -89,11 +89,18 @@ func qoderProfileForKwargs(kwargs map[string]string) qoderCLIProfile {
 // NewQoderCLIAgent creates a new QoderCLIAgent.
 func NewQoderCLIAgent(cfg Config) *QoderCLIAgent {
 	profile := qoderProfileForKwargs(cfg.Kwargs)
+	// Qoder's installer does not accept a version selector. Keep engine.version
+	// as a reported unsupported request instead of enforcing a constraint that
+	// skill-up cannot materialize.
+	cfg.Version = ""
 	if cfg.Name == "" {
 		cfg.Name = "qodercli"
 	}
 	if cfg.CheckCmd == "" {
 		cfg.CheckCmd = "command -v " + profile.binary
+	}
+	if cfg.VersionCmd == "" {
+		cfg.VersionCmd = profile.binary + " --version"
 	}
 	if cfg.RunCmd == "" {
 		cfg.RunCmd = profile.binary + " -p \"%s\" 2>&1"

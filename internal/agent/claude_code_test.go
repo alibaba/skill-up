@@ -67,6 +67,17 @@ func TestClaudeCodeInstall_DefaultCommand(t *testing.T) {
 	}
 }
 
+func TestClaudeCodeInstall_ConfiguredVersion(t *testing.T) {
+	t.Parallel()
+
+	cmd := defaultClaudeCodeInstallCmdForVersion("2.3.4")
+	for _, want := range []string{"claude --version", "'@anthropic-ai/claude-code@2.3.4'"} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("install command missing %q:\n%s", want, cmd)
+		}
+	}
+}
+
 func TestClaudeCodeInstall_UsesDefaultCommand(t *testing.T) {
 	t.Parallel()
 

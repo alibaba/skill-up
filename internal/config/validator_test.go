@@ -40,6 +40,26 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "non-exact supported version remains compatible",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine:        EngineConfig{Name: "codex", Version: "latest"},
+				Cases:         CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "unsupported qoder version remains compatible",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine:        EngineConfig{Name: "qodercli", Version: "latest"},
+				Cases:         CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+			},
+			wantErr: false,
+		},
+		{
 			name: "invalid eval-level output_matches regex",
 			cfg: &EvalConfig{
 				SchemaVersion: "v1alpha1",
