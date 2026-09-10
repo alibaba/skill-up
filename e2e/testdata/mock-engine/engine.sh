@@ -31,6 +31,25 @@ set -euo pipefail
 
 PROMPT=""
 
+build_judge_results() {
+  local include_passed="$1"
+  local evidence="$2"
+  awk -v include_passed="$include_passed" -v evidence="$evidence" '
+    BEGIN { printf "{\"results\":[" }
+    NF {
+      if (count++ > 0) {
+        printf ","
+      }
+      printf "{\"criterion_id\":\"%s\"", $0
+      if (include_passed == "1") {
+        printf ",\"passed\":true"
+      }
+      printf ",\"evidence\":[\"%s\"],\"failures\":[]}", evidence
+    }
+    END { print "]}" }
+  '
+}
+
 # Parse arguments - qodercli/claude pass: -p "<prompt>". Any other flags
 # (e.g. qwen's --yolo / -m <model>) are skipped harmlessly.
 while [[ $# -gt 0 ]]; do
@@ -88,13 +107,11 @@ if [[ "${MOCK_JUDGE_CORRECTION_RETRY:-}" == "1" ]] && echo "$PROMPT" | grep -q "
   if [[ -n "${MOCK_JUDGE_STATE_FILE:-}" ]]; then
     echo "correction" >> "$MOCK_JUDGE_STATE_FILE"
   fi
-  JSON_RESULTS=$(printf '%s' "$PROMPT" | python3 -c '
-import json, re, sys
-prompt = sys.stdin.read()
-ids = list(dict.fromkeys(re.findall(r"criterion_id\"\s*:\s*\"(criterion-[0-9]+)\"", prompt)))
-items = [{"criterion_id": criterion_id, "passed": True, "evidence": ["Mock engine corrected the response contract"], "failures": []} for criterion_id in ids]
-print(json.dumps({"results": items}))
-')
+  JSON_RESULTS=$(printf '%s' "$PROMPT" |
+    { grep -oE 'criterion_id"[[:space:]]*:[[:space:]]*"criterion-[0-9]+"' || true; } |
+    sed -E 's/.*"(criterion-[0-9]+)"/\1/' |
+    awk '!seen[$0]++' |
+    build_judge_results 1 "Mock engine corrected the response contract")
   echo "$JSON_RESULTS"
   exit "${MOCK_EXIT_CODE:-0}"
 fi
@@ -104,29 +121,18 @@ fi
 # We parse the stable criterion IDs and return a valid JSON response so that
 # agent_judge can succeed in mock/CI scenarios without a real LLM.
 if echo "$PROMPT" | grep -q "Required Response Format" && echo "$PROMPT" | grep -q "## Criteria"; then
-  # Build JSON using python3 for correct escaping of all special characters
-  # (quotes, backslashes, control chars, Unicode, etc.).
-  JSON_RESULTS=$(echo "$PROMPT" | grep -E '^\[criterion-[0-9]+\][[:space:]]+' | python3 -c '
-import json, sys
-items = []
-for line in sys.stdin:
-    text = line.strip()
-    close = text.find("]")
-    criterion_id = text[1:close]
-    items.append({"criterion_id": criterion_id, "passed": True, "evidence": ["Mock engine: criterion satisfied based on agent output analysis"], "failures": []})
-print(json.dumps({"results": items}))
-')
+  JSON_RESULTS=$(printf '%s\n' "$PROMPT" |
+    { grep -E '^\[criterion-[0-9]+\][[:space:]]+' || true; } |
+    sed -E 's/^\[([^]]+)\].*/\1/' |
+    build_judge_results 1 "Mock engine: criterion satisfied based on agent output analysis")
   if [[ "${MOCK_JUDGE_CORRECTION_RETRY:-}" == "1" ]]; then
     if [[ -n "${MOCK_JUDGE_STATE_FILE:-}" ]]; then
       echo "initial" >> "$MOCK_JUDGE_STATE_FILE"
     fi
-    JSON_RESULTS=$(printf '%s' "$JSON_RESULTS" | python3 -c '
-import json, sys
-payload = json.load(sys.stdin)
-for item in payload["results"]:
-    item.pop("passed", None)
-print(json.dumps(payload))
-')
+    JSON_RESULTS=$(printf '%s\n' "$PROMPT" |
+      { grep -E '^\[criterion-[0-9]+\][[:space:]]+' || true; } |
+      sed -E 's/^\[([^]]+)\].*/\1/' |
+      build_judge_results 0 "Mock engine: criterion satisfied based on agent output analysis")
   fi
   echo "$JSON_RESULTS"
   exit "${MOCK_EXIT_CODE:-0}"
