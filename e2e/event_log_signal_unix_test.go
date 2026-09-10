@@ -336,6 +336,10 @@ func baselineSignalEngineEnv(t *testing.T) []string {
 	}
 	engineScript := `#!/bin/bash
 set -euo pipefail
+if [[ "${1:-}" == "--version" ]]; then
+  printf '%s\n' 'qodercli 0.0.0-test'
+  exit 0
+fi
 state_file="${MOCK_STATE_FILE:?}"
 call_number=1
 if [[ -f "$state_file" ]]; then
