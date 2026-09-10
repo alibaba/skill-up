@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-10
+
 ### Added
 - `skill-up run` now supports `--event-log <path>` for a live, ordered v1
   JSONL evaluation event stream and repeatable `--event-attribute <key=value>`
@@ -556,6 +558,7 @@ The `v0.5.0` release tag is available at
   project and delivers the end-to-end capability to declare eval environments,
   run cases and emit structured reports as described in [README.md](README.md).
 
+[0.11.0]: https://github.com/alibaba/skill-up/releases/tag/v0.11.0
 [0.10.0]: https://github.com/alibaba/skill-up/releases/tag/v0.10.0
 [0.9.1]: https://github.com/alibaba/skill-up/releases/tag/v0.9.1
 [0.9.0]: https://github.com/alibaba/skill-up/releases/tag/v0.9.0
