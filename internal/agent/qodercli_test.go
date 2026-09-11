@@ -379,6 +379,56 @@ func TestBuildQoderRunCmd_WithoutModel(t *testing.T) {
 	}
 }
 
+func TestBuildQoderCommands_UnsetInheritedAgentSDKMode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		cmd  string
+		want string
+	}{
+		{
+			name: "global inline run",
+			cmd:  buildQoderRunCmdForBinary("qodercli", "hello", ""),
+			want: "env -u QODER_AGENT_SDK_ENTRYPOINT qodercli --permission-mode=bypass_permissions",
+		},
+		{
+			name: "global stdin run",
+			cmd:  buildQoderRunStdinCmdForBinary("qodercli", "/tmp/prompt", ""),
+			want: "| env -u QODER_AGENT_SDK_ENTRYPOINT qodercli --permission-mode=bypass_permissions",
+		},
+		{
+			name: "global resume",
+			cmd:  buildQoderResumeCmdForBinary("qodercli", "continue", "", "session-1"),
+			want: "env -u QODER_AGENT_SDK_ENTRYPOINT qodercli --permission-mode=bypass_permissions",
+		},
+		{
+			name: "CN inline run",
+			cmd:  buildQoderRunCmdForBinary("qodercn", "hello", ""),
+			want: "env -u QODER_AGENT_SDK_ENTRYPOINT qodercn --permission-mode=bypass_permissions",
+		},
+		{
+			name: "CN stdin run",
+			cmd:  buildQoderRunStdinCmdForBinary("qodercn", "/tmp/prompt", ""),
+			want: "| env -u QODER_AGENT_SDK_ENTRYPOINT qodercn --permission-mode=bypass_permissions",
+		},
+		{
+			name: "CN resume",
+			cmd:  buildQoderResumeCmdForBinary("qodercn", "continue", "", "session-1"),
+			want: "env -u QODER_AGENT_SDK_ENTRYPOINT qodercn --permission-mode=bypass_permissions",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if !strings.Contains(tt.cmd, tt.want) {
+				t.Fatalf("command does not unset inherited Agent SDK mode:\n got: %q\nwant: %q", tt.cmd, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildQoderResumeCmd(t *testing.T) {
 	t.Parallel()
 
