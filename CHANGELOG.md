@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Agent judges selecting a different provider no longer inherit runner credentials
   or endpoints, preventing judge keys from being sent to a runner endpoint.
+- QoderCLI commands now clear an inherited `QODER_AGENT_SDK_ENTRYPOINT`,
+  preventing SDK-hosted parent processes such as Qoder Work from forcing
+  ordinary version checks, runs, resumes, and MCP configuration into the
+  incompatible SDK protocol.
 
 ## [0.10.0] - 2026-09-01
 
