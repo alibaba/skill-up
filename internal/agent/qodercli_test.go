@@ -28,8 +28,11 @@ func TestNewQoderCLIAgent(t *testing.T) {
 	if ag.Cfg.CheckCmd != "command -v qodercli" {
 		t.Errorf("expected CheckCmd 'command -v qodercli', got %s", ag.Cfg.CheckCmd)
 	}
-	if ag.Cfg.VersionCmd != "qodercli --version" {
-		t.Errorf("expected VersionCmd 'qodercli --version', got %s", ag.Cfg.VersionCmd)
+	if ag.Cfg.VersionCmd != "env -u QODER_AGENT_SDK_ENTRYPOINT qodercli --version" {
+		t.Errorf("unexpected VersionCmd: %s", ag.Cfg.VersionCmd)
+	}
+	if ag.Cfg.RunCmd != `env -u QODER_AGENT_SDK_ENTRYPOINT qodercli -p "%s" 2>&1` {
+		t.Errorf("unexpected RunCmd: %s", ag.Cfg.RunCmd)
 	}
 
 	if ag.Cfg.SkillPath != ".qoder/skills" {
@@ -47,10 +50,10 @@ func TestNewQoderCLIAgent_CNEdition(t *testing.T) {
 	if ag.Cfg.CheckCmd != "command -v qodercn" {
 		t.Fatalf("CheckCmd = %q, want qodercn", ag.Cfg.CheckCmd)
 	}
-	if ag.Cfg.VersionCmd != "qodercn --version" {
+	if ag.Cfg.VersionCmd != "env -u QODER_AGENT_SDK_ENTRYPOINT qodercn --version" {
 		t.Fatalf("VersionCmd = %q, want qodercn", ag.Cfg.VersionCmd)
 	}
-	if ag.Cfg.RunCmd != `qodercn -p "%s" 2>&1` {
+	if ag.Cfg.RunCmd != `env -u QODER_AGENT_SDK_ENTRYPOINT qodercn -p "%s" 2>&1` {
 		t.Fatalf("RunCmd = %q, want qodercn command", ag.Cfg.RunCmd)
 	}
 	if ag.Cfg.SkillPath != ".qoder/skills" {
@@ -65,7 +68,7 @@ func TestNewQoderCLIAgent_DoesNotEnforceUnsupportedVersion(t *testing.T) {
 	if ag.Cfg.Version != "" {
 		t.Fatalf("Version = %q, want unsupported version constraint omitted", ag.Cfg.Version)
 	}
-	if ag.Cfg.VersionCmd != "qodercli --version" {
+	if ag.Cfg.VersionCmd != "env -u QODER_AGENT_SDK_ENTRYPOINT qodercli --version" {
 		t.Fatalf("VersionCmd = %q, want static version observation", ag.Cfg.VersionCmd)
 	}
 }
