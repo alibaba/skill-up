@@ -54,6 +54,7 @@ const (
 	qoderExposeTokenUsageEnv     = "QODER_EXPOSE_TOKEN_USAGE"   //nolint:gosec // environment variable name, not a credential
 	qoderCNExposeTokenUsageEnv   = "QODERCN_EXPOSE_TOKEN_USAGE" //nolint:gosec // environment variable name, not a credential
 	qoderExposeTokenUsageEnabled = "true"
+	qoderAgentSDKEntrypointEnv   = "QODER_AGENT_SDK_ENTRYPOINT"
 	qoderJSONOutputFlag          = " --output-format json"
 )
 
@@ -100,10 +101,10 @@ func NewQoderCLIAgent(cfg Config) *QoderCLIAgent {
 		cfg.CheckCmd = "command -v " + profile.binary
 	}
 	if cfg.VersionCmd == "" {
-		cfg.VersionCmd = profile.binary + " --version"
+		cfg.VersionCmd = qoderCLIInvocation(profile.binary) + " --version"
 	}
 	if cfg.RunCmd == "" {
-		cfg.RunCmd = profile.binary + " -p \"%s\" 2>&1"
+		cfg.RunCmd = qoderCLIInvocation(profile.binary) + " -p \"%s\" 2>&1"
 	}
 	if cfg.SkillPath == "" {
 		cfg.SkillPath = ".qoder/skills"
@@ -212,7 +213,7 @@ func buildQoderRunCmd(instruction, model string) string {
 }
 
 func buildQoderRunCmdForBinary(binary, instruction, model string) string {
-	cmd := binary + " --permission-mode=bypass_permissions" + qoderJSONOutputFlag
+	cmd := qoderCLIInvocation(binary) + " --permission-mode=bypass_permissions" + qoderJSONOutputFlag
 	if model != "" {
 		cmd += " --model " + shellQuote(model)
 	}
@@ -222,13 +223,20 @@ func buildQoderRunCmdForBinary(binary, instruction, model string) string {
 }
 
 func buildQoderRunStdinCmdForBinary(binary, promptPath, model string) string {
-	cmd := "cat " + shellQuote(promptPath) + " | " + binary + " --permission-mode=bypass_permissions" + qoderJSONOutputFlag
+	cmd := "cat " + shellQuote(promptPath) + " | " + qoderCLIInvocation(binary) + " --permission-mode=bypass_permissions" + qoderJSONOutputFlag
 	if model != "" {
 		cmd += " --model " + shellQuote(model)
 	}
 	cmd += " -p -"
 
 	return cmd
+}
+
+// qoderCLIInvocation prevents a nested ordinary CLI invocation from inheriting the
+// Agent SDK marker set by hosts such as Qoder Work. A non-empty marker forces
+// qodercli into the stream-json SDK protocol, which this adapter does not use.
+func qoderCLIInvocation(binary string) string {
+	return "env -u " + qoderAgentSDKEntrypointEnv + " " + binary
 }
 
 // buildQoderResumeCmd constructs a Global qodercli command that resumes an existing
@@ -238,7 +246,7 @@ func buildQoderResumeCmd(instruction, model, sessionID string) string {
 }
 
 func buildQoderResumeCmdForBinary(binary, instruction, model, sessionID string) string {
-	cmd := binary + " --permission-mode=bypass_permissions" + qoderJSONOutputFlag
+	cmd := qoderCLIInvocation(binary) + " --permission-mode=bypass_permissions" + qoderJSONOutputFlag
 	if model != "" {
 		cmd += " --model " + shellQuote(model)
 	}
@@ -432,7 +440,7 @@ func buildQoderMCPInstallCmd(server runtime.MCPServerConfig) (string, error) {
 }
 
 func buildQoderMCPInstallCmdForBinary(binary string, server runtime.MCPServerConfig) (string, error) {
-	return buildClaudeCompatibleMCPInstallCmd(binary, binary, server)
+	return buildClaudeCompatibleMCPInstallCmd(qoderCLIInvocation(binary), binary, server)
 }
 
 func defaultQoderCLIInstallCmd() string {

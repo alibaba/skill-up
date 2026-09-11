@@ -71,8 +71,8 @@ func TestBuildQoderMCPInstallCmd_Stdio(t *testing.T) {
 		t.Fatalf("buildQoderMCPInstallCmd failed: %v", err)
 	}
 	for _, want := range []string{
-		"qodercli mcp remove --scope project 'marker'",
-		"qodercli mcp add --scope project 'marker' -e 'MCP_TOKEN='\"$MCP_TOKEN\" -- 'node' '/tmp/marker-server.mjs'",
+		"env -u QODER_AGENT_SDK_ENTRYPOINT qodercli mcp remove --scope project 'marker'",
+		"env -u QODER_AGENT_SDK_ENTRYPOINT qodercli mcp add --scope project 'marker' -e 'MCP_TOKEN='\"$MCP_TOKEN\" -- 'node' '/tmp/marker-server.mjs'",
 	} {
 		if !strings.Contains(cmd, want) {
 			t.Fatalf("command missing %q:\n%s", want, cmd)
@@ -92,8 +92,8 @@ func TestBuildQoderMCPInstallCmd_CNStdio(t *testing.T) {
 		t.Fatalf("buildQoderMCPInstallCmdForBinary failed: %v", err)
 	}
 	for _, want := range []string{
-		"qodercn mcp remove --scope project 'marker'",
-		"qodercn mcp add --scope project 'marker'",
+		"env -u QODER_AGENT_SDK_ENTRYPOINT qodercn mcp remove --scope project 'marker'",
+		"env -u QODER_AGENT_SDK_ENTRYPOINT qodercn mcp add --scope project 'marker'",
 	} {
 		if !strings.Contains(cmd, want) {
 			t.Fatalf("CN command missing %q:\n%s", want, cmd)

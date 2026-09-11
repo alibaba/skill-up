@@ -28,8 +28,11 @@ func TestNewQoderCLIAgent(t *testing.T) {
 	if ag.Cfg.CheckCmd != "command -v qodercli" {
 		t.Errorf("expected CheckCmd 'command -v qodercli', got %s", ag.Cfg.CheckCmd)
 	}
-	if ag.Cfg.VersionCmd != "qodercli --version" {
-		t.Errorf("expected VersionCmd 'qodercli --version', got %s", ag.Cfg.VersionCmd)
+	if ag.Cfg.VersionCmd != "env -u QODER_AGENT_SDK_ENTRYPOINT qodercli --version" {
+		t.Errorf("unexpected VersionCmd: %s", ag.Cfg.VersionCmd)
+	}
+	if ag.Cfg.RunCmd != `env -u QODER_AGENT_SDK_ENTRYPOINT qodercli -p "%s" 2>&1` {
+		t.Errorf("unexpected RunCmd: %s", ag.Cfg.RunCmd)
 	}
 
 	if ag.Cfg.SkillPath != ".qoder/skills" {
@@ -47,10 +50,10 @@ func TestNewQoderCLIAgent_CNEdition(t *testing.T) {
 	if ag.Cfg.CheckCmd != "command -v qodercn" {
 		t.Fatalf("CheckCmd = %q, want qodercn", ag.Cfg.CheckCmd)
 	}
-	if ag.Cfg.VersionCmd != "qodercn --version" {
+	if ag.Cfg.VersionCmd != "env -u QODER_AGENT_SDK_ENTRYPOINT qodercn --version" {
 		t.Fatalf("VersionCmd = %q, want qodercn", ag.Cfg.VersionCmd)
 	}
-	if ag.Cfg.RunCmd != `qodercn -p "%s" 2>&1` {
+	if ag.Cfg.RunCmd != `env -u QODER_AGENT_SDK_ENTRYPOINT qodercn -p "%s" 2>&1` {
 		t.Fatalf("RunCmd = %q, want qodercn command", ag.Cfg.RunCmd)
 	}
 	if ag.Cfg.SkillPath != ".qoder/skills" {
@@ -65,7 +68,7 @@ func TestNewQoderCLIAgent_DoesNotEnforceUnsupportedVersion(t *testing.T) {
 	if ag.Cfg.Version != "" {
 		t.Fatalf("Version = %q, want unsupported version constraint omitted", ag.Cfg.Version)
 	}
-	if ag.Cfg.VersionCmd != "qodercli --version" {
+	if ag.Cfg.VersionCmd != "env -u QODER_AGENT_SDK_ENTRYPOINT qodercli --version" {
 		t.Fatalf("VersionCmd = %q, want static version observation", ag.Cfg.VersionCmd)
 	}
 }
@@ -376,6 +379,56 @@ func TestBuildQoderRunCmd_WithoutModel(t *testing.T) {
 	}
 	if strings.Contains(cmd, "--model") {
 		t.Fatalf("expected qoder command to omit model flag, got %q", cmd)
+	}
+}
+
+func TestBuildQoderCommands_UnsetInheritedAgentSDKMode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		cmd  string
+		want string
+	}{
+		{
+			name: "global inline run",
+			cmd:  buildQoderRunCmdForBinary("qodercli", "hello", ""),
+			want: "env -u QODER_AGENT_SDK_ENTRYPOINT qodercli --permission-mode=bypass_permissions",
+		},
+		{
+			name: "global stdin run",
+			cmd:  buildQoderRunStdinCmdForBinary("qodercli", "/tmp/prompt", ""),
+			want: "| env -u QODER_AGENT_SDK_ENTRYPOINT qodercli --permission-mode=bypass_permissions",
+		},
+		{
+			name: "global resume",
+			cmd:  buildQoderResumeCmdForBinary("qodercli", "continue", "", "session-1"),
+			want: "env -u QODER_AGENT_SDK_ENTRYPOINT qodercli --permission-mode=bypass_permissions",
+		},
+		{
+			name: "CN inline run",
+			cmd:  buildQoderRunCmdForBinary("qodercn", "hello", ""),
+			want: "env -u QODER_AGENT_SDK_ENTRYPOINT qodercn --permission-mode=bypass_permissions",
+		},
+		{
+			name: "CN stdin run",
+			cmd:  buildQoderRunStdinCmdForBinary("qodercn", "/tmp/prompt", ""),
+			want: "| env -u QODER_AGENT_SDK_ENTRYPOINT qodercn --permission-mode=bypass_permissions",
+		},
+		{
+			name: "CN resume",
+			cmd:  buildQoderResumeCmdForBinary("qodercn", "continue", "", "session-1"),
+			want: "env -u QODER_AGENT_SDK_ENTRYPOINT qodercn --permission-mode=bypass_permissions",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if !strings.Contains(tt.cmd, tt.want) {
+				t.Fatalf("command does not unset inherited Agent SDK mode:\n got: %q\nwant: %q", tt.cmd, tt.want)
+			}
+		})
 	}
 }
 
