@@ -12,6 +12,7 @@ import (
 )
 
 func TestMCP_SandboxRealAgents(t *testing.T) {
+	skipIfNotFullE2E(t)
 	skipIfSandboxMCPUnavailable(t)
 
 	evalPath := filepath.Join(getProjectRoot(), "e2e", "testdata", "sandbox-mcp", "evals", "eval.yaml")
