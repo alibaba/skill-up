@@ -57,7 +57,7 @@ func mockEngineEnv(t *testing.T, extra ...string) []string {
 	t.Helper()
 	home, binDir := mockEngineHome(t)
 	env := []string{
-		"PATH=" + binDir + ":" + os.Getenv("PATH"),
+		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"HOME=" + home,
 	}
 	env = append(env, extra...)
