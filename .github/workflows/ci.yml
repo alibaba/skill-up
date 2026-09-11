@@ -8,8 +8,8 @@ on:
   # Required checks must also run for commits synthesized by Merge Queue.
   merge_group:
 
-# Keep the default gate small and cancel only superseded pull-request work.
-# Expensive engine, sandbox, Windows and release checks live in extended-ci.yml.
+# Keep live engine, sandbox, Windows and release checks outside the default gate,
+# and cancel only superseded pull-request work.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -107,6 +107,7 @@ jobs:
           fi
           echo "::notice::Total coverage: ${pct}%"
 
+  # Keep the displayed name stable because repository rulesets require it.
   e2e-smoke:
     name: E2E Smoke
     needs: classify
@@ -127,8 +128,8 @@ jobs:
           go-version: "1.25.x"
           cache: true
 
-      - name: Run quick e2e smoke
-        run: go test -tags e2e -timeout 1200s -count=1 -v -run 'Test(Pipeline|CLI|Contract|NoneRuntime)_' ./e2e
+      - name: Run deterministic e2e suite
+        run: go test -tags e2e -timeout 1200s -count=1 -v ./e2e
         env:
           SKILL_UP_E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-artifacts
 

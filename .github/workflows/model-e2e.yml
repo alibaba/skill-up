@@ -232,6 +232,7 @@ jobs:
         if: steps.secrets.outputs.available == 'true'
         run: go test -tags e2e -timeout 1800s -count=1 -v -run TestAgent_Codex_OpenSandboxRuntime ./e2e
         env:
+          SKILL_UP_FULL_E2E: "1"
           OPENAI_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           OPENAI_BASE_URL: https://dashscope.aliyuncs.com/compatible-mode/v1
           OPENAI_MODEL: qwen3.6-plus

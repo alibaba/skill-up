@@ -660,6 +660,7 @@ expect:
 // TestAgent_Codex_NoneRuntime tests codex agent with none runtime.
 func TestAgent_Codex_NoneRuntime(t *testing.T) {
 	t.Parallel()
+	skipIfNotFullE2E(t)
 	if !isCodexInstalled() {
 		t.Skip("codex not installed locally")
 	}
@@ -751,6 +752,7 @@ report:
 }
 
 func TestAgent_Codex_OpenSandboxRuntime(t *testing.T) {
+	skipIfNotFullE2E(t)
 
 	sandboxAPIKey := openSandboxE2EAPIKey()
 	if sandboxAPIKey == "" {
@@ -873,6 +875,8 @@ func isOpenSandboxReadyFailure(stderr string) bool {
 // against a real OpenSandbox runtime. Mirrors TestAgent_Codex_OpenSandboxRuntime
 // so both supported engines have end-to-end coverage of the opensandbox bridge.
 func TestAgent_ClaudeCode_OpenSandboxRuntime(t *testing.T) {
+	skipIfNotFullE2E(t)
+
 	// No skipIfClaudeUnavailable here: the opensandbox runtime bootstraps the
 	// claude CLI inside the sandbox, so the host runner does not need it.
 	sandboxAPIKey := openSandboxE2EAPIKey()
@@ -1595,6 +1599,7 @@ judge:
 // This verifies skill installation and engine invocation work correctly.
 func TestAgent_QoderCLI_NoneRuntime_FullRun(t *testing.T) {
 	t.Parallel()
+	skipIfNotFullE2E(t)
 	if !isQoderCLIInstalled() {
 		t.Skip("qodercli not installed locally")
 	}
@@ -1718,6 +1723,7 @@ expect:
 // Mirrors TestAgent_QoderCLI_NoneRuntime_FullRun.
 func TestAgent_QwenCode_NoneRuntime_FullRun(t *testing.T) {
 	t.Parallel()
+	skipIfNotFullE2E(t)
 	if !isQwenCodeInstalled() {
 		t.Skip("qwen (qwen-code) not installed locally")
 	}
@@ -2005,7 +2011,7 @@ report:
 		t.Fatalf("failed to write eval.yaml: %v", err)
 	}
 
-	result := Run(t, RunConfig{Timeout: 30e9}, "run", evalPath)
+	result := Run(t, RunConfig{Timeout: 30e9, Env: mockEngineEnv(t)}, "run", evalPath)
 
 	if result.ExitCode != 0 {
 		if !strings.Contains(result.Stderr, "evals/should/be/excluded") {
