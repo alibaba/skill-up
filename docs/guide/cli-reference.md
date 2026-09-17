@@ -27,6 +27,7 @@ skill-up run [path] [flags]
 | `--exclude-case-name`  | —                             | Exclude matching cases (glob; can be repeated)                                                                                                             |
 | `--format`             | —                             | Extra report formats: `junit` / `html` (repeatable). `result.json` is always written; `--format junit` produces `report.xml`, `--format html` produces `report.html`; `--format json` is a no-op |
 | `--output-dir`         | `<skill-name>-workspace/` next to the skill dir | Output directory for reports and artifacts                                                                                                 |
+| `--workspace`          | —                             | Reuse an existing host directory as the agent workspace. Supported only with `environment.type: none`, `cases.parallelism: 1`, and benchmark disabled. The agent can modify this directory, but skill-up never deletes it. |
 | `--iteration`          | `0` (auto)                    | Repeat selected cases for stability/flakiness sampling. `0` auto-appends one run after the latest `iteration-N/` without summarizing history; positive `N` runs N samples and writes `iteration-1/` … `iteration-N/`; when `N > 1`, the terminal summary covers only samples from the current command |
 | `--engine`             | From config                   | Override engine name                                                                                                                                       |
 | `--provider`           | From config                   | Override `engine.model.provider`. When set, the complete `--model` value is preserved as an opaque model ID.                                               |
@@ -34,6 +35,7 @@ skill-up run [path] [flags]
 | `--parallelism`        | From config                   | Override `cases.parallelism`. Allowed range: 1–256                                                                                                          |
 | `--baseline`           | From config                   | Override `benchmark.enabled` to `true` for this run                                                                                                         |
 | `--api-key`            | —                             | Pass an API key (higher precedence than env vars)                                                                                                          |
+| `--no-delete`          | `false`                       | Preserve workspaces or containers created by skill-up after evaluation for debugging.                                                                      |
 | `--event-log`          | —                             | Write an ordered v1 JSONL evaluation event stream to a local file. The parent directory must already exist                                                  |
 | `--event-attribute`    | —                             | Attach a namespaced `key=value` string attribute to every event (repeatable; requires `--event-log`)                                                        |
 | `-v, --verbose`        | `0`                           | Increase log verbosity. Default `info`; `-v` / `--verbose` / `--verbose=true` → `debug`; `-vv` / `--verbose=2` → `trace`; `--verbose=false` disables extra detail |
@@ -45,6 +47,13 @@ skill-up run [path] [flags]
 > blocking a filtered smoke run. Use [`skill-up validate`](#skill-up-validate)
 > to validate the **whole** suite (every case) regardless of filters.
 
+> **Existing workspace state.** `--workspace` deliberately reuses the same
+> directory for every selected case, retry, and iteration. Runs are serialized,
+> but configured setup/fixtures/skill installation and agent changes carry
+> forward. The report `--output-dir` and `--event-log` must be outside this
+> directory. Select one case and one iteration, with retries disabled, when each
+> result must start from exactly the same state.
+
 ### Examples
 
 ```bash
@@ -53,6 +62,9 @@ skill-up run ./evals/eval.yaml
 
 # Run a subset
 skill-up run ./evals/eval.yaml --include-case-name "basic-*"
+
+# Evaluate an agent in an already prepared local workspace
+skill-up run ./evals/eval.yaml --workspace /path/to/project --parallelism 1 --no-delete
 
 # Exclude cases
 skill-up run ./evals/eval.yaml --exclude-case-name "*-old" --exclude-case-name "*-deprecated"

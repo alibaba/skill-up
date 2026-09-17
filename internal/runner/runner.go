@@ -47,6 +47,7 @@ type IterationObserver interface {
 type EvaluateOptions struct {
 	DeleteWorkspace   bool
 	OutputDir         string
+	WorkspaceDir      string
 	Iteration         int
 	Formats           []string
 	Observer          evaluator.ProgressObserver
@@ -177,6 +178,9 @@ func (r *Runner) Evaluate(ctx context.Context, cases []*config.CaseConfig, ag ag
 func (r *Runner) EvaluatePlan(ctx context.Context, plan ExecutionPlan, ag agent.Agent, opts EvaluateOptions) ([]evaluator.EvalResult, error) {
 	ctx, span := observability.Tracer().Start(ctx, "runner.evaluate")
 	defer span.End()
+	if err := validateExternalWorkspaceOutput(plan, opts.WorkspaceDir); err != nil {
+		return nil, err
+	}
 	span.SetAttributes(
 		attribute.Int("skill_up.cases.count", plan.CaseCount),
 		attribute.String("skill_up.engine", ag.Name()),
@@ -217,6 +221,7 @@ func (r *Runner) EvaluatePlan(ctx context.Context, plan ExecutionPlan, ag agent.
 			Agent:           ag,
 			RunnerConfig:    r.runnerConfig,
 			OutputDir:       r.workspace.IterationDir(),
+			WorkspaceDir:    opts.WorkspaceDir,
 			Concurrency:     r.evalCfg.Cases.Parallelism,
 			DeleteWorkspace: opts.DeleteWorkspace,
 			WithBaseline:    r.evalCfg.Benchmark.Enabled,
@@ -245,6 +250,84 @@ func (r *Runner) EvaluatePlan(ctx context.Context, plan ExecutionPlan, ag agent.
 		printIterationStabilitySummary(allResults)
 	}
 	return allResults, nil
+}
+
+func validateExternalWorkspaceOutput(plan ExecutionPlan, externalWorkspace string) error {
+	if externalWorkspace == "" {
+		return nil
+	}
+	workspacePath, err := canonicalizePotentialPath(externalWorkspace)
+	if err != nil {
+		return fmt.Errorf("resolve external workspace: %w", err)
+	}
+	for _, iteration := range plan.TaskPlan.Iterations {
+		iterationPath, err := canonicalizePotentialPath(filepath.Join(plan.WorkspaceDir, fmt.Sprintf("iteration-%d", iteration.Number)))
+		if err != nil {
+			return fmt.Errorf("resolve report directory for iteration %d: %w", iteration.Number, err)
+		}
+		if pathsOverlap(workspacePath, iterationPath) {
+			return fmt.Errorf("report directory for iteration %d overlaps external workspace %q; choose an --output-dir outside --workspace", iteration.Number, externalWorkspace)
+		}
+	}
+	return nil
+}
+
+func canonicalizePotentialPath(path string) (string, error) {
+	absolutePath, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return "", err
+	}
+	current := absolutePath
+	missing := make([]string, 0)
+	for {
+		if _, err := os.Lstat(current); err == nil {
+			resolved, resolveErr := filepath.EvalSymlinks(current)
+			if resolveErr != nil {
+				return "", resolveErr
+			}
+			for i := len(missing) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, missing[i])
+			}
+			return filepath.Clean(resolved), nil
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", fmt.Errorf("no existing ancestor for %q", path)
+		}
+		missing = append(missing, filepath.Base(current))
+		current = parent
+	}
+}
+
+func pathsOverlap(left, right string) bool {
+	return pathContains(left, right) || pathContains(right, left) ||
+		pathContainsByIdentity(left, right) || pathContainsByIdentity(right, left)
+}
+
+func pathContains(parent, child string) bool {
+	relative, err := filepath.Rel(parent, child)
+	if err != nil || filepath.IsAbs(relative) {
+		return false
+	}
+	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)))
+}
+
+func pathContainsByIdentity(parent, child string) bool {
+	parentInfo, err := os.Stat(parent)
+	if err != nil {
+		return false
+	}
+	for current := filepath.Clean(child); ; current = filepath.Dir(current) {
+		if info, statErr := os.Stat(current); statErr == nil && os.SameFile(parentInfo, info) {
+			return true
+		}
+		next := filepath.Dir(current)
+		if next == current {
+			return false
+		}
+	}
 }
 
 type stabilityCaseSummary struct {

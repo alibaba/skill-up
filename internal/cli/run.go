@@ -39,10 +39,11 @@ const (
 	engineKwargAlias       = "ek"
 	eventLogFlagName       = "event-log"
 	eventAttributeFlagName = "event-attribute"
+	runtimeTypeNone        = "none"
 )
 
 // validRuntimeTypes lists the environment.type values accepted by --runtime.
-var validRuntimeTypes = []string{"none", "opensandbox", "docker"}
+var validRuntimeTypes = []string{runtimeTypeNone, "opensandbox", "docker"}
 
 type verbosityValue int
 
@@ -106,6 +107,7 @@ func init() {
 	runCmd.Flags().StringArray("exclude-case-name", nil, "Exclude cases matching glob pattern (can be specified multiple times)")
 	runCmd.Flags().StringArray("format", nil, "Report format (json, junit, html). Can be specified multiple times. Default: json")
 	runCmd.Flags().String("output-dir", "", "Directory for report/artifact outputs. Default: <skill-name>-workspace alongside the skill directory")
+	runCmd.Flags().String("workspace", "", "Existing host workspace for the agent (requires runtime none and parallelism 1)")
 	runCmd.Flags().String("engine", "", "Override engine name")
 	runCmd.Flags().String(runtimeFlagName, "", "Override environment.type (none, opensandbox, docker)")
 	runCmd.Flags().String("provider", "", "Override model provider; when set, --model is treated as an opaque model name")
@@ -424,6 +426,16 @@ func evaluateOptionsFromFlags(cmd *cobra.Command) (runner.EvaluateOptions, error
 	if err != nil {
 		return runner.EvaluateOptions{}, fmt.Errorf("read --output-dir: %w", err)
 	}
+	workspaceDir, err := cmd.Flags().GetString("workspace")
+	if err != nil {
+		return runner.EvaluateOptions{}, fmt.Errorf("read --workspace: %w", err)
+	}
+	if workspaceDir != "" {
+		workspaceDir, err = filepath.Abs(filepath.Clean(workspaceDir))
+		if err != nil {
+			return runner.EvaluateOptions{}, fmt.Errorf("resolve --workspace: %w", err)
+		}
+	}
 	iteration, err := cmd.Flags().GetInt("iteration")
 	if err != nil {
 		return runner.EvaluateOptions{}, fmt.Errorf("read --iteration: %w", err)
@@ -446,6 +458,7 @@ func evaluateOptionsFromFlags(cmd *cobra.Command) (runner.EvaluateOptions, error
 	return runner.EvaluateOptions{
 		DeleteWorkspace: !noDelete,
 		OutputDir:       outputDir,
+		WorkspaceDir:    workspaceDir,
 		Iteration:       iteration,
 		Formats:         formats,
 	}, nil
@@ -495,22 +508,48 @@ func applyRunConfigOverrides(evalCfg *config.EvalConfig, cmd *cobra.Command) err
 	applyUserConfigKwargs(cmd.Context(), evalCfg)
 
 	parallelismFlag := cmd.Flags().Lookup("parallelism")
-	if parallelismFlag == nil || !parallelismFlag.Changed {
+	if parallelismFlag != nil && parallelismFlag.Changed {
+		parallelism, err := strconv.Atoi(parallelismFlag.Value.String())
+		if err != nil {
+			return fmt.Errorf("read --parallelism: %w", err)
+		}
+		if parallelism < 1 {
+			return fmt.Errorf("invalid --parallelism %d: must be >= 1", parallelism)
+		}
+		if parallelism > maxParallelismOverride {
+			return fmt.Errorf("invalid --parallelism %d: must be <= %d", parallelism, maxParallelismOverride)
+		}
+
+		evalCfg.Cases.Parallelism = parallelism
+	}
+	return validateWorkspaceOverride(evalCfg, cmd)
+}
+
+func validateWorkspaceOverride(evalCfg *config.EvalConfig, cmd *cobra.Command) error {
+	flag := cmd.Flags().Lookup("workspace")
+	if flag == nil || !flag.Changed {
 		return nil
 	}
-
-	parallelism, err := strconv.Atoi(parallelismFlag.Value.String())
+	workspaceDir := flag.Value.String()
+	if strings.TrimSpace(workspaceDir) == "" {
+		return errors.New("--workspace must not be empty")
+	}
+	if evalCfg.Environment.Type != runtimeTypeNone {
+		return fmt.Errorf("--workspace requires runtime none, got %q", evalCfg.Environment.Type)
+	}
+	if evalCfg.Cases.Parallelism != 1 {
+		return fmt.Errorf("--workspace requires cases.parallelism 1, got %d", evalCfg.Cases.Parallelism)
+	}
+	if evalCfg.Benchmark.Enabled {
+		return errors.New("--workspace cannot be used with benchmark.enabled because benchmark variants require isolated workspaces")
+	}
+	info, err := os.Stat(workspaceDir)
 	if err != nil {
-		return fmt.Errorf("read --parallelism: %w", err)
+		return fmt.Errorf("access --workspace %q: %w", workspaceDir, err)
 	}
-	if parallelism < 1 {
-		return fmt.Errorf("invalid --parallelism %d: must be >= 1", parallelism)
+	if !info.IsDir() {
+		return fmt.Errorf("--workspace %q is not a directory", workspaceDir)
 	}
-	if parallelism > maxParallelismOverride {
-		return fmt.Errorf("invalid --parallelism %d: must be <= %d", parallelism, maxParallelismOverride)
-	}
-
-	evalCfg.Cases.Parallelism = parallelism
 	return nil
 }
 
@@ -597,7 +636,7 @@ func applyRuntimeTypeOverride(evalCfg *config.EvalConfig, cmd *cobra.Command) er
 	if !slices.Contains(validRuntimeTypes, value) {
 		return fmt.Errorf("invalid --runtime %q (supported: %s)", value, strings.Join(validRuntimeTypes, ", "))
 	}
-	if value == "none" && evalCfg.Environment.NetworkPolicy != "" {
+	if value == runtimeTypeNone && evalCfg.Environment.NetworkPolicy != "" {
 		return fmt.Errorf("--runtime none is incompatible with network_policy %q (none cannot enforce network isolation)", evalCfg.Environment.NetworkPolicy)
 	}
 	if value == "docker" {

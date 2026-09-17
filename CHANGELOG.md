@@ -13,6 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   user message per invocation and carry the returned `session_id` into the
   next turn, enabling post-conditions, captures, early stopping, and per-turn
   judge assertions without changing existing batch configurations.
+- `skill-up run --workspace <dir>` can now evaluate a local `none` runtime in
+  an existing, externally owned workspace when case parallelism is one. The
+  workspace is always preserved; `--no-delete` also remains available to keep
+  workspaces and containers created by skill-up. Agent-judge diff capture uses
+  an isolated temporary Git repository, so skill-up does not commit, stage, or
+  invoke repository-configured clean/process filters while taking its
+  before/after snapshot. Selected cases, retries, and iterations intentionally
+  share the directory sequentially, so setup and agent changes carry forward.
+  Report directories that overlap the external workspace are rejected before
+  cleanup, event logs must remain outside it, nested skill installation avoids
+  recursively copying its own target, and snapshot paths are handled literally
+  on POSIX shells.
 
 ### Changed
 - Legacy no-op `engine.entry` and `engine.model.params` values are now dropped

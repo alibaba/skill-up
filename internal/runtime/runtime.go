@@ -171,8 +171,11 @@ type Config struct {
 	Type           string
 	Image          string
 	WorkspaceMount string
-	Env            map[string]string
-	SetupSteps     []SetupStep
+	// WorkspaceDir reuses an existing host directory as the workspace for the
+	// none runtime. Externally owned workspaces are never removed by Close.
+	WorkspaceDir string
+	Env          map[string]string
+	SetupSteps   []SetupStep
 
 	SandboxTemplate string
 
