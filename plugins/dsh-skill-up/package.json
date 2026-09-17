@@ -1,0 +1,59 @@
+{
+  "name": "@alibaba/dsh-skill-up",
+  "version": "0.1.0-alpha.1",
+  "description": "Test and iteratively improve Agent Skills with skill-up inside DeepSeek Harness.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "lib/",
+    "dist/skill-upper/",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "sync-skill": "node scripts/sync-skill-upper.mjs",
+    "test": "npm run sync-skill && node --test test/*.test.js",
+    "prepack": "npm test"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "agent-skill",
+    "skill-evaluation",
+    "skill-up"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alibaba/skill-up.git",
+    "directory": "plugins/dsh-skill-up"
+  },
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-jobs": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-skill": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-subprocess": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tools": "^0.1.5-rc.2"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-jobs": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-skill": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-subprocess": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-tools": "0.1.5-rc.2"
+  }
+}

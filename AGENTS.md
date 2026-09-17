@@ -141,6 +141,9 @@ skills/skill-upper/ Distributable Agent Skill that guides AI agents through the
                     templates, references/, and its own evals/ suite. Not part of
                     `go build`; consumed by Agent Engines (Cursor, Claude Code,
                     Qoder, etc.) at runtime.
+plugins/            Optional Agent-harness integrations kept outside the Go CLI.
+  dsh-skill-up/     DeepSeek Harness bundle exposing skill-up tools and the
+                    canonical skill-upper Skill.
 e2e/                End-to-end tests (build-tag gated) + testdata/
 examples/           Example fixtures and debug inputs
 docs/               Design docs, user manuals, and the VitePress site

@@ -97,6 +97,17 @@ jobs:
       - name: Test GitHub Action adapter
         run: make test-action
 
+      - name: Set up Node.js for DSH plugin
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '20'
+
+      - name: Test DSH plugin
+        working-directory: plugins/dsh-skill-up
+        run: |
+          npm install --no-package-lock --ignore-scripts
+          npm test
+
       - name: Report coverage
         run: |
           set -euo pipefail

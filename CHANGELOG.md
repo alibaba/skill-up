@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Add an experimental DeepSeek Harness plugin bundle that exposes structured
+  validation, background evaluation, and report-summary tools together with
+  the canonical `skill-upper` Skill for evidence-based Skill iteration.
+
 ### Changed
 - Legacy no-op `engine.entry` and `engine.model.params` values are now dropped
   at the resolved-agent boundary with migration warnings. The v1alpha1 loader

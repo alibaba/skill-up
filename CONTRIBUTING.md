@@ -63,6 +63,8 @@ skill-up/
 │       ├── assets/          #     YAML templates (eval.yaml.tmpl, case.yaml.tmpl)
 │       ├── references/      #     Reference docs for CLI, schema, judges, migration
 │       └── evals/           #     Evals for the skill-upper Skill itself
+├── plugins/                 # Optional Agent-harness integrations
+│   └── dsh-skill-up/        #   DeepSeek Harness bundle and native skill-up tools
 ├── docs/                    # VitePress documentation site (guide/, zh/, user-manual/, .vitepress/, public/)
 ├── schemas/evalevent/       # Versioned JSON Schemas for the evaluation event protocol
 ├── .githooks/               # Git hooks (commit message, pre-commit checks); see "Engineering Constraints" below
@@ -148,6 +150,11 @@ skill-up/
 - **Meaning**: A **distributable Agent Skill** that teaches AI agents (Cursor, Claude Code, Qoder, etc.) how to scaffold, run, and interpret skill-up evaluations on behalf of a user. It is consumed at runtime by Agent Engines — not compiled into the Go binary.
 - **Contents**: `SKILL.md` (workflow and language policy), `assets/` (YAML templates for `eval.yaml` and `case.yaml`), `references/` (CLI, schema, judge, and migration docs), and `evals/` (the Skill's own evaluation suite).
 - **Maintenance advice**: When CLI flags, schema fields, judge types, or report formats change, update the corresponding `references/` docs and the workflow steps in `SKILL.md` in the same commit. Keep templates in `assets/` consistent with the latest `v1alpha1` schema.
+
+### `plugins/dsh-skill-up/`
+
+- **Meaning**: An optional DeepSeek Harness bundle that registers structured `skill-up` tools and packages the canonical `skill-upper` Skill. It is distributed independently from the Go binary.
+- **Maintenance advice**: Keep its subprocess boundary argv-based, confine selected files to the caller's DSH workspace, and run `npm test` from the plugin directory after changing the plugin or `skills/skill-upper/`.
 
 ### `docs/`
 

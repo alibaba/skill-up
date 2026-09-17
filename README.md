@@ -58,6 +58,7 @@
 - **Eval-to-Evolution Loop with skill-upper**: Create evals through natural conversation, diagnose failures, automatically repair or expand cases, and rerun skill-up until the eval suite evolves.
 - **Declarative Eval Config**: Define evaluation environment, engine, model, and cases through YAML (`eval.yaml` + `cases/*.yaml`).
 - **Multi-Engine Support**: Works with Qoder CLI, Claude Code, and Codex as built-in Agent Engines, plus user-defined agents via `engine.custom` (local transport — see [docs/design/custom-engine.md](docs/design/custom-engine.md)).
+- **DeepSeek Harness Plugin**: Use the bundled `skill-upper` Skill and native DSH tools to turn new inputs into regression cases, baseline an existing Skill, improve it, and verify the same cases again. See [`plugins/dsh-skill-up`](plugins/dsh-skill-up/README.md).
 - **Flexible Judging**: Supports `rule_based`, `script`, and `agent_judge` evaluation strategies.
 - **Structured Reports**: Outputs Anthropic-compatible `grading.json`, `benchmark.json`, `benchmark.md`, plus `result.json`, JUnit XML, and HTML reports.
 - **Anthropic Compatible**: Import `evals.json` via `skill-up import`, or auto-detect with `--auto`.
@@ -323,6 +324,7 @@ skill-up/
 ├── pkg/                   # Publicly importable APIs
 ├── schemas/evalevent/     # Versioned evaluation event JSON Schemas
 ├── skills/skill-upper/    # Distributable workflow Skill
+├── plugins/dsh-skill-up/  # DeepSeek Harness integration bundle
 ├── docs/                  # VitePress documentation
 ├── e2e/                   # End-to-end tests and fixtures
 └── examples/              # Example evaluations and fixtures

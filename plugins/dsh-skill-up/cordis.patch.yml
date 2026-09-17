@@ -1,0 +1,3 @@
+- insert:
+    - id: skill-up
+      name: '@alibaba/dsh-skill-up'
