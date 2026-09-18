@@ -260,6 +260,90 @@ func TestListSkillFiles_EmptyDir(t *testing.T) {
 	}
 }
 
+func TestListSkillFiles_SymlinkedSourceDir(t *testing.T) {
+	t.Parallel()
+	if goruntime.GOOS == "windows" {
+		t.Skip("symlink creation requires extra privileges on this platform")
+	}
+
+	realDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(realDir, "SKILL.md"), []byte("# Skill"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(realDir, "references"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(realDir, "references", "guide.md"), []byte("ref"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	link := filepath.Join(t.TempDir(), "skill-link")
+	if err := os.Symlink(realDir, link); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := ListSkillFiles(link, nil, nil)
+	if err != nil {
+		t.Fatalf("ListSkillFiles failed: %v", err)
+	}
+	if !slices.Contains(files, "SKILL.md") {
+		t.Errorf("symlinked source should list SKILL.md, got %v", files)
+	}
+	if !slices.Contains(files, filepath.Join("references", "guide.md")) {
+		t.Errorf("symlinked source should list references/guide.md, got %v", files)
+	}
+}
+
+func TestInstallSkill_SymlinkedSource(t *testing.T) {
+	t.Parallel()
+	if goruntime.GOOS == "windows" {
+		t.Skip("symlink creation requires extra privileges on this platform")
+	}
+
+	realDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(realDir, "SKILL.md"), []byte("# Skill"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "skill-link")
+	if err := os.Symlink(realDir, link); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := &runtime.NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	if err := installSkill(context.Background(), rt, link, "skills/my-skill", nil, nil); err != nil {
+		t.Fatalf("installSkill failed: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(rt.Workspace(), "skills", "my-skill", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("expected SKILL.md installed into workspace: %v", err)
+	}
+	if string(data) != "# Skill" {
+		t.Errorf("installed content mismatch: %q", data)
+	}
+}
+
+func TestInstallSkill_ZeroFilesSelectedFails(t *testing.T) {
+	t.Parallel()
+
+	rt := &runtime.NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	// Empty source dir: an install that would upload nothing must fail loudly
+	// instead of silently running with_skill without the skill.
+	err := installSkill(context.Background(), rt, t.TempDir(), "skills/my-skill", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "0 files") {
+		t.Fatalf("expected zero-files install error, got %v", err)
+	}
+}
+
 func TestDetectAgent_QoderCLI(t *testing.T) {
 	t.Parallel()
 
