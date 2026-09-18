@@ -1,0 +1,4 @@
+interface:
+  display_name: "Skill Observation Reviewer"
+  short_description: "Review observations before creating regression cases"
+  default_prompt: "Review my local Skill observations and propose a regression case."

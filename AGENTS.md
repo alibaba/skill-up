@@ -135,6 +135,7 @@ internal/           Private implementation — never import from outside the mod
 pkg/                Publicly importable APIs (semver-stable; change with care)
   skillup/          Embeddable evaluation API
   transcript/       Transcript parsing helpers
+plugins/            Agent host plugins; each plugin owns its manifest, hooks, MCP, and Skills
 skills/skill-upper/ Distributable Agent Skill that guides AI agents through the
                     skill-up eval workflow (scaffolding, running, interpreting).
                     Contains SKILL.md, assets/

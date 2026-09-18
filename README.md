@@ -321,6 +321,7 @@ skill-up/
 │   ├── runner/            # End-to-end run orchestration
 │   └── report/            # JSON, JUnit, HTML, and benchmark reports
 ├── pkg/                   # Publicly importable APIs
+├── plugins/               # Agent host plugin bundles
 ├── schemas/evalevent/     # Versioned evaluation event JSON Schemas
 ├── skills/skill-upper/    # Distributable workflow Skill
 ├── docs/                  # VitePress documentation

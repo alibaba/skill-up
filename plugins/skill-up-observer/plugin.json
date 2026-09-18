@@ -1,0 +1,26 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "skill-up-observer",
+  "version": "0.1.0",
+  "description": "Capture privacy-aware Skill observations locally and turn approved observations into candidate skill-up regression cases.",
+  "author": {
+    "name": "Alibaba skill-up maintainers"
+  },
+  "extensions": {
+    "com.openai": {
+      "hooks": "./hooks/hooks.json",
+      "interface": {
+        "displayName": "Skill Up Observer",
+        "shortDescription": "Review Skill usage and create regression cases.",
+        "longDescription": "Observes explicitly attributed Skill interactions through Codex lifecycle hooks, redacts common credentials before local persistence, and requires human approval before writing a candidate evaluation case.",
+        "developerName": "Alibaba skill-up maintainers",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Local Skill observation",
+          "Human-reviewed regression case generation"
+        ],
+        "defaultPrompt": "Review my local Skill observations and propose an approved regression case."
+      }
+    }
+  }
+}

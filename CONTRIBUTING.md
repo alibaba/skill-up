@@ -149,6 +149,11 @@ skill-up/
 - **Contents**: `SKILL.md` (workflow and language policy), `assets/` (YAML templates for `eval.yaml` and `case.yaml`), `references/` (CLI, schema, judge, and migration docs), and `evals/` (the Skill's own evaluation suite).
 - **Maintenance advice**: When CLI flags, schema fields, judge types, or report formats change, update the corresponding `references/` docs and the workflow steps in `SKILL.md` in the same commit. Keep templates in `assets/` consistent with the latest `v1alpha1` schema.
 
+### `plugins/`
+
+- **Meaning**: Contains installable Agent host plugin bundles. A plugin may bundle Skills, lifecycle hooks, scripts, schemas, and MCP server configuration.
+- **Maintenance advice**: Validate each manifest and bundled Skill with the repository's documented plugin and Skill validators. Keep hook trust, compatibility, and local data behavior explicit in the plugin README.
+
 ### `docs/`
 
 - **Meaning**: VitePress-powered documentation site (English `guide/`, Chinese `zh/guide/`, legacy `user-manual/`); built and deployed to GitHub Pages by `.github/workflows/docs.yml`. Not part of `go build`.
