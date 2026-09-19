@@ -88,6 +88,19 @@ func (t *localTransport) run(ctx context.Context, rt Runtime, opts ExecOptions, 
 	}
 	raw, outputFileProduced := a.readRawResult(readCtx, rt, custom, result, outputFile)
 
+	// A deadline-killed engine never ran its cleanup path, so the output file
+	// may be missing entirely — per-case artifact collection would then find
+	// nothing for the run (the agent's early-turn transcript dies with the
+	// process). Synthesize a minimal session-result at the output path so the
+	// case stays inspectable; the run still fails via execErr below, and the
+	// synthesized payload's exit_code 124 keeps it from being graded a success.
+	if execErr != nil && !outputFileProduced && outputFile != "" &&
+		custom.Local.OutputFile != "" &&
+		customResponseFormat(custom) == customResponseSessionJSON &&
+		errors.Is(execErr, context.DeadlineExceeded) {
+		raw, outputFileProduced = a.synthesizeTimeoutOutput(readCtx, rt, outputFile, prep)
+	}
+
 	// The framework-written input file is always recorded; the output file only
 	// when it was produced by this run or cleared before it (the "produced or
 	// cleared" rule the diff collector relies on).

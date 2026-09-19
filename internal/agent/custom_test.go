@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1261,5 +1262,65 @@ EOF`,
 		if strings.Contains(m.Content, token) {
 			t.Fatalf("Transcript[%d].Content leaked the token: %q", i, m.Content)
 		}
+	}
+}
+
+func TestCustomAgent_RunLocal_TimeoutSynthesizesOutputFile(t *testing.T) {
+	t.Parallel()
+	rt := newCustomTestRuntime(t)
+	// The engine hangs without ever writing its output file — a deadline kill
+	// must leave a synthesized session-result behind so per-case artifact
+	// collection still finds something to persist.
+	ag := customLocalAgent(&config.CustomEngineConfig{
+		Transport:      "local",
+		TimeoutSeconds: 1,
+		Local: &config.CustomLocalConfig{
+			Command:    "sh",
+			Args:       []string{"-c", "sleep 30"},
+			OutputFile: "${output_file}",
+		},
+	})
+
+	res, err := ag.Run(context.Background(), rt, ExecOptions{}, userMessages())
+	if err == nil {
+		t.Fatal("expected a timeout error")
+	}
+	if res == nil {
+		t.Fatal("expected a synthesized session result")
+	}
+	if res.ExitCode != 124 {
+		t.Fatalf("res.ExitCode = %d, want 124 for a synthesized timeout result", res.ExitCode)
+	}
+	if !strings.Contains(res.Stderr, "synthesized") {
+		t.Fatalf("res.Stderr = %q, want it to name the artifact as synthesized", res.Stderr)
+	}
+	if !containsBasename(res.Artifacts.GeneratedFiles, "session-result.json") {
+		t.Fatalf("generated_files = %v, want the synthesized session-result.json registered", res.Artifacts.GeneratedFiles)
+	}
+	// The file must exist in the runtime with parseable content — downstream
+	// tooling reads it like any engine output.
+	tmp, err := os.CreateTemp("", "synth-check-*")
+	if err != nil {
+		t.Fatalf("temp file: %v", err)
+	}
+	tmpName := tmp.Name()
+	_ = tmp.Close()
+	defer os.Remove(tmpName)
+	if err := rt.DownloadFile(context.Background(), "outputs/session-result.json", tmpName); err != nil {
+		t.Fatalf("download synthesized output: %v", err)
+	}
+	data, err := os.ReadFile(tmpName)
+	if err != nil {
+		t.Fatalf("read synthesized output: %v", err)
+	}
+	var parsed struct {
+		ExitCode int    `json:"exit_code"`
+		Stderr   string `json:"stderr"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("synthesized output is not valid JSON: %v (%s)", err, data)
+	}
+	if parsed.ExitCode != 124 || !strings.Contains(parsed.Stderr, "synthesized") {
+		t.Fatalf("synthesized payload = {exit:%d, stderr:%q}, want exit 124 and a synthesized marker", parsed.ExitCode, parsed.Stderr)
 	}
 }
