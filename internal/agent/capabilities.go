@@ -36,8 +36,6 @@ const (
 	ModelPolicyPassthrough ModelPolicy = "passthrough"
 	// ModelPolicyCodexProvider requires a usable Codex provider configuration.
 	ModelPolicyCodexProvider ModelPolicy = "codex_provider"
-	// ModelPolicyQoderTier accepts only Qoder's named model tiers.
-	ModelPolicyQoderTier ModelPolicy = "qoder_tier"
 )
 
 // Capabilities declares the configuration surface consumed by an adapter.
@@ -77,7 +75,7 @@ func CapabilitiesForEngine(engineName string) Capabilities {
 	case agentkind.QoderCLI, agentkind.QoderAlias, agentkind.QoderCLIAlias:
 		return Capabilities{
 			Protocol:        ProtocolQoder,
-			ModelPolicy:     ModelPolicyQoderTier,
+			ModelPolicy:     ModelPolicyPassthrough,
 			SupportedKwargs: slices.Clone(qoderKwargs),
 		}
 	case agentkind.QwenCode, agentkind.QwenCodeAlias, agentkind.QwenAlias:
@@ -203,15 +201,15 @@ func appliedModelConnection(
 }
 
 func resolveAppliedProvider(params *credential.ResolvedAgentConfig, capabilities Capabilities) string {
-	switch capabilities.ModelPolicy {
-	case ModelPolicyQoderTier:
+	if capabilities.Protocol == ProtocolQoder {
 		// Qoder owns provider routing and authentication. A provider namespace
 		// can participate in requested-value compatibility, but it is not sent
 		// to qodercli.
 		params.AppliedAPIKey = ""
 		params.AppliedBaseURL = ""
 		return ""
-	case ModelPolicyCodexProvider:
+	}
+	if capabilities.ModelPolicy == ModelPolicyCodexProvider {
 		if reason := codexCustomProviderUnavailableReason(params.Provider, params.AppliedBaseURL); reason != "" {
 			params.Warnings = appendUniqueWarning(params.Warnings, fmt.Sprintf(
 				"engine %q cannot apply provider %q: provider %s; the provider override, endpoint, and provider-scoped credential are omitted and local Codex settings will be used",
@@ -240,17 +238,7 @@ func resolveAppliedModel(params *credential.ResolvedAgentConfig, capabilities Ca
 		return ""
 	}
 
-	switch capabilities.ModelPolicy {
-	case ModelPolicyQoderTier:
-		if slices.Contains(supportedQoderModels, requested) {
-			return requested
-		}
-		params.Warnings = appendUniqueWarning(params.Warnings, fmt.Sprintf(
-			"engine %q does not support model %q; the model override is omitted and local Qoder settings will be used",
-			params.Engine, requested,
-		))
-		return ""
-	case ModelPolicyCodexProvider:
+	if capabilities.ModelPolicy == ModelPolicyCodexProvider {
 		if reason := codexCustomProviderUnavailableReason(params.Provider, params.AppliedBaseURL); reason != "" {
 			return ""
 		}

@@ -993,10 +993,30 @@ engine:
 >
 > **注意**：`--api-key` 参数和 `eval.yaml` 中的 provider API key **不会**被用作 qodercli 的认证 token。鉴权来自所选版本对应的 PAT 或本地登录态。
 
-qodercli 的模型参数也有特殊限制：
+qodercli 的模型选择：
 
-- `model` 仅支持 qodercli 自己识别的值：`lite`、`efficient`、`auto`、`performance`、`ultimate`
-- `base_url` 对 qodercli 不生效
+- 非空的 `engine.model.name` 会去除首尾空白后传给 Qoder 的 `--model`，保留大小写和完整 ID。普通调用、stdin 提示词和恢复会话均遵循此规则。
+- 历史档位（`lite`、`efficient`、`auto`、`performance`、`ultimate`）、具体模型名和自定义模型 ID 均原样透传，不再使用本地白名单。是否可用取决于安装的 Qoder CLI 和账号，可通过 Qoder 模型选择器或支持该参数的版本中的 `--list-models` 查询。
+- 不指定模型时使用 Qoder 默认值。显式模型无效或不可用时，返回包含模型上下文和 Qoder 诊断的执行错误；skill-up 不会静默改用默认模型重试。
+- `base_url` 对 qodercli 不生效，provider API key 也不会作为 Qoder PAT 使用。
+- 报告中的 requested/applied model 分别表示请求值和实际传入 CLI 的参数，不表示独立验证了服务端的模型选择。
+
+例如，按准确名称选择一个可用的具体模型：
+
+```yaml
+engine:
+  name: qodercli
+  model:
+    name: Qwen3.7-Plus
+```
+
+对于含 `/` 的不透明 ID，使用 YAML 的 `engine.model.name`，或者在 CLI 中显式指定 provider，避免被按历史 `provider/model` 格式解析：
+
+```bash
+skill-up run ./evals/eval.yaml --engine qodercli --provider qoder --model 'team/custom-model-id'
+```
+
+这里的 provider 仅用于消除 CLI 解析歧义，路由和认证仍由 Qoder 管理。自定义模型需先在 Qoder 中配置。
 
 ### qwen_code 凭据说明
 

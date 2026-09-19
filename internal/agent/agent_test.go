@@ -774,7 +774,7 @@ func TestDetectAgentWithResolvedConfig_QoderCNPrefersOfficialEnv(t *testing.T) {
 }
 
 func TestDetectAgentWithResolvedConfig_QoderIgnoresParamsAPIKey(t *testing.T) {
-	t.Parallel()
+	t.Setenv(credential.EnvQoderPersonalAccessToken, "")
 
 	ag, err := detectMaterializedAgentForTest(credential.ResolvedAgentConfig{ //nolint:gosec // test dummy key
 		Engine:   "qoder-cli",
@@ -791,7 +791,7 @@ func TestDetectAgentWithResolvedConfig_QoderIgnoresParamsAPIKey(t *testing.T) {
 		t.Fatalf("expected *QoderCLIAgent, got %T", ag)
 	}
 	if got := qoderAgent.Cfg.EnvVars[credential.EnvQoderPersonalAccessToken]; got != "" {
-		t.Fatalf("expected empty token in EnvVars, got %q (params.APIKey should not leak)", got)
+		t.Fatal("expected empty token in EnvVars (params.APIKey should not leak)")
 	}
 }
 

@@ -267,15 +267,16 @@ Qoder CLI's model parameter capabilities differ from other agents; see the offic
 
 Constraints:
 
-- `model` only accepts Qoder-recognized values such as `lite`, `efficient`, `auto`
+- Non-empty `model` values are trimmed and passed through as opaque, case-preserving names/IDs, including historical tiers; Qoder validates availability
 - `base-url` is ignored by qodercli
 - `api-key` does not take effect as a qodercli command-line argument; Global authenticates with `QODER_PERSONAL_ACCESS_TOKEN`, while `engine.kwargs.edition=cn` uses `QODERCN_PERSONAL_ACCESS_TOKEN`
 - `QODER_CN_ACCESS_TOKEN` is a skill-up input alias for secret-manager/Keychain injection and is forwarded to qodercn under the official `QODERCN_PERSONAL_ACCESS_TOKEN` name
 
 Therefore for qodercli:
 
-- The final `model` may be parsed and recorded
-- The final `api-key` / `base-url` may be parsed; `api-key` should be converted to a runtime env var, while `base-url` should be explicitly ignored
+- The final `model` is recorded and forwarded to initial, stdin, and resumed calls; an omitted model leaves Qoder's default unchanged
+- Explicit model failures retain model context and upstream diagnostics, without retrying with a default model
+- The final provider `api-key` / `base-url` may be parsed, but neither is forwarded; only the selected edition's official PAT (or supported CN input alias) is used for PAT injection
 - The actually effective authentication path is env-var injection, not a CLI flag
 
 Do not assume that "the unified layer computed an `api-key`, so every agent will actually use it." qodercli is the canonical counterexample.
@@ -359,4 +360,4 @@ It is recommended that `internal/credential` stays within the following responsi
 - Emitting logs at the "global discovery" level
 - Providing baseline data for upstream parameter decisions
 
-It is not recommended to hard-code each agent's consumption differences into the resolver. Behaviors like qodercli's "recognizes only some `model` values, ignores `api-key`/`base-url`" should be decided and logged by the agent itself.
+It is not recommended to hard-code each agent's consumption differences into the resolver. Qoder model availability is validated by Qoder itself; its provider credential and endpoint isolation is decided by the adapter's protocol, independently of model passthrough.
