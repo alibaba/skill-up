@@ -16,7 +16,7 @@
       "Local Skill observation",
       "Human-reviewed regression case generation"
     ],
-    "defaultPrompt": "Review my local Skill observations and propose an approved regression case."
+    "defaultPrompt": "Use skill-upper to review my local Skill observations and propose an approved regression case."
   },
   "mcpServers": "./.mcp.json"
 }

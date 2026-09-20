@@ -11,7 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A current-Codex `skill-up-observer` plugin can capture explicitly attributed,
   locally redacted Skill observations and turn an approved observation into a
   non-overwriting candidate regression case using its self-contained Python
-  hooks and MCP server. The pinned Codex 0.80.0 evaluation adapter remains unchanged.
+  hooks and MCP server. The `skill-upper` Skill guides review, approval, and
+  the subsequent evaluation or evolution loop. The pinned Codex 0.80.0
+  evaluation adapter remains unchanged.
 - Custom Engines can opt into stateful multi-turn execution with
   `custom.conversation_mode: stateful`. Local and HTTP transports receive one
   user message per invocation and carry the returned `session_id` into the

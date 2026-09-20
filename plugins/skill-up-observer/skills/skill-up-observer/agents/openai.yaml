@@ -1,4 +1,4 @@
 interface:
-  display_name: "Skill Observation Reviewer"
-  short_description: "Review observations before creating regression cases"
-  default_prompt: "Review my local Skill observations and propose a regression case."
+  display_name: "Skill Observation Adapter"
+  short_description: "Record attributed Skill feedback for later review"
+  default_prompt: "Use $skill-up-observer to record feedback for this Skill interaction."

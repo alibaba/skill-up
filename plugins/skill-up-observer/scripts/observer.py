@@ -47,7 +47,7 @@ def utc_now() -> str:
 
 
 def data_dir() -> Path:
-    configured = os.environ.get("PLUGIN_DATA") or os.environ.get("SKILL_UP_OBSERVER_DATA")
+    configured = os.environ.get("SKILL_UP_OBSERVER_DATA") or os.environ.get("PLUGIN_DATA")
     if configured:
         return Path(configured).expanduser().resolve()
     return Path.home() / ".codex" / "plugin-data" / OBSERVER_SKILL_NAME

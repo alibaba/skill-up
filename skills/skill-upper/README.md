@@ -12,12 +12,14 @@ An Agent Skill that helps you evaluate and evolve other Agent Skills using the
 - **Validate** configuration before running
 - **Run** evaluations against real Agent Engines (Claude Code, Codex, qodercli, etc.)
 - **Diagnose** failures from structured reports and output evidence
+- **Review** locally captured Skill observations and turn approved feedback into regression cases
 - **Evolve** the Skill or strengthen eval coverage, then rerun the suite
 
 ## When to use
 
 - You want to evaluate, test, or regress a Skill
 - You want to fix or iterate a Skill from eval failures
+- You want to review a captured observation or convert approved feedback into a regression case
 - You need to write `eval.yaml` / `case.yaml` or choose a judge type
 - You're running `skill-up run/validate/list-cases/report/import/init`
 - You're migrating from Anthropic `evals.json`

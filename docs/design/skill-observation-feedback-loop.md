@@ -17,8 +17,8 @@ Codex hook payloads
   -> plugin Python runtime (normalization, attribution, redaction)
   -> plugin-local observation v1alpha1
   -> ${PLUGIN_DATA} review store
-  -> plugin MCP approve/reject tools
-  -> candidate case preview/write
+  -> skill-upper review and explicit approval workflow
+  -> plugin MCP candidate case preview/write
   -> optional skill-up validate, then existing run/report workflow
 ```
 
@@ -40,11 +40,11 @@ Installing/enabling the plugin and separately trusting its hook definition is th
 
 Storage uses Codex's plugin-specific `${PLUGIN_DATA}` directory; `SKILL_UP_OBSERVER_DATA` is a development/test override. Directories use `0700`; observation and draft files use `0600`. Data remains local and no upload path exists in this implementation.
 
-`UserPromptSubmit` creates a short-lived, redacted draft so later marker tools can attach attribution. `Stop` or `Interrupt` deletes the draft. If no explicit or instrumented attribution exists, no final observation is produced.
+`UserPromptSubmit` creates a short-lived, redacted draft so later marker tools can attach attribution. `Stop` deletes the draft; the plugin also handles `Interrupt` when the Codex host exposes that hook event. If no explicit or instrumented attribution exists, no final observation is produced.
 
 ## Review and mutation boundary
 
-New observations start as `candidate`. Listing, showing, and case preview are read-only MCP tools. A user must approve a specific observation before the write tool accepts it. Rejection is also explicit and retained as review metadata.
+New observations start as `candidate`. The canonical `skill-upper` Skill guides listing, inspection, preview, approval, case creation, validation, and any separately requested evolution loop. The plugin-local Skill remains a thin Codex capture adapter. Listing, showing, and case preview are read-only MCP tools. A user must approve a specific observation before the write tool accepts it. Rejection is also explicit and retained as review metadata.
 
 Case conversion:
 

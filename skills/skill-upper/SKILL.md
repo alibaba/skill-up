@@ -1,6 +1,6 @@
 ---
 name: skill-upper
-description: "Create, run, diagnose, and iteratively improve Agent Skill evaluations (evals) with the skill-up CLI / 使用 skill-up CLI 创建、运行、诊断并持续改进 Agent Skill 评测. Use when the user asks to evaluate, test, regress, verify, fix, improve, iterate, or evolve a Skill; add or strengthen eval cases; write eval.yaml/case.yaml; run skill-up run/validate/list-cases/report/import/init; or migrate from Anthropic evals.json. Handles Skill discovery, eval scaffolding, judge authoring, validation, runs, reports, and evidence-based repair loops."
+description: "Create, run, diagnose, and iteratively improve Agent Skill evaluations (evals) with the skill-up CLI / 使用 skill-up CLI 创建、运行、诊断并持续改进 Agent Skill 评测. Use when the user asks to evaluate, test, regress, verify, fix, improve, iterate, or evolve a Skill; review captured Skill observations or feedback; turn an approved observation into a regression case; add or strengthen eval cases; write eval.yaml/case.yaml; run skill-up run/validate/list-cases/report/import/init; or migrate from Anthropic evals.json. Handles Skill discovery, observation review, eval scaffolding, judge authoring, validation, runs, reports, and evidence-based repair loops."
 ---
 
 # use-skill-up-cli
@@ -59,12 +59,21 @@ Use this skill in any of the following situations:
 - The user asks to "run / evaluate / verify / test this skill".
 - The user asks to "fix / improve / iterate / evolve this skill" from eval failures.
 - The user wants to "add evals, test cases, or regression cases to a skill".
+- The user wants to review captured Skill observations or turn approved feedback into a regression case.
 - The user wants to edit `eval.yaml` / `case.yaml`, or asks you to choose an appropriate `judge` type.
 - The user mentions `skill-up run/validate/list-cases/report/import/init`.
 - The user wants to migrate from Anthropic `evals.json` to skill-up.
 - The current working directory contains `evals/eval.yaml` or `evals/evals.json` and the user wants to run it.
 
 ## Main flow (follow this order strictly)
+
+### Observation input mode (optional)
+
+When the request starts from a captured Skill observation, read
+`references/observations.md` first. Use the observer plugin's MCP tools to
+inspect and preview the observation, require explicit approval for the exact
+candidate, write it only after approval, and then continue at Step 4. If the
+request does not start from an observation, use the normal flow below.
 
 ### Step 0: Make sure skill-up is installed
 
@@ -239,4 +248,5 @@ Full flags: `references/cli.md`.
 - `references/judge-types.md`
 - `references/cli.md`
 - `references/migrate-anthropic.md`
+- `references/observations.md`
 - `assets/eval.yaml.tmpl`, `assets/case.yaml.tmpl`

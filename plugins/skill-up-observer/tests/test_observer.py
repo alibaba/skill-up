@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import threading
@@ -17,6 +18,23 @@ SPEC.loader.exec_module(observer)
 
 
 class ObserverTest(unittest.TestCase):
+    def test_codex_default_hook_manifest_exists(self) -> None:
+        manifest = json.loads((SCRIPT.parents[1] / "hooks" / "hooks.json").read_text())
+        self.assertIn("UserPromptSubmit", manifest["hooks"])
+        self.assertIn("Stop", manifest["hooks"])
+
+    def test_codex_mcp_uses_relative_plugin_path(self) -> None:
+        manifest = json.loads((SCRIPT.parents[1] / ".mcp.json").read_text())
+        args = manifest["mcpServers"]["skill_up_observer"]["args"]
+        self.assertEqual(args[0], "scripts/observer.py")
+
+    def test_development_data_override_takes_precedence(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {"SKILL_UP_OBSERVER_DATA": "/tmp/observer-override", "PLUGIN_DATA": "/tmp/plugin-data"},
+        ):
+            self.assertEqual(observer.data_dir(), Path("/tmp/observer-override").resolve())
+
     def test_redacts_prefixed_environment_credentials(self) -> None:
         source = "OPENAI_API_KEY=plain-secret GITHUB_TOKEN:another-secret MY_PASSWORD=hunter2"
         redacted, categories = observer.redact(source)

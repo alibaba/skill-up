@@ -1,8 +1,8 @@
 # Skill Up Observer Codex plugin
 
-This self-contained plugin captures explicitly attributed Skill interactions through Codex hooks and stores normalized observations locally. Its bundled MCP server and review Skill support explicit approval before the plugin creates a candidate regression case.
+This self-contained plugin captures explicitly attributed Skill interactions through Codex hooks and stores normalized observations locally. Its bundled MCP server supplies capture and case-conversion operations; the companion `skill-upper` Skill owns the review, approval, evaluation, and evolution workflow.
 
-The root `plugin.json` and `mcp.json` follow the current portable Agent Plugin format. `.codex-plugin/plugin.json` and `.mcp.json` are retained as Codex compatibility fallbacks.
+`.codex-plugin/plugin.json` and `.mcp.json` are the canonical local Codex package manifests. Codex discovers `hooks/hooks.json` by default, so the capture hooks and bundled Python MCP server load from the same installed plugin root.
 
 ## Requirements
 
@@ -16,10 +16,12 @@ The pinned Codex 0.80.0 binary used by skill-up's evaluation adapter is intentio
 
 Enabling the plugin and trusting its hooks opts in to local capture. Pending drafts and finalized observations are stored in Codex's plugin-specific writable `${PLUGIN_DATA}` directory. `SKILL_UP_OBSERVER_DATA` is available as a development/test override. Directories use mode `0700` and observation files use `0600`.
 
-Common API-key, bearer-token, JWT, and secret-assignment shapes are redacted before persistence. Nothing is uploaded. Unattributed turns are discarded at `Stop` or `Interrupt`, and inferred attribution is rejected by the observation contract.
+Common API-key, bearer-token, JWT, and secret-assignment shapes are redacted before persistence. Nothing is uploaded. Unattributed turns are discarded at `Stop`; the plugin also handles `Interrupt` when the Codex host exposes that hook event. Inferred attribution is rejected by the observation contract.
 
 ## Review workflow
 
-Ask Codex to list or show observations, preview a candidate case, and approve or reject a specific observation. The bundled Skill uses the plugin's MCP tools for these operations.
+Use `skill-upper` to list or show observations, preview a candidate case, and approve or reject a specific observation. The plugin-local `skill-up-observer` Skill is intentionally a thin Codex capture adapter so the canonical evaluation workflow is not duplicated.
 
 Preview is read-only. Writing requires an approved observation, never overwrites an existing case, and updates `evals/eval.yaml`. If `skill-up` is available on `PATH`, the plugin runs `skill-up validate` and rolls back both files when validation fails; capture and review do not depend on skill-up.
+
+Capture is self-contained. The complete review-to-evaluation flow also requires the distributable `skill-upper` Skill; running evaluations additionally requires the optional `skill-up` CLI.

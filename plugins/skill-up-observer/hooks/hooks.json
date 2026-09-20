@@ -3,6 +3,7 @@
   "hooks": {
     "UserPromptSubmit": [
       {
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
@@ -28,6 +29,7 @@
     ],
     "Stop": [
       {
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
@@ -40,6 +42,7 @@
     ],
     "Interrupt": [
       {
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",

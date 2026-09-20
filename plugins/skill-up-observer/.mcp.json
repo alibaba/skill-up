@@ -2,7 +2,8 @@
   "mcpServers": {
     "skill_up_observer": {
       "command": "python3",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/observer.py", "mcp"]
+      "args": ["scripts/observer.py", "mcp"],
+      "cwd": "."
     }
   }
 }
