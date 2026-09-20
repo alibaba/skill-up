@@ -21,6 +21,7 @@ from typing import Any, Iterator
 
 SCHEMA_VERSION = "v1alpha1"
 OBSERVER_SKILL_NAME = "skill-up-observer"
+CAPTURE_CONTROL_SKILLS = {OBSERVER_SKILL_NAME, "skill-upper"}
 SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 OBSERVATION_ID_RE = re.compile(r"^obs_[a-f0-9]{24}$")
 EXPLICIT_SKILL_RE = re.compile(r"(?:^|\s)\$([A-Za-z0-9][A-Za-z0-9_-]*)")
@@ -35,7 +36,7 @@ REDACTION_RULES = (
         "secret_assignment",
         re.compile(
             r"\b(?:[A-Za-z_][A-Za-z0-9_]*_)?(?:api[_-]?key|token|secret|password|passwd|pwd)"
-            r"\s*[:=]\s*(?:['\"]?)[^\s,;'\"]+",
+            r"\s*[:=]\s*(?:\"(?:\\.|[^\"\\\r\n])*\"|'(?:\\.|[^'\\\r\n])*'|[^\s,;'\"`]+)",
             re.IGNORECASE,
         ),
     ),
@@ -47,10 +48,11 @@ def utc_now() -> str:
 
 
 def data_dir() -> Path:
-    configured = os.environ.get("SKILL_UP_OBSERVER_DATA") or os.environ.get("PLUGIN_DATA")
+    configured = os.environ.get("SKILL_UP_OBSERVER_DATA")
     if configured:
         return Path(configured).expanduser().resolve()
-    return Path.home() / ".codex" / "plugin-data" / OBSERVER_SKILL_NAME
+    codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+    return codex_home.expanduser().resolve() / "plugin-data" / OBSERVER_SKILL_NAME
 
 
 def ensure_private_dir(path: Path) -> None:
@@ -275,7 +277,7 @@ def handle_hook(payload: dict[str, Any], root: Path | None = None) -> dict[str, 
             }
             for match in EXPLICIT_SKILL_RE.finditer(prompt):
                 name = match.group(1).lower()
-                if name != OBSERVER_SKILL_NAME and SKILL_NAME_RE.fullmatch(name):
+                if name not in CAPTURE_CONTROL_SKILLS and SKILL_NAME_RE.fullmatch(name):
                     draft["skill"] = {"name": name}
                     draft["attribution"] = {
                         "method": "explicit",

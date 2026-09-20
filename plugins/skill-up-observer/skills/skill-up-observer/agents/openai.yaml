@@ -1,4 +1,0 @@
-interface:
-  display_name: "Skill Observation Adapter"
-  short_description: "Record attributed Skill feedback for later review"
-  default_prompt: "Use $skill-up-observer to record feedback for this Skill interaction."

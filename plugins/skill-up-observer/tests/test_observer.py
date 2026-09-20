@@ -18,6 +18,33 @@ SPEC.loader.exec_module(observer)
 
 
 class ObserverTest(unittest.TestCase):
+    def test_plugin_exposes_only_skill_upper(self) -> None:
+        manifest = json.loads((SCRIPT.parents[1] / ".codex-plugin" / "plugin.json").read_text())
+        self.assertEqual(manifest["skills"], "./skills/")
+        skill_files = list((SCRIPT.parents[1] / "skills").rglob("SKILL.md"))
+        self.assertEqual([path.parent.name for path in skill_files], ["skill-upper"])
+
+    def test_bundled_skill_upper_matches_canonical_skill(self) -> None:
+        plugin_skill = SCRIPT.parents[1] / "skills" / "skill-upper"
+        canonical_skill = SCRIPT.parents[3] / "skills" / "skill-upper"
+        bundled_files = {
+            path.relative_to(plugin_skill)
+            for path in plugin_skill.rglob("*")
+            if path.is_file()
+        }
+        canonical_files = {
+            path.relative_to(canonical_skill)
+            for path in canonical_skill.rglob("*")
+            if path.is_file() and "evals" not in path.relative_to(canonical_skill).parts
+        }
+        self.assertEqual(bundled_files, canonical_files)
+        for relative_path in bundled_files:
+            self.assertEqual(
+                (plugin_skill / relative_path).read_bytes(),
+                (canonical_skill / relative_path).read_bytes(),
+                relative_path,
+            )
+
     def test_codex_default_hook_manifest_exists(self) -> None:
         manifest = json.loads((SCRIPT.parents[1] / "hooks" / "hooks.json").read_text())
         self.assertIn("UserPromptSubmit", manifest["hooks"])
@@ -35,12 +62,29 @@ class ObserverTest(unittest.TestCase):
         ):
             self.assertEqual(observer.data_dir(), Path("/tmp/observer-override").resolve())
 
+    def test_default_data_dir_is_shared_between_hooks_and_mcp(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {"CODEX_HOME": "/tmp/codex-home", "PLUGIN_DATA": "/tmp/hook-only-plugin-data"},
+            clear=True,
+        ):
+            self.assertEqual(
+                observer.data_dir(),
+                Path("/tmp/codex-home").resolve() / "plugin-data" / observer.OBSERVER_SKILL_NAME,
+            )
+
     def test_redacts_prefixed_environment_credentials(self) -> None:
         source = "OPENAI_API_KEY=plain-secret GITHUB_TOKEN:another-secret MY_PASSWORD=hunter2"
         redacted, categories = observer.redact(source)
         self.assertNotIn("plain-secret", redacted)
         self.assertNotIn("another-secret", redacted)
         self.assertNotIn("hunter2", redacted)
+        self.assertIn("secret_assignment", categories)
+
+    def test_redacts_complete_quoted_secret_assignments(self) -> None:
+        source = 'PASSWORD="correct horse battery staple" TOKEN=\'alpha beta gamma\''
+        redacted, categories = observer.redact(source)
+        self.assertEqual(redacted, "[REDACTED] [REDACTED]")
         self.assertIn("secret_assignment", categories)
 
     def test_explicit_hook_lifecycle_is_redacted_and_deduplicated(self) -> None:
@@ -73,6 +117,28 @@ class ObserverTest(unittest.TestCase):
             duplicate = observer.handle_hook(stop, root)
             self.assertEqual(duplicate["id"], result["id"])
             self.assertEqual(len(observer.list_observations(root)), 1)
+
+    def test_skill_upper_is_not_captured_as_the_target_skill(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            observer.handle_hook(
+                {
+                    "session_id": "session-control-skill",
+                    "turn_id": "turn-1",
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "Use $skill-upper to record feedback for $demo-skill",
+                },
+                root,
+            )
+            result = observer.handle_hook(
+                {
+                    "session_id": "session-control-skill",
+                    "turn_id": "turn-1",
+                    "hook_event_name": "Stop",
+                },
+                root,
+            )
+            self.assertEqual(result["skill"]["name"], "demo-skill")
 
     def test_concurrent_duplicate_observation_writes_are_atomic(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

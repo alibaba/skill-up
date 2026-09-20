@@ -38,13 +38,13 @@ Only explicit and instrumented attribution can produce a stored observation. Gen
 
 Installing/enabling the plugin and separately trusting its hook definition is the opt-in boundary. Hooks redact common provider keys, bearer tokens, JWTs, AWS access keys, and secret assignments before writing a draft or final observation. Raw hook payloads and transcript files are not stored.
 
-Storage uses Codex's plugin-specific `${PLUGIN_DATA}` directory; `SKILL_UP_OBSERVER_DATA` is a development/test override. Directories use `0700`; observation and draft files use `0600`. Data remains local and no upload path exists in this implementation.
+Storage uses `$CODEX_HOME/plugin-data/skill-up-observer` so Hook and MCP processes resolve the same directory even when only hooks receive `PLUGIN_DATA`; `SKILL_UP_OBSERVER_DATA` is a development/test override. Directories use `0700`; observation and draft files use `0600`. Data remains local and no upload path exists in this implementation.
 
 `UserPromptSubmit` creates a short-lived, redacted draft so later marker tools can attach attribution. `Stop` deletes the draft; the plugin also handles `Interrupt` when the Codex host exposes that hook event. If no explicit or instrumented attribution exists, no final observation is produced.
 
 ## Review and mutation boundary
 
-New observations start as `candidate`. The canonical `skill-upper` Skill guides listing, inspection, preview, approval, case creation, validation, and any separately requested evolution loop. The plugin-local Skill remains a thin Codex capture adapter. Listing, showing, and case preview are read-only MCP tools. A user must approve a specific observation before the write tool accepts it. Rejection is also explicit and retained as review metadata.
+New observations start as `candidate`. The plugin bundles the canonical `skill-upper` Skill to guide capture, listing, inspection, preview, approval, case creation, validation, and any separately requested evolution loop. Hooks and the `skill_up_observer` MCP server remain plugin runtime components rather than a second user-facing Skill. Listing, showing, and case preview are read-only MCP tools. A user must approve a specific observation before the write tool accepts it. Rejection is also explicit and retained as review metadata.
 
 Case conversion:
 
