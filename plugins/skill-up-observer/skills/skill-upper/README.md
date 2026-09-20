@@ -16,6 +16,10 @@ An Agent Skill that helps you evaluate and evolve other Agent Skills using the
 - **Review** locally captured Skill observations and turn approved feedback into regression cases
 - **Evolve** the Skill or strengthen eval coverage, then rerun the suite
 
+Observation capture and review currently support Codex only. Claude Code,
+qodercli, Qwen Code, and other Agent Engines remain available for ordinary
+`skill-up` evaluation runs, but are not supported by the observation workflow.
+
 ## When to use
 
 - You want to evaluate, test, or regress a Skill

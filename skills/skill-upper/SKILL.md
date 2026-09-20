@@ -1,6 +1,6 @@
 ---
 name: skill-upper
-description: "Capture and review Agent Skill observations, and create, run, diagnose, or iteratively improve Skill evaluations (evals) with the skill-up CLI / 采集和审核 Agent Skill 观察，并使用 skill-up CLI 创建、运行、诊断或持续改进 Skill 评测. Use when the user asks to record explicitly attributed Skill usage or feedback; review observations; turn an approved observation into a regression case; evaluate, test, regress, verify, fix, improve, iterate, or evolve a Skill; add or strengthen eval cases; write eval.yaml/case.yaml; run skill-up run/validate/list-cases/report/import/init; or migrate from Anthropic evals.json."
+description: "Capture and review Agent Skill observations, and create, run, diagnose, or iteratively improve Skill evaluations (evals) with the skill-up CLI / 采集和审核 Agent Skill 观察，并使用 skill-up CLI 创建、运行、诊断或持续改进 Skill 评测. Use when the user asks to record explicitly attributed Skill usage or feedback; review observations; turn an approved observation into a regression case; evaluate, test, regress, verify, fix, improve, iterate, or evolve a Skill; add or strengthen eval cases; write eval.yaml/case.yaml; run skill-up run/validate/list-cases/report/import/init; or migrate from Anthropic evals.json. Observation capture and review currently require the Codex observer plugin; evaluation remains multi-engine."
 ---
 
 # use-skill-up-cli
@@ -74,6 +74,11 @@ Use this mode when the user asks to record the current Skill interaction or
 feedback and the plugin's `skill_up_observer` MCP tools are available. It
 requires a current Codex release with plugin and lifecycle-hook support; do not
 retrofit it onto the pinned Codex 0.80.0 evaluation adapter.
+
+Observation capture and review are currently **Codex-only**. Claude Code,
+qodercli, Qwen Code, and other Agent Engines are not supported for this
+observation workflow. This restriction does not apply to normal `skill-up`
+evaluation runs, which remain multi-engine.
 
 1. Attribute the interaction only when the user explicitly references a Skill
    (for example, `$my-skill`) or the responsible Skill is otherwise known with

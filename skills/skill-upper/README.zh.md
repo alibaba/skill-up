@@ -15,6 +15,9 @@
 - **审核** 本地采集的 Skill 观察记录，将已批准的反馈转成回归用例
 - **演进** 修复目标 Skill 或增强 eval 覆盖，然后重新运行评测
 
+观察采集与审核目前仅支持 Codex。Claude Code、qodercli、Qwen Code 等其他
+Agent Engine 仍可用于普通 `skill-up` 评测，但暂不支持观察工作流。
+
 ## 使用场景
 
 - 需要对某个 Skill 进行评测、测试或回归验证

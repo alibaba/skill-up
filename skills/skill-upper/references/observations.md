@@ -6,6 +6,10 @@ available. If they are unavailable, explain that a current Codex release with
 the skill-up observer plugin is required. Do not install or enable it unless the user
 asks.
 
+This observation capture and review workflow currently supports Codex only.
+Claude Code, qodercli, Qwen Code, and other Agent Engines are not supported for
+observations; they remain supported for ordinary `skill-up` evaluation runs.
+
 ## Review before mutation
 
 1. Call `list_skill_observations` to find candidate records.
