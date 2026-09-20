@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alibaba/skill-up/internal/agent"
 	"github.com/alibaba/skill-up/internal/config"
@@ -22,6 +25,14 @@ type mockResumerAgent struct {
 	runTurnFunc func(ctx context.Context, rt runtime.Runtime, opts agent.ExecOptions, msg transcript.Message, sessionID string) (*agent.SessionResult, error)
 	turnCall    int
 }
+
+type strictIncrementalMockResumerAgent struct {
+	*mockResumerAgent
+}
+
+func (*strictIncrementalMockResumerAgent) RequiresSessionIDForNextTurn() bool { return true }
+
+func (*strictIncrementalMockResumerAgent) ReturnsIncrementalSessionResults() bool { return true }
 
 func (m *mockResumerAgent) RunTurn(ctx context.Context, rt runtime.Runtime, opts agent.ExecOptions, msg transcript.Message, sessionID string) (*agent.SessionResult, error) {
 	m.turnCall++
@@ -754,6 +765,250 @@ func TestExecuteMultiTurn_WarnsWhenSessionResumeUnavailable(t *testing.T) {
 	}
 	if !strings.Contains(logs, "resume-unavailable") || !strings.Contains(strings.ToLower(logs), "session") {
 		t.Errorf("expected the warning to name the case and the session problem, got logs:\n%s", logs)
+	}
+}
+
+func TestExecuteMultiTurn_StrictResumerRejectsMissingIntermediateSessionID(t *testing.T) {
+	t.Parallel()
+	calls := 0
+	ag := &strictIncrementalMockResumerAgent{mockResumerAgent: &mockResumerAgent{
+		mockAgent: mockAgent{name: "stateful-custom"},
+		runTurnFunc: func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, msg transcript.Message, _ string) (*agent.SessionResult, error) {
+			calls++
+			return &agent.SessionResult{
+				FinalMessage: "answer",
+				Transcript: transcript.Transcript{
+					{Role: transcript.RoleUser, Content: msg.Content},
+					{Role: transcript.RoleAssistant, Content: "answer"},
+				},
+				Artifacts: &agent.SessionArtifacts{Files: []agent.ArtifactFile{{Name: "turn-1.txt", Content: "evidence"}}},
+			}, nil
+		},
+	}}
+	caseCfg := &config.CaseConfig{ID: "missing-session", Input: config.Input{Turns: []config.Turn{
+		{Role: "user", Content: "first"},
+		{Role: "user", Content: "second"},
+	}}}
+	e := newTestEvaluator(EvalOptions{Agent: ag, EvalCfg: &config.EvalConfig{}})
+	results, aggregate, err := e.executeMultiTurn(context.Background(), &mockRuntime{workspace: t.TempDir()}, caseCfg, ag, agent.ExecOptions{})
+	if err == nil || !strings.Contains(err.Error(), "returned no session_id") {
+		t.Fatalf("error = %v, want missing session_id", err)
+	}
+	if calls != 1 || len(results) != 1 || results[0].Status != TurnError {
+		t.Fatalf("calls=%d results=%#v, want one errored turn", calls, results)
+	}
+	if aggregate == nil || aggregate.Artifacts == nil || len(aggregate.Artifacts.Files) != 1 {
+		t.Fatalf("aggregate lost first-turn evidence: %#v", aggregate)
+	}
+}
+
+func TestExecuteMultiTurn_StrictResumerAllowsMissingFinalSessionID(t *testing.T) {
+	t.Parallel()
+	ag := &strictIncrementalMockResumerAgent{mockResumerAgent: &mockResumerAgent{
+		mockAgent: mockAgent{name: "stateful-custom"},
+		runTurnFunc: func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ transcript.Message, _ string) (*agent.SessionResult, error) {
+			return &agent.SessionResult{FinalMessage: "done"}, nil
+		},
+	}}
+	caseCfg := &config.CaseConfig{ID: "final-session-optional", Input: config.Input{Turns: []config.Turn{{Role: "user", Content: "only"}}}}
+	e := newTestEvaluator(EvalOptions{Agent: ag, EvalCfg: &config.EvalConfig{}})
+	results, _, err := e.executeMultiTurn(context.Background(), &mockRuntime{workspace: t.TempDir()}, caseCfg, ag, agent.ExecOptions{})
+	if err != nil || len(results) != 1 || results[0].Status != TurnCompleted {
+		t.Fatalf("results=%#v error=%v, want completed final turn", results, err)
+	}
+}
+
+func TestExecuteSingleTurn_ClampsAdvertisedTimeoutToTurnDeadline(t *testing.T) {
+	t.Parallel()
+	var gotTimeout int
+	ag := &mockResumerAgent{
+		mockAgent: mockAgent{name: "timeout-aware"},
+		runTurnFunc: func(ctx context.Context, _ runtime.Runtime, opts agent.ExecOptions, _ transcript.Message, _ string) (*agent.SessionResult, error) {
+			gotTimeout = opts.TimeoutSec
+			deadline, ok := ctx.Deadline()
+			if !ok || time.Until(deadline) > 2*time.Second {
+				return nil, errors.New("turn context deadline was not applied")
+			}
+			return &agent.SessionResult{FinalMessage: "ok"}, nil
+		},
+	}
+	_, err := executeSingleTurn(
+		context.Background(),
+		ag,
+		&mockRuntime{workspace: t.TempDir()},
+		agent.ExecOptions{TimeoutSec: 60},
+		"work",
+		1,
+		1,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("executeSingleTurn: %v", err)
+	}
+	if gotTimeout != 1 {
+		t.Fatalf("advertised timeout = %d, want 1", gotTimeout)
+	}
+}
+
+func TestExecuteSingleTurn_ClampsAdvertisedTimeoutToRemainingCaseDeadline(t *testing.T) {
+	t.Parallel()
+	var gotTimeout int
+	ag := &mockResumerAgent{
+		mockAgent: mockAgent{name: "timeout-aware"},
+		runTurnFunc: func(_ context.Context, _ runtime.Runtime, opts agent.ExecOptions, _ transcript.Message, _ string) (*agent.SessionResult, error) {
+			gotTimeout = opts.TimeoutSec
+			return &agent.SessionResult{FinalMessage: "ok"}, nil
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	_, err := executeSingleTurn(
+		ctx,
+		ag,
+		&mockRuntime{workspace: t.TempDir()},
+		agent.ExecOptions{TimeoutSec: 60},
+		"work",
+		2,
+		0,
+		"session-1",
+	)
+	if err != nil {
+		t.Fatalf("executeSingleTurn: %v", err)
+	}
+	if gotTimeout != 1 {
+		t.Fatalf("advertised timeout = %d, want remaining 1 second", gotTimeout)
+	}
+}
+
+func TestExecuteMultiTurn_StrictResumerAllowsMissingIDWhenSkippingRemaining(t *testing.T) {
+	t.Parallel()
+	ag := &strictIncrementalMockResumerAgent{mockResumerAgent: &mockResumerAgent{
+		mockAgent: mockAgent{name: "stateful-custom"},
+		runTurnFunc: func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ transcript.Message, _ string) (*agent.SessionResult, error) {
+			return &agent.SessionResult{FinalMessage: "stop"}, nil
+		},
+	}}
+	caseCfg := &config.CaseConfig{ID: "skip-without-session", Input: config.Input{Turns: []config.Turn{
+		{
+			Role: "user", Content: "first",
+			PostCondition: &config.PostCondition{MustContainAll: []string{"continue"}, OnFail: "skip_remaining"},
+		},
+		{Role: "user", Content: "second"},
+	}}}
+	e := newTestEvaluator(EvalOptions{Agent: ag, EvalCfg: &config.EvalConfig{}})
+	results, _, err := e.executeMultiTurn(context.Background(), &mockRuntime{workspace: t.TempDir()}, caseCfg, ag, agent.ExecOptions{})
+	if err != nil {
+		t.Fatalf("executeMultiTurn: %v", err)
+	}
+	if len(results) != 2 || results[0].Status != TurnFailed || results[1].Status != TurnSkipped {
+		t.Fatalf("results = %#v, want failed gate followed by skipped turn", results)
+	}
+}
+
+func TestExecuteMultiTurn_IncrementalResultsRemainDistinct(t *testing.T) {
+	t.Parallel()
+	var artifactDirs []string
+	call := 0
+	ag := &strictIncrementalMockResumerAgent{mockResumerAgent: &mockResumerAgent{
+		mockAgent: mockAgent{name: "stateful-custom"},
+		runTurnFunc: func(_ context.Context, _ runtime.Runtime, opts agent.ExecOptions, msg transcript.Message, _ string) (*agent.SessionResult, error) {
+			call++
+			artifactDirs = append(artifactDirs, opts.ArtifactDir)
+			sessionID := ""
+			if call == 1 {
+				sessionID = "session-1"
+			}
+			return &agent.SessionResult{
+				SessionID: sessionID, FinalMessage: "same", InputTokens: 10, OutputTokens: 2,
+				Transcript: transcript.Transcript{
+					{Role: transcript.RoleUser, Content: msg.Content},
+					{Role: transcript.RoleAssistant, Content: "same"},
+				},
+				Artifacts: &agent.SessionArtifacts{Files: []agent.ArtifactFile{{Name: fmt.Sprintf("turn-%d.txt", call), Content: "evidence"}}},
+			}, nil
+		},
+	}}
+	caseCfg := &config.CaseConfig{ID: "incremental", Input: config.Input{Turns: []config.Turn{
+		{Role: "user", Content: "same"},
+		{Role: "user", Content: "same"},
+	}}}
+	e := newTestEvaluator(EvalOptions{Agent: ag, EvalCfg: &config.EvalConfig{}})
+	results, aggregate, err := e.executeMultiTurn(context.Background(), &mockRuntime{workspace: t.TempDir()}, caseCfg, ag, agent.ExecOptions{ArtifactDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("executeMultiTurn: %v", err)
+	}
+	if len(results) != 2 || len(aggregate.Transcript) != 4 {
+		t.Fatalf("results=%d aggregate transcript=%d, want 2 turns and 4 messages", len(results), len(aggregate.Transcript))
+	}
+	if aggregate.InputTokens != 20 || aggregate.OutputTokens != 4 {
+		t.Fatalf("aggregate tokens = %d/%d, want 20/4", aggregate.InputTokens, aggregate.OutputTokens)
+	}
+	if aggregate.Artifacts == nil || len(aggregate.Artifacts.Files) != 2 {
+		t.Fatalf("aggregate artifacts = %#v, want both turns", aggregate.Artifacts)
+	}
+	if len(artifactDirs) != 2 || filepath.Base(artifactDirs[0]) != "turn-1" || filepath.Base(artifactDirs[1]) != "turn-2" {
+		t.Fatalf("artifact dirs = %#v, want turn-scoped directories", artifactDirs)
+	}
+}
+
+func TestExecuteMultiTurn_IncrementalPathArtifactsAreSnapshottedPerTurn(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	artifactDir := t.TempDir()
+	call := 0
+	ag := &strictIncrementalMockResumerAgent{mockResumerAgent: &mockResumerAgent{
+		mockAgent: mockAgent{name: "stateful-custom"},
+		runTurnFunc: func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ transcript.Message, _ string) (*agent.SessionResult, error) {
+			call++
+			content := fmt.Sprintf("evidence from turn %d", call)
+			if err := os.WriteFile(filepath.Join(workspace, "evidence.txt"), []byte(content), 0o600); err != nil {
+				return nil, err
+			}
+			sessionID := ""
+			if call == 1 {
+				sessionID = "session-1"
+			}
+			return &agent.SessionResult{
+				SessionID:    sessionID,
+				FinalMessage: content,
+				Artifacts:    &agent.SessionArtifacts{GeneratedFiles: []string{"evidence.txt"}},
+			}, nil
+		},
+	}}
+	caseCfg := &config.CaseConfig{ID: "path-artifacts", Input: config.Input{Turns: []config.Turn{
+		{Role: "user", Content: "first"},
+		{Role: "user", Content: "second"},
+	}}}
+	e := newTestEvaluator(EvalOptions{Agent: ag, EvalCfg: &config.EvalConfig{}})
+	_, aggregate, err := e.executeMultiTurn(
+		context.Background(),
+		&mockRuntime{workspace: workspace},
+		caseCfg,
+		ag,
+		agent.ExecOptions{ArtifactDir: artifactDir},
+	)
+	if err != nil {
+		t.Fatalf("executeMultiTurn: %v", err)
+	}
+	if aggregate.Artifacts == nil || len(aggregate.Artifacts.GeneratedFiles) != 2 {
+		t.Fatalf("aggregate artifacts = %#v, want two snapshots", aggregate.Artifacts)
+	}
+	if len(aggregate.Artifacts.GeneratedFileSources) != 2 {
+		t.Fatalf("artifact source paths = %#v, want both workspace paths for diff exclusion", aggregate.Artifacts.GeneratedFileSources)
+	}
+	for i, path := range aggregate.Artifacts.GeneratedFiles {
+		wantDir := filepath.Join(artifactDir, fmt.Sprintf("turn-%d", i+1))
+		if !artifactInCleanDir(path, wantDir) {
+			t.Errorf("artifact %d path = %q, want inside %q", i+1, path, wantDir)
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatalf("read artifact %d: %v", i+1, readErr)
+		}
+		want := fmt.Sprintf("evidence from turn %d", i+1)
+		if string(content) != want {
+			t.Errorf("artifact %d content = %q, want %q", i+1, content, want)
+		}
 	}
 }
 

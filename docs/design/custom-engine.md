@@ -150,6 +150,7 @@ engine:
     base_url: string
   custom:
     transport: local | http
+    conversation_mode: batch | stateful
     timeout_seconds: int
     response_format: session_result | text
     env:
@@ -180,6 +181,7 @@ engine:
 | --- | --- | --- |
 | `engine.name` | yes | Agent name; a built-in match uses the built-in implementation, otherwise `engine.custom` is read |
 | `custom.transport` | yes | Invocation style, `local` or `http` |
+| `custom.conversation_mode` | no | `batch` (default) sends all messages once; `stateful` invokes once per turn and propagates `session_id` |
 | `custom.timeout_seconds` | no | Engine call timeout; falls back to the case timeout when unset |
 | `custom.response_format` | no | How the result is parsed, default `session_result`; keeping the default is recommended |
 | `custom.env` | no | Custom environment variables; `local` injects them into the process env, `http` does not send them automatically |
@@ -210,7 +212,7 @@ only where the transport genuinely requires it:
 | Dimension | Unified semantics | local carrier | http carrier |
 | --- | --- | --- | --- |
 | Input | `SessionInput` | Written to `custom.local.input_file` | JSON body; multipart `payload` when files are present |
-| Multi-turn | `messages` is the complete conversation history | Read from the input file | Read from the request body / payload |
+| Multi-turn | Batch sends complete history; stateful sends the current user message plus prior `session_id` | Read from the input file | Read from the request body / payload |
 | Custom params | `custom.kwargs` | Appear in the input file, can be templated | Appear in the request body / payload, can be templated |
 | Credentials | `${api_key}` referenced explicitly, never auto-injected | Injected via `custom.env` | Injected via `custom.http.headers` |
 | Workspace input | Passed only when explicitly declared | Agent runs directly inside the runtime workspace | Uploaded explicitly via `custom.http.files` |
@@ -375,6 +377,7 @@ The Custom Engine config also supports the following template variables provided
 | `${messages}` | The current case's message array; used as a structured value only inside a JSON body, payload, or input-file template |
 | `${session_input}` | The standard SessionInput structure; used as a structured value only inside a JSON body, payload, or input-file template |
 | `${session_input_json}` | The standard SessionInput as a JSON string |
+| `${session_id}` | The previous turn's continuation ID, available only in `custom.http.request_body`; empty on the first stateful invocation |
 | `${input_file}` | Suggested runtime input file path, default `inputs/messages.json` |
 | `${output_file}` | Suggested runtime output file path, default `outputs/session-result.json` |
 | `${model}` | Model reference in `provider/name` form; empty string when `engine.model` is unset |
@@ -422,6 +425,7 @@ uploads are present.
   "variant": "with_skill",
   "workspace": "/tmp/skill-up/workspace",
   "model": "openai/gpt-4.1",
+  "session_id": "session-from-the-previous-turn",
   "kwargs": {
     "profile": "strict",
     "max_files": "20"
@@ -444,20 +448,27 @@ changing the meaning of `content`.
 
 ### Session state boundary
 
-Each case variant is an independent session. A Custom Engine must not depend on
-implicit remote session state across cases, variants, or iterations.
-
-If the Engine itself supports session resume, it may only be used within a single
-`Run`. The result may include the full transcript, but exposing a remote session ID
-is not required; if exposed, it should be placed in `artifacts.logs` or a future
-metadata field.
+Each case variant and retry attempt is an independent session. A Custom Engine must
+not depend on implicit remote session state or a "latest session" lookup across
+cases, variants, workers, iterations, or retries.
 
 ### Multi-turn execution semantics
 
-When a Custom Engine receives multiple `messages`, it should treat them as the same
-conversation history and continue from the last user message. It does not need to
-replay each message and call the model after every user message; whether to compress
-context or genuinely replay is the Engine's own decision.
+In the default `batch` mode, a Custom Engine receives all configured `messages` in
+one invocation and should treat them as the same conversation history.
+
+With `conversation_mode: stateful`, skill-up invokes the engine once per user turn.
+The first `SessionInput` contains one message and omits `session_id`. A successful
+result must return `session_id` whenever another turn remains; skill-up places that
+exact ID in the next `SessionInput`. The ID may rotate on
+every response. Missing an ID before a required continuation is an execution error;
+the last turn and a turn that triggers `skip_remaining` do not require one.
+
+Stateful results are per-turn increments: their transcript and usage describe the
+current invocation. skill-up stamps the logical turn number, accumulates usage and
+artifacts, and uses turn-scoped report directories so same-named artifacts cannot
+replace earlier evidence. The evaluator remains responsible for post-conditions,
+capture and substitution, early stopping, and per-turn judge assertions.
 
 The returned `transcript` should contain at least the input messages and the final
 assistant reply. If the Engine produces tool calls or intermediate assistant messages
@@ -487,6 +498,7 @@ engine:
     name: gpt-4.1
   custom:
     transport: local
+    conversation_mode: stateful
     timeout_seconds: 300
     response_format: session_result
     env:
@@ -547,6 +559,7 @@ engine:
     name: gpt-4.1
   custom:
     transport: http
+    conversation_mode: stateful
     timeout_seconds: 300
     response_format: session_result
     kwargs:
@@ -588,9 +601,10 @@ Invocation rules:
 ### HTTP multi-turn conversations
 
 The multi-turn semantics of the HTTP transport are the same as the local transport:
-`payload.messages` in a single request is the complete conversation history, and the
-agent should continue from the last user message. The HTTP transport does not rely on
-the server keeping session state across requests.
+batch mode sends the complete conversation in one request. Stateful mode sends one
+user message per request and carries the opaque `session_id` returned by the server
+into the next payload. The server owns the corresponding conversation state; skill-up
+never discovers a "latest" session or shares an ID between case attempts.
 
 With file uploads, the multipart structure is:
 
@@ -662,6 +676,7 @@ The standard result of a Custom Engine is `SessionResult` JSON:
 {
   "engine": "custom",
   "model": "openai/gpt-4.1",
+  "session_id": "session-for-the-next-turn",
   "exit_code": 0,
   "duration_ms": 45200,
   "turns": 3,
@@ -694,6 +709,7 @@ The standard result of a Custom Engine is `SessionResult` JSON:
 | --- | --- | --- |
 | `engine` | string | Identifier of the responder; filled by `skill-up` with `engine.name` when unset |
 | `model` | string | Model reference explicitly observed by the engine. It remains empty when the engine does not report one; skill-up does not infer it from the applied input configuration. |
+| `session_id` | string | Opaque continuation ID. Required in stateful mode when another turn remains; it may rotate on every result. |
 | `duration_ms` | integer | Engine-side elapsed time; filled by `skill-up` with the call duration when unset |
 | `turns` | integer | Number of agent interaction turns |
 | `input_tokens` | integer | Number of input tokens |

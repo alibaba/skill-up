@@ -1,0 +1,57 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+
+mcp:
+  servers: []
+
+skills:
+  - source: local_path
+    path: .
+    target: .dsh-skills/dsh-marker-reader
+
+engine:
+  name: deepseek-harness
+  model:
+    provider: dashscope
+    name: qwen3.8-max
+  custom:
+    transport: local
+    conversation_mode: stateful
+    response_format: session_result
+    timeout_seconds: 300
+    env:
+      DSH_API_KEY: ${DASHSCOPE_EVAL_API_KEY?DASHSCOPE_EVAL_API_KEY is required}
+      DSH_BASE_URL: ${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      DSH_MODEL: ${model_name}
+      DSH_BIN: ${DSH_BIN:-dsh}
+      DSH_SKILLS_DIR: ${workspace}/.dsh-skills
+      DSH_TELEMETRY_MODE: DISABLED
+      DSH_PERMISSION_MODE: danger-full-access
+    local:
+      command: ${DSH_SKILL_UP_PYTHON:-python3}
+      args:
+        - ${DSH_SKILL_UP_RUNNER?DSH_SKILL_UP_RUNNER must point to dsh_runner.py}
+        - --input
+        - ${input_file}
+        - --output
+        - ${output_file}
+      cwd: ${workspace}
+      input_file: .skill-up-dsh/input.json
+      output_file: .skill-up-dsh/result.json
+
+cases:
+  files:
+    - evals/cases/decode-marker.yaml
+  defaults:
+    timeout_seconds: 300
+    max_turns: 12
+  parallelism: 1
+
+judge:
+  type: rule_based
+
+report:
+  formats: [json, html]
+  artifacts: [transcript, logs]

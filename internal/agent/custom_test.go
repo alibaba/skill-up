@@ -295,8 +295,8 @@ func TestCustomAgent_RunLocal_ClearedStaleOutputRegistered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if !containsBasename(res.Artifacts.GeneratedFiles, "result.json") {
-		t.Fatalf("generated_files = %v, want the cleared output path registered", res.Artifacts.GeneratedFiles)
+	if !containsBasename(res.Artifacts.GeneratedFileSources, "result.json") {
+		t.Fatalf("generated_file_sources = %v, want the cleared output path registered", res.Artifacts.GeneratedFileSources)
 	}
 }
 
@@ -557,10 +557,10 @@ func TestCustomAgent_RunLocal_PathArtifactPreservesName(t *testing.T) {
 	}
 }
 
-// assertCustomGeneratedFile runs a local custom agent with the given shell
-// args and asserts that a file with wantBasename is registered in
-// GeneratedFiles (so it is excluded from workspace diffs).
-func assertCustomGeneratedFile(t *testing.T, scriptArgs []string, wantBasename string) {
+// assertCustomFrameworkFileExcluded runs a local custom agent with the given
+// shell args and asserts that a framework path is excluded from workspace
+// diffs without being exposed to judges as a generated artifact.
+func assertCustomFrameworkFileExcluded(t *testing.T, scriptArgs []string, wantBasename string) {
 	t.Helper()
 	rt := newCustomTestRuntime(t)
 	ag := customLocalAgent(&config.CustomEngineConfig{
@@ -572,16 +572,19 @@ func assertCustomGeneratedFile(t *testing.T, scriptArgs []string, wantBasename s
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if !containsBasename(res.Artifacts.GeneratedFiles, wantBasename) {
-		t.Fatalf("generated_files = %v, want %s registered", res.Artifacts.GeneratedFiles, wantBasename)
+	if containsBasename(res.Artifacts.GeneratedFiles, wantBasename) {
+		t.Fatalf("generated_files = %v, framework file %s must not be exposed", res.Artifacts.GeneratedFiles, wantBasename)
+	}
+	if !containsBasename(res.Artifacts.GeneratedFileSources, wantBasename) {
+		t.Fatalf("generated_file_sources = %v, want %s registered", res.Artifacts.GeneratedFileSources, wantBasename)
 	}
 }
 
 func TestCustomAgent_RunLocal_RegistersFrameworkInputFile(t *testing.T) {
 	t.Parallel()
-	// The framework-written input file must be registered so it is excluded
-	// from workspace diffs.
-	assertCustomGeneratedFile(t,
+	// The framework-written input file must be registered only for workspace
+	// diff exclusion because it can contain a resumable session ID.
+	assertCustomFrameworkFileExcluded(t,
 		[]string{"-c", `echo '{"exit_code":0,"final_message":"ok"}'`},
 		"messages.json")
 }
@@ -894,6 +897,56 @@ func TestDetectAgent_CustomDispatch(t *testing.T) {
 	}
 	if _, ok := ag.(*CustomAgent); !ok {
 		t.Fatalf("agent type = %T, want *CustomAgent", ag)
+	}
+	if _, ok := ag.(SessionResumer); ok {
+		t.Fatalf("batch custom agent type %T unexpectedly implements SessionResumer", ag)
+	}
+}
+
+func TestDetectAgent_StatefulCustomDispatch(t *testing.T) {
+	t.Parallel()
+	custom := &config.CustomEngineConfig{
+		Transport:        "local",
+		ConversationMode: "stateful",
+		Local:            &config.CustomLocalConfig{Command: "/opt/agent"},
+	}
+	ag, err := DetectAgent("my-agent", Config{Name: "my-agent", Custom: custom})
+	if err != nil {
+		t.Fatalf("DetectAgent: %v", err)
+	}
+	if _, ok := ag.(SessionResumer); !ok {
+		t.Fatalf("stateful custom agent type %T does not implement SessionResumer", ag)
+	}
+	if _, ok := ag.(*CustomAgent); ok {
+		t.Fatalf("stateful custom agent type = %T, want opt-in wrapper", ag)
+	}
+}
+
+func TestCustomAgent_RunTurnLocal_PropagatesSessionID(t *testing.T) {
+	t.Parallel()
+	rt := newCustomTestRuntime(t)
+	custom := &config.CustomEngineConfig{
+		Transport:        "local",
+		ConversationMode: "stateful",
+		Local: &config.CustomLocalConfig{
+			Command: "sh",
+			Args:    []string{"-c", `session_id=$(sed -n 's/.*"session_id":"\([^"]*\)".*/\1/p' "$1"); printf '{"exit_code":0,"session_id":"next","final_message":"%s"}' "$session_id"`, "sh", "${input_file}"},
+		},
+	}
+	ag, err := DetectAgent("my-agent", Config{Name: "my-agent", Custom: custom})
+	if err != nil {
+		t.Fatalf("DetectAgent: %v", err)
+	}
+	resumer, ok := ag.(SessionResumer)
+	if !ok {
+		t.Fatalf("agent type %T does not implement SessionResumer", ag)
+	}
+	result, err := resumer.RunTurn(context.Background(), rt, ExecOptions{}, transcript.Message{Role: transcript.RoleUser, Content: "continue"}, "prior-session")
+	if err != nil {
+		t.Fatalf("RunTurn: %v", err)
+	}
+	if result.FinalMessage != "prior-session" || result.SessionID != "next" {
+		t.Fatalf("result = %#v, want propagated prior session and returned next session", result)
 	}
 }
 

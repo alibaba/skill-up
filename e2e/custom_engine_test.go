@@ -235,6 +235,93 @@ func TestPipeline_CustomEngine_HTTPTransport(t *testing.T) {
 	}
 }
 
+func TestPipeline_CustomEngine_StatefulHTTPTransport(t *testing.T) {
+	t.Parallel()
+
+	var (
+		mu     sync.Mutex
+		inputs []struct {
+			SessionID string `json:"session_id"`
+			Messages  []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			SessionID string `json:"session_id"`
+			Messages  []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		inputs = append(inputs, input)
+		call := len(inputs)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if call == 1 {
+			_, _ = io.WriteString(w, `{"exit_code":0,"session_id":"session-1","final_message":"token=abc"}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"exit_code":0,"final_message":"used token abc"}`)
+	}))
+	defer srv.Close()
+
+	dir := getCustomEngineTestdataDir()
+	result := Run(t, RunConfig{
+		Env: []string{
+			"PATH=" + os.Getenv("PATH"),
+			"HOME=" + os.Getenv("HOME"),
+			"CUSTOM_AGENT_ENDPOINT=" + srv.URL,
+		},
+		WorkDir: dir,
+		Timeout: 60 * time.Second,
+	}, "run", filepath.Join(dir, "evals", "eval-stateful-http.yaml"), "--no-delete", "--output-dir", t.TempDir())
+
+	if result.ExitCode != 0 {
+		t.Fatalf("stateful HTTP run failed: exit=%d\nstdout:\n%s\nstderr:\n%s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(inputs) != 2 {
+		t.Fatalf("HTTP invocations = %d, want 2", len(inputs))
+	}
+	if inputs[0].SessionID != "" || inputs[1].SessionID != "session-1" {
+		t.Fatalf("session IDs = %q, %q", inputs[0].SessionID, inputs[1].SessionID)
+	}
+	if len(inputs[0].Messages) != 1 || inputs[0].Messages[0].Content != "Generate a token." ||
+		len(inputs[1].Messages) != 1 || inputs[1].Messages[0].Content != "Use token abc." {
+		t.Fatalf("unexpected per-turn messages: %#v", inputs)
+	}
+}
+
+func TestPipeline_CustomEngine_StatefulLocalTransport(t *testing.T) {
+	skipIfNoPOSIXShell(t)
+	t.Parallel()
+
+	dir := getCustomEngineTestdataDir()
+	result := Run(t, RunConfig{
+		Env: []string{
+			"PATH=" + os.Getenv("PATH"),
+			"HOME=" + os.Getenv("HOME"),
+			"CUSTOM_STATEFUL_AGENT_BIN=" + filepath.Join(dir, "stateful-agent.sh"),
+		},
+		WorkDir: dir,
+		Timeout: 60 * time.Second,
+	}, "run", filepath.Join(dir, "evals", "eval-stateful-local.yaml"), "--no-delete", "--output-dir", t.TempDir())
+
+	if result.ExitCode != 0 {
+		t.Fatalf("stateful local run failed: exit=%d\nstdout:\n%s\nstderr:\n%s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if !strings.Contains(result.Stdout, "1 passed") {
+		t.Fatalf("expected stateful local case to pass:\n%s", result.Stdout)
+	}
+}
+
 // TestPipeline_CustomEngine_Validate runs `skill-up validate` against the
 // custom engine eval.yaml. This exercises the post-load
 // config.ResolveCustomEngineConfig path that validate.go invokes, including

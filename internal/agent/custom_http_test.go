@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -10,10 +11,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/alibaba/skill-up/internal/config"
+	"github.com/alibaba/skill-up/internal/runtime"
+	"github.com/alibaba/skill-up/pkg/transcript"
 )
 
 func httpAgent(custom *config.CustomEngineConfig, apiKey string) *CustomAgent {
@@ -102,6 +106,116 @@ func TestCustomAgent_RunHTTP_DefaultBodyIsSessionInput(t *testing.T) {
 	}
 	if len(got.Messages) != 1 || got.Messages[0].Content != "review the diff" {
 		t.Fatalf("default body did not carry SessionInput.messages: %#v", got.Messages)
+	}
+}
+
+func TestCustomAgent_RunTurnHTTP_PropagatesRotatingSessionID(t *testing.T) {
+	t.Parallel()
+	var got []SessionInput
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var input SessionInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			t.Errorf("decode SessionInput: %v", err)
+		}
+		got = append(got, input)
+		nextID := "session-1"
+		if len(got) == 2 {
+			nextID = "session-2"
+		}
+		_, _ = io.WriteString(w, `{"exit_code":0,"session_id":"`+nextID+`","final_message":"ok"}`)
+	}))
+	defer srv.Close()
+
+	custom := httpEngine(srv.URL)
+	custom.ConversationMode = "stateful"
+	custom.HTTP.RequestBody = map[string]any{
+		"session_id": "${session_id}",
+		"messages":   "${messages}",
+	}
+	ag, err := DetectAgent("my-agent", Config{Name: "my-agent", Custom: custom})
+	if err != nil {
+		t.Fatalf("DetectAgent: %v", err)
+	}
+	resumer, ok := ag.(SessionResumer)
+	if !ok {
+		t.Fatalf("agent type %T does not implement SessionResumer", ag)
+	}
+	rt := newCustomTestRuntime(t)
+	first, err := resumer.RunTurn(context.Background(), rt, ExecOptions{}, transcript.Message{Role: transcript.RoleUser, Content: "first"}, "")
+	if err != nil {
+		t.Fatalf("first RunTurn: %v", err)
+	}
+	second, err := resumer.RunTurn(context.Background(), rt, ExecOptions{}, transcript.Message{Role: transcript.RoleUser, Content: "second"}, first.SessionID)
+	if err != nil {
+		t.Fatalf("second RunTurn: %v", err)
+	}
+	if len(got) != 2 || got[0].SessionID != "" || got[1].SessionID != "session-1" {
+		t.Fatalf("session IDs received by server = %#v", got)
+	}
+	if len(got[0].Messages) != 1 || got[0].Messages[0].Content != "first" || len(got[1].Messages) != 1 || got[1].Messages[0].Content != "second" {
+		t.Fatalf("per-turn messages received by server = %#v", got)
+	}
+	if second.SessionID != "session-2" {
+		t.Fatalf("second session ID = %q, want session-2", second.SessionID)
+	}
+}
+
+func TestCustomAgent_RunTurnHTTP_ConcurrentCasesKeepSessionsIsolated(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var input SessionInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		wantID := "session-" + input.CaseID
+		if input.SessionID != "" && input.SessionID != wantID {
+			http.Error(w, "session belongs to another case", http.StatusConflict)
+			return
+		}
+		_, _ = io.WriteString(w, `{"exit_code":0,"session_id":"`+wantID+`","final_message":"ok"}`)
+	}))
+	defer srv.Close()
+
+	custom := httpEngine(srv.URL)
+	custom.ConversationMode = "stateful"
+	ag, err := DetectAgent("my-agent", Config{Name: "my-agent", Custom: custom})
+	if err != nil {
+		t.Fatalf("DetectAgent: %v", err)
+	}
+	resumer, ok := ag.(SessionResumer)
+	if !ok {
+		t.Fatalf("agent type %T does not implement SessionResumer", ag)
+	}
+	runtimes := map[string]*runtime.NoneRuntime{
+		"alpha": newCustomTestRuntime(t),
+		"beta":  newCustomTestRuntime(t),
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, caseID := range []string{"alpha", "beta"} {
+		wg.Go(func() {
+			opts := ExecOptions{AgentMetadata: &runtime.AgentMetadata{CaseID: caseID}}
+			first, runErr := resumer.RunTurn(context.Background(), runtimes[caseID], opts, transcript.Message{Role: transcript.RoleUser, Content: "first"}, "")
+			if runErr != nil {
+				errs <- runErr
+				return
+			}
+			second, runErr := resumer.RunTurn(context.Background(), runtimes[caseID], opts, transcript.Message{Role: transcript.RoleUser, Content: "second"}, first.SessionID)
+			if runErr != nil {
+				errs <- runErr
+				return
+			}
+			if second.SessionID != "session-"+caseID {
+				errs <- fmt.Errorf("case %s received session %q", caseID, second.SessionID)
+			}
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for runErr := range errs {
+		t.Error(runErr)
 	}
 }
 

@@ -1,0 +1,33 @@
+id: decode-marker
+title: Decode a marker through an installed Skill
+
+input:
+  turns:
+    - role: user
+      content: |
+        Use the dsh-marker-reader skill to decode marker.txt. Follow the Skill's
+        required response format exactly and remember the result for the next
+        turn.
+      post_condition:
+        must_contain_all: ["DSH_SKILL_UP_OK=skill-up-dsh"]
+    - role: user
+      content: |
+        Without reading marker.txt again, repeat the exact response you gave in
+        the previous turn and output no other text.
+
+context:
+  repo_fixture: evals/fixtures/repos/marker-project
+
+expect:
+  must_contain:
+    - DSH_SKILL_UP_OK=skill-up-dsh
+
+judge:
+  type: rule_based
+  success:
+    - tool_called_in_turn:
+        turn: 1
+        name: read
+    - tool_not_called_in_turn:
+        turn: 2
+        name: read

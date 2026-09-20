@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -183,7 +184,9 @@ func (t *httpTransport) buildRequestBody(prep *customRunPrep) ([]byte, error) {
 	if rb == nil {
 		return prep.sessJSON, nil
 	}
-	rendered, err := renderBodyValue(rb, prep.vars)
+	vars := maps.Clone(prep.vars)
+	vars["session_id"] = prep.sessionID
+	rendered, err := renderBodyValue(rb, vars)
 	if err != nil {
 		return nil, err
 	}

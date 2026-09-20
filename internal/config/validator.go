@@ -603,6 +603,8 @@ func validateCustomEngine(custom *customengine.Config) []string {
 		errs = append(errs, fmt.Sprintf("engine.custom.response_format must be one of: session_result, text (got %q)", custom.ResponseFormat))
 	}
 
+	errs = append(errs, validateCustomConversationMode(custom)...)
+
 	if custom.TimeoutSeconds < 0 {
 		errs = append(errs, "engine.custom.timeout_seconds must be non-negative")
 	}
@@ -618,6 +620,18 @@ func validateCustomEngine(custom *customengine.Config) []string {
 	}
 
 	return errs
+}
+
+func validateCustomConversationMode(custom *customengine.Config) []string {
+	if custom.ConversationMode != "" &&
+		custom.ConversationMode != customengine.ConversationModeBatch &&
+		custom.ConversationMode != customengine.ConversationModeStateful {
+		return []string{fmt.Sprintf("engine.custom.conversation_mode must be one of: batch, stateful (got %q)", custom.ConversationMode)}
+	}
+	if custom.ConversationMode == customengine.ConversationModeStateful && custom.ResponseFormat == "text" {
+		return []string{"engine.custom.response_format must be session_result when conversation_mode is stateful"}
+	}
+	return nil
 }
 
 // validateCustomHTTP validates the engine.custom.http block: url is required,

@@ -11,8 +11,9 @@ func TestConfigPreservesYAMLSchema(t *testing.T) {
 	var cfg Config
 	err := yaml.Unmarshal([]byte(`
 transport: http
+conversation_mode: stateful
 timeout_seconds: 30
-response_format: text
+response_format: session_result
 http:
   url: https://example.test/agent
   method: POST
@@ -24,7 +25,7 @@ http:
 	if err != nil {
 		t.Fatalf("unmarshal Config: %v", err)
 	}
-	if cfg.Transport != "http" || cfg.TimeoutSeconds != 30 || cfg.ResponseFormat != "text" {
+	if cfg.Transport != "http" || cfg.ConversationMode != ConversationModeStateful || cfg.TimeoutSeconds != 30 || cfg.ResponseFormat != "session_result" {
 		t.Fatalf("top-level fields = %+v", cfg)
 	}
 	if cfg.HTTP == nil || cfg.HTTP.URL != "https://example.test/agent" || cfg.HTTP.Method != http.MethodPost {

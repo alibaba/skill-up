@@ -1,0 +1,23 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+
+engine:
+  name: e2e-custom-stateful-http-agent
+  custom:
+    transport: http
+    conversation_mode: stateful
+    response_format: session_result
+    http:
+      url: ${CUSTOM_AGENT_ENDPOINT}/v1/run
+
+cases:
+  files:
+    - evals/cases/stateful.yaml
+  defaults:
+    timeout_seconds: 60
+  parallelism: 1
+
+report:
+  formats: [json]

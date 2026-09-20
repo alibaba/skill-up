@@ -16,3 +16,7 @@ in-process `httptest` server, points `${CUSTOM_AGENT_ENDPOINT}` at it, and
 asserts the posted `SessionInput` reaches the server and the returned
 `SessionResult` flows into the report — so the http stand-in agent lives in the
 test rather than in `agent.sh`.
+
+The `eval-stateful-*.yaml` fixtures exercise opt-in stateful conversations for
+both transports, including session-ID propagation, per-turn post-conditions,
+capture, substitution, and a final response that needs no continuation ID.

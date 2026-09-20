@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -68,6 +70,7 @@ type multiTurnState struct {
 	tokenBaseIn       int
 	tokenBaseOut      int
 	durationMs        int64
+	artifacts         *agent.SessionArtifacts
 }
 
 // executeMultiTurn orchestrates multi-turn evaluation for cases with
@@ -80,15 +83,10 @@ func (e *defaultEvaluator) executeMultiTurn(
 	runAgent agent.Agent,
 	agentExecOpts agent.ExecOptions,
 ) ([]TurnResult, *agent.SessionResult, error) {
-	resumer, hasResumer := runAgent.(agent.SessionResumer)
-	if !hasResumer {
-		return nil, nil, fmt.Errorf("agent %s does not implement SessionResumer for multi-turn evaluation", runAgent.Name())
-	}
-
 	turns := caseCfg.Input.Turns
-	state := &multiTurnState{
-		capturedVars: make(map[string]string),
-		turnResults:  make([]TurnResult, 0, len(turns)),
+	resumer, state, requireSessionID, resultsAreIncremental, err := prepareMultiTurnExecution(runAgent, len(turns))
+	if err != nil {
+		return nil, nil, err
 	}
 
 	var lastSessionResult *agent.SessionResult
@@ -97,29 +95,41 @@ func (e *defaultEvaluator) executeMultiTurn(
 		turnNum := i + 1
 
 		// Template substitution.
-		content, err := substituteTemplate(turn.Content, state.capturedVars)
+		content, err := substituteTurnContent(state, turn, turnNum)
 		if err != nil {
-			tr := TurnResult{TurnNumber: turnNum, Content: turn.Content, Status: TurnError, Reason: err.Error()}
-			state.turnResults = append(state.turnResults, tr)
-			return state.turnResults, lastSessionResult, fmt.Errorf("turn %d template substitution: %w", turnNum, err)
+			return state.turnResults, lastSessionResult, err
 		}
 
-		// Execute the turn via the resumer.
-		sessionResult, execErr := executeSingleTurn(ctx, resumer, rt, agentExecOpts, content, turnNum, turn.TimeoutSeconds, state.sessionID)
+		// Incremental engines isolate same-named artifacts by turn.
+		turnExecOpts := agentExecOpts
+		if resultsAreIncremental {
+			turnExecOpts, err = turnScopedExecOptions(turnExecOpts, turnNum)
+			if err != nil {
+				tr := TurnResult{TurnNumber: turnNum, Content: content, Status: TurnError, Reason: err.Error()}
+				state.turnResults = append(state.turnResults, tr)
+				return state.turnResults, buildAggregateResult(state, lastSessionResult), err
+			}
+		}
+		sessionResult, execErr := executeSingleTurn(ctx, resumer, rt, turnExecOpts, content, turnNum, turn.TimeoutSeconds, state.sessionID)
+		if resultsAreIncremental {
+			e.archiveIncrementalTurnArtifacts(ctx, rt, turnExecOpts.ArtifactDir, turnNum, sessionResult)
+		}
+		meta := turnSessionMeta{
+			caseID:                caseCfg.ID,
+			agentName:             runAgent.Name(),
+			turnNum:               turnNum,
+			totalTurns:            len(turns),
+			requireSessionID:      requireSessionID,
+			resultsAreIncremental: resultsAreIncremental,
+		}
 		if execErr != nil {
-			tr := TurnResult{TurnNumber: turnNum, Content: content, Status: TurnError, Reason: execErr.Error(), SessionResult: sessionResult}
-			state.turnResults = append(state.turnResults, tr)
+			lastSessionResult = recordTurnExecutionError(ctx, state, sessionResult, meta, content, execErr)
 			return state.turnResults, buildAggregateResult(state, lastSessionResult), execErr
 		}
 
 		// Update state from the successful turn.
 		lastSessionResult = sessionResult
-		sessionResult = absorbTurnSession(ctx, state, sessionResult, turnSessionMeta{
-			caseID:     caseCfg.ID,
-			agentName:  runAgent.Name(),
-			turnNum:    turnNum,
-			totalTurns: len(turns),
-		})
+		sessionResult = absorbTurnSession(ctx, state, sessionResult, meta)
 
 		// Build turn result.
 		tr := buildTurnResult(turnNum, content, sessionResult)
@@ -134,23 +144,123 @@ func (e *defaultEvaluator) executeMultiTurn(
 			return state.turnResults, buildAggregateResult(state, lastSessionResult), nil
 		}
 
-		// Capture variables.
-		if len(turn.Capture) > 0 {
-			captured, captureErr := captureVariables(turn.Capture, tr.Response)
-			if captureErr != nil {
-				tr.Status = TurnError
-				tr.Reason = captureErr.Error()
-				state.turnResults = append(state.turnResults, tr)
-				return state.turnResults, buildAggregateResult(state, lastSessionResult), captureErr
-			}
-			tr.CapturedVars = captured
-			maps.Copy(state.capturedVars, captured)
+		if err := captureTurnVariables(turn, &tr, state); err != nil {
+			return state.turnResults, buildAggregateResult(state, lastSessionResult), err
+		}
+
+		if err := requiredSessionIDError(meta, sessionResult); err != nil {
+			tr.Status = TurnError
+			tr.Reason = err.Error()
+			state.turnResults = append(state.turnResults, tr)
+			return state.turnResults, buildAggregateResult(state, lastSessionResult), err
 		}
 
 		state.turnResults = append(state.turnResults, tr)
 	}
 
 	return state.turnResults, buildAggregateResult(state, lastSessionResult), nil
+}
+
+func captureTurnVariables(turn config.Turn, tr *TurnResult, state *multiTurnState) error {
+	if len(turn.Capture) == 0 {
+		return nil
+	}
+	captured, err := captureVariables(turn.Capture, tr.Response)
+	if err != nil {
+		tr.Status = TurnError
+		tr.Reason = err.Error()
+		state.turnResults = append(state.turnResults, *tr)
+		return err
+	}
+	tr.CapturedVars = captured
+	maps.Copy(state.capturedVars, captured)
+	return nil
+}
+
+func substituteTurnContent(state *multiTurnState, turn config.Turn, turnNum int) (string, error) {
+	content, err := substituteTemplate(turn.Content, state.capturedVars)
+	if err == nil {
+		return content, nil
+	}
+	state.turnResults = append(state.turnResults, TurnResult{
+		TurnNumber: turnNum,
+		Content:    turn.Content,
+		Status:     TurnError,
+		Reason:     err.Error(),
+	})
+	return "", fmt.Errorf("turn %d template substitution: %w", turnNum, err)
+}
+
+func prepareMultiTurnExecution(runAgent agent.Agent, turnCount int) (
+	resumer agent.SessionResumer,
+	state *multiTurnState,
+	requireSessionID bool,
+	resultsAreIncremental bool,
+	err error,
+) {
+	resolvedResumer, ok := runAgent.(agent.SessionResumer)
+	if !ok {
+		return nil, nil, false, false, fmt.Errorf("agent %s does not implement SessionResumer for multi-turn evaluation", runAgent.Name())
+	}
+	requireSessionID, resultsAreIncremental = sessionResumerCapabilities(runAgent)
+	state = &multiTurnState{
+		capturedVars: make(map[string]string),
+		turnResults:  make([]TurnResult, 0, turnCount),
+	}
+	return resolvedResumer, state, requireSessionID, resultsAreIncremental, nil
+}
+
+func sessionResumerCapabilities(runAgent agent.Agent) (requireSessionID, incrementalResults bool) {
+	if strict, ok := runAgent.(agent.StrictSessionResumer); ok {
+		requireSessionID = strict.RequiresSessionIDForNextTurn()
+	}
+	if incremental, ok := runAgent.(agent.IncrementalSessionResumer); ok {
+		incrementalResults = incremental.ReturnsIncrementalSessionResults()
+	}
+	return requireSessionID, incrementalResults
+}
+
+func turnScopedExecOptions(opts agent.ExecOptions, turnNum int) (agent.ExecOptions, error) {
+	if opts.ArtifactDir == "" {
+		return opts, nil
+	}
+	opts.ArtifactDir = filepath.Join(opts.ArtifactDir, fmt.Sprintf("turn-%d", turnNum))
+	if err := os.MkdirAll(opts.ArtifactDir, 0o755); err != nil {
+		return opts, fmt.Errorf("create turn %d artifact directory: %w", turnNum, err)
+	}
+	return opts, nil
+}
+
+func recordTurnExecutionError(
+	ctx context.Context,
+	state *multiTurnState,
+	sessionResult *agent.SessionResult,
+	meta turnSessionMeta,
+	content string,
+	execErr error,
+) *agent.SessionResult {
+	rawResult := sessionResult
+	if sessionResult != nil {
+		sessionResult = absorbTurnSession(ctx, state, sessionResult, meta)
+	}
+	tr := buildTurnResult(meta.turnNum, content, sessionResult)
+	tr.Status = TurnError
+	tr.Reason = execErr.Error()
+	if tr.Transcript != nil {
+		state.transcript = append(state.transcript, tr.Transcript...)
+	}
+	state.turnResults = append(state.turnResults, tr)
+	return rawResult
+}
+
+func requiredSessionIDError(meta turnSessionMeta, result *agent.SessionResult) error {
+	if !meta.requireSessionID || meta.turnNum >= meta.totalTurns {
+		return nil
+	}
+	if result != nil && result.SessionID != "" {
+		return nil
+	}
+	return fmt.Errorf("case %s turn %d: custom stateful engine returned no session_id; turn %d cannot resume", meta.caseID, meta.turnNum, meta.turnNum+1)
 }
 
 // executeSingleTurn invokes the resumer for one turn, applying an optional per-turn timeout.
@@ -174,8 +284,21 @@ func executeSingleTurn(
 		cancel = func() {}
 	}
 	defer cancel()
+	opts = clampExecTimeoutToContext(turnCtx, opts)
 
 	return resumer.RunTurn(turnCtx, rt, opts, msg, sessionID)
+}
+
+func clampExecTimeoutToContext(ctx context.Context, opts agent.ExecOptions) agent.ExecOptions {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return opts
+	}
+	remainingSeconds := max(int(time.Until(deadline)/time.Second), 1)
+	if opts.TimeoutSec <= 0 || remainingSeconds < opts.TimeoutSec {
+		opts.TimeoutSec = remainingSeconds
+	}
+	return opts
 }
 
 // buildTurnResult creates a TurnResult from a successful agent execution.
@@ -195,10 +318,12 @@ func buildTurnResult(turnNum int, content string, sessionResult *agent.SessionRe
 
 // turnSessionMeta carries the identifiers needed to report on a turn's session.
 type turnSessionMeta struct {
-	caseID     string
-	agentName  string
-	turnNum    int
-	totalTurns int
+	caseID                string
+	agentName             string
+	turnNum               int
+	totalTurns            int
+	requireSessionID      bool
+	resultsAreIncremental bool
 }
 
 // absorbTurnSession folds a completed turn's session result into the running
@@ -214,6 +339,8 @@ func absorbTurnSession(
 	switch {
 	case sessionResult != nil && sessionResult.SessionID != "":
 		state.sessionID = sessionResult.SessionID
+	case meta.requireSessionID:
+		state.sessionID = ""
 	case meta.turnNum < meta.totalTurns:
 		// Without a session id the next turn cannot resume this conversation and
 		// silently starts a fresh one, losing every earlier turn. The only visible
@@ -230,13 +357,20 @@ func absorbTurnSession(
 	if sessionResult != nil {
 		sessionTranscript = sessionResult.Transcript
 	}
-	normalized, cumulativeUsage := normalizeTurnSessionResult(sessionResult, meta.turnNum, state.sessionTranscript)
+	var normalized *agent.SessionResult
+	var cumulativeUsage bool
+	if meta.resultsAreIncremental {
+		normalized = normalizeIncrementalTurnSessionResult(sessionResult, meta.turnNum)
+	} else {
+		normalized, cumulativeUsage = normalizeTurnSessionResult(sessionResult, meta.turnNum, state.sessionTranscript)
+	}
 	state.sessionTranscript = sessionTranscript
 	if cumulativeUsage {
 		accumulateCumulativeMetrics(state, normalized)
 	} else {
 		accumulatePerTurnMetrics(state, normalized)
 	}
+	mergeTurnArtifacts(state, normalized)
 
 	return normalized
 }
@@ -255,6 +389,33 @@ func normalizeTurnSessionResult(sessionResult *agent.SessionResult, turnNum int,
 		}
 	}
 	return &normalized, cumulative
+}
+
+func normalizeIncrementalTurnSessionResult(sessionResult *agent.SessionResult, turnNum int) *agent.SessionResult {
+	if sessionResult == nil {
+		return nil
+	}
+	normalized := *sessionResult
+	normalized.Transcript = stampTurnTranscript(sessionResult.Transcript, turnNum)
+	if len(normalized.Transcript) > 0 {
+		normalized.Turns = 1
+		if final := normalized.Transcript.FinalAssistantMessage(); final != "" {
+			normalized.FinalMessage = final
+		}
+	}
+	return &normalized
+}
+
+func stampTurnTranscript(source transcript.Transcript, turnNum int) transcript.Transcript {
+	if len(source) == 0 {
+		return nil
+	}
+	stamped := make(transcript.Transcript, len(source))
+	copy(stamped, source)
+	for i := range stamped {
+		stamped[i].Turn = turnNum
+	}
+	return stamped
 }
 
 // transcriptForLogicalTurn isolates the messages one logical turn contributed.
@@ -629,6 +790,58 @@ func accumulateCumulativeMetrics(state *multiTurnState, result *agent.SessionRes
 	state.durationMs += result.DurationMs
 }
 
+func mergeTurnArtifacts(state *multiTurnState, result *agent.SessionResult) {
+	if result == nil || result.Artifacts == nil {
+		return
+	}
+	if state.artifacts == nil {
+		state.artifacts = &agent.SessionArtifacts{}
+	}
+	state.artifacts.GeneratedFiles = append(state.artifacts.GeneratedFiles, result.Artifacts.GeneratedFiles...)
+	state.artifacts.GeneratedFileSources = append(state.artifacts.GeneratedFileSources, result.Artifacts.GeneratedFileSources...)
+	state.artifacts.Files = append(state.artifacts.Files, result.Artifacts.Files...)
+	state.artifacts.WorkspaceDiff = joinArtifactText(state.artifacts.WorkspaceDiff, result.Artifacts.WorkspaceDiff)
+	state.artifacts.Logs = joinArtifactText(state.artifacts.Logs, result.Artifacts.Logs)
+}
+
+// archiveIncrementalTurnArtifacts snapshots workspace-backed files before the
+// next turn can overwrite them, then points the aggregate at those snapshots.
+// Inline, URL, and renamed artifacts are already written into artifactDir by
+// the custom agent and are left unchanged.
+func (e *defaultEvaluator) archiveIncrementalTurnArtifacts(
+	ctx context.Context,
+	rt runtime.Runtime,
+	artifactDir string,
+	turnNum int,
+	result *agent.SessionResult,
+) {
+	if artifactDir == "" || result == nil || result.Artifacts == nil || len(result.Artifacts.GeneratedFiles) == 0 {
+		return
+	}
+	targetSubpath := filepath.Join("agent", "run", fmt.Sprintf("turn-%d", turnNum))
+	e.downloadArtifactsIntoDir(ctx, rt, targetSubpath, artifactDir, result)
+	for i, path := range result.Artifacts.GeneratedFiles {
+		if artifactInCleanDir(path, filepath.Clean(artifactDir)) {
+			continue
+		}
+		archived := filepath.Join(artifactDir, filepath.Base(path))
+		if _, err := os.Stat(archived); err == nil {
+			result.Artifacts.GeneratedFileSources = append(result.Artifacts.GeneratedFileSources, path)
+			result.Artifacts.GeneratedFiles[i] = archived
+		}
+	}
+}
+
+func joinArtifactText(existing, next string) string {
+	if existing == "" {
+		return next
+	}
+	if next == "" {
+		return existing
+	}
+	return existing + "\n" + next
+}
+
 // buildAggregateResult constructs a SessionResult that aggregates all turns.
 func buildAggregateResult(state *multiTurnState, lastResult *agent.SessionResult) *agent.SessionResult {
 	if lastResult == nil {
@@ -638,6 +851,7 @@ func buildAggregateResult(state *multiTurnState, lastResult *agent.SessionResult
 			OutputTokens: state.outputTokens,
 			DurationMs:   state.durationMs,
 			Turns:        countCompletedTurns(state.turnResults),
+			Artifacts:    state.artifacts,
 		}
 	}
 	agg := *lastResult
@@ -646,6 +860,9 @@ func buildAggregateResult(state *multiTurnState, lastResult *agent.SessionResult
 	agg.OutputTokens = state.outputTokens
 	agg.DurationMs = state.durationMs
 	agg.Turns = countCompletedTurns(state.turnResults)
+	if state.artifacts != nil {
+		agg.Artifacts = state.artifacts
+	}
 	// FinalMessage is the response from the last completed turn.
 	if msg := lastCompletedResponse(state.turnResults); msg != "" {
 		agg.FinalMessage = msg

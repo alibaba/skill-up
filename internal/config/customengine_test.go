@@ -24,13 +24,15 @@ func TestCustomHTTPConfig_UnmarshalsScalarRequestBody(t *testing.T) {
 
 func TestResolveCustomEngineEnv_AllForms(t *testing.T) {
 	t.Setenv("CUSTOM_BIN", "/opt/agent")
+	t.Setenv("CUSTOM_CONVERSATION_MODE", "stateful")
 	t.Setenv("EMPTY_VAR", "")
 
 	cfg := &EvalConfig{
 		Engine: EngineConfig{
 			Name: "my-agent",
 			Custom: &CustomEngineConfig{
-				Transport: "local",
+				Transport:        "local",
+				ConversationMode: "${CUSTOM_CONVERSATION_MODE}",
 				Env: map[string]string{
 					"WITH_DEFAULT": "${MISSING_VAR:-fallback}",
 					"FROM_ENV":     "${CUSTOM_BIN}",
@@ -50,6 +52,9 @@ func TestResolveCustomEngineEnv_AllForms(t *testing.T) {
 	custom := cfg.Engine.Custom
 	if custom.Local.Command != "/opt/agent" {
 		t.Errorf("command = %q, want /opt/agent", custom.Local.Command)
+	}
+	if custom.ConversationMode != "stateful" {
+		t.Errorf("conversation_mode = %q, want stateful", custom.ConversationMode)
 	}
 	if custom.Env["WITH_DEFAULT"] != "fallback" {
 		t.Errorf("WITH_DEFAULT = %q, want fallback", custom.Env["WITH_DEFAULT"])
@@ -275,7 +280,7 @@ func TestResolveCustomEngineConfig_RejectsAPIKeyTemplateInCommand(t *testing.T) 
 }
 
 func TestResolveCustomEngineConfig_RejectsAggregateKwargsInCommand(t *testing.T) {
-	for _, ref := range []string{"${kwargs}", "${kwargs_json}", "${session_input}", "${session_input_json}"} {
+	for _, ref := range []string{"${kwargs}", "${kwargs_json}", "${session_id}", "${session_input}", "${session_input_json}"} {
 		cfg := customEngineEvalConfig("my-agent", &CustomEngineConfig{
 			Transport: "local",
 			Local: &CustomLocalConfig{
@@ -477,7 +482,7 @@ func TestIsSensitiveEnvName(t *testing.T) {
 }
 
 func TestIsBuiltinTemplateVar(t *testing.T) {
-	for _, name := range []string{"workspace", "prompt", "api_key", "input_file", "kwargs", "kwargs.profile"} {
+	for _, name := range []string{"workspace", "prompt", "api_key", "input_file", "session_id", "kwargs", "kwargs.profile"} {
 		if !IsBuiltinTemplateVar(name) {
 			t.Errorf("IsBuiltinTemplateVar(%q) = false, want true", name)
 		}
@@ -532,6 +537,16 @@ func TestResolveCustomEngineConfig_CustomTransport(t *testing.T) {
 			name:      "invalid response_format",
 			custom:    &CustomEngineConfig{Transport: "local", Local: &CustomLocalConfig{Command: "x"}, ResponseFormat: "xml"},
 			wantError: "engine.custom.response_format must be one of",
+		},
+		{
+			name:      "invalid conversation mode",
+			custom:    &CustomEngineConfig{Transport: "local", Local: &CustomLocalConfig{Command: "x"}, ConversationMode: "replay"},
+			wantError: "engine.custom.conversation_mode must be one of",
+		},
+		{
+			name:      "stateful text response",
+			custom:    &CustomEngineConfig{Transport: "local", Local: &CustomLocalConfig{Command: "x"}, ConversationMode: "stateful", ResponseFormat: "text"},
+			wantError: "response_format must be session_result",
 		},
 		{
 			name:      "http missing url",

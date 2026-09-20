@@ -11,14 +11,22 @@ import (
 // built-in agent. It is read only when engine.name does not match a built-in
 // agent. See docs/design/custom-engine.md for the full contract.
 type Config struct {
-	Transport      string            `yaml:"transport"` // local, http
-	TimeoutSeconds int               `yaml:"timeout_seconds,omitempty"`
-	ResponseFormat string            `yaml:"response_format,omitempty"` // session_result (default), text
-	Env            map[string]string `yaml:"env,omitempty"`
-	Kwargs         map[string]string `yaml:"kwargs,omitempty"`
-	Local          *LocalConfig      `yaml:"local,omitempty"`
-	HTTP           *HTTPConfig       `yaml:"http,omitempty"`
+	Transport        string            `yaml:"transport"`                   // local, http
+	ConversationMode string            `yaml:"conversation_mode,omitempty"` // batch (default), stateful
+	TimeoutSeconds   int               `yaml:"timeout_seconds,omitempty"`
+	ResponseFormat   string            `yaml:"response_format,omitempty"` // session_result (default), text
+	Env              map[string]string `yaml:"env,omitempty"`
+	Kwargs           map[string]string `yaml:"kwargs,omitempty"`
+	Local            *LocalConfig      `yaml:"local,omitempty"`
+	HTTP             *HTTPConfig       `yaml:"http,omitempty"`
 }
+
+const (
+	// ConversationModeBatch sends all configured messages in one invocation.
+	ConversationModeBatch = "batch"
+	// ConversationModeStateful invokes the engine once per turn and propagates session_id.
+	ConversationModeStateful = "stateful"
+)
 
 // LocalConfig configures the local transport: a command executed inside
 // the current runtime via runtime.Exec.

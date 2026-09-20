@@ -6,6 +6,7 @@ import (
 
 	"github.com/alibaba/skill-up/internal/agentkind"
 	"github.com/alibaba/skill-up/internal/credential"
+	"github.com/alibaba/skill-up/internal/customengine"
 	"github.com/alibaba/skill-up/internal/logging"
 )
 
@@ -41,7 +42,11 @@ func DetectAgent(engineName string, cfg Config) (Agent, error) {
 		// A non-built-in engine name is a Custom Engine when engine.custom
 		// is configured; otherwise it is unsupported.
 		if cfg.Custom != nil {
-			return NewCustomAgent(cfg), nil
+			customAgent := NewCustomAgent(cfg)
+			if cfg.Custom.ConversationMode == customengine.ConversationModeStateful {
+				return newStatefulCustomAgent(customAgent), nil
+			}
+			return customAgent, nil
 		}
 		return nil, &UnsupportedAgentError{Name: engineName}
 	}

@@ -82,6 +82,18 @@ type SessionResumer interface {
 	RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, message transcript.Message, sessionID string) (*SessionResult, error)
 }
 
+// StrictSessionResumer identifies resumable agents that cannot continue a
+// conversation without the session ID returned by the preceding turn.
+type StrictSessionResumer interface {
+	RequiresSessionIDForNextTurn() bool
+}
+
+// IncrementalSessionResumer identifies agents whose RunTurn results contain
+// only the current logical turn rather than the complete session to date.
+type IncrementalSessionResumer interface {
+	ReturnsIncrementalSessionResults() bool
+}
+
 // RuntimeObservation contains metadata obtained from side-effect-free runtime
 // inspection. It does not include authentication or login state.
 type RuntimeObservation struct {
@@ -109,10 +121,11 @@ func Preflight(ctx context.Context, rt Runtime, ag Agent) (RuntimeObservation, e
 
 // SessionArtifacts holds artifacts produced during an agent session.
 type SessionArtifacts struct {
-	WorkspaceDiff  string         `json:"workspace_diff,omitempty"`
-	GeneratedFiles []string       `json:"generated_files,omitempty"` // Runtime file paths, e.g. ["outputs/stdout.json", "outputs/transcript.jsonl"]
-	Files          []ArtifactFile `json:"files,omitempty"`           // Structured artifact declarations (Custom Engine).
-	Logs           string         `json:"logs,omitempty"`
+	WorkspaceDiff        string         `json:"workspace_diff,omitempty"`
+	GeneratedFiles       []string       `json:"generated_files,omitempty"` // Runtime file paths, e.g. ["outputs/stdout.json", "outputs/transcript.jsonl"]
+	GeneratedFileSources []string       `json:"-"`                         // Original workspace paths retained for diff exclusion after archiving.
+	Files                []ArtifactFile `json:"files,omitempty"`           // Structured artifact declarations (Custom Engine).
+	Logs                 string         `json:"logs,omitempty"`
 }
 
 // ArtifactFile is a structured artifact declaration returned by an agent.

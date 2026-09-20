@@ -1,0 +1,23 @@
+id: custom-stateful
+title: Custom Engine propagates an opaque session between turns
+input:
+  turns:
+    - role: user
+      content: Generate a token.
+      post_condition:
+        must_contain_all: ["token=abc"]
+      capture:
+        - variable: token
+          pattern: "token=(?P<value>[a-z]+)"
+    - role: user
+      content: Use token {{token}}.
+
+judge:
+  type: rule_based
+  success:
+    - turn_response_contains:
+        turn: 1
+        contains_all: ["token=abc"]
+    - turn_response_contains:
+        turn: 2
+        contains_all: ["used token abc"]
