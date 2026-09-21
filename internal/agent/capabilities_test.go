@@ -29,7 +29,7 @@ func TestCapabilitiesForEngine(t *testing.T) {
 	}{
 		{engine: "claude_code", protocol: ProtocolAnthropic, modelPolicy: ModelPolicyPassthrough, supportsBaseURL: true, supportsVersion: true},
 		{engine: "codex", protocol: ProtocolOpenAI, modelPolicy: ModelPolicyCodexProvider, supportsBaseURL: true, supportsVersion: true, kwarg: KwargBypassSandbox},
-		{engine: "qoder-cli", protocol: ProtocolQoder, modelPolicy: ModelPolicyQoderTier, kwarg: KwargEdition},
+		{engine: "qoder-cli", protocol: ProtocolQoder, modelPolicy: ModelPolicyPassthrough, kwarg: KwargEdition},
 		{engine: "qwen", protocol: ProtocolOpenAI, modelPolicy: ModelPolicyPassthrough, supportsBaseURL: true, supportsVersion: true},
 		{engine: "custom-agent", protocol: ProtocolCustom, modelPolicy: ModelPolicyPassthrough},
 	}
@@ -84,10 +84,10 @@ func TestResolveAdapterConfig_ModelPolicies(t *testing.T) {
 			wantApplied:  "auto",
 		},
 		{
-			name:         "qoder unsupported model",
-			params:       credential.ResolvedAgentConfig{Engine: "qodercli", Model: "qwen3.6-plus"},
+			name:         "qoder concrete model",
+			params:       credential.ResolvedAgentConfig{Engine: "qodercli", Model: " Qwen3.7-Plus "},
 			wantProtocol: ProtocolQoder,
-			wantWarning:  "does not support model",
+			wantApplied:  "Qwen3.7-Plus",
 		},
 		{
 			name:         "qwen passthrough",
@@ -115,6 +115,84 @@ func TestResolveAdapterConfig_ModelPolicies(t *testing.T) {
 			}
 			if tt.wantWarning != "" && !containsWarning(got.Warnings, tt.wantWarning) {
 				t.Fatalf("warnings = %v, want substring %q", got.Warnings, tt.wantWarning)
+			}
+		})
+	}
+}
+
+func TestResolveAdapterConfig_QoderModelAndConnectionIsolation(t *testing.T) {
+	t.Parallel()
+
+	for _, edition := range []string{qoderEditionGlobal, qoderEditionCN} {
+		for _, model := range []string{"lite", "efficient", "auto", "performance", "ultimate", " Qwen3.7-Plus ", "team/custom-ID", "", " \t "} {
+			t.Run(edition+"/"+model, func(t *testing.T) {
+				t.Parallel()
+				params := credential.ResolvedAgentConfig{
+					Engine: "qodercli", Model: model, Provider: "anthropic",
+					APIKey: "test-provider-key", BaseURL: "https://example.test",
+					Kwargs: map[string]string{KwargEdition: edition},
+				}
+				got := ResolveAdapterConfig(params, nil)
+				if got.Model != model || got.AppliedModel != strings.TrimSpace(model) {
+					t.Fatalf("model changed: requested=%q applied=%q", got.Model, got.AppliedModel)
+				}
+				if got.Provider != params.Provider || got.APIKey != params.APIKey || got.BaseURL != params.BaseURL {
+					t.Fatal("requested connection was mutated")
+				}
+				for _, value := range []string{
+					got.AppliedProvider, got.AppliedAPIKey, got.AppliedBaseURL,
+					got.AppliedConnection.APIKey, got.AppliedConnection.BaseURL, got.AppliedConnection.Provider,
+				} {
+					if value != "" {
+						t.Fatal("Qoder forwarded provider routing or credentials")
+					}
+				}
+				if got.AppliedConnection.APIKeySet || got.AppliedConnection.BaseURLSet {
+					t.Fatal("Qoder retained rejected connection flags")
+				}
+				if containsWarning(got.Warnings, "model") {
+					t.Fatalf("unexpected model warning: %v", got.Warnings)
+				}
+			})
+		}
+	}
+}
+
+func TestResolveAdapterConfig_QoderRunnerAndJudgeModels(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		cli  credential.CLIOverrides
+		want string
+	}{
+		{"yaml", credential.CLIOverrides{}, "openai/custom-ID"},
+		{"explicit-provider", credential.CLIOverrides{Provider: "qoder", Model: "openai/custom-ID"}, "openai/custom-ID"},
+		{"legacy-provider-model", credential.CLIOverrides{Model: "openai/Qwen3.7-Plus"}, "Qwen3.7-Plus"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runner := credential.ResolveRunnerConfig(config.EngineConfig{
+				Name:  "qodercli",
+				Model: config.ModelConfig{Name: "openai/custom-ID"},
+			}, nil, tc.cli)
+			runner = ResolveAdapterConfig(runner, nil)
+			if runner.AppliedModel != tc.want {
+				t.Fatalf("runner model = %q, want %q", runner.AppliedModel, tc.want)
+			}
+			for _, judgeModel := range []string{"", "Qwen3.7-Plus", "qoder/team/custom-ID"} {
+				judge := ResolveAdapterConfig(credential.ResolveJudgeConfig(
+					config.JudgeConfig{Type: "agent_judge", Model: judgeModel}, runner, nil), nil)
+				want := judgeModel
+				switch judgeModel {
+				case "":
+					want = tc.want
+				case "qoder/team/custom-ID":
+					want = "team/custom-ID"
+				}
+				if judge.AppliedModel != want || judge.AppliedProvider != "" || judge.AppliedAPIKey != "" || judge.AppliedBaseURL != "" {
+					t.Fatalf("judge model = %q, want %q, or connection leaked", judge.AppliedModel, want)
+				}
 			}
 		})
 	}

@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -551,21 +553,152 @@ func TestQoderCLIRunTurn_ResumeUsesCorrectFlag(t *testing.T) {
 	}
 }
 
-func TestQoderCLIAppliedModelName_AllowsSupportedModel(t *testing.T) {
+func TestQoderCLIAppliedModelName_Passthrough(t *testing.T) {
 	t.Parallel()
 
-	ag := NewQoderCLIAgent(Config{ModelProvider: "anthropic", ModelName: "auto"})
-	if got := ag.appliedModelName(context.Background()); got != "auto" {
-		t.Fatalf("appliedModelName() = %q, want auto", got)
+	for _, model := range []string{"", " \t ", "lite", "efficient", "auto", "performance", "ultimate", " Qwen3.7-Plus ", "team/custom-ID", "missing-model"} {
+		ag := NewQoderCLIAgent(Config{ModelName: model})
+		if got := ag.appliedModelName(context.Background()); got != strings.TrimSpace(model) {
+			t.Fatalf("appliedModelName() = %q, want %q", got, strings.TrimSpace(model))
+		}
 	}
 }
 
-func TestQoderCLIAppliedModelName_IgnoresUnsupportedConfiguredModel(t *testing.T) {
-	t.Parallel()
+const qoderTestStdinMode = "stdin"
 
-	ag := NewQoderCLIAgent(Config{ModelProvider: "anthropic", ModelName: "claude-sonnet-4-6"})
-	if got := ag.appliedModelName(context.Background()); got != "" {
-		t.Fatalf("appliedModelName() = %q, want empty", got)
+func TestQoderCLIModelPassthrough_AllExecutionPaths(t *testing.T) {
+	t.Setenv(envPromptInlineMaxBytes, "1024")
+
+	for _, edition := range []string{qoderEditionGlobal, qoderEditionCN} {
+		for _, model := range []string{"", " \t ", "lite", "efficient", "auto", "performance", "ultimate", " Qwen3.7-Plus ", "team/custom-ID", "custom'$(echo unsafe);id"} {
+			for _, mode := range []string{"inline", qoderTestStdinMode, "resume"} {
+				t.Run(edition+"/"+model+"/"+mode, func(t *testing.T) {
+					checkQoderModelExecution(t, edition, model, mode)
+				})
+			}
+		}
+	}
+}
+
+func checkQoderModelExecution(t *testing.T, edition, model, mode string) {
+	t.Helper()
+	params := ResolveAdapterConfig(credential.ResolvedAgentConfig{
+		Engine: "qodercli", Model: model,
+		Kwargs: map[string]string{KwargEdition: edition},
+	}, nil)
+	ag, err := DetectAgentWithResolvedConfig(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumer, ok := ag.(SessionResumer)
+	if !ok {
+		t.Fatalf("Qoder agent does not support resume: %T", ag)
+	}
+	rt := &qoderTestRuntime{workspace: t.TempDir(), execResult: runtime.ExecResult{
+		Stdout: `{"type":"result","result":"OK","session_id":"session-new"}`,
+	}}
+	message := transcript.Message{Role: transcript.RoleUser, Content: "hello"}
+	if mode == qoderTestStdinMode {
+		message.Content = strings.Repeat("a", 2048)
+	}
+	var result *SessionResult
+	if mode == "resume" {
+		result, err = resumer.RunTurn(context.Background(), rt, ExecOptions{}, message, "session-existing")
+	} else {
+		result, err = ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{message})
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied := strings.TrimSpace(model)
+	checkQoderModelCommand(t, rt.agentCommand, applied, mode)
+	if mode == qoderTestStdinMode && result.PromptDelivery.Mode != "file" {
+		t.Fatal("expected file prompt delivery")
+	}
+	if result.RequestedModel != model || result.AppliedModel != applied || result.Model != "" {
+		t.Fatalf("unexpected requested/applied/observed model: %q/%q/%q", result.RequestedModel, result.AppliedModel, result.Model)
+	}
+	if len(result.Warnings) != 0 || rt.agentExecCount != 1 {
+		t.Fatalf("unexpected warning or fallback: %v, executions=%d", result.Warnings, rt.agentExecCount)
+	}
+}
+
+func checkQoderModelCommand(t *testing.T, command, model, mode string) {
+	t.Helper()
+	if model == "" {
+		if strings.Contains(command, "--model") {
+			t.Fatalf("empty model was forwarded: %s", command)
+		}
+	} else if !strings.Contains(command, " --model "+shellQuote(model)+" ") {
+		t.Fatalf("model not passed as one quoted argument: %s", command)
+	}
+	if mode == qoderTestStdinMode && !strings.Contains(command, " -p -") {
+		t.Fatalf("expected stdin delivery: %s", command)
+	}
+	if mode == "resume" && !strings.Contains(command, " -r 'session-existing'") {
+		t.Fatalf("expected resume: %s", command)
+	}
+}
+
+func TestQoderCLIModelErrors_DoNotFallback(t *testing.T) {
+	t.Setenv(envPromptInlineMaxBytes, "1024")
+
+	execErr := errors.New("runtime transport failed")
+	for _, edition := range []string{qoderEditionGlobal, qoderEditionCN} {
+		for _, mode := range []string{"inline", qoderTestStdinMode, "resume"} {
+			for _, failure := range []struct {
+				name   string
+				code   int
+				stderr string
+				err    error
+			}{
+				{"invalid-model", 42, `Invalid model "missing-model"`, nil},
+				{"auth", 1, "Token has expired", nil},
+				{"runtime", 1, "", execErr},
+			} {
+				t.Run(edition+"/"+mode+"/"+failure.name, func(t *testing.T) {
+					checkQoderModelFailure(t, edition, mode,
+						runtime.ExecResult{ExitCode: failure.code, Stderr: failure.stderr}, failure.err)
+				})
+			}
+		}
+	}
+}
+
+func checkQoderModelFailure(t *testing.T, edition, mode string, failure runtime.ExecResult, execErr error) {
+	t.Helper()
+	ag := NewQoderCLIAgent(Config{
+		ModelName: "missing-model", RequestedModelName: "missing-model",
+		Kwargs: map[string]string{KwargEdition: edition},
+	})
+	rt := &qoderTestRuntime{workspace: t.TempDir(), execResult: failure, execErr: execErr}
+	message := transcript.Message{Role: transcript.RoleUser, Content: "hello"}
+	sessionID := ""
+	switch mode {
+	case qoderTestStdinMode:
+		message.Content = strings.Repeat("a", 2048)
+	case "resume":
+		sessionID = "session-existing"
+	}
+	result, err := ag.RunTurn(context.Background(), rt, ExecOptions{}, message, sessionID)
+	if err == nil || !strings.Contains(err.Error(), `with model "missing-model"`) {
+		t.Fatalf("missing model context: %v", err)
+	}
+	if execErr != nil && !errors.Is(err, execErr) {
+		t.Fatalf("lost runtime cause: %v", err)
+	}
+	if execErr == nil && !strings.Contains(err.Error(), fmt.Sprintf("(exit %d)", failure.ExitCode)) {
+		t.Fatalf("lost exit code: %v", err)
+	}
+	if !strings.Contains(err.Error(), failure.Stderr) {
+		t.Fatalf("lost upstream diagnostic: %v", err)
+	}
+	if result.ExitCode != failure.ExitCode || result.AppliedModel != "missing-model" || result.Stderr != failure.Stderr {
+		t.Fatalf("lost failure metadata: %+v", result)
+	}
+	checkQoderModelCommand(t, rt.agentCommand, "missing-model", mode)
+	if rt.agentExecCount != 1 {
+		t.Fatalf("explicit model retried: executions=%d", rt.agentExecCount)
 	}
 }
 
@@ -764,6 +897,8 @@ func TestFindQoderSessionFileSymlink(t *testing.T) {
 type qoderTestRuntime struct {
 	workspace           string
 	execResult          runtime.ExecResult
+	execErr             error
+	agentExecCount      int
 	lastCommand         string
 	agentCommand        string // first non-probe, non-intercepted command
 	lastExecEnv         map[string]string
@@ -814,6 +949,9 @@ func (r *qoderTestRuntime) Exec(_ context.Context, command string, opts runtime.
 		strings.Contains(command, "qoder.com/install") ||
 		strings.Contains(command, "qoder.com.cn/qoder-cli-cn/install.sh") {
 		r.lastExecEnv = mapsClone(opts.Env)
+		r.agentExecCount++
+		r.agentCommand = command
+		return r.execResult, r.execErr
 	}
 	return r.execResult, nil
 }

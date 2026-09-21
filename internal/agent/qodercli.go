@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"slices"
 	"strings"
 	"time"
 
@@ -37,8 +36,6 @@ const (
 	qoderEditionGlobal = "global"
 	qoderEditionCN     = "cn"
 )
-
-var supportedQoderModels = []string{"lite", "efficient", "auto", "performance", "ultimate"}
 
 // qoderExecPathProbeCmd resolves $HOME/.local/bin only — qodercli is a
 // self-contained binary placed there by the official installer, not a node
@@ -182,20 +179,23 @@ func (a *QoderCLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 				Artifacts:  &SessionArtifacts{},
 			}
 		}
-		return sessionResult, fmt.Errorf("%s run failed: %w", a.profile.binary, err)
+		return sessionResult, fmt.Errorf("%s run failed%s: %w", a.profile.binary, a.modelErrorContext(), err)
 	}
 
 	if result.ExitCode != 0 {
-		return sessionResult, fmt.Errorf("%s run failed (exit %d): %s", a.profile.binary, result.ExitCode, result.Stderr)
+		return sessionResult, fmt.Errorf("%s run failed%s (exit %d): %s", a.profile.binary, a.modelErrorContext(), result.ExitCode, result.Stderr)
 	}
 
 	return sessionResult, nil
 }
 
 func (a *QoderCLIAgent) appliedModelName(_ context.Context) string {
-	model := strings.TrimSpace(a.Cfg.ModelName)
-	if slices.Contains(supportedQoderModels, model) {
-		return model
+	return strings.TrimSpace(a.Cfg.ModelName)
+}
+
+func (a *QoderCLIAgent) modelErrorContext() string {
+	if model := strings.TrimSpace(a.Cfg.ModelName); model != "" {
+		return fmt.Sprintf(" with model %q", model)
 	}
 	return ""
 }
@@ -369,11 +369,11 @@ func (a *QoderCLIAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOption
 				Artifacts:  &SessionArtifacts{},
 			}
 		}
-		return sessionResult, fmt.Errorf("%s resume failed: %w", a.profile.binary, err)
+		return sessionResult, fmt.Errorf("%s resume failed%s: %w", a.profile.binary, a.modelErrorContext(), err)
 	}
 
 	if result.ExitCode != 0 {
-		return sessionResult, fmt.Errorf("%s resume failed (exit %d): %s", a.profile.binary, result.ExitCode, result.Stderr)
+		return sessionResult, fmt.Errorf("%s resume failed%s (exit %d): %s", a.profile.binary, a.modelErrorContext(), result.ExitCode, result.Stderr)
 	}
 
 	return sessionResult, nil

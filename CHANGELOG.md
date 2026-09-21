@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validation, background evaluation, and report-summary tools together with
   the canonical `skill-upper` Skill for evidence-based Skill iteration.
 
+### Fixed
+- Qoder CLI now receives explicit model names and custom IDs in initial,
+  stdin, and resumed calls instead of silently discarding values outside the
+  historical five tiers. Model availability is validated by Qoder; failures
+  retain model context without falling back to the default. Global/CN
+  authentication and provider isolation are unchanged.
+
 ## [0.12.0] - 2026-09-18
 
 ### Added
