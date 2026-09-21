@@ -197,6 +197,9 @@ func excludeInstallTarget(workspace, source, target string, exclude []string) ([
 	}
 	relTarget, err := filepath.Rel(sourcePath, targetPath)
 	if err != nil {
+		if !strings.EqualFold(filepath.VolumeName(sourcePath), filepath.VolumeName(targetPath)) {
+			return exclude, false, nil
+		}
 		return nil, false, fmt.Errorf("resolve skill target relative to source: %w", err)
 	}
 	if filepath.IsAbs(relTarget) || relTarget == ".." || strings.HasPrefix(relTarget, ".."+string(filepath.Separator)) {

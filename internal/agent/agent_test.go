@@ -331,6 +331,29 @@ func TestInstallSkill_TargetAliasInsideSourceDoesNotRecurse(t *testing.T) {
 	}
 }
 
+func TestExcludeInstallTarget_DifferentWindowsVolumes(t *testing.T) {
+	if goruntime.GOOS != platform.GOOSWindows {
+		t.Skip("Windows filepath semantics are required")
+	}
+
+	exclude := []string{"private/**"}
+	got, alreadyInstalled, err := excludeInstallTarget(
+		`C:\Users\runneradmin\AppData\Local\Temp\skill-up-workspace`,
+		`D:\a\skill-up\skill-up\e2e\testdata\mock-engine`,
+		`C:\Users\runneradmin\AppData\Local\Temp\skill-up-workspace\.qoder\skills\mock-engine`,
+		exclude,
+	)
+	if err != nil {
+		t.Fatalf("excludeInstallTarget failed for different volumes: %v", err)
+	}
+	if alreadyInstalled {
+		t.Fatal("target on a different volume reported as already installed")
+	}
+	if !slices.Equal(got, exclude) {
+		t.Fatalf("excludeInstallTarget exclusions = %v, want %v", got, exclude)
+	}
+}
+
 func TestInstallSkill_RemoteWorkspaceDoesNotRequireHostPath(t *testing.T) {
 	t.Parallel()
 
