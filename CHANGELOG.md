@@ -9,8 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Add an experimental DeepSeek Harness plugin bundle that exposes structured
-  validation, background evaluation, and report-summary tools together with
-  the canonical `skill-upper` Skill for evidence-based Skill iteration.
+  validation, background evaluation, report-summary, and before/after
+  comparison tools together with the canonical `skill-upper` Skill. Its
+  opt-in observer captures only explicitly invoked or successfully loaded
+  Skills from durable DSH session events, applies local redaction, supports
+  review and approval, and writes non-overwriting candidate cases with
+  validation rollback.
 - `skill-up run --workspace <dir>` can now evaluate a local `none` runtime in
   an existing, externally owned workspace when case parallelism is one. The
   workspace is always preserved; `--no-delete` also remains available to keep

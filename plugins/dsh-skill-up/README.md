@@ -50,6 +50,19 @@ dsh plugin --profile web add @alibaba/dsh-skill-up
   Skill, so concurrent jobs and before/after evidence cannot overwrite or
   contaminate one another.
 - `skill_up_summary` reads the per-case statuses in an existing `result.json`.
+- `skill_up_compare` compares the same cases across preserved baseline and
+  post-change reports.
+- An opt-in observer reads DSH's durable session events and stores only
+  explicitly invoked Skills or Skills successfully loaded through the `skill`
+  tool. It never persists inferred attribution.
+- With the observer enabled, `list_skill_observations`,
+  `get_skill_observation`, `record_observation_feedback`,
+  `link_observation_report`,
+  `preview_observation_case`, `review_skill_observation`, and
+  `write_observation_case` provide the local review and approval workflow.
+- Candidate case writes require an approved observation, never overwrite an
+  existing file, remain inside the DSH workspace, and roll back if
+  `skill-up validate` fails.
 - Evaluation arguments are passed as an argv array, not interpolated into a shell.
 - Eval and result paths are confined to the DSH workspace, including symlink resolution.
 
@@ -69,12 +82,30 @@ profile's `cordis.patch.yml` when needed:
     credentialEnv:
       - OPENAI_API_KEY
       - ANTHROPIC_API_KEY
+    observer:
+      enabled: true
+      # Optional; defaults to $DSH_HOME/plugin-data/skill-up-observer.
+      dataDir: /local/private/dsh-observations
 ```
 
 `credentialEnv` is empty by default. DSH deliberately scrubs credential-shaped
 environment variables from subprocesses; listing a name explicitly opts that
 value into the `skill-up` child without logging it. Prefer skill-up's credential
 file or an already authenticated Agent CLI when possible.
+
+Observation collection is disabled by default. Enabling it is the local
+collection consent boundary. The adapter listens to committed `session/event`
+records, redacts common credential shapes, stores files with private
+permissions, and ignores unattributed turns as well as the control Skills
+`skill-upper` and `skill-up-observer`. Data is not uploaded.
+
+Review is a separate boundary: collection creates `candidate` observations.
+Listing, reading, feedback attachment, and preview do not authorize a case
+write. Show the candidate to the user, obtain approval for its exact observation
+ID, call `review_skill_observation`, and only then call
+`write_observation_case` with a workspace-relative Skill root. The generated
+case intentionally has no invented expectations; maintainers must add concrete
+assertions before treating it as a release gate.
 
 `skill-up run` may execute Agent CLIs, judge scripts, and other code declared by
 the selected eval suite. Only run suites you trust. The plugin confines selected

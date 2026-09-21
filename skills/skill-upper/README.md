@@ -12,12 +12,12 @@ An Agent Skill that helps you evaluate and evolve other Agent Skills using the
 - **Validate** configuration before running
 - **Run** evaluations against real Agent Engines (Claude Code, Codex, qodercli, etc.)
 - **Diagnose** failures from structured reports and output evidence
-- **Capture** explicitly attributed Skill usage, evidence, and feedback through the Codex observer plugin
+- **Capture** explicitly attributed Skill usage, evidence, and feedback through the Codex or DSH observer integration
 - **Review** locally captured Skill observations and turn approved feedback into regression cases
 - **Evolve** the Skill or strengthen eval coverage, then rerun the suite
 
-Observation capture and review currently support Codex only. Claude Code,
-qodercli, Qwen Code, and other Agent Engines remain available for ordinary
+Observation capture and review support Codex and observer-enabled DSH. Claude
+Code, qodercli, Qwen Code, and other Agent Engines remain available for ordinary
 `skill-up` evaluation runs, but are not supported by the observation workflow.
 
 ## When to use

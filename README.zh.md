@@ -58,7 +58,7 @@
 - **skill-upper 从评测到演进的闭环**：通过自然对话创建评测、诊断失败、自动修复或补充用例并重新运行 skill-up，让 eval 评测集持续演进。
 - **声明式评测配置**：通过 YAML（`eval.yaml` + `cases/*.yaml`）定义评测环境、引擎、模型和用例。
 - **多引擎支持**：内置支持 Qoder CLI、Claude Code、Codex；亦可通过 `engine.custom` 接入用户自定义 Agent（本地传输，详见 [docs/design/custom-engine.md](docs/design/custom-engine.md)）。
-- **DeepSeek Harness 插件**：通过内置的 `skill-upper` Skill 和 DSH 原生工具，把新输入转化为回归用例，为既有 Skill 建立 baseline、按失败证据优化，并重跑同一批用例完成验证。详见 [`plugins/dsh-skill-up`](plugins/dsh-skill-up/README.md)。
+- **DeepSeek Harness 插件**：通过内置的 `skill-upper` Skill、显式启用的持久化观察采集、审批门禁回归用例、隔离运行与状态对比，验证有证据的 Skill 改进。详见 [`plugins/dsh-skill-up`](plugins/dsh-skill-up/README.md)。
 - **灵活评分**：支持 `rule_based`（规则匹配）、`script`（脚本评分）、`agent_judge`（Agent 评分）三种评估策略。
 - **结构化报告**：输出 Anthropic 兼容的 `grading.json`、`benchmark.json`、`benchmark.md`，以及 `result.json`、JUnit XML 和 HTML 报告。
 - **Anthropic 兼容**：通过 `skill-up import` 导入 `evals.json`，或使用 `--auto` 自动识别。

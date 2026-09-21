@@ -11,12 +11,13 @@
 - **校验** 配置，在运行前发现 schema 错误
 - **运行** 评测，调用真实 Agent Engine（Claude Code、Codex、qodercli 等）
 - **诊断** 结构化报告和输出证据中的失败原因
-- **采集** 通过 Codex observer plugin 记录明确归因的 Skill 使用、证据和反馈
+- **采集** 通过 Codex 或 DSH observer 集成记录明确归因的 Skill 使用、证据和反馈
 - **审核** 本地采集的 Skill 观察记录，将已批准的反馈转成回归用例
 - **演进** 修复目标 Skill 或增强 eval 覆盖，然后重新运行评测
 
-观察采集与审核目前仅支持 Codex。Claude Code、qodercli、Qwen Code 等其他
-Agent Engine 仍可用于普通 `skill-up` 评测，但暂不支持观察工作流。
+观察采集与审核支持 Codex 和已显式启用 observer 的 DSH。Claude Code、
+qodercli、Qwen Code 等其他 Agent Engine 仍可用于普通 `skill-up` 评测，
+但暂不支持观察工作流。
 
 ## 使用场景
 
