@@ -109,6 +109,19 @@ test('prepareOutputDirectory keeps reports below the excluded evals tree of the 
   )
 })
 
+test('prepareOutputDirectory checks a workspace-root Skill before using the fallback', () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'dsh-skill-up-root-skill-'))
+  mkdirSync(join(workspace, 'custom', 'bench'), { recursive: true })
+  writeFileSync(join(workspace, 'SKILL.md'), '# Root Skill\n')
+  const evalPath = join(workspace, 'custom', 'bench', 'eval.yaml')
+  writeFileSync(evalPath, 'schema_version: v1alpha1\n')
+
+  assert.equal(
+    prepareOutputDirectory(workspace, evalPath, 'run-1'),
+    join('evals', '.skill-up-workspace', 'run-1'),
+  )
+})
+
 test('forwardedEnvironment only forwards explicitly configured names', () => {
   assert.deepEqual(
     forwardedEnvironment(['OPENAI_API_KEY'], { OPENAI_API_KEY: 'secret', OTHER: 'ignored' }),

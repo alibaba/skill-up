@@ -38,8 +38,10 @@ function findSkillDirectory(workspace, evalPath) {
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error
     }
+    if (current === root) break
     const parent = dirname(current)
-    if (parent === current || relativeInside(root, parent, 'skill root') === '.') break
+    if (parent === current) break
+    relativeInside(root, parent, 'skill root')
     current = parent
   }
   return dirname(start)
