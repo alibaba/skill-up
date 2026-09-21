@@ -38,12 +38,13 @@ test('tools wait for the managed process range to become quiescent', async () =>
   const tools = []
   const waits = []
   let jobHooks
-  const handle = () => ({
+  let spawnCount = 0
+  const handle = (exitCode) => ({
     collected: {
       stdout: { readFrom: () => ({ text: '', nextOffset: 0, lossy: false }) },
       stderr: { readFrom: () => ({ text: '', nextOffset: 0, lossy: false }) },
     },
-    done: Promise.resolve({ exitCode: 0 }),
+    done: Promise.resolve({ exitCode }),
     terminate() {},
     async waitForExit() {
       waits.push('waited')
@@ -55,7 +56,10 @@ test('tools wait for the managed process range to become quiescent', async () =>
     skills: { register() {} },
     subprocess: {
       async resolveExecutable() { return '/usr/local/bin/skill-up' },
-      spawn() { return handle() },
+      spawn() {
+        spawnCount += 1
+        return handle(spawnCount === 1 ? 0 : 1)
+      },
     },
     jobs: {
       start(spec) {
@@ -72,7 +76,7 @@ test('tools wait for the managed process range to become quiescent', async () =>
   const run = await tools[1].execute({ eval_path: 'evals/eval.yaml' }, exec)
   assert.equal(run.job_id, 'job-1')
   assert.match(run.output_dir, /^evals\/\.skill-up-workspace\/[0-9a-f-]{36}$/)
-  assert.equal((await jobHooks.done).status, 'completed')
+  assert.deepEqual(await jobHooks.done, { status: 'completed', detail: 'exit code: 1' })
   assert.equal(waits.length, 2)
 })
 

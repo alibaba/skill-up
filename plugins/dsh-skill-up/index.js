@@ -71,7 +71,7 @@ function createJobHooks(handle) {
     },
     done: awaitProcess(handle).then((outcome) => {
       return {
-        status: outcome.exitCode === 0 ? 'completed' : outcome.signal ? 'killed' : 'failed',
+        status: outcome.signal ? 'killed' : 'completed',
         detail: outcome.exitCode === 0
           ? 'evaluation completed'
           : outcome.signal
