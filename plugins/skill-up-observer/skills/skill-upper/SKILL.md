@@ -1,6 +1,6 @@
 ---
 name: skill-upper
-description: "Capture and review Agent Skill observations, and create, run, diagnose, or iteratively improve Skill evaluations (evals) with the skill-up CLI / 采集和审核 Agent Skill 观察，并使用 skill-up CLI 创建、运行、诊断或持续改进 Skill 评测. Use when the user asks to record explicitly attributed Skill usage or feedback; review observations; turn an approved observation into a regression case; evaluate, test, regress, verify, fix, improve, iterate, or evolve a Skill; add or strengthen eval cases; write eval.yaml/case.yaml; run skill-up run/validate/list-cases/report/import/init; or migrate from Anthropic evals.json. Observation capture and review currently require the Codex observer plugin; evaluation remains multi-engine."
+description: "Capture and review Agent Skill observations, and create, run, diagnose, or iteratively improve Skill evaluations (evals) with the skill-up CLI / 采集和审核 Agent Skill 观察，并使用 skill-up CLI 创建、运行、诊断或持续改进 Skill 评测. Use when the user asks to record explicitly attributed Skill usage or feedback; review observations; turn an approved observation into a regression case; evaluate, test, regress, verify, fix, improve, iterate, or evolve a Skill; add or strengthen eval cases; write eval.yaml/case.yaml; run skill-up run/validate/list-cases/report/import/init; or migrate from Anthropic evals.json. Observation capture and review require either the Codex observer plugin or an observer-enabled DSH skill-up plugin; evaluation remains multi-engine."
 ---
 
 # use-skill-up-cli
@@ -71,27 +71,30 @@ Use this skill in any of the following situations:
 ### Observation capture mode (optional)
 
 Use this mode when the user asks to record the current Skill interaction or
-feedback and the plugin's `skill_up_observer` MCP tools are available. It
-requires a current Codex release with plugin and lifecycle-hook support; do not
-retrofit it onto the pinned Codex 0.80.0 evaluation adapter.
+feedback and observation tools are available. It requires either a current
+Codex release with the observer plugin and lifecycle-hook support, or DSH with
+the skill-up plugin's observer explicitly enabled. Do not retrofit observation
+capture onto the pinned Codex 0.80.0 evaluation adapter.
 
-Observation capture and review are currently **Codex-only**. Claude Code,
-qodercli, Qwen Code, and other Agent Engines are not supported for this
-observation workflow. This restriction does not apply to normal `skill-up`
+Claude Code, qodercli, Qwen Code, and other Agent Engines are not supported for
+this observation workflow. This restriction does not apply to normal `skill-up`
 evaluation runs, which remain multi-engine.
 
 1. Attribute the interaction only when the user explicitly references a Skill
    (for example, `$my-skill`) or the responsible Skill is otherwise known with
    certainty.
-2. If explicit attribution is absent but certain, call
-   `mark_skill_invocation` once with the Skill name and optional version.
-3. Use `attach_skill_evidence` only for references that help reproduce or
+2. In Codex, if explicit attribution is absent but certain, call
+   `mark_skill_invocation` once with the Skill name and optional version. DSH
+   derives exact attribution from its durable `/skill` injection or successful
+   `skill` tool result; do not add inferred attribution.
+3. In Codex, use `attach_skill_evidence` only for references that help reproduce or
    evaluate the behavior. Prefer paths and short summaries over copied file
    contents.
-4. Use `record_skill_feedback` when the user provides feedback. Never invent
-   sentiment or comments.
+4. In Codex, use `record_skill_feedback` during the observed turn. In DSH,
+   wait until the completed turn has produced an observation, then use
+   `record_observation_feedback` with its ID. Never invent sentiment or comments.
 
-Hooks redact common credential shapes before local persistence, but still
+Both adapters redact common credential shapes before local persistence, but still
 avoid sending secrets to marker tools. If the request is capture-only, stop
 after recording it; do not edit, evaluate, commit, or publish a Skill unless
 the user also asks for that work.
@@ -99,7 +102,7 @@ the user also asks for that work.
 ### Observation input mode (optional)
 
 When the request starts from a captured Skill observation, read
-`references/observations.md` first. Use the plugin's `skill_up_observer` MCP tools to
+`references/observations.md` first. Use the available observation tools to
 inspect and preview the observation, require explicit approval for the exact
 candidate, write it only after approval, and then continue at Step 4. If the
 request does not start from an observation, use the normal flow below.

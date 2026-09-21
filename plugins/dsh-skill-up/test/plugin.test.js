@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { apply, inject, name } from '../index.js'
@@ -18,16 +18,157 @@ test('plugin registers the bundled skill and structured tools', () => {
   apply(ctx)
 
   assert.equal(name, 'dsh-skill-up')
-  assert.deepEqual(inject, ['tools', 'skills', 'subprocess', 'jobs'])
+  assert.deepEqual(inject, ['tools', 'skills', 'subprocess', 'jobs', 'sessions'])
   assert.deepEqual(tools.map((tool) => tool.name), [
     'skill_up_validate',
     'skill_up_run',
     'skill_up_summary',
+    'skill_up_compare',
   ])
   assert.equal(skills.length, 1)
   assert.equal(skills[0].name, 'skill-upper')
   assert.match(skills[0].content, /user-provided new\s+input or scenario as regression evidence/)
   assert.match(skills[0].content, /Base\s+improvements on gaps revealed by the supplied scenario/)
+})
+
+test('observer tools and durable event listener are opt-in', async () => {
+  const tools = []
+  const listeners = new Map()
+  const dataDir = mkdtempSync(join(tmpdir(), 'dsh-skill-up-observer-plugin-'))
+  const ctx = {
+    tools: { register(tool) { tools.push(tool) } },
+    skills: { register() {} },
+    subprocess: {},
+    jobs: {},
+    sessions: {},
+    on(name, listener) { listeners.set(name, listener) },
+  }
+
+  apply(ctx, { observer: { enabled: true, dataDir } })
+
+  assert.equal(listeners.has('session/event'), true)
+  assert.deepEqual(tools.slice(0, 7).map((tool) => tool.name), [
+    'list_skill_observations',
+    'get_skill_observation',
+    'record_observation_feedback',
+    'link_observation_report',
+    'review_skill_observation',
+    'preview_observation_case',
+    'write_observation_case',
+  ])
+  assert.deepEqual(tools.slice(7).map((tool) => tool.name), [
+    'skill_up_validate',
+    'skill_up_run',
+    'skill_up_summary',
+    'skill_up_compare',
+  ])
+
+  const session = { id: 'plugin-session' }
+  const observe = listeners.get('session/event')
+  observe(session, { type: 'turn/start', data: { turn: 1 } })
+  observe(session, {
+    type: 'user/message',
+    data: { turn: 1, source: { kind: 'user' }, content: [{ type: 'text', text: 'Use /demo-skill' }] },
+  })
+  observe(session, {
+    type: 'user/message',
+    data: { turn: 1, source: { kind: 'skill-invocation', name: 'demo-skill' }, content: [] },
+  })
+  observe(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+  const listed = await tools.find((tool) => tool.name === 'list_skill_observations').execute({}, {})
+  assert.equal(listed.observations.length, 1)
+  assert.equal(listed.observations[0].skill, 'demo-skill')
+})
+
+test('approved observation case write rolls back failed validation', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'dsh-skill-up-observer-write-'))
+  const dataDir = join(workspace, '.observer')
+  mkdirSync(join(workspace, 'skill', 'evals', 'cases'), { recursive: true })
+  writeFileSync(join(workspace, 'skill', 'SKILL.md'), '---\nname: demo-skill\n---\n')
+  const evalPath = join(workspace, 'skill', 'evals', 'eval.yaml')
+  const original = 'schema_version: v1alpha1\ncases:\n  files: []\n'
+  writeFileSync(evalPath, original)
+  const tools = []
+  let listener
+  let exitCode = 1
+  const ctx = {
+    tools: { register(tool) { tools.push(tool) } },
+    skills: { register() {} },
+    sessions: {},
+    jobs: {},
+    on(_name, value) { listener = value },
+    subprocess: {
+      async resolveExecutable() { return '/usr/local/bin/skill-up' },
+      spawn() {
+        return {
+          collected: {
+            stdout: { readFrom: () => ({ text: exitCode === 0 ? 'valid' : '', lossy: false }) },
+            stderr: { readFrom: () => ({ text: exitCode === 0 ? '' : 'invalid suite', lossy: false }) },
+          },
+          done: Promise.resolve({ exitCode }),
+          terminate() {},
+          async waitForExit() {},
+        }
+      },
+    },
+  }
+  apply(ctx, { observer: { enabled: true, dataDir } })
+  const session = { id: 'write-session' }
+  listener(session, { type: 'turn/start', data: { turn: 1 } })
+  listener(session, {
+    type: 'user/message',
+    data: { turn: 1, source: { kind: 'user' }, content: [{ type: 'text', text: 'Use /demo-skill' }] },
+  })
+  listener(session, {
+    type: 'user/message',
+    data: { turn: 1, source: { kind: 'skill-invocation', name: 'demo-skill' }, content: [] },
+  })
+  listener(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+  const listTool = tools.find((tool) => tool.name === 'list_skill_observations')
+  const reviewTool = tools.find((tool) => tool.name === 'review_skill_observation')
+  const writeTool = tools.find((tool) => tool.name === 'write_observation_case')
+  const [{ id }] = (await listTool.execute({}, {})).observations
+  await reviewTool.execute({ observation_id: id, status: 'approved' }, {})
+  const exec = { agent: { session: { header: { cwd: workspace } } } }
+
+  await assert.rejects(
+    writeTool.execute({ observation_id: id, skill_root: 'skill' }, exec),
+    /invalid suite/,
+  )
+  assert.equal(readFileSync(evalPath, 'utf8'), original)
+  assert.deepEqual(readdirSync(join(workspace, 'skill', 'evals', 'cases')), [])
+
+  exitCode = 0
+  const result = await writeTool.execute({ observation_id: id, skill_root: 'skill' }, exec)
+  assert.equal(result.validation, 'passed')
+  assert.equal(readdirSync(join(workspace, 'skill', 'evals', 'cases')).length, 1)
+
+  const baselinePath = join(workspace, 'baseline-result.json')
+  const postChangePath = join(workspace, 'post-change-result.json')
+  writeFileSync(baselinePath, JSON.stringify({
+    case_results: [{ case_id: 'observed-case', configuration: 'with_skill', status: 'FAIL' }],
+  }))
+  writeFileSync(postChangePath, JSON.stringify({
+    case_results: [{ case_id: 'observed-case', configuration: 'with_skill', status: 'PASS' }],
+  }))
+  const linkTool = tools.find((tool) => tool.name === 'link_observation_report')
+  await linkTool.execute({ observation_id: id, phase: 'baseline', result_path: 'baseline-result.json' }, exec)
+  await linkTool.execute({ observation_id: id, phase: 'post_change', result_path: 'post-change-result.json' }, exec)
+  const getTool = tools.find((tool) => tool.name === 'get_skill_observation')
+  const linked = await getTool.execute({ observation_id: id }, {})
+  assert.deepEqual(linked.evidence.slice(-2).map((item) => item.kind), [
+    'skill_up_baseline_report',
+    'skill_up_post_change_report',
+  ])
+
+  const compareTool = tools.find((tool) => tool.name === 'skill_up_compare')
+  const comparison = await compareTool.execute({
+    before_result_path: 'baseline-result.json',
+    after_result_path: 'post-change-result.json',
+  }, exec)
+  assert.deepEqual(comparison.cases, [
+    { id: 'observed-case', before: 'FAIL', after: 'PASS', changed: true },
+  ])
 })
 
 test('tools wait for the managed process range to become quiescent', async () => {
