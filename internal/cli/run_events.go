@@ -120,7 +120,7 @@ func runEvalWithEventLog(
 	if err != nil {
 		return fmt.Errorf("build event plan: %w", err)
 	}
-	eventPath, err := validateEvaluationEventLogPath(eventOptions.Path, executionPlan)
+	eventPath, err := validateEvaluationEventLogPath(eventOptions.Path, executionPlan, evaluateOpts.WorkspaceDir)
 	if err != nil {
 		return err
 	}
@@ -337,7 +337,7 @@ func evaluationEventConfiguration(configuration string) (evalevent.Configuration
 	}
 }
 
-func validateEvaluationEventLogPath(path string, plan runner.ExecutionPlan) (string, error) {
+func validateEvaluationEventLogPath(path string, plan runner.ExecutionPlan, externalWorkspace string) (string, error) {
 	canonicalPath, err := canonicalEventLogPath(path)
 	if err != nil {
 		return "", fmt.Errorf("invalid --event-log path %q: %w", path, err)
@@ -348,6 +348,15 @@ func validateEvaluationEventLogPath(path string, plan runner.ExecutionPlan) (str
 	}
 	if pathsReferToSameFile(canonicalPath, workspacePath) {
 		return "", fmt.Errorf("--event-log path %q conflicts with the evaluation workspace", path)
+	}
+	if externalWorkspace != "" {
+		externalPath, err := canonicalizePotentialPath(externalWorkspace)
+		if err != nil {
+			return "", fmt.Errorf("resolve external workspace: %w", err)
+		}
+		if pathWithin(externalPath, canonicalPath) {
+			return "", fmt.Errorf("--event-log path %q resolves inside external --workspace %q", path, externalWorkspace)
+		}
 	}
 	for _, iteration := range plan.TaskPlan.Iterations {
 		iterationPath, err := canonicalizePotentialPath(filepath.Join(plan.WorkspaceDir, fmt.Sprintf("iteration-%d", iteration.Number)))

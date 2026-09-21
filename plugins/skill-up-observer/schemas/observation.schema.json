@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alibaba/skill-up/plugins/skill-up-observer/schemas/observation.schema.json",
+  "title": "Skill Up Observer document v1alpha1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "host",
+    "skill",
+    "attribution",
+    "input",
+    "outcome",
+    "correlation",
+    "timing",
+    "privacy",
+    "review"
+  ],
+  "properties": {
+    "schema_version": { "const": "v1alpha1" },
+    "id": { "type": "string", "pattern": "^obs_[a-f0-9]{24}$" },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "const": "codex" },
+        "version": { "type": "string" },
+        "adapter_version": { "type": "string" }
+      }
+    },
+    "skill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$" },
+        "version": { "type": "string" }
+      }
+    },
+    "attribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "confidence"],
+      "properties": {
+        "method": { "enum": ["explicit", "instrumented"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": { "text": { "type": "string", "minLength": 1 } }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": { "enum": ["completed", "interrupted"] },
+        "final_message": { "type": "string" }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind"],
+        "properties": {
+          "kind": { "type": "string", "minLength": 1 },
+          "ref": { "type": "string" },
+          "summary": { "type": "string" }
+        }
+      }
+    },
+    "feedback": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sentiment": { "enum": ["positive", "negative", "mixed", "neutral", ""] },
+        "comment": { "type": "string" }
+      }
+    },
+    "correlation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session_id"],
+      "properties": {
+        "session_id": { "type": "string", "minLength": 1 },
+        "turn_id": { "type": "string" }
+      }
+    },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observed_at"],
+      "properties": {
+        "observed_at": { "type": "string", "format": "date-time" },
+        "completed_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["storage", "consent"],
+      "properties": {
+        "storage": { "const": "local" },
+        "consent": { "type": "string", "minLength": 1 },
+        "redactions": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": { "enum": ["candidate", "approved", "rejected"] },
+        "reviewed_at": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

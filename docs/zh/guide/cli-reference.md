@@ -27,6 +27,7 @@ skill-up run [path] [flags]
 | `--exclude-case-name` | —                            | 排除匹配的用例（支持 glob，可多次指定）                                                                                                                    |
 | `--format`            | —                            | 附加报告格式：`junit` / `html`（可多次指定）。`result.json` 始终写入；`--format junit` 生成 `report.xml`，`--format html` 生成 `report.html`；`--format json` 为空操作 |
 | `--output-dir`        | 与 skill 目录同级的 `<skill-name>-workspace/` | 报告和产物的输出目录                                                                                                                       |
+| `--workspace`         | —                            | 复用已有宿主机目录作为 agent workspace。仅支持 `environment.type: none`、`cases.parallelism: 1` 且 benchmark 关闭。agent 可以修改该目录，但 skill-up 永远不会删除它。 |
 | `--iteration`         | `0`（auto）                  | 重复运行已选用例，用于稳定性/flaky 采样。`0` 表示在最新 `iteration-N/` 后自动追加一轮，但不汇总历史结果；正整数 `N` 表示运行 N 次采样，产物写入 `iteration-1/` 到 `iteration-N/`；当 `N > 1` 时，终端摘要只覆盖本次命令执行的采样 |
 | `--engine`            | 配置文件中的值                | 覆盖 Engine 名称                                                                                                                                          |
 | `--provider`          | 配置文件中的值                | 覆盖 `engine.model.provider`。指定后，完整的 `--model` 值将作为不透明模型 ID 透传。                                                                        |
@@ -34,7 +35,13 @@ skill-up run [path] [flags]
 | `--parallelism`       | 配置文件中的值                | 覆盖 `cases.parallelism`，用于临时调整用例并行数，取值范围为 1 到 256                                                                                       |
 | `--baseline`          | 配置文件中的值                | 为本次运行覆盖 `benchmark.enabled` 为 `true`                                                                                                                |
 | `--api-key`           | —                            | 传入 API Key（优先级高于环境变量）                                                                                                                          |
+| `--no-delete`         | `false`                      | 评测后保留由 skill-up 创建的 workspace 或容器，便于调试。                                                                                                   |
 | `-v, --verbose`       | `0`                          | 增加日志详细程度。默认输出 `info`；`-v`/`--verbose`/`--verbose=true` 输出 `debug`；`-vv`/`--verbose=2` 输出 `trace`；`--verbose=false` 关闭附加详细日志        |
+
+> **已有 workspace 的状态语义。** `--workspace` 会让所有已选 case、retry 和
+> iteration 串行复用同一个目录；配置的 setup、fixture、skill 安装及 agent 修改都会
+> 传递到后续执行。报告 `--output-dir` 和 `--event-log` 必须位于该目录之外。若每个
+> 结果必须从完全一致的状态开始，请只选择一个 case、执行一轮 iteration，并关闭 retry。
 
 ### 示例
 
@@ -44,6 +51,9 @@ skill-up run ./evals/eval.yaml
 
 # 只运行匹配的用例
 skill-up run ./evals/eval.yaml --include-case-name "basic-*"
+
+# 在已经准备好的本地 workspace 中评测 agent
+skill-up run ./evals/eval.yaml --workspace /path/to/project --parallelism 1 --no-delete
 
 # 排除特定用例
 skill-up run ./evals/eval.yaml --exclude-case-name "*-old" --exclude-case-name "*-deprecated"

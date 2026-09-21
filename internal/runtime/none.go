@@ -41,10 +41,12 @@ func (r *NoneRuntime) pathInWorkspaceOrAbs(p string) string {
 	return filepath.Join(r.workspace, c)
 }
 
-// NoneRuntime executes commands directly on the host with an isolated temp workspace.
+// NoneRuntime executes commands directly on the host with either an isolated
+// temporary workspace or an explicitly supplied, externally owned workspace.
 type NoneRuntime struct {
-	cfg       Config
-	workspace string
+	cfg              Config
+	workspace        string
+	ownsWorkspaceDir bool
 }
 
 // MergeEnv layers entries into the runtime's persistent env baseline. See
@@ -54,13 +56,31 @@ func (r *NoneRuntime) MergeEnv(env map[string]string) {
 	mergeIntoEnvBaseline(&r.cfg.Env, env)
 }
 
-// Create allocates the temporary workspace used by the runtime.
+// Create selects an existing external workspace or allocates a temporary one.
 func (r *NoneRuntime) Create(ctx context.Context) error {
+	if r.cfg.WorkspaceDir != "" {
+		dir, err := filepath.Abs(filepath.Clean(r.cfg.WorkspaceDir))
+		if err != nil {
+			return fmt.Errorf("failed to resolve existing workspace: %w", err)
+		}
+		info, err := os.Stat(dir)
+		if err != nil {
+			return fmt.Errorf("failed to access existing workspace %s: %w", dir, err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("existing workspace %s is not a directory", dir)
+		}
+		r.workspace = dir
+		r.ownsWorkspaceDir = false
+		return nil
+	}
+
 	dir, err := os.MkdirTemp("", "skill-up-*")
 	if err != nil {
 		return fmt.Errorf("failed to create temp dir: %w", err)
 	}
 	r.workspace = dir
+	r.ownsWorkspaceDir = true
 
 	return nil
 }
@@ -68,6 +88,10 @@ func (r *NoneRuntime) Create(ctx context.Context) error {
 // Close removes the temporary workspace.
 func (r *NoneRuntime) Close() error {
 	if r.workspace == "" {
+		return nil
+	}
+	if !r.ownsWorkspaceDir {
+		logging.Debugf("NoneRuntime.Close: externally owned workspace preserved at %s", r.workspace)
 		return nil
 	}
 	if !r.cfg.Delete {

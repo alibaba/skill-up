@@ -1,0 +1,56 @@
+{
+  "description": "Capture explicitly attributed Skill interactions as local, reviewable observations.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/observer.py\" ingest-hook",
+            "timeout": 5,
+            "statusMessage": "Preparing local Skill observation"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^mcp__skill_up_observer__(mark_skill_invocation|attach_skill_evidence|record_skill_feedback)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/observer.py\" ingest-hook",
+            "timeout": 5,
+            "statusMessage": "Updating local Skill observation"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/observer.py\" ingest-hook",
+            "timeout": 5,
+            "statusMessage": "Saving local Skill observation"
+          }
+        ]
+      }
+    ],
+    "Interrupt": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/observer.py\" ingest-hook",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}

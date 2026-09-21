@@ -55,8 +55,8 @@ RUN tmp_dir="$(mktemp -d)" \
         "https://qoder-ide.oss-accelerate.aliyuncs.com/qodercli/releases/${QODER_VERSION}/qodercli-linux-x64.tar.gz" \
         -o "$tmp_dir/qodercli.tar.gz" \
     && echo "${QODER_SHA256}  $tmp_dir/qodercli.tar.gz" | sha256sum -c - \
-    && tar -xzf "$tmp_dir/qodercli.tar.gz" -C /usr/local/bin qodercli \
-    && chmod 0755 /usr/local/bin/qodercli \
+    && tar -xzf "$tmp_dir/qodercli.tar.gz" -C "$tmp_dir" ./qodercli \
+    && install -m 0755 "$tmp_dir/qodercli" /usr/local/bin/qodercli \
     && rm -rf "$tmp_dir" \
     && qodercli --version
 

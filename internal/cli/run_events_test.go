@@ -149,7 +149,7 @@ func TestValidateEvaluationEventLogPathSafePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(workspace, "events.jsonl")
-	got, err := validateEvaluationEventLogPath(path, eventPathTestPlan(workspace))
+	got, err := validateEvaluationEventLogPath(path, eventPathTestPlan(workspace), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,6 +163,25 @@ func TestValidateEvaluationEventLogPathSafePath(t *testing.T) {
 	}
 }
 
+func TestValidateEvaluationEventLogPathRejectsExternalWorkspace(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	externalWorkspace := filepath.Join(root, "project")
+	reportWorkspace := filepath.Join(root, "reports")
+	if err := os.MkdirAll(externalWorkspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := validateEvaluationEventLogPath(
+		filepath.Join(externalWorkspace, "events.jsonl"),
+		eventPathTestPlan(reportWorkspace),
+		externalWorkspace,
+	)
+	if err == nil || !strings.Contains(err.Error(), "inside external --workspace") {
+		t.Fatalf("error = %v, want external workspace conflict", err)
+	}
+}
+
 func TestValidateEvaluationEventLogPathMissingParent(t *testing.T) {
 	t.Parallel()
 
@@ -171,6 +190,7 @@ func TestValidateEvaluationEventLogPathMissingParent(t *testing.T) {
 	_, err := validateEvaluationEventLogPath(
 		filepath.Join(root, "missing", "events.jsonl"),
 		eventPathTestPlan(workspace),
+		"",
 	)
 	if err == nil || !strings.Contains(err.Error(), "parent directory") {
 		t.Fatalf("error = %v, want missing parent error", err)
@@ -186,7 +206,7 @@ func TestValidateEvaluationEventLogPathInsideIteration(t *testing.T) {
 	if err := os.MkdirAll(iteration, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	_, err := validateEvaluationEventLogPath(filepath.Join(iteration, "events.jsonl"), eventPathTestPlan(workspace))
+	_, err := validateEvaluationEventLogPath(filepath.Join(iteration, "events.jsonl"), eventPathTestPlan(workspace), "")
 	if err == nil || !strings.Contains(err.Error(), "inside scheduled iteration directory") {
 		t.Fatalf("error = %v, want iteration conflict", err)
 	}
@@ -220,6 +240,7 @@ func TestValidateEvaluationEventLogPathInsideCaseInsensitiveIteration(t *testing
 	_, err = validateEvaluationEventLogPath(
 		filepath.Join(actualIteration, "events.jsonl"),
 		eventPathTestPlan(workspace),
+		"",
 	)
 	if err == nil || !strings.Contains(err.Error(), "inside scheduled iteration directory") {
 		t.Fatalf("error = %v, want case-insensitive iteration conflict", err)
@@ -231,7 +252,7 @@ func TestValidateEvaluationEventLogPathWorkspaceCollision(t *testing.T) {
 
 	root := t.TempDir()
 	workspace := filepath.Join(root, "workspace")
-	_, err := validateEvaluationEventLogPath(workspace, eventPathTestPlan(workspace))
+	_, err := validateEvaluationEventLogPath(workspace, eventPathTestPlan(workspace), "")
 	if err == nil || !strings.Contains(err.Error(), "conflicts with the evaluation workspace") {
 		t.Fatalf("error = %v, want workspace conflict", err)
 	}
@@ -252,7 +273,7 @@ func TestValidateEvaluationEventLogPathSymlinkIntoIteration(t *testing.T) {
 	if err := os.Symlink(iteration, alias); err != nil {
 		t.Fatal(err)
 	}
-	_, err := validateEvaluationEventLogPath(filepath.Join(alias, "events.jsonl"), eventPathTestPlan(workspace))
+	_, err := validateEvaluationEventLogPath(filepath.Join(alias, "events.jsonl"), eventPathTestPlan(workspace), "")
 	if err == nil || !strings.Contains(err.Error(), "inside scheduled iteration directory") {
 		t.Fatalf("error = %v, want symlink iteration conflict", err)
 	}

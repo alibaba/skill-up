@@ -92,12 +92,20 @@ type ExecResult struct {
 
 ### NoneRuntime (Local Mode)
 
-Uses the host environment directly with a temporary directory as the workspace:
+Uses the host environment directly with either a temporary directory or an
+explicitly supplied existing host directory as the workspace:
 
-- `Create`: creates `os.MkdirTemp("", "skill-up-*")`
-- `Close`: deletes the temp directory (can be retained via `Config.Delete=false`)
+- `Create`: reuses `Config.WorkspaceDir` when set; otherwise creates
+  `os.MkdirTemp("", "skill-up-*")`
+- `Close`: never deletes an externally owned `Config.WorkspaceDir`; temporary
+  workspaces follow `Config.Delete`
+- Reused workspaces are stateful across serialized cases, retries, and
+  iterations; setup steps, fixtures, skill installation, and agent changes all
+  persist. Report output and event logs must be outside the reused directory.
+  Callers that need isolated trials must reset or copy the directory between
+  tasks
 - `Exec`: runs bash commands directly on the host
-- `Workspace()`: returns the temp directory path
+- `Workspace()`: returns the selected host workspace path
 - `Upload` / `Download`: reads/writes the local file system
 
 **Security assumption**: NoneRuntime executes commands directly on the host; `pathInWorkspaceOrAbs` allows access to any absolute path. Callers must ensure the paths they pass in are trusted and must not pass in untrusted user-controlled paths.
@@ -145,6 +153,7 @@ type Config struct {
     Type           string            // "none" | "opensandbox" | "docker"
     Image          string            // Sandbox image (for opensandbox mode)
     WorkspaceMount string            // Workspace mount path
+    WorkspaceDir   string            // Existing host workspace for none runtime
     Env            map[string]string // Environment variables
     SetupSteps     []SetupStep       // Initialization commands
 

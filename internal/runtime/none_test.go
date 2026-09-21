@@ -61,6 +61,50 @@ func TestNoneRuntime_CreateAndClose(t *testing.T) {
 	}
 }
 
+func TestNoneRuntime_ExistingWorkspaceIsReusedAndPreserved(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	marker := filepath.Join(workspace, "memory.db")
+	if err := os.WriteFile(marker, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rt := &NoneRuntime{cfg: Config{
+		Delete:       true,
+		WorkspaceDir: workspace,
+	}}
+
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	want, err := filepath.Abs(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rt.Workspace(); got != want {
+		t.Fatalf("Workspace() = %q, want %q", got, want)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+	if data, err := os.ReadFile(marker); err != nil || string(data) != "keep" {
+		t.Fatalf("external workspace marker after Close = %q, %v; want preserved", data, err)
+	}
+}
+
+func TestNoneRuntime_ExistingWorkspaceMustBeDirectory(t *testing.T) {
+	t.Parallel()
+
+	file := filepath.Join(t.TempDir(), "workspace.txt")
+	if err := os.WriteFile(file, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rt := &NoneRuntime{cfg: Config{WorkspaceDir: file}}
+	if err := rt.Create(context.Background()); err == nil || !strings.Contains(err.Error(), "is not a directory") {
+		t.Fatalf("Create error = %v, want not-a-directory error", err)
+	}
+}
+
 func TestNoneRuntime_StartStop(t *testing.T) {
 	t.Parallel()
 

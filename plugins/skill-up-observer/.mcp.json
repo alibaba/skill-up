@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "skill_up_observer": {
+      "command": "python3",
+      "args": ["scripts/observer.py", "mcp"],
+      "cwd": "."
+    }
+  }
+}

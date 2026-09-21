@@ -432,6 +432,54 @@ input:
 	}
 }
 
+func TestContract_Run_Workspace_ReusesAndPreservesExistingDirectory(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "SKILL.md"), "# Existing Workspace Skill\n")
+	writeFile(t, filepath.Join(dir, "evals", "eval.yaml"), `schema_version: v1alpha1
+environment:
+  type: none
+skills:
+  - source: local_path
+    path: .
+engine:
+  name: qoder-cli
+  model:
+    provider: qoder
+    name: auto
+cases:
+  files:
+    - evals/cases/test.yaml
+  parallelism: 1
+  defaults:
+    timeout_seconds: 30
+    max_turns: 1
+`)
+	writeFile(t, filepath.Join(dir, "evals", "cases", "test.yaml"), `id: existing-workspace-test
+title: Reuse an existing workspace
+input:
+  prompt: hello
+expect:
+  files_exist:
+    - memory/state.db
+`)
+
+	workspace := filepath.Join(t.TempDir(), "prepared-workspace")
+	marker := filepath.Join(workspace, "memory", "state.db")
+	writeFile(t, marker, "remembered state\n")
+	env := mockEngineEnv(t)
+	result := Run(t, RunConfig{Env: env, WorkDir: dir, Timeout: 60 * time.Second},
+		"run", filepath.Join(dir, "evals", "eval.yaml"), "--workspace", workspace, "--no-delete")
+
+	if result.ExitCode != 0 {
+		t.Fatalf("--workspace run exit %d\nstdout: %s\nstderr: %s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if data, err := os.ReadFile(marker); err != nil || string(data) != "remembered state\n" {
+		t.Fatalf("external workspace marker after run = %q, %v; want preserved", data, err)
+	}
+}
+
 // ============================================================================
 // CLI Reference — skill-up validate
 // ============================================================================

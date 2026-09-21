@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add an experimental DeepSeek Harness plugin bundle that exposes structured
   validation, background evaluation, and report-summary tools together with
   the canonical `skill-upper` Skill for evidence-based Skill iteration.
+- `skill-up run --workspace <dir>` can now evaluate a local `none` runtime in
+  an existing, externally owned workspace when case parallelism is one. The
+  workspace is always preserved; `--no-delete` also remains available to keep
+  workspaces and containers created by skill-up. Agent-judge diff capture uses
+  an isolated temporary Git repository, so skill-up does not commit, stage, or
+  invoke repository-configured clean/process filters while taking its
+  before/after snapshot. Selected cases, retries, and iterations intentionally
+  share the directory sequentially, so setup and agent changes carry forward.
+  Report directories that overlap the external workspace are rejected before
+   cleanup, event logs must remain outside it, nested skill installation avoids
+   recursively copying its own target, and snapshot paths are handled literally
+   on POSIX shells.
 
 ### Fixed
 - Qoder CLI now receives explicit model names and custom IDs in initial,
@@ -22,6 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.12.0] - 2026-09-18
 
 ### Added
+- A current-Codex observer plugin can capture explicitly attributed,
+  locally redacted Skill observations and turn an approved observation into a
+  non-overwriting candidate regression case using its self-contained Python
+  hooks and MCP server. The bundled `skill-upper` Skill guides capture, review,
+  approval, and the subsequent evaluation or evolution loop without exposing
+  a separate observer Skill. The pinned Codex 0.80.0
+  evaluation adapter remains unchanged.
 - Custom Engines can opt into stateful multi-turn execution with
   `custom.conversation_mode: stateful`. Local and HTTP transports receive one
   user message per invocation and carry the returned `session_id` into the

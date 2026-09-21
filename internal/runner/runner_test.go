@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,6 +68,95 @@ func TestRunner_SetupWorkspacePreservesArtifactsWhenCancelled(t *testing.T) {
 	}
 	if data, readErr := os.ReadFile(artifactPath); readErr != nil || string(data) != "keep" {
 		t.Fatalf("artifact changed after cancelled setup: data=%q err=%v", data, readErr)
+	}
+}
+
+func TestEvaluatePlanRejectsReportOverlapBeforeDeletion(t *testing.T) {
+	t.Parallel()
+
+	externalWorkspace := t.TempDir()
+	reportRoot := filepath.Join(externalWorkspace, "reports")
+	keepPath := filepath.Join(reportRoot, "iteration-1", "keep.txt")
+	if err := os.MkdirAll(filepath.Dir(keepPath), 0o755); err != nil {
+		t.Fatalf("create existing report directory: %v", err)
+	}
+	if err := os.WriteFile(keepPath, []byte("keep"), 0o600); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+
+	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.ResolvedAgentConfig{})
+	plan := ExecutionPlan{
+		WorkspaceDir: reportRoot,
+		TaskPlan: evaluator.BuildPlan([]*config.CaseConfig{{
+			ID:    "case-1",
+			Title: "Case 1",
+		}}, 1, 1, []string{evaluator.ConfigurationWithSkill}),
+	}
+	_, err := r.EvaluatePlan(context.Background(), plan, &runnerTestAgent{}, EvaluateOptions{WorkspaceDir: externalWorkspace})
+	if err == nil || !strings.Contains(err.Error(), "overlaps external workspace") {
+		t.Fatalf("EvaluatePlan error = %v, want overlap rejection", err)
+	}
+	if data, readErr := os.ReadFile(keepPath); readErr != nil || string(data) != "keep" {
+		t.Fatalf("sentinel changed after rejected plan: data=%q err=%v", data, readErr)
+	}
+}
+
+func TestValidateExternalWorkspaceOutputRejectsEitherOverlapDirection(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	iteration := evaluator.IterationPlan{Number: 1}
+	tests := []struct {
+		name      string
+		workspace string
+		output    string
+		wantError bool
+	}{
+		{name: "reports inside workspace", workspace: filepath.Join(root, "project"), output: filepath.Join(root, "project", "reports"), wantError: true},
+		{name: "workspace is iteration directory", workspace: filepath.Join(root, "reports", "iteration-1"), output: filepath.Join(root, "reports"), wantError: true},
+		{name: "disjoint", workspace: filepath.Join(root, "project"), output: filepath.Join(root, "reports")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			plan := ExecutionPlan{WorkspaceDir: tt.output, TaskPlan: evaluator.Plan{Iterations: []evaluator.IterationPlan{iteration}}}
+			err := validateExternalWorkspaceOutput(plan, tt.workspace)
+			if (err != nil) != tt.wantError {
+				t.Fatalf("validateExternalWorkspaceOutput() error = %v, wantError %t", err, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestValidateExternalWorkspaceOutputRejectsFilesystemAlias(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "project")
+	if err := os.Mkdir(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workspaceAlias := filepath.Join(root, "project-alias")
+	if err := os.Symlink(workspace, workspaceAlias); err != nil {
+		t.Fatal(err)
+	}
+	plan := ExecutionPlan{
+		WorkspaceDir: filepath.Join(workspaceAlias, "reports"),
+		TaskPlan:     evaluator.Plan{Iterations: []evaluator.IterationPlan{{Number: 1}}},
+	}
+	if err := validateExternalWorkspaceOutput(plan, workspace); err == nil {
+		t.Fatal("validateExternalWorkspaceOutput() accepted an output path aliased inside the workspace")
+	}
+
+	caseAlias := filepath.Join(root, "PROJECT")
+	if _, err := os.Stat(caseAlias); err == nil {
+		casePlan := ExecutionPlan{
+			WorkspaceDir: filepath.Join(caseAlias, "case-reports"),
+			TaskPlan:     evaluator.Plan{Iterations: []evaluator.IterationPlan{{Number: 1}}},
+		}
+		if err := validateExternalWorkspaceOutput(casePlan, workspace); err == nil {
+			t.Fatal("validateExternalWorkspaceOutput() accepted a case-insensitive output alias inside the workspace")
+		}
 	}
 }
 

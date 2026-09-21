@@ -246,6 +246,107 @@ func TestInstallSkill_AppliesFilters(t *testing.T) {
 	}
 }
 
+func TestInstallSkill_TargetInsideSourceDoesNotRecurse(t *testing.T) {
+	t.Parallel()
+
+	source := t.TempDir()
+	for name, content := range map[string]string{
+		"SKILL.md":    "# Skill",
+		".git/config": "private repository metadata",
+	} {
+		path := filepath.Join(source, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rt, err := runtime.NewRuntime(runtime.Config{Type: "none", WorkspaceDir: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	const target = ".qoder/skills/test-skill"
+	for range 2 {
+		if err := installSkill(context.Background(), rt, source, target, nil, nil); err != nil {
+			t.Fatalf("installSkill failed: %v", err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(source, target, "SKILL.md")); err != nil {
+		t.Fatalf("installed skill missing: %v", err)
+	}
+	for _, unwanted := range []string{
+		filepath.Join(source, target, ".git"),
+		filepath.Join(source, target, filepath.FromSlash(target)),
+	} {
+		if _, err := os.Stat(unwanted); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("recursive/private source path was installed at %s: %v", unwanted, err)
+		}
+	}
+	if err := installSkill(context.Background(), rt, source, "", nil, nil); err != nil {
+		t.Fatalf("installing an already-present source at the workspace root should be a no-op: %v", err)
+	}
+}
+
+func TestInstallSkill_TargetAliasInsideSourceDoesNotRecurse(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	if err := os.Mkdir(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("# Skill"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(root, "source-alias")
+	if err := os.Symlink(source, alias); err != nil {
+		t.Fatal(err)
+	}
+	rt, err := runtime.NewRuntime(runtime.Config{Type: "none", WorkspaceDir: alias})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	const target = ".codex/skills/test-skill"
+	for range 2 {
+		if err := installSkill(context.Background(), rt, source, target, nil, nil); err != nil {
+			t.Fatalf("installSkill failed: %v", err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(source, target, "SKILL.md")); err != nil {
+		t.Fatalf("installed skill missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(source, target, filepath.FromSlash(target))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("recursive target was installed through a workspace alias: %v", err)
+	}
+}
+
+func TestInstallSkill_RemoteWorkspaceDoesNotRequireHostPath(t *testing.T) {
+	t.Parallel()
+
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("# Skill"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rt := &promptDeliveryTestRuntime{workspace: "/remote/workspace-that-does-not-exist-on-host"}
+	if err := installSkill(context.Background(), rt, source, ".codex/skills/test-skill", nil, nil); err != nil {
+		t.Fatalf("installSkill failed for a remote workspace path: %v", err)
+	}
+	if rt.uploadedTarget != filepath.Join(".codex/skills/test-skill", "SKILL.md") {
+		t.Fatalf("uploaded target = %q, want remote skill target", rt.uploadedTarget)
+	}
+}
+
 func TestListSkillFiles_EmptyDir(t *testing.T) {
 	t.Parallel()
 

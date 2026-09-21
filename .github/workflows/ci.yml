@@ -94,6 +94,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Test Codex observer plugin
+        run: make test-plugin
+
       - name: Test GitHub Action adapter
         run: make test-action
 

@@ -44,6 +44,7 @@ func newRunPhaseTestCommand(t *testing.T) *cobra.Command {
 	cmd.Flags().Bool("auto", false, "")
 	cmd.Flags().StringArray("format", nil, "")
 	cmd.Flags().String("output-dir", "", "")
+	cmd.Flags().String("workspace", "", "")
 	cmd.Flags().String("engine", "", "")
 	cmd.Flags().String(runtimeFlagName, "", "")
 	cmd.Flags().String("provider", "", "")
@@ -1330,6 +1331,7 @@ func TestEvaluateOptionsFromFlags(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().Bool("no-delete", false, "")
 	cmd.Flags().String("output-dir", "", "")
+	cmd.Flags().String("workspace", "", "")
 	cmd.Flags().Int("iteration", 1, "")
 	cmd.Flags().StringArray("format", nil, "")
 
@@ -1338,6 +1340,10 @@ func TestEvaluateOptionsFromFlags(t *testing.T) {
 	}
 	if err := cmd.Flags().Set("output-dir", "/tmp/custom-output"); err != nil {
 		t.Fatalf("set output-dir: %v", err)
+	}
+	workspace := t.TempDir()
+	if err := cmd.Flags().Set("workspace", workspace); err != nil {
+		t.Fatalf("set workspace: %v", err)
 	}
 	if err := cmd.Flags().Set("iteration", "99"); err != nil {
 		t.Fatalf("set iteration: %v", err)
@@ -1354,11 +1360,65 @@ func TestEvaluateOptionsFromFlags(t *testing.T) {
 	if opts.OutputDir != "/tmp/custom-output" {
 		t.Fatalf("OutputDir = %q, want /tmp/custom-output", opts.OutputDir)
 	}
+	wantWorkspace, err := filepath.Abs(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.WorkspaceDir != wantWorkspace {
+		t.Fatalf("WorkspaceDir = %q, want %q", opts.WorkspaceDir, wantWorkspace)
+	}
 	if opts.Iteration != 99 {
 		t.Fatalf("Iteration = %d, want 99", opts.Iteration)
 	}
 	if len(opts.Formats) != 0 {
 		t.Fatalf("Formats = %v, want empty", opts.Formats)
+	}
+}
+
+func TestApplyRunConfigOverrides_Workspace(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	tests := []struct {
+		name        string
+		runtimeType string
+		parallelism int
+		benchmark   bool
+		workspace   string
+		wantError   string
+	}{
+		{name: "local single concurrency", runtimeType: "none", parallelism: 1, workspace: workspace},
+		{name: "remote runtime", runtimeType: "opensandbox", parallelism: 1, workspace: workspace, wantError: "--workspace requires runtime none"},
+		{name: "parallel cases", runtimeType: "none", parallelism: 2, workspace: workspace, wantError: "--workspace requires cases.parallelism 1"},
+		{name: "benchmark", runtimeType: "none", parallelism: 1, benchmark: true, workspace: workspace, wantError: "--workspace cannot be used with benchmark.enabled"},
+		{name: "missing directory", runtimeType: "none", parallelism: 1, workspace: filepath.Join(workspace, "missing"), wantError: "access --workspace"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cmd := &cobra.Command{}
+			cmd.SetContext(context.Background())
+			cmd.Flags().String("workspace", "", "")
+			if err := cmd.Flags().Set("workspace", tt.workspace); err != nil {
+				t.Fatal(err)
+			}
+			cfg := config.DefaultEvalConfig()
+			cfg.Environment.Type = tt.runtimeType
+			cfg.Cases.Parallelism = tt.parallelism
+			cfg.Benchmark.Enabled = tt.benchmark
+
+			err := applyRunConfigOverrides(cfg, cmd)
+			if tt.wantError == "" {
+				if err != nil {
+					t.Fatalf("applyRunConfigOverrides: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("error = %v, want substring %q", err, tt.wantError)
+			}
+		})
 	}
 }
 
@@ -1368,6 +1428,7 @@ func TestEvaluateOptionsFromFlags_RejectsNegativeIteration(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().Bool("no-delete", false, "")
 	cmd.Flags().String("output-dir", "", "")
+	cmd.Flags().String("workspace", "", "")
 	cmd.Flags().Int("iteration", 0, "")
 	cmd.Flags().StringArray("format", nil, "")
 
