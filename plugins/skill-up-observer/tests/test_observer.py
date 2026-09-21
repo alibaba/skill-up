@@ -18,6 +18,12 @@ SPEC.loader.exec_module(observer)
 
 
 class ObserverTest(unittest.TestCase):
+    def test_cross_host_observation_fixtures_share_the_contract(self) -> None:
+        fixtures = SCRIPT.parents[1] / "tests" / "fixtures"
+        for name in ("codex-observation.json", "dsh-observation.json"):
+            observation = json.loads((fixtures / name).read_text(encoding="utf-8"))
+            observer.validate_observation(observation)
+
     def test_plugin_exposes_only_skill_upper(self) -> None:
         manifest = json.loads((SCRIPT.parents[1] / ".codex-plugin" / "plugin.json").read_text())
         self.assertEqual(manifest["skills"], "./skills/")

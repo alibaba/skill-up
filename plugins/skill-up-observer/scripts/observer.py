@@ -221,8 +221,8 @@ def validate_observation(observation: dict[str, Any]) -> None:
         raise ValueError("schema_version must be v1alpha1")
     if not OBSERVATION_ID_RE.fullmatch(str(observation.get("id", ""))):
         raise ValueError("invalid observation id")
-    if observation.get("host", {}).get("name") != "codex":
-        raise ValueError("host.name must be codex")
+    if observation.get("host", {}).get("name") not in {"codex", "dsh"}:
+        raise ValueError("host.name must be codex or dsh")
     if not SKILL_NAME_RE.fullmatch(str(observation.get("skill", {}).get("name", ""))):
         raise ValueError("invalid skill.name")
     if observation.get("attribution", {}).get("method") not in {"explicit", "instrumented"}:
