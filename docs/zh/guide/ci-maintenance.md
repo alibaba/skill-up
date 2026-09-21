@@ -4,16 +4,20 @@
 
 ## 信任边界
 
-Pull Request 代码只在 GitHub 托管 Runner 上运行。持久化的自托管 Runner 仅用于可信的 `push`、`merge_group`、`workflow_dispatch` 和可复用工作流调用。
+CI 与 Extended CI 在 `pull_request`、`merge_group` 和维护者手工校验时都使用
+仓库管理的自托管 Runner。来自 Fork 的首次贡献者需要先通过 GitHub 的工作流审批，
+之后任务才会运行。
 
 | 能力 | 必需标签 | 用途 |
 | --- | --- | --- |
 | 可信 Linux | `self-hosted`、`linux`、`x64`、`trusted` | 可信集成测试和模型测试 |
 | 支持 Docker 的可信 Linux | `self-hosted`、`linux`、`x64`、`docker`、`trusted` | 可信容器 E2E 测试 |
-| 可信 Windows | `self-hosted`、`Windows`、`X64`、`trusted` | 手动触发的 Windows E2E 与模型测试 |
-| 不可信 PR 与 Merge Group 校验 | `ubuntu-24.04` 或 `windows-2025` | 构建、Lint、冒烟测试、文档、CodeQL 与 Merge Group Windows E2E |
+| 可信 Windows | `self-hosted`、`Windows`、`X64`、`trusted` | Windows E2E 与模型测试 |
 
-不要给会检出或执行 PR 代码的工作流添加 `pull_request_target`，不要让 PR Job 使用自托管 Runner。Runner 主机是持久化环境，应定期打补丁、移除无用软件和凭据、限制 Docker 权限；怀疑被入侵后必须重建。
+不要给会检出或执行 PR 代码的工作流添加 `pull_request_target`。在自托管 Runner
+上运行的 PR Job 必须使用只读 Token、不接收 Secret，并保留仓库的 Fork 审批策略。
+Runner 主机是持久化环境，应定期打补丁、移除无用软件和凭据、限制 Docker 权限、
+在任务间清理工作区；怀疑被入侵后必须重建。
 
 可信 Windows Runner 必须安装 Git for Windows，并将
 `C:\Program Files\Git\cmd` 与 `C:\Program Files\Git\bin` 都加入机器级
@@ -25,9 +29,10 @@ Windows 还必须开启开发者模式。对于 `NETWORK SERVICE` 等非管理�
 重启 Runner 服务，使新登录令牌带上该权限。workflow 会在安装 Go 工具链之前
 实际创建符号链接来验证这项能力。
 
-Merge Group 代码不得与后续会接收模型凭据的持久 Windows Runner 共用环境。
-因此 Extended CI 的 `merge_group` 使用 `windows-2025`，只有维护者
-`workflow_dispatch` 才会选中可信自托管标签。
+Extended CI 的 `pull_request`、`merge_group` 与维护者 `workflow_dispatch` 统一
+使用仓库管理的自托管 Runner 池，以避免 GitHub 托管 Runner 的排队延迟，并保证
+合入前和 Merge Queue 的运行环境一致。这些任务均为确定性、无凭据校验，仓库权限
+保持只读。
 
 ## 稳定检查与 Merge Queue
 
@@ -37,7 +42,7 @@ Ruleset 必须使用下表的 Job 展示名称。`build` 等 Job ID 只是实现
 | --- | --- | --- | --- |
 | CI | `push`、`pull_request`、`merge_group` | `Build & Test`、`E2E Smoke`、`Lint` | — |
 | CodeQL | `push`、`pull_request`、`merge_group`、定时任务 | `Analyze (actions)`、`Analyze (go)`、`Analyze (python)` | — |
-| Extended CI | `merge_group`、手动触发 | `Extended CI Summary` | 其余组件 Job 由 Summary 汇总 |
+| Extended CI | `pull_request`、`merge_group`、手动触发 | `Extended CI Summary` | 其余组件 Job 由 Summary 汇总 |
 | Model E2E | 手动触发 | 不得设为必需检查 | `E2E (none runtime, live models)`、`E2E (OpenSandbox, live model)`、`E2E (none runtime, Windows, live Claude)`、`E2E (Docker runtime, live model)` |
 | Docs | 文档相关的 `push` 和 `pull_request` | 不要设为全局必需；路径过滤会使非文档 PR 没有该检查 | `Build` |
 | Workflow Security | 工作流相关的 `push`、`pull_request`、`merge_group` | 初始基线完成处置前保持可选 | `Zizmor` |

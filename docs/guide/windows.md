@@ -8,9 +8,8 @@ limitations, and the recommended workflow.
 ## Supported
 
 - **Build and unit tests** — `go build ./...` and `go test ./...` pass on
-  Windows. Maintainer-dispatched Extended CI exercises a trusted self-hosted
-  runner; pull-request and merge-group code remains on clean GitHub-hosted
-  runners.
+  Windows. Extended CI uses the trusted self-hosted Windows runner for pull
+  requests, merge groups, and maintainer dispatches.
 - **The `none` runtime** — commands run on the host through `cmd.exe`.
 - **The `opensandbox` runtime** — unaffected by the host OS; it always
   executes inside a Linux sandbox.
