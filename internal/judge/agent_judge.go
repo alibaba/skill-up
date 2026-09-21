@@ -781,9 +781,8 @@ func buildJudgePrompt(_ context.Context, criteria []string, materialized *Materi
 	sb.WriteString("- \"passed\": true/false\n")
 	sb.WriteString("- \"evidence\": a non-empty JSON array of concrete observations supporting your judgment\n")
 	sb.WriteString("- \"failures\": an empty JSON array when passed is true, otherwise a non-empty array of unmet requirements\n\n")
-	sb.WriteString("You MUST NOT pass a criterion without specific evidence.\n\n")
-	sb.WriteString("IMPORTANT: Return only the required JSON object, optionally wrapped in one JSON code fence. Do not add prose or extra fields. ")
-	sb.WriteString("Escape double quotes inside string values (e.g. \\\"example\\\").\n\n")
+	sb.WriteString("You MUST NOT pass a criterion without specific evidence.\n")
+	sb.WriteString("The exact output contract is stated near the end of this prompt under \"Required Output Contract\"; your final message MUST satisfy it verbatim.\n\n")
 
 	appendJudgeSkillInstructions(&sb, skills)
 
@@ -793,6 +792,7 @@ func buildJudgePrompt(_ context.Context, criteria []string, materialized *Materi
 	}
 
 	appendReviewMaterials(&sb, materialized)
+	appendStrictOutputRules(&sb)
 	appendRequiredResponseFormat(&sb, criteria)
 	return sb.String()
 }
@@ -805,15 +805,11 @@ func buildAgentJudgeCorrectionPrompt(criteria []string, validationErr error) str
 
 	var sb strings.Builder
 	sb.WriteString("## Agent Judge Output Correction\n\n")
-	sb.WriteString("Your previous response failed the program-owned output contract. Correct the response using the same evaluation. ")
-	sb.WriteString("Do not add commentary, do not wrap the response in a Markdown fence, and do not introduce fields outside the schema.\n\n")
+	sb.WriteString("Your previous response failed the program-owned output contract. Correct the response using the same evaluation, then re-emit it so that it satisfies the contract below.\n\n")
 	sb.WriteString("Validation error (JSON string): ")
 	sb.Write(encodedError)
 	sb.WriteString("\n\n")
-	sb.WriteString("Allowed root field: results.\n")
-	sb.WriteString("Required result fields with exact casing: criterion_id, passed, evidence, failures.\n")
-	sb.WriteString("Use every configured criterion_id exactly once. Evidence must be a non-empty string array. ")
-	sb.WriteString("Failures must be empty when passed is true and non-empty when passed is false.\n")
+	appendStrictOutputRules(&sb)
 	appendRequiredResponseFormat(&sb, criteria)
 	return sb.String()
 }
@@ -882,6 +878,27 @@ func appendReviewMaterials(sb *strings.Builder, materialized *MaterializedContex
 		sb.WriteString(m.InlineContent)
 		sb.WriteString("\n```\n")
 	}
+}
+
+// appendStrictOutputRules states the program-owned output contract shared
+// verbatim by the first-attempt judge prompt and the correction prompt, so the
+// two can never drift apart. decodeAgentJudgeResponse (via
+// agentJudgeJSONCandidate) accepts either a bare JSON object or a single
+// ```json code fence, but strips nothing else: any leading prose — e.g. a final
+// message that begins with "I ..." after the judge loaded Skills or read review
+// materials — makes the response unparseable and forces an avoidable correction
+// retry. The rules below therefore forbid any text around the JSON and are
+// emitted near the end of the prompt, where an agentic judge is most likely to
+// honor them after its tool-using turns.
+func appendStrictOutputRules(sb *strings.Builder) {
+	sb.WriteString("\n## Required Output Contract\n")
+	sb.WriteString("- Allowed root field: results.\n")
+	sb.WriteString("- Required result fields with exact casing: criterion_id, passed, evidence, failures.\n")
+	sb.WriteString("- Use every configured criterion_id exactly once.\n")
+	sb.WriteString("- Evidence must be a non-empty string array. Failures must be empty when passed is true and non-empty when passed is false.\n")
+	sb.WriteString("- Your FINAL message must contain ONLY the JSON object, even after you have invoked judge Skills or read the review materials. It must begin with '{' and end with '}'. Wrapping that single object in one ```json code fence is also accepted.\n")
+	sb.WriteString("- Do NOT begin the final message with any prose, preamble, acknowledgement, or narration (for example \"I\", \"Sure\", \"Here is\", \"Based on\"). Do NOT add any commentary, explanation, or extra fields before or after the JSON.\n")
+	sb.WriteString("- Escape double quotes inside string values (e.g. \\\"example\\\").\n")
 }
 
 func appendRequiredResponseFormat(sb *strings.Builder, criteria []string) {

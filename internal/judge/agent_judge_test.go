@@ -386,6 +386,52 @@ func TestBuildJudgePrompt_ContainsAllParts(t *testing.T) {
 	}
 }
 
+// TestAgentJudgePromptsShareStrictOutputContract locks in the fix for the
+// observed "invalid character 'I'" failures: an agentic judge that closes with a
+// prose final message. The first-attempt prompt must now carry the same strict
+// output contract as the correction prompt (which already passed on retry), and
+// both must share it verbatim so they cannot drift apart again.
+func TestAgentJudgePromptsShareStrictOutputContract(t *testing.T) {
+	criteria := []string{"criterion A"}
+	materialized := &MaterializedContext{
+		Materials: []ContextMaterial{
+			{
+				ContextMaterialManifest: ContextMaterialManifest{
+					Key:           "final_message",
+					Mode:          "include",
+					OriginalBytes: len("Agent final message"),
+				},
+				InlineContent: "Agent final message",
+			},
+		},
+	}
+
+	firstPrompt := buildJudgePrompt(context.Background(), criteria, materialized)
+	correctionPrompt := buildAgentJudgeCorrectionPrompt(criteria, errors.New("invalid character 'I' looking for beginning of value"))
+
+	sharedRules := []string{
+		"## Required Output Contract",
+		"Required result fields with exact casing: criterion_id, passed, evidence, failures",
+		"Your FINAL message must contain ONLY the JSON object",
+		"Do NOT begin the final message with any prose",
+	}
+	for _, rule := range sharedRules {
+		if !strings.Contains(firstPrompt, rule) {
+			t.Errorf("first-attempt judge prompt missing shared contract rule %q", rule)
+		}
+		if !strings.Contains(correctionPrompt, rule) {
+			t.Errorf("correction judge prompt missing shared contract rule %q", rule)
+		}
+	}
+
+	// The two prompts must state the fence policy identically: the correction
+	// prompt previously forbade a Markdown fence while the first attempt allowed
+	// one, which is exactly the kind of drift this contract removes.
+	if strings.Contains(correctionPrompt, "do not wrap the response in a Markdown fence") {
+		t.Error("correction prompt still carries the old fence-forbidding wording")
+	}
+}
+
 func TestBuildJudgePromptWithSkills_RequiresJudgeSkillUse(t *testing.T) {
 	materialized := &MaterializedContext{
 		Materials: []ContextMaterial{

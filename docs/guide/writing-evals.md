@@ -1047,10 +1047,40 @@ engine:
 >
 > **Note:** the `--api-key` flag and any provider API key declared in `eval.yaml` are **not** used as the qodercli auth token. Authentication comes from the selected edition's PAT or local login state.
 
-qodercli also has model-parameter restrictions:
+qodercli model selection:
 
-- `model` must be one of qodercli's predefined values: `lite`, `efficient`, `auto`, `performance`, `ultimate`
-- `base_url` has no effect for qodercli
+- A non-empty `engine.model.name` is passed to Qoder's `--model` after trimming
+  surrounding whitespace, preserving case and the complete identifier. This
+  applies to initial runs, stdin prompts, and resumed sessions.
+- Historical tiers (`lite`, `efficient`, `auto`, `performance`, `ultimate`),
+  concrete model names, and custom model IDs are forwarded without a local
+  allowlist. Availability depends on the installed Qoder CLI and account.
+  Use Qoder's model selector or `--list-models` where supported to check it.
+- Omit the model to use Qoder's default. An invalid or unavailable explicit
+  model produces an execution error with model context and Qoder's diagnostic;
+  skill-up does not silently retry with the default model.
+- `base_url` has no effect for qodercli. Provider API keys are not Qoder PATs.
+- Requested/applied model report fields describe the requested value and the
+  forwarded argument, not independently verified server-side model selection.
+
+For example, select an available concrete model by its exact name:
+
+```yaml
+engine:
+  name: qodercli
+  model:
+    name: Qwen3.7-Plus
+```
+
+For an opaque ID containing `/`, use `engine.model.name` in YAML or an explicit
+CLI provider to avoid the legacy `provider/model` interpretation:
+
+```bash
+skill-up run ./evals/eval.yaml --engine qodercli --provider qoder --model 'team/custom-model-id'
+```
+
+The provider above only disambiguates CLI parsing; Qoder still owns routing and
+authentication. Configure any custom model in Qoder first.
 
 ### qwen_code credentials
 

@@ -1737,6 +1737,53 @@ func TestExecuteCase_RetryPolicyRetriesErrors(t *testing.T) {
 	}
 }
 
+func TestExecuteCase_QoderInvalidModelRemainsErrorAcrossRetries(t *testing.T) {
+	t.Parallel()
+
+	runCalls := atomic.Int32{}
+	ag := agent.NewQoderCLIAgent(agent.Config{
+		ModelName: "missing-model", RequestedModelName: "missing-model",
+	})
+	rt := &mockRuntime{
+		workspace: t.TempDir(),
+		execFunc: func(_ context.Context, command string, _ runtime.ExecOptions) (runtime.ExecResult, error) {
+			switch {
+			case strings.Contains(command, "qodercli --permission-mode="):
+				runCalls.Add(1)
+				if !strings.Contains(command, " --model 'missing-model' ") {
+					t.Errorf("retry dropped explicit model: %s", command)
+				}
+				return runtime.ExecResult{ExitCode: 42, Stderr: `Invalid model "missing-model"`}, nil
+			case strings.Contains(command, "--version"):
+				return runtime.ExecResult{Stdout: "1.1.9"}, nil
+			default:
+				return runtime.ExecResult{}, nil
+			}
+		},
+	}
+	e := newTestEvaluator(EvalOptions{
+		Agent: ag, OutputDir: t.TempDir(),
+		EvalCfg: &config.EvalConfig{
+			Cases: config.CasesConfig{
+				RetryPolicy: config.RetryPolicy{MaxRetries: 1, RetryOn: []string{"error"}},
+			},
+		},
+	})
+	result := e.executeCase(context.Background(), &config.CaseConfig{
+		ID: "qoder-invalid-model", Input: config.Input{Prompt: "hello"},
+	}, "with_skill", rt, nil)
+
+	if runCalls.Load() != 2 {
+		t.Fatalf("expected two configured attempts, got %d", runCalls.Load())
+	}
+	if result.Status != judge.StatusError || result.Error == nil || !strings.Contains(result.Error.Error(), `with model "missing-model"`) {
+		t.Fatalf("model rejection must remain execution ERROR: status=%s error=%v", result.Status, result.Error)
+	}
+	if result.ExitCode != 42 || result.RequestedModel != "missing-model" || result.AppliedModel != "missing-model" {
+		t.Fatalf("retry lost exit/model metadata: exit=%d requested=%q applied=%q", result.ExitCode, result.RequestedModel, result.AppliedModel)
+	}
+}
+
 func TestExecuteCase_RetryPolicyDoesNotRetryUnmatchedReason(t *testing.T) {
 	t.Parallel()
 

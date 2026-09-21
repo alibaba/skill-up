@@ -8,11 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Custom Engines can opt into stateful multi-turn execution with
-  `custom.conversation_mode: stateful`. Local and HTTP transports receive one
-  user message per invocation and carry the returned `session_id` into the
-  next turn, enabling post-conditions, captures, early stopping, and per-turn
-  judge assertions without changing existing batch configurations.
 - `skill-up run --workspace <dir>` can now evaluate a local `none` runtime in
   an existing, externally owned workspace when case parallelism is one. The
   workspace is always preserved; `--no-delete` also remains available to keep
@@ -26,11 +21,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recursively copying its own target, and snapshot paths are handled literally
   on POSIX shells.
 
+### Fixed
+- Qoder CLI now receives explicit model names and custom IDs in initial,
+  stdin, and resumed calls instead of silently discarding values outside the
+  historical five tiers. Model availability is validated by Qoder; failures
+  retain model context without falling back to the default. Global/CN
+  authentication and provider isolation are unchanged.
+
+## [0.12.0] - 2026-09-18
+
+### Added
+- Custom Engines can opt into stateful multi-turn execution with
+  `custom.conversation_mode: stateful`. Local and HTTP transports receive one
+  user message per invocation and carry the returned `session_id` into the
+  next turn, enabling post-conditions, captures, early stopping, and per-turn
+  judge assertions without changing existing batch configurations.
+- Add an experimental DeepSeek Harness Custom Engine example with isolated
+  per-run DSH state, DashScope/Qwen routing, Skill discovery, stateful ACP
+  session resume, structured transcripts, token accounting, and
+  credential-redacted session artifacts.
+
 ### Changed
 - Legacy no-op `engine.entry` and `engine.model.params` values are now dropped
   at the resolved-agent boundary with migration warnings. The v1alpha1 loader
   continues to accept both fields; use custom-engine command configuration or
   engine/custom kwargs instead.
+
+### Fixed
+- Agent-judge prompts now require a JSON-only final response after tool use,
+  preventing harmless prose prefixes from triggering a correction retry.
 
 ## [0.11.0] - 2026-09-11
 
@@ -587,6 +606,7 @@ The `v0.5.0` release tag is available at
   project and delivers the end-to-end capability to declare eval environments,
   run cases and emit structured reports as described in [README.md](README.md).
 
+[0.12.0]: https://github.com/alibaba/skill-up/releases/tag/v0.12.0
 [0.11.0]: https://github.com/alibaba/skill-up/releases/tag/v0.11.0
 [0.10.0]: https://github.com/alibaba/skill-up/releases/tag/v0.10.0
 [0.9.1]: https://github.com/alibaba/skill-up/releases/tag/v0.9.1

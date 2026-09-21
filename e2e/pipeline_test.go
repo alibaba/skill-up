@@ -146,13 +146,11 @@ expect:
 	if result.ExitCode != 0 {
 		t.Fatalf("applied config run failed: exit=%d\nstdout=%s\nstderr=%s", result.ExitCode, result.Stdout, result.Stderr)
 	}
-	for _, want := range []string{
-		"requested.model=qwen3.6-plus applied.model=",
-		`does not support model \"qwen3.6-plus\"`,
-	} {
-		if !strings.Contains(result.Stdout, want) {
-			t.Fatalf("stdout missing %q:\n%s", want, result.Stdout)
-		}
+	if want := "requested.model=qwen3.6-plus applied.model=qwen3.6-plus"; !strings.Contains(result.Stdout, want) {
+		t.Fatalf("stdout missing %q:\n%s", want, result.Stdout)
+	}
+	if strings.Contains(result.Stdout+result.Stderr, "does not support model") {
+		t.Fatalf("unexpected model rejection warning:\n%s\n%s", result.Stdout, result.Stderr)
 	}
 
 	data, err := os.ReadFile(filepath.Join(outputDir, "iteration-1", "result.json"))
@@ -178,7 +176,7 @@ expect:
 	if err := json.Unmarshal(data, &report); err != nil {
 		t.Fatalf("parse result.json: %v", err)
 	}
-	if report.ModelName != "dashscope/qwen3.6-plus" || report.Requested.Model != "qwen3.6-plus" || report.Applied.Model != "" || report.Observed != nil {
+	if report.ModelName != "dashscope/qwen3.6-plus" || report.Requested.Model != "qwen3.6-plus" || report.Applied.Model != "qwen3.6-plus" || report.Observed != nil {
 		t.Fatalf("requested/applied/observed report mismatch: %+v", report)
 	}
 	if report.Requested.Protocol != "qoder" || report.Applied.Protocol != "qoder" || report.Applied.Provider != "" {
