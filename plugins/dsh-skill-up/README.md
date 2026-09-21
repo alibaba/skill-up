@@ -45,8 +45,10 @@ dsh plugin --profile web add @alibaba/dsh-skill-up
 - Bundles the repository's canonical `skill-upper` Skill at package time.
 - `skill_up_validate` validates a workspace-relative evaluation suite.
 - `skill_up_run` starts an evaluation through DSH's background-job service.
-- Each run gets an isolated report directory under `.skill-up-workspace/`, so
-  concurrent jobs and before/after evidence cannot overwrite one another.
+- Each run gets an isolated report directory under
+  `evals/.skill-up-workspace/`, which the evaluator excludes from the installed
+  Skill, so concurrent jobs and before/after evidence cannot overwrite or
+  contaminate one another.
 - `skill_up_summary` reads the per-case statuses in an existing `result.json`.
 - Evaluation arguments are passed as an argv array, not interpolated into a shell.
 - Eval and result paths are confined to the DSH workspace, including symlink resolution.

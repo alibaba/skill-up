@@ -187,7 +187,7 @@ export function apply(ctx, config = {}) {
       const evalFile = resolveWorkspaceFile(workspace, args.eval_path, 'eval_path')
       const env = forwardedEnvironment(credentialEnv)
       const executable = await ctx.subprocess.resolveExecutable(skillUpBin, env, exec.signal)
-      const outputDir = prepareOutputDirectory(workspace, randomUUID())
+      const outputDir = prepareOutputDirectory(workspace, evalFile.absolute, randomUUID())
       const cliArgs = buildRunArgs(evalFile.relative, outputDir, args)
       const jobId = ctx.jobs.start({
         kind: 'skill-up',

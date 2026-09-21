@@ -71,7 +71,7 @@ test('tools wait for the managed process range to become quiescent', async () =>
   assert.equal(validation.exit_code, 0)
   const run = await tools[1].execute({ eval_path: 'evals/eval.yaml' }, exec)
   assert.equal(run.job_id, 'job-1')
-  assert.match(run.output_dir, /^\.skill-up-workspace\/[0-9a-f-]{36}$/)
+  assert.match(run.output_dir, /^evals\/\.skill-up-workspace\/[0-9a-f-]{36}$/)
   assert.equal((await jobHooks.done).status, 'completed')
   assert.equal(waits.length, 2)
 })

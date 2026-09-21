@@ -74,19 +74,39 @@ test('resolveWorkspaceFile returns a canonical relative path for a symlinked wor
 
 test('prepareOutputDirectory confines generated reports despite symlinks', () => {
   const workspace = mkdtempSync(join(tmpdir(), 'dsh-skill-up-output-workspace-'))
+  mkdirSync(join(workspace, 'evals'))
+  const evalPath = join(workspace, 'evals', 'eval.yaml')
+  writeFileSync(evalPath, 'schema_version: v1alpha1\n')
   assert.equal(
-    prepareOutputDirectory(workspace, '00000000-0000-0000-0000-000000000001'),
-    join('.skill-up-workspace', '00000000-0000-0000-0000-000000000001'),
+    prepareOutputDirectory(workspace, evalPath, '00000000-0000-0000-0000-000000000001'),
+    join('evals', '.skill-up-workspace', '00000000-0000-0000-0000-000000000001'),
   )
 
   const escapedWorkspace = mkdtempSync(join(tmpdir(), 'dsh-skill-up-output-escape-'))
   const outside = mkdtempSync(join(tmpdir(), 'dsh-skill-up-output-outside-'))
-  symlinkSync(outside, join(escapedWorkspace, '.skill-up-workspace'))
+  mkdirSync(join(escapedWorkspace, 'evals'))
+  const escapedEvalPath = join(escapedWorkspace, 'evals', 'eval.yaml')
+  writeFileSync(escapedEvalPath, 'schema_version: v1alpha1\n')
+  symlinkSync(outside, join(escapedWorkspace, 'evals', '.skill-up-workspace'))
   assert.throws(
-    () => prepareOutputDirectory(escapedWorkspace, '00000000-0000-0000-0000-000000000002'),
-    /output root must stay inside the DSH workspace/,
+    () => prepareOutputDirectory(escapedWorkspace, escapedEvalPath, '00000000-0000-0000-0000-000000000002'),
+    /output root must stay inside the DSH workspace|output root must stay inside the evals root/,
   )
   assert.deepEqual(readdirSync(outside), [])
+})
+
+test('prepareOutputDirectory keeps reports below the excluded evals tree of the Skill root', () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'dsh-skill-up-nested-skill-'))
+  const skillRoot = join(workspace, 'skills', 'demo')
+  mkdirSync(join(skillRoot, 'benchmarks'), { recursive: true })
+  writeFileSync(join(skillRoot, 'SKILL.md'), '# Demo\n')
+  const evalPath = join(skillRoot, 'benchmarks', 'eval.yaml')
+  writeFileSync(evalPath, 'schema_version: v1alpha1\n')
+
+  assert.equal(
+    prepareOutputDirectory(workspace, evalPath, 'run-1'),
+    join('skills', 'demo', 'evals', '.skill-up-workspace', 'run-1'),
+  )
 })
 
 test('forwardedEnvironment only forwards explicitly configured names', () => {

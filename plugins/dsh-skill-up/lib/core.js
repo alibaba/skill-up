@@ -1,5 +1,5 @@
 import { mkdirSync, realpathSync, statSync } from 'node:fs'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 const DEFAULT_EVAL_PATH = 'evals/eval.yaml'
 export const OUTPUT_ROOT = '.skill-up-workspace'
@@ -28,12 +28,40 @@ export function resolveWorkspaceFile(workspace, input, label) {
   return { absolute: candidate, relative: rel || '.' }
 }
 
-export function prepareOutputDirectory(workspace, runId) {
+function findSkillDirectory(workspace, evalPath) {
   const root = realpathSync(workspace)
-  const outputRoot = resolve(root, OUTPUT_ROOT)
+  const start = dirname(realpathSync(evalPath))
+  let current = start
+  for (let depth = 0; depth <= 10; depth += 1) {
+    try {
+      if (statSync(join(current, 'SKILL.md')).isFile()) return current
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error
+    }
+    const parent = dirname(current)
+    if (parent === current || relativeInside(root, parent, 'skill root') === '.') break
+    current = parent
+  }
+  return dirname(start)
+}
+
+export function prepareOutputDirectory(workspace, evalPath, runId) {
+  const root = realpathSync(workspace)
+  const skillRoot = findSkillDirectory(root, evalPath)
+  relativeInside(root, skillRoot, 'skill root')
+
+  // The evaluator never installs the conventional evals/ tree into the Skill.
+  // Keeping reports below it prevents prior-case artifacts from contaminating
+  // later cases when the DSH workspace is also the Skill root.
+  const evalsRoot = resolve(skillRoot, 'evals')
+  mkdirSync(evalsRoot, { recursive: true })
+  const confinedEvalsRoot = realpathSync(evalsRoot)
+  relativeInside(root, confinedEvalsRoot, 'evals root')
+
+  const outputRoot = resolve(confinedEvalsRoot, OUTPUT_ROOT)
   mkdirSync(outputRoot, { recursive: true })
   const confinedOutputRoot = realpathSync(outputRoot)
-  relativeInside(root, confinedOutputRoot, 'output root')
+  relativeInside(confinedEvalsRoot, confinedOutputRoot, 'output root')
 
   const runDirectory = resolve(confinedOutputRoot, runId)
   mkdirSync(runDirectory)
