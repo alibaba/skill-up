@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/alibaba/skill-up/plugins/skill-up-observer/schemas/observation.schema.json",
+  "$id": "https://github.com/alibaba/skill-up/schemas/skill-observation/v1alpha1/observation.schema.json",
   "title": "Skill Up observation document v1alpha1",
   "type": "object",
   "additionalProperties": false,

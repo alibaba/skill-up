@@ -101,7 +101,7 @@ Observation collection is disabled by default. Enabling it is the local
 collection consent boundary. The adapter listens to committed `session/event`
 records, redacts common credential shapes, stores files with private
 permissions, and ignores unattributed turns as well as the control Skills
-`skill-upper` and `skill-up-observer`. Data is not uploaded.
+`skill-upper`, `codex-skill-up`, and `dsh-skill-up`. Data is not uploaded.
 
 Review is a separate boundary: collection creates `candidate` observations.
 Listing, reading, feedback attachment, and preview do not authorize a case

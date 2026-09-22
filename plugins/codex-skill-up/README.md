@@ -1,4 +1,4 @@
-# Skill Up Observer Codex plugin
+# Skill Up for Codex
 
 This plugin captures explicitly attributed Skill interactions through Codex hooks and stores normalized observations locally. Its bundled MCP server supplies capture and case-conversion operations; the release bundle includes the canonical `skill-upper` Skill for capture guidance, review, approval, evaluation, and evolution.
 
@@ -12,9 +12,13 @@ This plugin captures explicitly attributed Skill interactions through Codex hook
 
 The pinned Codex 0.80.0 binary used by skill-up's evaluation adapter is intentionally out of scope. It remains available for custom-model evaluation and does not load this plugin.
 
+If an earlier checkout installed the plugin as `skill-up-observer`, uninstall or
+disable that local plugin before installing `codex-skill-up`; otherwise both
+hook sets may run. The observation data directory remains unchanged.
+
 ## Data and consent
 
-Enabling the plugin and trusting its hooks opts in to local capture. Pending drafts and finalized observations are stored under `$CODEX_HOME/plugin-data/skill-up-observer` (normally `~/.codex/plugin-data/skill-up-observer`). The stable path keeps Hook and MCP access consistent on Codex versions that inject `PLUGIN_DATA` only for hooks. `SKILL_UP_OBSERVER_DATA` is available as a development/test override. Directories use mode `0700` and observation files use `0600`.
+Enabling the plugin and trusting its hooks opts in to local capture. Pending drafts and finalized observations are stored under `$CODEX_HOME/plugin-data/skill-up-observer` (normally `~/.codex/plugin-data/skill-up-observer`). This storage namespace is retained across the plugin rename so existing local observations remain visible. The stable path keeps Hook and MCP access consistent on Codex versions that inject `PLUGIN_DATA` only for hooks. `SKILL_UP_OBSERVER_DATA` is available as a development/test override. Directories use mode `0700` and observation files use `0600`.
 
 Common API-key, bearer-token, JWT, and secret-assignment shapes are redacted before persistence. Nothing is uploaded. Unattributed turns are discarded at `Stop`; the plugin also handles `Interrupt` when the Codex host exposes that hook event. Inferred attribution is rejected by the observation contract.
 
@@ -31,7 +35,7 @@ The complete capture-to-evaluation flow is available through the bundled `skill-
 [`../../skills/skill-upper`](../../skills/skill-upper) is the only editable source for `skill-upper`; this source directory is intentionally not an installable plugin by itself. From the repository root, run:
 
 ```bash
-make package-observer-plugin
+make package-codex-plugin
 ```
 
-The command assembles a complete plugin under `dist/plugins/skill-up-observer/` and creates `dist/skill-up-observer_<version>.tar.gz`. Both outputs are ignored build artifacts. Tagged GitHub releases attach the same self-contained archive for downstream marketplace or registry publishing; no external registry upload occurs in this repository.
+The command assembles a complete plugin under `dist/plugins/codex-skill-up/` and creates `dist/codex-skill-up_<version>.tar.gz`. Both outputs are ignored build artifacts. Tagged GitHub releases attach the same self-contained archive for downstream marketplace or registry publishing; no external registry upload occurs in this repository.

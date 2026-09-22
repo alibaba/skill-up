@@ -333,9 +333,9 @@ skill-up/
 │   └── report/            # JSON, JUnit, HTML, and benchmark reports
 ├── pkg/                   # Publicly importable APIs
 ├── plugins/               # Agent host plugin bundles
-│   ├── skill-up-observer/ # Codex observer source; release bundles add skill-upper
+│   ├── codex-skill-up/    # Codex adapter; release bundles add shared assets
 │   └── dsh-skill-up/      # DSH bundle with a generated dist/ Skill copy
-├── schemas/evalevent/     # Versioned evaluation event JSON Schemas
+├── schemas/               # Evaluation-event and host-neutral observation contracts
 ├── skills/skill-upper/    # Canonical source for the distributable workflow Skill
 ├── docs/                  # VitePress documentation
 ├── e2e/                   # End-to-end tests and fixtures

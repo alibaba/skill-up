@@ -17,7 +17,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 const SCHEMA_VERSION = 'v1alpha1'
 const OBSERVATION_ID = /^obs_[a-f0-9]{24}$/
 const SKILL_NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/
-const CONTROL_SKILLS = new Set(['skill-upper', 'skill-up-observer'])
+const CONTROL_SKILLS = new Set(['skill-upper', 'skill-up-observer', 'codex-skill-up', 'dsh-skill-up'])
 const REVIEW_STATUSES = new Set(['candidate', 'approved', 'rejected'])
 const FEEDBACK_SENTIMENTS = new Set(['', 'positive', 'negative', 'mixed', 'neutral'])
 

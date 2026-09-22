@@ -8,11 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Tagged releases now attach self-contained Codex observer and DeepSeek Harness
+- Tagged releases now attach self-contained Codex and DeepSeek Harness
   plugin archives assembled with the canonical `skill-upper` source, including
   checksums and attestations without publishing to an external registry. Plugin
   build output is generated under ignored `dist/` paths, so the repository no
   longer tracks a second copy of the Skill.
+- Rename the Codex host plugin from `skill-up-observer` to `codex-skill-up`
+  and move the observation schema and cross-host fixtures under
+  `schemas/skill-observation`. Existing `plugin-data/skill-up-observer` storage
+  remains unchanged so local observations survive the rename.
 - Add an experimental DeepSeek Harness plugin bundle that exposes structured
   validation, background evaluation, report-summary, and before/after
   comparison tools together with the canonical `skill-upper` Skill. Its

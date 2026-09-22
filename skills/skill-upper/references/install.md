@@ -49,10 +49,14 @@ skill-up --help
 [GitHub Releases](https://github.com/alibaba/skill-up/releases)。以下示例用
 `0.13.0`，实际使用时替换为目标 release 版本。
 
-### Codex Observer
+### Codex（`codex-skill-up`）
 
 要求：支持插件与 lifecycle hooks 的当前 Codex CLI 或 ChatGPT 桌面端，以及
 `python3`。Codex IDE extension 不支持该插件。
+
+如果此前从旧 checkout 安装过名为 `skill-up-observer` 的本地插件，先在
+Plugins Directory 中卸载或禁用旧插件，再安装 `codex-skill-up`，避免两组 hooks
+同时运行。原 `$CODEX_HOME/plugin-data/skill-up-observer` 数据目录保持不变。
 
 Codex 的本地插件通过 marketplace 发现，不能直接对 tarball 执行安装。下载并
 解压到一个独立的本地 marketplace：
@@ -63,9 +67,9 @@ export SKILL_UP_MARKETPLACE="$HOME/.local/share/skill-up-marketplace"
 
 mkdir -p "$SKILL_UP_MARKETPLACE/plugins" "$SKILL_UP_MARKETPLACE/.agents/plugins"
 curl -fL \
-  "https://github.com/alibaba/skill-up/releases/download/v${SKILL_UP_VERSION}/skill-up-observer_${SKILL_UP_VERSION}.tar.gz" \
-  -o /tmp/skill-up-observer.tar.gz
-tar -xzf /tmp/skill-up-observer.tar.gz -C "$SKILL_UP_MARKETPLACE/plugins"
+  "https://github.com/alibaba/skill-up/releases/download/v${SKILL_UP_VERSION}/codex-skill-up_${SKILL_UP_VERSION}.tar.gz" \
+  -o /tmp/codex-skill-up.tar.gz
+tar -xzf /tmp/codex-skill-up.tar.gz -C "$SKILL_UP_MARKETPLACE/plugins"
 ```
 
 在 `$SKILL_UP_MARKETPLACE/.agents/plugins/marketplace.json` 写入：
@@ -78,10 +82,10 @@ tar -xzf /tmp/skill-up-observer.tar.gz -C "$SKILL_UP_MARKETPLACE/plugins"
   },
   "plugins": [
     {
-      "name": "skill-up-observer",
+      "name": "codex-skill-up",
       "source": {
         "source": "local",
-        "path": "./plugins/skill-up-observer"
+        "path": "./plugins/codex-skill-up"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -101,7 +105,7 @@ codex plugin marketplace list
 ```
 
 然后重启 ChatGPT 桌面端，在 Plugins Directory 中选择 **Skill Up Local**，安装
-**skill-up-observer**，并在提示时审核、信任其 hooks。安装后新建对话验证
+**codex-skill-up**，并在提示时审核、信任其 hooks。安装后新建对话验证
 `skill-upper` 以及 `mark_skill_invocation`、`record_skill_feedback` 等工具可用。
 
 ### DeepSeek Harness（DSH）

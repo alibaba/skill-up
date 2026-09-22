@@ -11,28 +11,30 @@ import { fileURLToPath } from 'node:url'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const canonicalSkill = resolve(repoRoot, 'skills', 'skill-upper')
-const observerSource = resolve(repoRoot, 'plugins', 'skill-up-observer')
-const observerBundle = resolve(repoRoot, 'dist', 'plugins', 'skill-up-observer')
+const observationSchema = resolve(repoRoot, 'schemas', 'skill-observation', 'v1alpha1', 'observation.schema.json')
+const codexSource = resolve(repoRoot, 'plugins', 'codex-skill-up')
+const codexBundle = resolve(repoRoot, 'dist', 'plugins', 'codex-skill-up')
 const dshSource = resolve(repoRoot, 'plugins', 'dsh-skill-up')
 const dshSkillBundle = resolve(repoRoot, 'plugins', 'dsh-skill-up', 'dist', 'skill-upper')
+const dshSchemaBundle = resolve(repoRoot, 'plugins', 'dsh-skill-up', 'dist', 'skill-observation', 'v1alpha1', 'observation.schema.json')
 const dshPackageBundle = resolve(repoRoot, 'dist', 'plugins', 'dsh-skill-up')
 
-const observerEntries = [
-  '.codex-plugin',
-  '.mcp.json',
-  'README.md',
-  'hooks',
-  'schemas',
-  'scripts',
-]
-
-const dshPackageEntries = [
-  'index.js',
-  'lib',
-  'cordis.patch.yml',
-  'package.json',
-  'README.md',
-]
+const hostPackages = {
+  codex: {
+    source: codexSource,
+    bundle: codexBundle,
+    entries: ['.codex-plugin', '.mcp.json', 'README.md', 'hooks', 'scripts'],
+    skillTarget: 'skills/skill-upper',
+    schemaTarget: 'schemas/skill-observation/v1alpha1/observation.schema.json',
+  },
+  dsh: {
+    source: dshSource,
+    bundle: dshPackageBundle,
+    entries: ['index.js', 'lib', 'cordis.patch.yml', 'package.json', 'README.md'],
+    skillTarget: 'dist/skill-upper',
+    schemaTarget: 'dist/skill-observation/v1alpha1/observation.schema.json',
+  },
+}
 
 function validateVersion(version, label) {
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) {
@@ -53,37 +55,39 @@ function copy(source, target) {
   cpSync(source, target, { recursive: true, filter: includeInBundle })
 }
 
-function bundleObserver() {
-  rmSync(observerBundle, { recursive: true, force: true })
-  mkdirSync(observerBundle, { recursive: true })
-  for (const entry of observerEntries) {
-    copy(resolve(observerSource, entry), resolve(observerBundle, entry))
+function stageHostPackage(config) {
+  rmSync(config.bundle, { recursive: true, force: true })
+  mkdirSync(config.bundle, { recursive: true })
+  for (const entry of config.entries) {
+    copy(resolve(config.source, entry), resolve(config.bundle, entry))
   }
-  copy(canonicalSkill, resolve(observerBundle, 'skills', 'skill-upper'))
-  const version = process.env.SKILL_UP_PLUGIN_VERSION
+  copy(canonicalSkill, resolve(config.bundle, config.skillTarget))
+  copy(observationSchema, resolve(config.bundle, config.schemaTarget))
+}
+
+function bundleCodex() {
+  stageHostPackage(hostPackages.codex)
+  const version = process.env.SKILL_UP_CODEX_PLUGIN_VERSION
   if (version) {
-    validateVersion(version, 'observer plugin')
-    const manifestPath = resolve(observerBundle, '.codex-plugin', 'plugin.json')
+    validateVersion(version, 'Codex plugin')
+    const manifestPath = resolve(codexBundle, '.codex-plugin', 'plugin.json')
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
     manifest.version = version
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
   }
-  console.log(`bundled Codex observer -> ${relative(repoRoot, observerBundle)}`)
+  console.log(`bundled Codex plugin -> ${relative(repoRoot, codexBundle)}`)
 }
 
 function bundleDSH() {
   rmSync(dshSkillBundle, { recursive: true, force: true })
+  rmSync(resolve(dshSource, 'dist', 'skill-observation'), { recursive: true, force: true })
   copy(canonicalSkill, dshSkillBundle)
-  console.log(`bundled skill-upper -> ${relative(repoRoot, dshSkillBundle)} (DSH)`)
+  copy(observationSchema, dshSchemaBundle)
+  console.log(`bundled shared assets -> ${relative(repoRoot, resolve(dshSource, 'dist'))} (DSH)`)
 }
 
 function packageDSH() {
-  rmSync(dshPackageBundle, { recursive: true, force: true })
-  mkdirSync(dshPackageBundle, { recursive: true })
-  for (const entry of dshPackageEntries) {
-    copy(resolve(dshSource, entry), resolve(dshPackageBundle, entry))
-  }
-  copy(canonicalSkill, resolve(dshPackageBundle, 'dist', 'skill-upper'))
+  stageHostPackage(hostPackages.dsh)
 
   const version = process.env.SKILL_UP_DSH_PLUGIN_VERSION
   if (version) {
@@ -96,12 +100,12 @@ function packageDSH() {
   console.log(`bundled DSH package -> ${relative(repoRoot, dshPackageBundle)}`)
 }
 
-const targets = { observer: bundleObserver, dsh: bundleDSH, 'dsh-package': packageDSH }
+const targets = { codex: bundleCodex, dsh: bundleDSH, 'dsh-package': packageDSH }
 const selection = process.argv[2] ?? 'all'
-const selectedTargets = selection === 'all' ? ['observer', 'dsh'] : [selection]
+const selectedTargets = selection === 'all' ? ['codex', 'dsh'] : [selection]
 
 if (selectedTargets.some((name) => !(name in targets))) {
-  console.error('usage: node scripts/bundle-plugins.mjs [all|observer|dsh|dsh-package]')
+  console.error('usage: node scripts/bundle-plugins.mjs [all|codex|dsh|dsh-package]')
   process.exit(2)
 }
 

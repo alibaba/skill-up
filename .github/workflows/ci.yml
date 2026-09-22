@@ -99,7 +99,7 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Test Codex observer plugin
+      - name: Test Codex skill-up plugin
         run: make test-plugin
 
       - name: Test GitHub Action adapter

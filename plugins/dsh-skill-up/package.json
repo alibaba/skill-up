@@ -13,6 +13,7 @@
     "index.js",
     "lib/",
     "dist/skill-upper/",
+    "dist/skill-observation/",
     "cordis.patch.yml",
     "README.md"
   ],

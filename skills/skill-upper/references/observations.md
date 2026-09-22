@@ -2,8 +2,8 @@
 
 Use this workflow only when the user asks to review captured Skill usage,
 feedback, or an observation, and the observation tools are available. If they
-are unavailable, explain that either a current Codex release with the skill-up
-observer plugin or an observer-enabled DSH skill-up plugin is required. Do not
+are unavailable, explain that either a current Codex release with the
+`codex-skill-up` plugin or an observer-enabled DSH skill-up plugin is required. Do not
 install or enable either integration unless the user asks.
 
 This observation capture and review workflow supports Codex and DSH. Claude

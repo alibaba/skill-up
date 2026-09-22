@@ -49,10 +49,17 @@ test('DSH explicit invocation produces a redacted durable observation', () => {
 })
 
 test('DSH validates the shared cross-host observation fixtures', () => {
-  const fixtureRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'skill-up-observer', 'tests', 'fixtures')
+  const fixtureRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'schemas', 'skill-observation', 'v1alpha1', 'fixtures')
   for (const name of ['codex-observation.json', 'dsh-observation.json']) {
     validateObservation(JSON.parse(readFileSync(join(fixtureRoot, name), 'utf8')))
   }
+})
+
+test('DSH bundles the canonical observation schema', () => {
+  const testRoot = dirname(fileURLToPath(import.meta.url))
+  const bundled = join(testRoot, '..', 'dist', 'skill-observation', 'v1alpha1', 'observation.schema.json')
+  const canonical = join(testRoot, '..', '..', '..', 'schemas', 'skill-observation', 'v1alpha1', 'observation.schema.json')
+  assert.equal(readFileSync(bundled, 'utf8'), readFileSync(canonical, 'utf8'))
 })
 
 test('DSH model-selected skill is recorded only after a successful tool result', () => {

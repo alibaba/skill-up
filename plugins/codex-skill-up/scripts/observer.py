@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Self-contained runtime for the Skill Up Observer Codex plugin."""
+"""Self-contained observation runtime for the Codex skill-up plugin."""
 
 from __future__ import annotations
 
@@ -20,8 +20,9 @@ from typing import Any, Iterator
 
 
 SCHEMA_VERSION = "v1alpha1"
-OBSERVER_SKILL_NAME = "skill-up-observer"
-CAPTURE_CONTROL_SKILLS = {OBSERVER_SKILL_NAME, "skill-upper"}
+PLUGIN_NAME = "codex-skill-up"
+OBSERVATION_DATA_NAME = "skill-up-observer"
+CAPTURE_CONTROL_SKILLS = {PLUGIN_NAME, OBSERVATION_DATA_NAME, "skill-upper"}
 SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 OBSERVATION_ID_RE = re.compile(r"^obs_[a-f0-9]{24}$")
 EXPLICIT_SKILL_RE = re.compile(r"(?:^|\s)\$([A-Za-z0-9][A-Za-z0-9_-]*)")
@@ -52,7 +53,7 @@ def data_dir() -> Path:
     if configured:
         return Path(configured).expanduser().resolve()
     codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
-    return codex_home.expanduser().resolve() / "plugin-data" / OBSERVER_SKILL_NAME
+    return codex_home.expanduser().resolve() / "plugin-data" / OBSERVATION_DATA_NAME
 
 
 def ensure_private_dir(path: Path) -> None:
@@ -658,7 +659,7 @@ def handle_rpc(request: dict[str, Any], root: Path) -> dict[str, Any] | None:
             {
                 "protocolVersion": requested,
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": OBSERVER_SKILL_NAME, "version": "0.1.0"},
+                "serverInfo": {"name": PLUGIN_NAME, "version": "0.1.0"},
             },
         )
     if method == "ping":
@@ -709,7 +710,7 @@ def main() -> int:
         print("{}")
         return 0
     except Exception as error:
-        print(f"skill-up-observer: {error}", file=sys.stderr)
+        print(f"codex-skill-up: {error}", file=sys.stderr)
         return 1
 
 

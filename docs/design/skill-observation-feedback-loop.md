@@ -6,7 +6,7 @@ This design introduces compatible observer adapters for current Codex releases a
 
 ## Compatibility boundary
 
-The observer plugin targets current Codex CLI and Codex desktop releases that support plugins and lifecycle hooks. It does not target the IDE extension, which does not support plugins.
+The `codex-skill-up` plugin targets current Codex CLI and Codex desktop releases that support plugins and lifecycle hooks. It does not target the IDE extension, which does not support plugins.
 
 The DSH adapter is part of `plugins/dsh-skill-up` and targets DSH 0.1.5-rc.2 or newer. Collection is disabled by default and uses committed DSH session events rather than transcript scraping.
 
@@ -32,7 +32,11 @@ DSH session/event records
   -> isolated baseline/post-change runs and status comparison
 ```
 
-The observation schema lives in `plugins/skill-up-observer/schemas`. It describes the persisted document without adding a public skill-up CLI or Go package. Host integrations share the schema and normalized fixtures, but do not share lifecycle payloads or runtime implementation language.
+The observation schema and normalized conformance fixtures live in
+`schemas/skill-observation/v1alpha1`. Host plugins bundle the schema from this
+single source, but do not share lifecycle payloads or runtime implementation
+language. Each adapter converts its host events into the same persisted
+contract and passes the same fixtures.
 
 ## Attribution
 
@@ -50,7 +54,7 @@ DSH maps an admitted `user/message` with `source.kind = skill-invocation` to `ex
 
 Installing/enabling the plugin and separately trusting its hook definition is the opt-in boundary. Hooks redact common provider keys, bearer tokens, JWTs, AWS access keys, and secret assignments before writing a draft or final observation. Raw hook payloads and transcript files are not stored.
 
-Storage uses `$CODEX_HOME/plugin-data/skill-up-observer` so Hook and MCP processes resolve the same directory even when only hooks receive `PLUGIN_DATA`; `SKILL_UP_OBSERVER_DATA` is a development/test override. Directories use `0700`; observation and draft files use `0600`. Data remains local and no upload path exists in this implementation.
+Storage uses `$CODEX_HOME/plugin-data/skill-up-observer` so Hook and MCP processes resolve the same directory even when only hooks receive `PLUGIN_DATA`; the storage namespace is retained across the plugin rename. `SKILL_UP_OBSERVER_DATA` is a development/test override. Directories use `0700`; observation and draft files use `0600`. Data remains local and no upload path exists in this implementation.
 
 DSH storage defaults to `$DSH_HOME/plugin-data/skill-up-observer` and can be overridden by the plugin's `observer.dataDir`. DSH collection is a separate explicit configuration switch. It uses the same redaction categories and private file modes.
 

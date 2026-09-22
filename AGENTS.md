@@ -136,7 +136,7 @@ pkg/                Publicly importable APIs (semver-stable; change with care)
   skillup/          Embeddable evaluation API
   transcript/       Transcript parsing helpers
 plugins/            Agent host plugin sources; complete bundles are generated under ignored dist/
-  skill-up-observer/ Codex hooks/MCP source; release packaging adds canonical skill-upper
+  codex-skill-up/    Codex hooks/MCP adapter; packaging adds shared Skill/schema
   dsh-skill-up/     DeepSeek Harness bundle with a generated skill-upper copy under dist/
 skills/skill-upper/ Canonical source for the distributable Agent Skill that guides AI agents through the
                     skill-up eval workflow (scaffolding, running, interpreting).
@@ -149,6 +149,7 @@ examples/           Example fixtures and debug inputs
 docs/               Design docs, user manuals, and the VitePress site
                     (built & deployed to GitHub Pages by .github/workflows/docs.yml)
 schemas/evalevent/  Versioned machine-readable evaluation event protocol schemas
+schemas/skill-observation/ Host-neutral observation schema and conformance fixtures
 ```
 
 ### Boundary rules

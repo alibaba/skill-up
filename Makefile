@@ -1,4 +1,4 @@
-.PHONY: build test test-plugin test-action bundle-plugins bundle-observer-plugin package-plugins package-observer-plugin package-dsh-plugin vet fmt fmt-check lint lint-new revive verify tidy clean install hooks e2e lint-tools coverage coverage-badge
+.PHONY: build test test-plugin test-action bundle-plugins bundle-codex-plugin package-plugins package-codex-plugin package-dsh-plugin vet fmt fmt-check lint lint-new revive verify tidy clean install hooks e2e lint-tools coverage coverage-badge
 
 CMD := ./cmd/skill-up
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -29,21 +29,21 @@ build: hooks
 test: test-plugin
 	go test -race ./...
 
-test-plugin: bundle-observer-plugin
-	python3 -m unittest discover -s plugins/skill-up-observer/tests -p 'test*.py'
+test-plugin: bundle-codex-plugin
+	python3 -m unittest discover -s plugins/codex-skill-up/tests -p 'test*.py'
 
 bundle-plugins:
 	node scripts/bundle-plugins.mjs all
 
-bundle-observer-plugin:
-	node scripts/bundle-plugins.mjs observer
+bundle-codex-plugin:
+	node scripts/bundle-plugins.mjs codex
 
-package-plugins: package-observer-plugin package-dsh-plugin
+package-plugins: package-codex-plugin package-dsh-plugin
 
-package-observer-plugin:
-	SKILL_UP_PLUGIN_VERSION=$(PLUGIN_ARCHIVE_VERSION) node scripts/bundle-plugins.mjs observer
-	tar -C dist/plugins -czf dist/skill-up-observer_$(PLUGIN_ARCHIVE_VERSION).tar.gz skill-up-observer
-	@echo "created dist/skill-up-observer_$(PLUGIN_ARCHIVE_VERSION).tar.gz"
+package-codex-plugin:
+	SKILL_UP_CODEX_PLUGIN_VERSION=$(PLUGIN_ARCHIVE_VERSION) node scripts/bundle-plugins.mjs codex
+	tar -C dist/plugins -czf dist/codex-skill-up_$(PLUGIN_ARCHIVE_VERSION).tar.gz codex-skill-up
+	@echo "created dist/codex-skill-up_$(PLUGIN_ARCHIVE_VERSION).tar.gz"
 
 package-dsh-plugin:
 	SKILL_UP_DSH_PLUGIN_VERSION=$(PLUGIN_ARCHIVE_VERSION) node scripts/bundle-plugins.mjs dsh-package

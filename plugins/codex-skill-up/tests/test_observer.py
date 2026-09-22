@@ -11,7 +11,7 @@ from unittest import mock
 
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "observer.py"
-BUNDLE = SCRIPT.parents[3] / "dist" / "plugins" / "skill-up-observer"
+BUNDLE = SCRIPT.parents[3] / "dist" / "plugins" / "codex-skill-up"
 SPEC = importlib.util.spec_from_file_location("skill_up_observer", SCRIPT)
 observer = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -20,13 +20,14 @@ SPEC.loader.exec_module(observer)
 
 class ObserverTest(unittest.TestCase):
     def test_cross_host_observation_fixtures_share_the_contract(self) -> None:
-        fixtures = SCRIPT.parents[1] / "tests" / "fixtures"
+        fixtures = SCRIPT.parents[3] / "schemas" / "skill-observation" / "v1alpha1" / "fixtures"
         for name in ("codex-observation.json", "dsh-observation.json"):
             observation = json.loads((fixtures / name).read_text(encoding="utf-8"))
             observer.validate_observation(observation)
 
     def test_plugin_exposes_only_skill_upper(self) -> None:
         manifest = json.loads((BUNDLE / ".codex-plugin" / "plugin.json").read_text())
+        self.assertEqual(manifest["name"], "codex-skill-up")
         self.assertEqual(manifest["skills"], "./skills/")
         skill_files = list((BUNDLE / "skills").glob("*/SKILL.md"))
         self.assertEqual([path.parent.name for path in skill_files], ["skill-upper"])
@@ -56,6 +57,11 @@ class ObserverTest(unittest.TestCase):
                 relative_path,
             )
 
+    def test_bundled_observation_schema_matches_canonical_contract(self) -> None:
+        relative_path = Path("schemas/skill-observation/v1alpha1/observation.schema.json")
+        canonical_schema = SCRIPT.parents[3] / relative_path
+        self.assertEqual((BUNDLE / relative_path).read_bytes(), canonical_schema.read_bytes())
+
     def test_codex_default_hook_manifest_exists(self) -> None:
         manifest = json.loads((SCRIPT.parents[1] / "hooks" / "hooks.json").read_text())
         self.assertIn("UserPromptSubmit", manifest["hooks"])
@@ -81,7 +87,7 @@ class ObserverTest(unittest.TestCase):
         ):
             self.assertEqual(
                 observer.data_dir(),
-                Path("/tmp/codex-home").resolve() / "plugin-data" / observer.OBSERVER_SKILL_NAME,
+                Path("/tmp/codex-home").resolve() / "plugin-data" / observer.OBSERVATION_DATA_NAME,
             )
 
     def test_redacts_prefixed_environment_credentials(self) -> None:

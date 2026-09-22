@@ -12,7 +12,8 @@ on:
       - "Makefile"
       - "scripts/bundle-plugins.mjs"
       - "plugins/dsh-skill-up/**"
-      - "plugins/skill-up-observer/**"
+      - "plugins/codex-skill-up/**"
+      - "schemas/skill-observation/**"
       - "skills/skill-upper/**"
 
 permissions: {}
@@ -58,8 +59,12 @@ jobs:
         run: |
           set -euo pipefail
           make package-plugins VERSION=v0.0.0-test
-          test -f dist/skill-up-observer_0.0.0-test.tar.gz
+          test -f dist/codex-skill-up_0.0.0-test.tar.gz
           test -f dist/alibaba-dsh-skill-up-0.0.0-test.tgz
+          tar -tzf dist/codex-skill-up_0.0.0-test.tar.gz > "$RUNNER_TEMP/codex-skill-up-files"
+          tar -tzf dist/alibaba-dsh-skill-up-0.0.0-test.tgz > "$RUNNER_TEMP/dsh-skill-up-files"
+          grep -Fqx 'codex-skill-up/schemas/skill-observation/v1alpha1/observation.schema.json' "$RUNNER_TEMP/codex-skill-up-files"
+          grep -Fqx 'package/dist/skill-observation/v1alpha1/observation.schema.json' "$RUNNER_TEMP/dsh-skill-up-files"
 
   build:
     name: Build release artifacts
@@ -126,9 +131,9 @@ jobs:
             echo "::error::GoReleaser checksum file is missing"
             exit 1
           fi
-          observer_archive="skill-up-observer_${RELEASE_TAG#v}.tar.gz"
+          codex_archive="codex-skill-up_${RELEASE_TAG#v}.tar.gz"
           dsh_archive="alibaba-dsh-skill-up-${RELEASE_TAG#v}.tgz"
-          (cd dist && sha256sum "$observer_archive" "$dsh_archive" >> "$(basename "$checksum_file")")
+          (cd dist && sha256sum "$codex_archive" "$dsh_archive" >> "$(basename "$checksum_file")")
 
       - name: Upload release artifacts for approval
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
