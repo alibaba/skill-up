@@ -410,7 +410,7 @@ function registerObservationTools(ctx, store, skillUpBin, credentialEnv) {
         if (outcome.exitCode !== 0) {
           throw new Error(`skill-up validate failed: ${(output.stderr || output.stdout).trim()}`)
         }
-        staged.commit()
+        store.commitApprovedCandidate(args.observation_id, staged.candidateYaml, () => staged.commit())
         return {
           case_path: staged.casePath,
           eval_path: staged.evalPath,

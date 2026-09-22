@@ -220,6 +220,29 @@ test('feedback invalidates approval and a duplicate write preserves the existing
   assert.throws(() => stageCandidateCase(workspace, 'demo-skill', updated), /must be approved/)
 })
 
+test('candidate staging rejects a root for a different Skill', () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'dsh-observer-wrong-skill-'))
+  const skill = join(workspace, 'other-skill')
+  mkdirSync(join(skill, 'evals', 'cases'), { recursive: true })
+  writeFileSync(join(skill, 'SKILL.md'), '---\nname: other-skill\n---\n')
+  writeFileSync(join(skill, 'evals', 'eval.yaml'), 'schema_version: v1alpha1\ncases:\n  files: []\n')
+  const observation = {
+    schema_version: 'v1alpha1',
+    id: 'obs_0123456789abcdef01234567',
+    host: { name: 'dsh' },
+    skill: { name: 'demo-skill' },
+    attribution: { method: 'explicit', confidence: 1 },
+    input: { text: 'new scenario' },
+    outcome: { status: 'completed' },
+    correlation: { session_id: 'session' },
+    timing: { observed_at: '2026-09-21T00:00:00Z' },
+    privacy: { storage: 'local', consent: 'test' },
+    review: { status: 'approved' },
+  }
+
+  assert.throws(() => stageCandidateCase(workspace, 'other-skill', observation), /belongs to other-skill/)
+})
+
 test('candidate case and result comparison use business status', () => {
   const observation = {
     schema_version: 'v1alpha1',
@@ -248,7 +271,7 @@ test('candidate case and result comparison use business status', () => {
 })
 
 test('redaction covers credential assignments', () => {
-  const result = redact('TOKEN=secret-value PASSWORD="correct horse battery staple"')
-  assert.equal(result.text, '[REDACTED] [REDACTED]')
+  const result = redact('TOKEN=secret-value PASSWORD="correct horse battery staple" AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI')
+  assert.equal(result.text, '[REDACTED] [REDACTED] [REDACTED]')
   assert.deepEqual(result.categories, ['secret_assignment'])
 })

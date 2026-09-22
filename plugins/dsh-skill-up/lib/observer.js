@@ -28,7 +28,7 @@ const REDACTION_RULES = [
   ['aws_access_key', /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/gu],
   [
     'secret_assignment',
-    /\b(?:[A-Za-z_][A-Za-z0-9_]*_)?(?:api[_-]?key|token|secret|password|passwd|pwd)\s*[:=]\s*(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|[^\s,;'"`]+)/giu,
+    /\b(?:[A-Za-z_][A-Za-z0-9_-]*)?(?:api[_-]?key|token|secret|password|passwd|pwd)[A-Za-z0-9_-]*\s*[:=]\s*(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|[^\s,;'"`]+)/giu,
   ],
 ]
 
@@ -236,6 +236,20 @@ export class ObservationStore {
         reference.categories,
         summary.categories,
       )
+    })
+  }
+
+  commitApprovedCandidate(id, expectedYaml, operation) {
+    const path = this.path(id)
+    return withFileLock(path, () => {
+      const observation = this.get(id)
+      if (observation.review.status !== 'approved') {
+        throw new Error('observation approval changed while validating the candidate case')
+      }
+      if (candidateCase(observation).yaml !== expectedYaml) {
+        throw new Error('observation content changed while validating the candidate case')
+      }
+      return operation()
     })
   }
 }
@@ -452,7 +466,17 @@ export function stageCandidateCase(workspace, skillRootInput, observation) {
   if (isAbsolute(skillRootInput)) throw new Error('skill_root must be relative to the DSH workspace')
   const skillRoot = realpathSync(resolve(root, skillRootInput || '.'))
   relativeInside(root, skillRoot, 'skill_root')
-  if (!statSync(join(skillRoot, 'SKILL.md')).isFile()) throw new Error('skill_root must contain SKILL.md')
+  const skillDocumentPath = realpathSync(join(skillRoot, 'SKILL.md'))
+  relativeInside(skillRoot, skillDocumentPath, 'SKILL.md')
+  if (!statSync(skillDocumentPath).isFile()) throw new Error('skill_root must contain SKILL.md')
+  const skillDocument = readFileSync(skillDocumentPath, 'utf8')
+  const frontmatterEnd = skillDocument.startsWith('---\n') ? skillDocument.indexOf('\n---\n', 4) : -1
+  const frontmatter = frontmatterEnd >= 0 ? skillDocument.slice(4, frontmatterEnd) : ''
+  const nameMatch = frontmatter.match(/^name:\s*['"]?([a-z0-9][a-z0-9_-]{0,63})['"]?\s*(?:#.*)?$/mu)
+  if (!nameMatch) throw new Error('SKILL.md must declare a valid frontmatter name')
+  if (nameMatch[1] !== observation.skill.name) {
+    throw new Error(`skill_root belongs to ${nameMatch[1]}, not ${observation.skill.name}`)
+  }
   const evalPath = realpathSync(join(skillRoot, 'evals', 'eval.yaml'))
   relativeInside(skillRoot, evalPath, 'eval.yaml')
   const lockPath = join(dirname(evalPath), '.skill-up-observer.lock')
@@ -486,6 +510,7 @@ export function stageCandidateCase(workspace, skillRootInput, observation) {
     return {
       casePath,
       evalPath,
+      candidateYaml: candidate.yaml,
       relativeEvalPath: relativeInside(root, evalPath, 'eval.yaml'),
       commit: close,
       rollback() {

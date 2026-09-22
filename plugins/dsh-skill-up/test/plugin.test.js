@@ -128,6 +128,7 @@ test('approved observation case write rolls back failed validation', async () =>
   const listTool = tools.find((tool) => tool.name === 'list_skill_observations')
   const reviewTool = tools.find((tool) => tool.name === 'review_skill_observation')
   const writeTool = tools.find((tool) => tool.name === 'write_observation_case')
+  const feedbackTool = tools.find((tool) => tool.name === 'record_observation_feedback')
   const [{ id }] = (await listTool.execute({}, {})).observations
   await reviewTool.execute({ observation_id: id, status: 'approved' }, {})
   const exec = { agent: { session: { header: { cwd: workspace } } } }
@@ -140,6 +141,34 @@ test('approved observation case write rolls back failed validation', async () =>
   assert.deepEqual(readdirSync(join(workspace, 'skill', 'evals', 'cases')), [])
 
   exitCode = 0
+  let releaseValidation
+  ctx.subprocess.spawn = () => ({
+    collected: {
+      stdout: { readFrom: () => ({ text: 'valid', lossy: false }) },
+      stderr: { readFrom: () => ({ text: '', lossy: false }) },
+    },
+    done: new Promise((resolve) => { releaseValidation = () => resolve({ exitCode: 0 }) }),
+    terminate() {},
+    async waitForExit() {},
+  })
+  const staleWrite = writeTool.execute({ observation_id: id, skill_root: 'skill' }, exec)
+  await new Promise((resolve) => setImmediate(resolve))
+  await feedbackTool.execute({ observation_id: id, sentiment: 'negative', comment: 'Needs revision' }, {})
+  releaseValidation()
+  await assert.rejects(staleWrite, /approval changed/)
+  assert.equal(readFileSync(evalPath, 'utf8'), original)
+  assert.deepEqual(readdirSync(join(workspace, 'skill', 'evals', 'cases')), [])
+
+  await reviewTool.execute({ observation_id: id, status: 'approved' }, {})
+  ctx.subprocess.spawn = () => ({
+    collected: {
+      stdout: { readFrom: () => ({ text: 'valid', lossy: false }) },
+      stderr: { readFrom: () => ({ text: '', lossy: false }) },
+    },
+    done: Promise.resolve({ exitCode: 0 }),
+    terminate() {},
+    async waitForExit() {},
+  })
   const result = await writeTool.execute({ observation_id: id, skill_root: 'skill' }, exec)
   assert.equal(result.validation, 'passed')
   assert.equal(readdirSync(join(workspace, 'skill', 'evals', 'cases')).length, 1)
