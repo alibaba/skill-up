@@ -138,7 +138,9 @@ export function apply(ctx, config = {}) {
   if (observerConfig.enabled === true) {
     const store = new ObservationStore(defaultObservationDirectory(observerConfig.dataDir))
     const collector = new ObservationCollector(store, { hostVersion: observerConfig.hostVersion || '' })
-    ctx.on('session/event', (session, event) => collector.handle(session, event))
+    ctx.on('session/event', (session, event) => {
+      collector.handle(session, event)
+    }, { global: true })
     registerObservationTools(ctx, store, skillUpBin, credentialEnv)
   }
 

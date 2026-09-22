@@ -41,12 +41,13 @@ test('observer tools and durable event listener are opt-in', async () => {
     subprocess: {},
     jobs: {},
     sessions: {},
-    on(name, listener) { listeners.set(name, listener) },
+    on(name, listener, options) { listeners.set(name, { listener, options }) },
   }
 
   apply(ctx, { observer: { enabled: true, dataDir } })
 
   assert.equal(listeners.has('session/event'), true)
+  assert.deepEqual(listeners.get('session/event').options, { global: true })
   assert.deepEqual(tools.slice(0, 7).map((tool) => tool.name), [
     'list_skill_observations',
     'get_skill_observation',
@@ -64,7 +65,7 @@ test('observer tools and durable event listener are opt-in', async () => {
   ])
 
   const session = { id: 'plugin-session' }
-  const observe = listeners.get('session/event')
+  const observe = listeners.get('session/event').listener
   observe(session, { type: 'turn/start', data: { turn: 1 } })
   observe(session, {
     type: 'user/message',
