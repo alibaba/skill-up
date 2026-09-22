@@ -1,5 +1,11 @@
 # 安装 / 升级 / 排错
 
+这里区分两个独立组件：
+
+- `skill-up`：运行评测的 CLI 二进制。
+- observation host plugin：可选的 Codex 或 DSH 插件，用于采集和审核真实
+  Skill 使用记录。普通评测不需要安装插件。
+
 `skill-up` 以预编译单二进制发布在 [GitHub Releases](https://github.com/alibaba/skill-up/releases)，无运行时依赖（不需要 Go、Python、Node 等即可使用官方安装脚本）。
 
 > **平台**：仅支持 **macOS / Linux**，暂不支持 Windows。
@@ -35,6 +41,96 @@ curl -fsSL https://raw.githubusercontent.com/alibaba/skill-up/main/install.sh | 
 skill-up --version
 skill-up --help
 ```
+
+## 安装 observation host plugin（可选）
+
+只有在用户要求使用 observation capture/review 时才安装。仓库当前没有接入
+公开 marketplace 或 npm；两个自包含安装包都来自
+[GitHub Releases](https://github.com/alibaba/skill-up/releases)。以下示例用
+`0.13.0`，实际使用时替换为目标 release 版本。
+
+### Codex Observer
+
+要求：支持插件与 lifecycle hooks 的当前 Codex CLI 或 ChatGPT 桌面端，以及
+`python3`。Codex IDE extension 不支持该插件。
+
+Codex 的本地插件通过 marketplace 发现，不能直接对 tarball 执行安装。下载并
+解压到一个独立的本地 marketplace：
+
+```bash
+export SKILL_UP_VERSION=0.13.0
+export SKILL_UP_MARKETPLACE="$HOME/.local/share/skill-up-marketplace"
+
+mkdir -p "$SKILL_UP_MARKETPLACE/plugins" "$SKILL_UP_MARKETPLACE/.agents/plugins"
+curl -fL \
+  "https://github.com/alibaba/skill-up/releases/download/v${SKILL_UP_VERSION}/skill-up-observer_${SKILL_UP_VERSION}.tar.gz" \
+  -o /tmp/skill-up-observer.tar.gz
+tar -xzf /tmp/skill-up-observer.tar.gz -C "$SKILL_UP_MARKETPLACE/plugins"
+```
+
+在 `$SKILL_UP_MARKETPLACE/.agents/plugins/marketplace.json` 写入：
+
+```json
+{
+  "name": "skill-up-local",
+  "interface": {
+    "displayName": "Skill Up Local"
+  },
+  "plugins": [
+    {
+      "name": "skill-up-observer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/skill-up-observer"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
+```
+
+注册并检查 marketplace：
+
+```bash
+codex plugin marketplace add "$SKILL_UP_MARKETPLACE"
+codex plugin marketplace list
+```
+
+然后重启 ChatGPT 桌面端，在 Plugins Directory 中选择 **Skill Up Local**，安装
+**skill-up-observer**，并在提示时审核、信任其 hooks。安装后新建对话验证
+`skill-upper` 以及 `mark_skill_invocation`、`record_skill_feedback` 等工具可用。
+
+### DeepSeek Harness（DSH）
+
+要求：`dsh` 0.1.5-rc.2 或更新版本、`pnpm`，以及 PATH 中可用的 `skill-up`。
+
+```bash
+export SKILL_UP_VERSION=0.13.0
+curl -fL \
+  "https://github.com/alibaba/skill-up/releases/download/v${SKILL_UP_VERSION}/alibaba-dsh-skill-up-${SKILL_UP_VERSION}.tgz" \
+  -o "/tmp/alibaba-dsh-skill-up-${SKILL_UP_VERSION}.tgz"
+dsh plugin --profile web add "/tmp/alibaba-dsh-skill-up-${SKILL_UP_VERSION}.tgz"
+dsh --profile web --dump-config
+```
+
+安装本身不会同意采集。需要 observation workflow 时，在该 profile 的
+`cordis.patch.yml` 中将插件配置显式设为：
+
+```yaml
+- id: skill-up
+  name: '@alibaba/dsh-skill-up'
+  config:
+    skillUpBin: skill-up
+    observer:
+      enabled: true
+```
+
+重新启动该 DSH profile，再确认 observation tools 可用。若只需要运行评测，
+保持 `observer.enabled: false` 即可。
 
 ## 升级
 
@@ -80,4 +176,3 @@ xattr -d com.apple.quarantine "$(which skill-up)"
 ```bash
 make build
 ```
-

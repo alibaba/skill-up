@@ -76,6 +76,11 @@ Codex release with the observer plugin and lifecycle-hook support, or DSH with
 the skill-up plugin's observer explicitly enabled. Do not retrofit observation
 capture onto the pinned Codex 0.80.0 evaluation adapter.
 
+If the user asks how to install either host plugin, or the required observation
+tools are missing and the user asks to enable them, read
+`references/install.md` under "安装 observation host plugin（可选）". Do not
+install or enable a plugin unless the user asks.
+
 Claude Code, qodercli, Qwen Code, and other Agent Engines are not supported for
 this observation workflow. This restriction does not apply to normal `skill-up`
 evaluation runs, which remain multi-engine.
@@ -131,7 +136,8 @@ curl -fsSL https://raw.githubusercontent.com/alibaba/skill-up/main/install.sh | 
 
 After installing, run `skill-up --version` again. If the command is still missing, add `~/.local/bin` to `PATH`.
 
-More details: `references/install.md`.
+More details, including optional Codex and DSH observation host plugins:
+`references/install.md`.
 
 ### Step 0.5 (optional): User config and telemetry
 
