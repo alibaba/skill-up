@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -185,6 +185,39 @@ test('review and candidate write require approval and preserve file mode', () =>
   assert.equal(statSync(evalPath).mode & 0o777, 0o640)
   staged.rollback()
   assert.doesNotMatch(readFileSync(evalPath, 'utf8'), /observed-demo-skill/)
+})
+
+test('feedback invalidates approval and a duplicate write preserves the existing case', () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'dsh-observer-retry-'))
+  const skill = join(workspace, 'demo-skill')
+  const root = join(workspace, 'observer-data')
+  mkdirSync(join(skill, 'evals', 'cases'), { recursive: true })
+  writeFileSync(join(skill, 'SKILL.md'), '---\nname: demo-skill\n---\n')
+  writeFileSync(join(skill, 'evals', 'eval.yaml'), 'schema_version: v1alpha1\ncases:\n  files: []\n')
+
+  const store = new ObservationStore(root)
+  const collector = new ObservationCollector(store)
+  const session = { id: 'session-retry' }
+  collector.handle(session, event('turn/start', 1))
+  collector.handle(session, event('user/message', undefined, {
+    source: { kind: 'user' },
+    content: [{ type: 'text', text: 'Use /demo-skill' }],
+  }))
+  collector.handle(session, event('user/message', undefined, {
+    source: { kind: 'skill-invocation', name: 'demo-skill' },
+    content: [],
+  }))
+  const [observation] = collector.handle(session, event('turn/end', 1, { reason: { kind: 'completed' } }))
+
+  const approved = store.review(observation.id, 'approved')
+  const staged = stageCandidateCase(workspace, 'demo-skill', approved)
+  staged.commit()
+  assert.throws(() => stageCandidateCase(workspace, 'demo-skill', approved), /already references/)
+  assert.equal(existsSync(staged.casePath), true)
+
+  const updated = store.feedback(observation.id, 'negative', 'Needs another assertion')
+  assert.deepEqual(updated.review, { status: 'candidate' })
+  assert.throws(() => stageCandidateCase(workspace, 'demo-skill', updated), /must be approved/)
 })
 
 test('candidate case and result comparison use business status', () => {

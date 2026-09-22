@@ -208,6 +208,7 @@ export class ObservationStore {
     return this.update(id, (observation) => {
       observation.feedback = { ...(sentiment ? { sentiment } : {}), ...(redacted.text ? { comment: redacted.text } : {}) }
       observation.privacy.redactions = mergeStrings(observation.privacy.redactions || [], redacted.categories)
+      observation.review = { status: 'candidate' }
     })
   }
 
@@ -463,6 +464,7 @@ export function stageCandidateCase(workspace, skillRootInput, observation) {
   }
   const casesDir = resolve(skillRoot, 'evals', 'cases')
   let casePath
+  let caseCreated = false
   try {
     mkdirSync(casesDir, { recursive: true })
     relativeInside(skillRoot, realpathSync(casesDir), 'cases directory')
@@ -473,6 +475,7 @@ export function stageCandidateCase(workspace, skillRootInput, observation) {
     const original = readFileSync(evalPath, 'utf8')
     const updated = appendCaseReference(original, relativePath)
     writeFileSync(casePath, candidate.yaml, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+    caseCreated = true
     atomicWriteText(evalPath, updated)
     let closed = false
     const close = () => {
@@ -493,7 +496,7 @@ export function stageCandidateCase(workspace, skillRootInput, observation) {
       },
     }
   } catch (error) {
-    if (casePath) rmSync(casePath, { force: true })
+    if (caseCreated) rmSync(casePath, { force: true })
     rmSync(lockPath, { recursive: true, force: true })
     throw error
   }
