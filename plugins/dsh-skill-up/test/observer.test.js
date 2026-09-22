@@ -95,6 +95,34 @@ test('DSH model-selected skill is recorded only after a successful tool result',
   assert.deepEqual(collector.handle(session, event('turn/end', 3, { reason: { kind: 'completed' } })), [])
 })
 
+test('DSH scopes reused tool call IDs to their session', () => {
+  const store = new ObservationStore(mkdtempSync(join(tmpdir(), 'dsh-observer-concurrent-')))
+  const collector = new ObservationCollector(store)
+  const sessions = [{ id: 'session-a' }, { id: 'session-b' }]
+
+  for (const [index, session] of sessions.entries()) {
+    collector.handle(session, event('turn/start', 1))
+    collector.handle(session, event('user/message', undefined, {
+      source: { kind: 'user' },
+      content: [{ type: 'text', text: `Prompt ${index}` }],
+    }))
+    collector.handle(session, event('tool/call', 1, {
+      callId: 'call-1',
+      name: 'skill',
+      arguments: JSON.stringify({ name: `demo-skill-${index}` }),
+    }))
+  }
+
+  for (const session of sessions) {
+    collector.handle(session, event('tool/result', 1, {
+      message: { content: [{ type: 'tool-result', toolCallId: 'call-1', isError: false }] },
+    }))
+    collector.handle(session, event('turn/end', 1, { reason: { kind: 'completed' } }))
+  }
+
+  assert.deepEqual(store.list().map((item) => item.skill.name).sort(), ['demo-skill-0', 'demo-skill-1'])
+})
+
 test('unattributed turns and control Skills are not persisted', () => {
   const root = mkdtempSync(join(tmpdir(), 'dsh-observer-control-'))
   const store = new ObservationStore(root)

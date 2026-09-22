@@ -253,6 +253,10 @@ export class ObservationCollector {
     return `${session.id}:${turn}`
   }
 
+  callKey(session, callId) {
+    return `${session.id}:${callId}`
+  }
+
   turn(session, turn) {
     const key = this.key(session, turn)
     if (!this.turns.has(key)) {
@@ -297,7 +301,7 @@ export class ObservationCollector {
       try {
         const name = JSON.parse(event.data.arguments).name
         if (SKILL_NAME.test(String(name || ''))) {
-          this.calls.set(event.data.callId, { sessionId: session.id, turn: turnNumber, name })
+          this.calls.set(this.callKey(session, event.data.callId), { sessionId: session.id, turn: turnNumber, name })
         }
       } catch {}
       return []
@@ -305,9 +309,10 @@ export class ObservationCollector {
 
     if (event.type === 'tool/result') {
       const block = event.data.message?.content?.find((item) => item?.type === 'tool-result')
-      const call = this.calls.get(block?.toolCallId)
+      const key = this.callKey(session, block?.toolCallId)
+      const call = this.calls.get(key)
       if (call) {
-        this.calls.delete(block.toolCallId)
+        this.calls.delete(key)
         if (call.sessionId === session.id && call.turn === turnNumber && block.isError !== true) {
           this.mark(turn, call.name, 'instrumented', `DSH skill tool loaded ${call.name}`)
         }
@@ -325,8 +330,8 @@ export class ObservationCollector {
     if (event.type !== 'turn/end') return []
     this.activeTurns.delete(session.id)
     this.turns.delete(this.key(session, turnNumber))
-    for (const [callId, call] of this.calls) {
-      if (call.sessionId === session.id && call.turn === turnNumber) this.calls.delete(callId)
+    for (const [key, call] of this.calls) {
+      if (call.sessionId === session.id && call.turn === turnNumber) this.calls.delete(key)
     }
     if (!turn.prompt) return []
 
