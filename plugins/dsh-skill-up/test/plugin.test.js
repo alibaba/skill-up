@@ -68,11 +68,11 @@ test('observer tools and durable event listener are opt-in', async () => {
   observe(session, { type: 'turn/start', data: { turn: 1 } })
   observe(session, {
     type: 'user/message',
-    data: { turn: 1, source: { kind: 'user' }, content: [{ type: 'text', text: 'Use /demo-skill' }] },
+    data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'Use /demo-skill' }] },
   })
   observe(session, {
     type: 'user/message',
-    data: { turn: 1, source: { kind: 'skill-invocation', name: 'demo-skill' }, content: [] },
+    data: { source: { kind: 'skill-invocation', name: 'demo-skill' }, content: [] },
   })
   observe(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
   const listed = await tools.find((tool) => tool.name === 'list_skill_observations').execute({}, {})
@@ -117,11 +117,11 @@ test('approved observation case write rolls back failed validation', async () =>
   listener(session, { type: 'turn/start', data: { turn: 1 } })
   listener(session, {
     type: 'user/message',
-    data: { turn: 1, source: { kind: 'user' }, content: [{ type: 'text', text: 'Use /demo-skill' }] },
+    data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'Use /demo-skill' }] },
   })
   listener(session, {
     type: 'user/message',
-    data: { turn: 1, source: { kind: 'skill-invocation', name: 'demo-skill' }, content: [] },
+    data: { source: { kind: 'skill-invocation', name: 'demo-skill' }, content: [] },
   })
   listener(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
   const listTool = tools.find((tool) => tool.name === 'list_skill_observations')

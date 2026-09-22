@@ -246,6 +246,7 @@ export class ObservationCollector {
     this.hostVersion = hostVersion
     this.turns = new Map()
     this.calls = new Map()
+    this.activeTurns = new Map()
   }
 
   key(session, turn) {
@@ -267,11 +268,16 @@ export class ObservationCollector {
   }
 
   handle(session, event) {
-    const turnNumber = event?.data?.turn
     if (event?.type === 'turn/start') {
+      const turnNumber = event?.data?.turn
+      if (!Number.isInteger(turnNumber)) return []
+      this.activeTurns.set(session.id, turnNumber)
       this.turn(session, turnNumber)
       return []
     }
+    const turnNumber = Number.isInteger(event?.data?.turn)
+      ? event.data.turn
+      : this.activeTurns.get(session.id)
     if (!Number.isInteger(turnNumber)) return []
     const turn = this.turn(session, turnNumber)
 
@@ -317,6 +323,7 @@ export class ObservationCollector {
     }
 
     if (event.type !== 'turn/end') return []
+    this.activeTurns.delete(session.id)
     this.turns.delete(this.key(session, turnNumber))
     for (const [callId, call] of this.calls) {
       if (call.sessionId === session.id && call.turn === turnNumber) this.calls.delete(callId)

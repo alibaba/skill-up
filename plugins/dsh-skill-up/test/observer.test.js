@@ -15,7 +15,7 @@ import {
 } from '../lib/observer.js'
 
 function event(type, turn, data = {}) {
-  return { type, data: { turn, ...data } }
+  return { type, data: { ...(turn === undefined ? {} : { turn }), ...data } }
 }
 
 test('DSH explicit invocation produces a redacted durable observation', () => {
@@ -25,11 +25,11 @@ test('DSH explicit invocation produces a redacted durable observation', () => {
   const session = { id: 'session-1' }
 
   collector.handle(session, event('turn/start', 1))
-  collector.handle(session, event('user/message', 1, {
+  collector.handle(session, event('user/message', undefined, {
     source: { kind: 'user' },
     content: [{ type: 'text', text: 'Use /demo-skill with OPENAI_API_KEY=plain-secret' }],
   }))
-  collector.handle(session, event('user/message', 1, {
+  collector.handle(session, event('user/message', undefined, {
     source: { kind: 'skill-invocation', name: 'demo-skill' },
     content: [{ type: 'text', text: '<skill_content name="demo-skill">...</skill_content>' }],
   }))
@@ -62,7 +62,7 @@ test('DSH model-selected skill is recorded only after a successful tool result',
   const session = { id: 'session-tool' }
 
   collector.handle(session, event('turn/start', 2))
-  collector.handle(session, event('user/message', 2, {
+  collector.handle(session, event('user/message', undefined, {
     source: { kind: 'user' },
     content: [{ type: 'text', text: 'Please help' }],
   }))
@@ -80,7 +80,7 @@ test('DSH model-selected skill is recorded only after a successful tool result',
   assert.equal(saved[0].attribution.method, 'instrumented')
 
   collector.handle(session, event('turn/start', 3))
-  collector.handle(session, event('user/message', 3, {
+  collector.handle(session, event('user/message', undefined, {
     source: { kind: 'user' },
     content: [{ type: 'text', text: 'Try again' }],
   }))
@@ -101,11 +101,11 @@ test('unattributed turns and control Skills are not persisted', () => {
   const collector = new ObservationCollector(store)
   const session = { id: 'session-control' }
   collector.handle(session, event('turn/start', 1))
-  collector.handle(session, event('user/message', 1, {
+  collector.handle(session, event('user/message', undefined, {
     source: { kind: 'user' },
     content: [{ type: 'text', text: 'Use /skill-upper' }],
   }))
-  collector.handle(session, event('user/message', 1, {
+  collector.handle(session, event('user/message', undefined, {
     source: { kind: 'skill-invocation', name: 'skill-upper' },
     content: [],
   }))
@@ -127,11 +127,11 @@ test('review and candidate write require approval and preserve file mode', () =>
   const collector = new ObservationCollector(store)
   const session = { id: 'session-write' }
   collector.handle(session, event('turn/start', 1))
-  collector.handle(session, event('user/message', 1, {
+  collector.handle(session, event('user/message', undefined, {
     source: { kind: 'user' },
     content: [{ type: 'text', text: 'Use /demo-skill' }],
   }))
-  collector.handle(session, event('user/message', 1, {
+  collector.handle(session, event('user/message', undefined, {
     source: { kind: 'skill-invocation', name: 'demo-skill' },
     content: [],
   }))
