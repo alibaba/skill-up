@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- GitHub releases now include a checksum-covered `skill-upper_<version>.tar.gz`
+  asset built from the canonical `skills/skill-upper` directory. Distributors
+  can replace its neutral `references/distribution.md` extension point with
+  narrowly scoped platform guidance without maintaining a fork of the Skill.
 - Add an experimental DeepSeek Harness plugin bundle that exposes structured
   validation, background evaluation, and report-summary tools together with
   the canonical `skill-upper` Skill for evidence-based Skill iteration.

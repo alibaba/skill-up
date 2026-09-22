@@ -91,6 +91,12 @@ npx skills add https://github.com/alibaba/skill-up/tree/main/skills/skill-upper 
 npx skills add https://github.com/alibaba/skill-up/tree/main/skills/skill-upper -g -a claude-code -y
 ```
 
+Each GitHub release also publishes a checksum-covered
+`skill-upper_<version>.tar.gz` asset. Internal distributors can consume that
+immutable canonical package and replace only
+`references/distribution.md` with platform-specific guidance; the remaining
+Skill files should not be copied or maintained separately.
+
 You normally do not need to install skill-up first. skill-upper checks for the
 CLI when it runs and guides the agent through installation if needed.
 

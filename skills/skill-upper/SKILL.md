@@ -9,6 +9,13 @@ Help the user evaluate and evolve Agent Skills through the `skill-up` CLI.
 
 Manual: <https://alibaba.github.io/skill-up/>
 
+## Distribution extensions
+
+If `references/distribution.md` exists, read it before handling a request that
+concerns the distribution, platform, or environment described there. Treat the
+file as additive distribution-specific guidance: apply it only in its stated
+scope, and keep this Skill's canonical workflow for all other environments.
+
 ## Language Policy
 
 **Default to English when responding to the user. If the user writes in Chinese (or any other language), switch to that language and stay consistent with the user's input throughout the session.**
