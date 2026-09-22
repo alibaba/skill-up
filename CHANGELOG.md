@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-22
+
 ### Added
+- A current-Codex observer plugin can capture explicitly attributed,
+  locally redacted Skill observations and turn an approved observation into a
+  non-overwriting candidate regression case using its self-contained Python
+  hooks and MCP server. The bundled `skill-upper` Skill guides capture, review,
+  approval, and the subsequent evaluation or evolution loop without exposing
+  a separate observer Skill. The pinned Codex 0.80.0
+  evaluation adapter remains unchanged.
 - Add an experimental DeepSeek Harness plugin bundle that exposes structured
   validation, background evaluation, and report-summary tools together with
   the canonical `skill-upper` Skill for evidence-based Skill iteration.
@@ -20,11 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before/after snapshot. Selected cases, retries, and iterations intentionally
   share the directory sequentially, so setup and agent changes carry forward.
   Report directories that overlap the external workspace are rejected before
-   cleanup, event logs must remain outside it, nested skill installation avoids
-   recursively copying its own target, and snapshot paths are handled literally
-   on POSIX shells.
+  cleanup, event logs must remain outside it, nested skill installation avoids
+  recursively copying its own target, and snapshot paths are handled literally
+  on POSIX shells.
 
 ### Fixed
+- The GitHub Action runner image now extracts the pinned Qoder CLI binary from
+  its archive path before installing it, instead of treating the archive root
+  as the executable.
 - Qoder CLI now receives explicit model names and custom IDs in initial,
   stdin, and resumed calls instead of silently discarding values outside the
   historical five tiers. Model availability is validated by Qoder; failures
@@ -34,13 +46,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.12.0] - 2026-09-18
 
 ### Added
-- A current-Codex observer plugin can capture explicitly attributed,
-  locally redacted Skill observations and turn an approved observation into a
-  non-overwriting candidate regression case using its self-contained Python
-  hooks and MCP server. The bundled `skill-upper` Skill guides capture, review,
-  approval, and the subsequent evaluation or evolution loop without exposing
-  a separate observer Skill. The pinned Codex 0.80.0
-  evaluation adapter remains unchanged.
 - Custom Engines can opt into stateful multi-turn execution with
   `custom.conversation_mode: stateful`. Local and HTTP transports receive one
   user message per invocation and carry the returned `session_id` into the
@@ -616,6 +621,7 @@ The `v0.5.0` release tag is available at
   project and delivers the end-to-end capability to declare eval environments,
   run cases and emit structured reports as described in [README.md](README.md).
 
+[0.13.0]: https://github.com/alibaba/skill-up/releases/tag/v0.13.0
 [0.12.0]: https://github.com/alibaba/skill-up/releases/tag/v0.12.0
 [0.11.0]: https://github.com/alibaba/skill-up/releases/tag/v0.11.0
 [0.10.0]: https://github.com/alibaba/skill-up/releases/tag/v0.10.0
