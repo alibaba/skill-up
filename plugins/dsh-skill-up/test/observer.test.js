@@ -123,6 +123,37 @@ test('DSH scopes reused tool call IDs to their session', () => {
   assert.deepEqual(store.list().map((item) => item.skill.name).sort(), ['demo-skill-0', 'demo-skill-1'])
 })
 
+test('DSH scopes tool calls without delimiter collisions', () => {
+  const store = new ObservationStore(mkdtempSync(join(tmpdir(), 'dsh-observer-call-key-')))
+  const collector = new ObservationCollector(store)
+  const calls = [
+    { session: { id: 'session:a' }, callId: 'call', skill: 'demo-skill-0' },
+    { session: { id: 'session' }, callId: 'a:call', skill: 'demo-skill-1' },
+  ]
+
+  for (const { session, callId, skill } of calls) {
+    collector.handle(session, event('turn/start', 1))
+    collector.handle(session, event('user/message', undefined, {
+      source: { kind: 'user' },
+      content: [{ type: 'text', text: `Use ${skill}` }],
+    }))
+    collector.handle(session, event('tool/call', 1, {
+      callId,
+      name: 'skill',
+      arguments: JSON.stringify({ name: skill }),
+    }))
+  }
+
+  for (const { session, callId } of calls) {
+    collector.handle(session, event('tool/result', 1, {
+      message: { content: [{ type: 'tool-result', toolCallId: callId, isError: false }] },
+    }))
+    collector.handle(session, event('turn/end', 1, { reason: { kind: 'completed' } }))
+  }
+
+  assert.deepEqual(store.list().map((item) => item.skill.name).sort(), ['demo-skill-0', 'demo-skill-1'])
+})
+
 test('unattributed turns and control Skills are not persisted', () => {
   const root = mkdtempSync(join(tmpdir(), 'dsh-observer-control-'))
   const store = new ObservationStore(root)
@@ -274,6 +305,35 @@ test('candidate staging preserves indentationless case file sequences', () => {
 
   const staged = stageCandidateCase(workspace, 'demo-skill', observation)
   assert.match(readFileSync(evalPath, 'utf8'), /  - evals\/cases\/observed-demo-skill-01234567\.yaml\n  defaults:/)
+  staged.commit()
+})
+
+test('candidate staging appends after an eval file without a trailing newline', () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'dsh-observer-no-final-newline-'))
+  const skill = join(workspace, 'demo-skill')
+  mkdirSync(join(skill, 'evals', 'cases'), { recursive: true })
+  writeFileSync(join(skill, 'SKILL.md'), '---\nname: demo-skill\n---\n')
+  const evalPath = join(skill, 'evals', 'eval.yaml')
+  writeFileSync(evalPath, 'schema_version: v1alpha1\ncases:\n  files:\n    - evals/cases/existing.yaml')
+  const observation = {
+    schema_version: 'v1alpha1',
+    id: 'obs_0123456789abcdef01234567',
+    host: { name: 'dsh' },
+    skill: { name: 'demo-skill' },
+    attribution: { method: 'explicit', confidence: 1 },
+    input: { text: 'new scenario' },
+    outcome: { status: 'completed' },
+    correlation: { session_id: 'session' },
+    timing: { observed_at: '2026-09-21T00:00:00Z' },
+    privacy: { storage: 'local', consent: 'test' },
+    review: { status: 'approved' },
+  }
+
+  const staged = stageCandidateCase(workspace, 'demo-skill', observation)
+  assert.match(
+    readFileSync(evalPath, 'utf8'),
+    /    - evals\/cases\/existing\.yaml\n    - evals\/cases\/observed-demo-skill-01234567\.yaml\n$/,
+  )
   staged.commit()
 })
 

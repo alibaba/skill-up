@@ -269,7 +269,7 @@ export class ObservationCollector {
   }
 
   callKey(session, callId) {
-    return `${session.id}:${callId}`
+    return JSON.stringify([session.id, callId])
   }
 
   turn(session, turn) {
@@ -463,7 +463,8 @@ function appendCaseReference(evalText, relativePath) {
       throw new Error(`eval.yaml already references ${relativePath}`)
     }
   }
-  const reference = `${' '.repeat(itemIndent)}- ${relativePath}\n`
+  const separator = filesEnd === lines.length && lines.length > 0 && !lines.at(-1).endsWith('\n') ? '\n' : ''
+  const reference = `${separator}${' '.repeat(itemIndent)}- ${relativePath}\n`
   lines.splice(filesEnd, 0, reference)
   return lines.join('')
 }
