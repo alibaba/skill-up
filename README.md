@@ -31,6 +31,9 @@
     <a href="https://github.com/alibaba/skill-up/releases">
       <img src="https://img.shields.io/github/v/release/alibaba/skill-up" alt="Release" />
     </a>
+    <a href="plugins/dsh-skill-up/README.md">
+      <img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-4D6BFE" alt="DeepSeek Harness Plugin" />
+    </a>
   </p>
 
   <p align="center">
