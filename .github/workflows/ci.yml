@@ -108,7 +108,7 @@ jobs:
       - name: Test DSH plugin
         working-directory: plugins/dsh-skill-up
         run: |
-          npm install --no-package-lock --ignore-scripts
+          npm ci --ignore-scripts
           npm test
 
       - name: Report coverage

@@ -26,7 +26,7 @@ From the repository root:
 
 ```bash
 cd plugins/dsh-skill-up
-npm install --no-package-lock
+npm ci --ignore-scripts
 npm pack
 dsh plugin --profile web add ./alibaba-dsh-skill-up-0.1.0-alpha.1.tgz
 dsh --profile web --dump-config
