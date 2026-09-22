@@ -83,6 +83,9 @@
 AI Agent 通过对话创建评测、运行 skill-up、理解失败原因、修复 Skill 或
 eval、补充回归用例，并持续完成下一轮迭代。
 
+参与仓库开发时，只修改 `skills/skill-upper/` 这一份唯一源码。插件目录里的
+副本是同步生成的打包产物，不是软链；修改源码后运行 `make sync-skill-upper`。
+
 ### 第一步：安装 skill-upper
 
 ```bash

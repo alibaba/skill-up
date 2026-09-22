@@ -17,7 +17,7 @@
     "README.md"
   ],
   "scripts": {
-    "sync-skill": "node scripts/sync-skill-upper.mjs",
+    "sync-skill": "node ../../scripts/sync-skill-upper.mjs dsh",
     "test": "npm run sync-skill && node --test test/*.test.js",
     "prepack": "npm test"
   },

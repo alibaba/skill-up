@@ -84,6 +84,10 @@ shipped in this repository. It lets your AI agent create evals, run skill-up,
 understand failures, fix the Skill or its evals, add regression coverage, and
 repeat the loop through conversation.
 
+For repository development, `skills/skill-upper/` is the only editable source.
+Plugin-local copies are synchronized package artifacts, not symlinks; run
+`make sync-skill-upper` after changing the canonical Skill.
+
 ### 1. Install skill-upper
 
 ```bash
@@ -326,9 +330,10 @@ skill-up/
 │   └── report/            # JSON, JUnit, HTML, and benchmark reports
 ├── pkg/                   # Publicly importable APIs
 ├── plugins/               # Agent host plugin bundles
+│   ├── skill-up-observer/ # Codex bundle with a synchronized tracked Skill copy
+│   └── dsh-skill-up/      # DSH bundle with a generated dist/ Skill copy
 ├── schemas/evalevent/     # Versioned evaluation event JSON Schemas
-├── skills/skill-upper/    # Distributable workflow Skill
-├── plugins/dsh-skill-up/  # DeepSeek Harness integration bundle
+├── skills/skill-upper/    # Canonical source for the distributable workflow Skill
 ├── docs/                  # VitePress documentation
 ├── e2e/                   # End-to-end tests and fixtures
 └── examples/              # Example evaluations and fixtures

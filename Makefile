@@ -1,4 +1,4 @@
-.PHONY: build test test-plugin test-action vet fmt fmt-check lint lint-new revive verify tidy clean install hooks e2e lint-tools coverage coverage-badge
+.PHONY: build test test-plugin test-action sync-skill-upper vet fmt fmt-check lint lint-new revive verify tidy clean install hooks e2e lint-tools coverage coverage-badge
 
 CMD := ./cmd/skill-up
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -29,7 +29,11 @@ test: test-plugin
 	go test -race ./...
 
 test-plugin:
+	node scripts/sync-skill-upper.mjs observer --check
 	python3 -m unittest discover -s plugins/skill-up-observer/tests -p 'test*.py'
+
+sync-skill-upper:
+	node scripts/sync-skill-upper.mjs all
 
 test-action:
 	python3 -m unittest discover -s action -p '*_test.py'

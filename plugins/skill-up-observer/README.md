@@ -25,3 +25,7 @@ Use `skill-upper` to capture explicitly attributed feedback, list or show observ
 Preview is read-only. Writing requires an approved observation, never overwrites an existing case, and updates `evals/eval.yaml`. If `skill-up` is available on `PATH`, the plugin runs `skill-up validate` and rolls back both files when validation fails; capture and review do not depend on skill-up.
 
 The complete capture-to-evaluation flow is available through the bundled `skill-upper` Skill; running evaluations additionally requires the optional `skill-up` CLI.
+
+## Bundled Skill maintenance
+
+[`../../skills/skill-upper`](../../skills/skill-upper) is the only editable source for `skill-upper`. Run `make sync-skill-upper` from the repository root after changing it. The sync command refreshes this tracked, install-ready copy without the canonical Skill's self-evaluation suite; `make test-plugin` rejects stale copies.
