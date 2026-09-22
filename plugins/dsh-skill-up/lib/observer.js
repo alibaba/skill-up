@@ -436,18 +436,25 @@ function appendCaseReference(evalText, relativePath) {
     }
   }
   if (filesIndex < 0) throw new Error('eval.yaml cases must contain files')
-  const reference = `${' '.repeat(filesIndent + 2)}- ${relativePath}\n`
   if (inline === '[]') {
+    const reference = `${' '.repeat(filesIndent + 2)}- ${relativePath}\n`
     lines[filesIndex] = `${' '.repeat(filesIndent)}files:\n`
     lines.splice(filesIndex + 1, 0, reference)
     return lines.join('')
   }
   if (inline) throw new Error('flow-style non-empty cases.files is not supported; use a block sequence')
   let filesEnd = end
+  let itemIndent = filesIndent + 2
+  let foundItem = false
   for (let i = filesIndex + 1; i < end; i += 1) {
     if (lines[i].trim() && !lines[i].trim().startsWith('#')) {
       const indent = lines[i].length - lines[i].trimStart().length
-      if (indent <= filesIndent) {
+      if (lines[i].trimStart().startsWith('-')) {
+        if (!foundItem) {
+          itemIndent = indent
+          foundItem = true
+        }
+      } else if (indent <= filesIndent) {
         filesEnd = i
         break
       }
@@ -456,6 +463,7 @@ function appendCaseReference(evalText, relativePath) {
       throw new Error(`eval.yaml already references ${relativePath}`)
     }
   }
+  const reference = `${' '.repeat(itemIndent)}- ${relativePath}\n`
   lines.splice(filesEnd, 0, reference)
   return lines.join('')
 }
@@ -469,7 +477,7 @@ export function stageCandidateCase(workspace, skillRootInput, observation) {
   const skillDocumentPath = realpathSync(join(skillRoot, 'SKILL.md'))
   relativeInside(skillRoot, skillDocumentPath, 'SKILL.md')
   if (!statSync(skillDocumentPath).isFile()) throw new Error('skill_root must contain SKILL.md')
-  const skillDocument = readFileSync(skillDocumentPath, 'utf8')
+  const skillDocument = readFileSync(skillDocumentPath, 'utf8').replace(/\r\n?/g, '\n')
   const frontmatterEnd = skillDocument.startsWith('---\n') ? skillDocument.indexOf('\n---\n', 4) : -1
   const frontmatter = frontmatterEnd >= 0 ? skillDocument.slice(4, frontmatterEnd) : ''
   const nameMatch = frontmatter.match(/^name:\s*['"]?([a-z0-9][a-z0-9_-]{0,63})['"]?\s*(?:#.*)?$/mu)
