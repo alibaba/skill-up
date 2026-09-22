@@ -120,7 +120,17 @@ test('review and candidate write require approval and preserve file mode', () =>
   mkdirSync(join(skill, 'evals', 'cases'), { recursive: true })
   writeFileSync(join(skill, 'SKILL.md'), '---\nname: demo-skill\n---\n')
   const evalPath = join(skill, 'evals', 'eval.yaml')
-  writeFileSync(evalPath, 'schema_version: v1alpha1\ncases:\n  files: []\n', { mode: 0o640 })
+  writeFileSync(evalPath, [
+    'schema_version: v1alpha1',
+    'cases:',
+    '  files:',
+    '    - evals/cases/existing.yaml',
+    '  defaults:',
+    '    timeout_seconds: 120',
+    'report:',
+    '  formats: [json]',
+    '',
+  ].join('\n'), { mode: 0o640 })
   chmodSync(evalPath, 0o640)
 
   const store = new ObservationStore(root)
@@ -141,7 +151,9 @@ test('review and candidate write require approval and preserve file mode', () =>
   const approved = store.review(observation.id, 'approved')
   const staged = stageCandidateCase(workspace, 'demo-skill', approved)
   assert.match(readFileSync(staged.casePath, 'utf8'), /Use \/demo-skill/)
-  assert.match(readFileSync(evalPath, 'utf8'), /observed-demo-skill/)
+  const updatedEval = readFileSync(evalPath, 'utf8')
+  assert.match(updatedEval, /observed-demo-skill/)
+  assert.ok(updatedEval.indexOf('observed-demo-skill') < updatedEval.indexOf('  defaults:'))
   assert.equal(statSync(evalPath).mode & 0o777, 0o640)
   staged.rollback()
   assert.doesNotMatch(readFileSync(evalPath, 'utf8'), /observed-demo-skill/)

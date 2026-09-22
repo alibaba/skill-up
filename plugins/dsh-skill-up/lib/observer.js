@@ -423,12 +423,20 @@ function appendCaseReference(evalText, relativePath) {
     return lines.join('')
   }
   if (inline) throw new Error('flow-style non-empty cases.files is not supported; use a block sequence')
+  let filesEnd = end
   for (let i = filesIndex + 1; i < end; i += 1) {
+    if (lines[i].trim() && !lines[i].trim().startsWith('#')) {
+      const indent = lines[i].length - lines[i].trimStart().length
+      if (indent <= filesIndent) {
+        filesEnd = i
+        break
+      }
+    }
     if (lines[i].trim().startsWith('-') && lines[i].trim().slice(1).trim().replace(/^['"]|['"]$/g, '') === relativePath) {
       throw new Error(`eval.yaml already references ${relativePath}`)
     }
   }
-  lines.splice(end, 0, reference)
+  lines.splice(filesEnd, 0, reference)
   return lines.join('')
 }
 
