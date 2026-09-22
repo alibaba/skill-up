@@ -1,6 +1,6 @@
 # Skill Up Observer Codex plugin
 
-This plugin captures explicitly attributed Skill interactions through Codex hooks and stores normalized observations locally. Its bundled MCP server supplies capture and case-conversion operations; its bundled copy of the canonical `skill-upper` Skill owns capture guidance, review, approval, evaluation, and evolution.
+This plugin captures explicitly attributed Skill interactions through Codex hooks and stores normalized observations locally. Its bundled MCP server supplies capture and case-conversion operations; the release bundle includes the canonical `skill-upper` Skill for capture guidance, review, approval, evaluation, and evolution.
 
 `.codex-plugin/plugin.json` and `.mcp.json` are the canonical local Codex package manifests. Codex discovers `hooks/hooks.json` by default, so the capture hooks and bundled Python MCP server load from the same installed plugin root.
 
@@ -26,6 +26,12 @@ Preview is read-only. Writing requires an approved observation, never overwrites
 
 The complete capture-to-evaluation flow is available through the bundled `skill-upper` Skill; running evaluations additionally requires the optional `skill-up` CLI.
 
-## Bundled Skill maintenance
+## Build a distributable bundle
 
-[`../../skills/skill-upper`](../../skills/skill-upper) is the only editable source for `skill-upper`. Run `make sync-skill-upper` from the repository root after changing it. The sync command refreshes this tracked, install-ready copy without the canonical Skill's self-evaluation suite; `make test-plugin` rejects stale copies.
+[`../../skills/skill-upper`](../../skills/skill-upper) is the only editable source for `skill-upper`; this source directory is intentionally not an installable plugin by itself. From the repository root, run:
+
+```bash
+make package-observer-plugin
+```
+
+The command assembles a complete plugin under `dist/plugins/skill-up-observer/` and creates `dist/skill-up-observer_<version>.tar.gz`. Both outputs are ignored build artifacts. Tagged GitHub releases attach the same self-contained archive for downstream marketplace or registry publishing; no external registry upload occurs in this repository.

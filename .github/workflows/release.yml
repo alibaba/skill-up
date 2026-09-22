@@ -78,6 +78,11 @@ jobs:
           # Release artifacts must not consume caches writable by other jobs.
           cache: false
 
+      - name: Set up Node.js for plugin packaging
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '20'
+
       - name: Build release artifacts with GoReleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:
@@ -90,6 +95,20 @@ jobs:
           # The changelog provider reads repository history through the API.
           # This token is read-only in the build job and cannot publish.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Package Codex observer plugin
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          make package-observer-plugin VERSION="$RELEASE_TAG"
+          archive="skill-up-observer_${RELEASE_TAG#v}.tar.gz"
+          checksum_file=$(find dist -maxdepth 1 -name '*_checksums.txt' -print -quit)
+          if [ -z "$checksum_file" ]; then
+            echo "::error::GoReleaser checksum file is missing"
+            exit 1
+          fi
+          (cd dist && sha256sum "$archive" >> "$(basename "$checksum_file")")
 
       - name: Upload release artifacts for approval
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

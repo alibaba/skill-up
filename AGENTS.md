@@ -135,8 +135,8 @@ internal/           Private implementation — never import from outside the mod
 pkg/                Publicly importable APIs (semver-stable; change with care)
   skillup/          Embeddable evaluation API
   transcript/       Transcript parsing helpers
-plugins/            Agent host plugins; bundled Skill directories are synchronized artifacts
-  skill-up-observer/ Codex hooks/MCP bundle with a tracked, eval-free skill-upper copy
+plugins/            Agent host plugin sources; complete bundles are generated under ignored dist/
+  skill-up-observer/ Codex hooks/MCP source; release packaging adds canonical skill-upper
   dsh-skill-up/     DeepSeek Harness bundle with a generated skill-upper copy under dist/
 skills/skill-upper/ Canonical source for the distributable Agent Skill that guides AI agents through the
                     skill-up eval workflow (scaffolding, running, interpreting).

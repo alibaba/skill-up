@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Tagged releases now attach a self-contained Codex observer plugin archive
+  assembled from the observer runtime and the canonical `skill-upper` source.
+  Plugin build output is generated under ignored `dist/` paths, so the
+  repository no longer tracks a second copy of the Skill.
 - Add an experimental DeepSeek Harness plugin bundle that exposes structured
   validation, background evaluation, report-summary, and before/after
   comparison tools together with the canonical `skill-upper` Skill. Its

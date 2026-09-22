@@ -85,8 +85,8 @@ understand failures, fix the Skill or its evals, add regression coverage, and
 repeat the loop through conversation.
 
 For repository development, `skills/skill-upper/` is the only editable source.
-Plugin-local copies are synchronized package artifacts, not symlinks; run
-`make sync-skill-upper` after changing the canonical Skill.
+Plugin bundles are generated into ignored build directories rather than tracked
+copies or symlinks; run `make bundle-plugins` when preparing them locally.
 
 ### 1. Install skill-upper
 
@@ -330,7 +330,7 @@ skill-up/
 │   └── report/            # JSON, JUnit, HTML, and benchmark reports
 ├── pkg/                   # Publicly importable APIs
 ├── plugins/               # Agent host plugin bundles
-│   ├── skill-up-observer/ # Codex bundle with a synchronized tracked Skill copy
+│   ├── skill-up-observer/ # Codex observer source; release bundles add skill-upper
 │   └── dsh-skill-up/      # DSH bundle with a generated dist/ Skill copy
 ├── schemas/evalevent/     # Versioned evaluation event JSON Schemas
 ├── skills/skill-upper/    # Canonical source for the distributable workflow Skill

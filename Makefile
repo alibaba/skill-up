@@ -1,8 +1,9 @@
-.PHONY: build test test-plugin test-action sync-skill-upper vet fmt fmt-check lint lint-new revive verify tidy clean install hooks e2e lint-tools coverage coverage-badge
+.PHONY: build test test-plugin test-action bundle-plugins bundle-observer-plugin package-observer-plugin vet fmt fmt-check lint lint-new revive verify tidy clean install hooks e2e lint-tools coverage coverage-badge
 
 CMD := ./cmd/skill-up
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 VERSION := $(shell echo $(VERSION) | sed 's/^v//')
+PLUGIN_ARCHIVE_VERSION := $(patsubst v%,%,$(VERSION))
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 # GOPROXY and GOPRIVATE defaults; override locally via environment if needed
 # (e.g. `GOPROXY=https://goproxy.cn,direct make build` for mainland China users)
@@ -28,12 +29,19 @@ build: hooks
 test: test-plugin
 	go test -race ./...
 
-test-plugin:
-	node scripts/sync-skill-upper.mjs observer --check
+test-plugin: bundle-observer-plugin
 	python3 -m unittest discover -s plugins/skill-up-observer/tests -p 'test*.py'
 
-sync-skill-upper:
-	node scripts/sync-skill-upper.mjs all
+bundle-plugins:
+	node scripts/bundle-plugins.mjs all
+
+bundle-observer-plugin:
+	node scripts/bundle-plugins.mjs observer
+
+package-observer-plugin:
+	SKILL_UP_PLUGIN_VERSION=$(PLUGIN_ARCHIVE_VERSION) node scripts/bundle-plugins.mjs observer
+	tar -C dist/plugins -czf dist/skill-up-observer_$(PLUGIN_ARCHIVE_VERSION).tar.gz skill-up-observer
+	@echo "created dist/skill-up-observer_$(PLUGIN_ARCHIVE_VERSION).tar.gz"
 
 test-action:
 	python3 -m unittest discover -s action -p '*_test.py'

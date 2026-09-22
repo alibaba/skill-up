@@ -11,6 +11,7 @@ from unittest import mock
 
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "observer.py"
+BUNDLE = SCRIPT.parents[3] / "dist" / "plugins" / "skill-up-observer"
 SPEC = importlib.util.spec_from_file_location("skill_up_observer", SCRIPT)
 observer = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -25,13 +26,17 @@ class ObserverTest(unittest.TestCase):
             observer.validate_observation(observation)
 
     def test_plugin_exposes_only_skill_upper(self) -> None:
-        manifest = json.loads((SCRIPT.parents[1] / ".codex-plugin" / "plugin.json").read_text())
+        manifest = json.loads((BUNDLE / ".codex-plugin" / "plugin.json").read_text())
         self.assertEqual(manifest["skills"], "./skills/")
-        skill_files = list((SCRIPT.parents[1] / "skills").rglob("SKILL.md"))
+        skill_files = list((BUNDLE / "skills").glob("*/SKILL.md"))
         self.assertEqual([path.parent.name for path in skill_files], ["skill-upper"])
 
+    def test_bundle_excludes_python_cache_files(self) -> None:
+        self.assertFalse(list(BUNDLE.rglob("__pycache__")))
+        self.assertFalse(list(BUNDLE.rglob("*.pyc")))
+
     def test_bundled_skill_upper_matches_canonical_skill(self) -> None:
-        plugin_skill = SCRIPT.parents[1] / "skills" / "skill-upper"
+        plugin_skill = BUNDLE / "skills" / "skill-upper"
         canonical_skill = SCRIPT.parents[3] / "skills" / "skill-upper"
         bundled_files = {
             path.relative_to(plugin_skill)
@@ -41,7 +46,7 @@ class ObserverTest(unittest.TestCase):
         canonical_files = {
             path.relative_to(canonical_skill)
             for path in canonical_skill.rglob("*")
-            if path.is_file() and "evals" not in path.relative_to(canonical_skill).parts
+            if path.is_file()
         }
         self.assertEqual(bundled_files, canonical_files)
         for relative_path in bundled_files:

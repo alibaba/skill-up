@@ -32,10 +32,10 @@ dsh plugin --profile web add ./alibaba-dsh-skill-up-0.1.0-alpha.1.tgz
 dsh --profile web --dump-config
 ```
 
-Packing uses the repository-wide sync command to materialize the canonical
+Packing uses the repository-wide bundle command to materialize the canonical
 `skills/skill-upper` directory under the ignored `dist/` directory, then tests
-the package. Edit only the canonical Skill; `make sync-skill-upper` refreshes
-both plugin bundles when a local full sync is useful.
+the package. Edit only the canonical Skill; `make bundle-plugins` prepares both
+plugin bundles when a local full build is useful.
 The config dump should then contain the `skill-up` row from this bundle. The
 package is not published to npm yet; after publication, installation becomes:
 
