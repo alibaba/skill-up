@@ -1,4 +1,4 @@
-.PHONY: build test test-plugin test-action bundle-plugins bundle-observer-plugin package-observer-plugin vet fmt fmt-check lint lint-new revive verify tidy clean install hooks e2e lint-tools coverage coverage-badge
+.PHONY: build test test-plugin test-action bundle-plugins bundle-observer-plugin package-plugins package-observer-plugin package-dsh-plugin vet fmt fmt-check lint lint-new revive verify tidy clean install hooks e2e lint-tools coverage coverage-badge
 
 CMD := ./cmd/skill-up
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -38,10 +38,16 @@ bundle-plugins:
 bundle-observer-plugin:
 	node scripts/bundle-plugins.mjs observer
 
+package-plugins: package-observer-plugin package-dsh-plugin
+
 package-observer-plugin:
 	SKILL_UP_PLUGIN_VERSION=$(PLUGIN_ARCHIVE_VERSION) node scripts/bundle-plugins.mjs observer
 	tar -C dist/plugins -czf dist/skill-up-observer_$(PLUGIN_ARCHIVE_VERSION).tar.gz skill-up-observer
 	@echo "created dist/skill-up-observer_$(PLUGIN_ARCHIVE_VERSION).tar.gz"
+
+package-dsh-plugin:
+	SKILL_UP_DSH_PLUGIN_VERSION=$(PLUGIN_ARCHIVE_VERSION) node scripts/bundle-plugins.mjs dsh-package
+	cd dist/plugins/dsh-skill-up && npm pack --ignore-scripts --pack-destination ../..
 
 test-action:
 	python3 -m unittest discover -s action -p '*_test.py'

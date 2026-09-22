@@ -37,10 +37,11 @@ Packing uses the repository-wide bundle command to materialize the canonical
 the package. Edit only the canonical Skill; `make bundle-plugins` prepares both
 plugin bundles when a local full build is useful.
 The config dump should then contain the `skill-up` row from this bundle. The
-package is not published to npm yet; after publication, installation becomes:
+package is not published to npm. Tagged GitHub releases attach a self-contained
+`alibaba-dsh-skill-up-<version>.tgz`; install the downloaded asset directly:
 
 ```bash
-dsh plugin --profile web add @alibaba/dsh-skill-up
+dsh plugin --profile web add ./alibaba-dsh-skill-up-<version>.tgz
 ```
 
 ## Capabilities

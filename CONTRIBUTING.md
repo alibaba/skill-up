@@ -155,7 +155,7 @@ skill-up/
 ### `plugins/`
 
 - **Meaning**: Contains Agent host plugin sources. Packaging assembles installable bundles with Skills, lifecycle hooks, scripts, schemas, and MCP server configuration.
-- **Maintenance advice**: Validate each manifest and bundled Skill with the repository's documented plugin and Skill validators. Keep hook trust, compatibility, and local data behavior explicit in the plugin README. The source tree does not contain a plugin-local `skill-upper`; `make package-observer-plugin` assembles the self-contained release archive under ignored `dist/` output.
+- **Maintenance advice**: Validate each manifest and bundled Skill with the repository's documented plugin and Skill validators. Keep hook trust, compatibility, and local data behavior explicit in the plugin README. The source tree does not contain a plugin-local `skill-upper`; `make package-plugins VERSION=<version>` assembles the self-contained Codex and DSH release archives under ignored `dist/` output.
 
 ### `plugins/dsh-skill-up/`
 

@@ -86,6 +86,9 @@ eval、补充回归用例，并持续完成下一轮迭代。
 参与仓库开发时，只修改 `skills/skill-upper/` 这一份唯一源码。插件 bundle
 生成到被忽略的构建目录中，不跟踪副本，也不使用软链；本地打包前运行
 `make bundle-plugins`。
+`make package-plugins VERSION=<version>` 会生成自包含的 Codex 和 DSH
+安装包。GitHub tag release 会同时附带两个安装包及其校验和；本仓库不会将
+任一插件发布到外部 marketplace 或 npm。
 
 ### 第一步：安装 skill-upper
 

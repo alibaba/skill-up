@@ -87,6 +87,9 @@ repeat the loop through conversation.
 For repository development, `skills/skill-upper/` is the only editable source.
 Plugin bundles are generated into ignored build directories rather than tracked
 copies or symlinks; run `make bundle-plugins` when preparing them locally.
+`make package-plugins VERSION=<version>` creates self-contained Codex and DSH
+archives. Tagged GitHub releases attach both archives and their checksums; this
+repository does not publish either plugin to an external marketplace or npm.
 
 ### 1. Install skill-upper
 
