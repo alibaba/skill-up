@@ -1,0 +1,30 @@
+id: exclude-dependencies
+title: 统计项目代码时排除依赖目录
+description: 验证代码统计不会把 node_modules 中的第三方文件算作项目源码
+
+input:
+  prompt: |
+    请使用 code-stats 统计当前项目自己维护的代码，按 Skill 规定的完整格式报告。
+
+context:
+  repo_fixture: evals/fixtures/repos/sample-project
+  files:
+    node_modules/example-package/index.js: |
+      export function externalDependency() {
+        return 'third-party code';
+      }
+
+constraints:
+  timeout_seconds: 900
+  max_turns: 5
+
+judge:
+  type: rule_based
+  success:
+    - output_matches:
+        all:
+          - '(?m)^- Total Files: 3$'
+          - '(?m)^\| \.go \| 2 \| [0-9]+ \|$'
+          - '(?m)^\| \.md \| 1 \| [0-9]+ \|$'
+        not:
+          - '(?m)^\| \.js \|'
