@@ -1,0 +1,49 @@
+{
+  "schema_version": "v1alpha1",
+  "id": "obs_222222222222222222222222",
+  "host": {
+    "name": "dsh",
+    "version": "0.1.5-rc.2",
+    "adapter_version": "v1alpha1"
+  },
+  "skill": {
+    "name": "demo-skill"
+  },
+  "attribution": {
+    "method": "instrumented",
+    "confidence": 1,
+    "evidence": [
+      "DSH skill tool loaded demo-skill"
+    ]
+  },
+  "input": {
+    "text": "Use the appropriate Skill for this request."
+  },
+  "outcome": {
+    "status": "completed",
+    "final_message": "Done."
+  },
+  "evidence": [
+    {
+      "kind": "dsh_session",
+      "ref": "dsh-session",
+      "summary": "turn 1"
+    }
+  ],
+  "correlation": {
+    "session_id": "dsh-session",
+    "turn_id": "1"
+  },
+  "timing": {
+    "observed_at": "2026-09-21T00:00:00Z",
+    "completed_at": "2026-09-21T00:00:01Z"
+  },
+  "privacy": {
+    "storage": "local",
+    "consent": "test_fixture",
+    "redactions": []
+  },
+  "review": {
+    "status": "candidate"
+  }
+}

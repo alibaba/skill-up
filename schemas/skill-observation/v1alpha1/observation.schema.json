@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/alibaba/skill-up/plugins/skill-up-observer/schemas/observation.schema.json",
-  "title": "Skill Up Observer document v1alpha1",
+  "$id": "https://github.com/alibaba/skill-up/schemas/skill-observation/v1alpha1/observation.schema.json",
+  "title": "Skill Up observation document v1alpha1",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -25,7 +25,7 @@
       "additionalProperties": false,
       "required": ["name"],
       "properties": {
-        "name": { "const": "codex" },
+        "name": { "enum": ["codex", "dsh"] },
         "version": { "type": "string" },
         "adapter_version": { "type": "string" }
       }

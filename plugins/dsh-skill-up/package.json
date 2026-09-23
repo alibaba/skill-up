@@ -13,12 +13,13 @@
     "index.js",
     "lib/",
     "dist/skill-upper/",
+    "dist/skill-observation/",
     "cordis.patch.yml",
     "README.md"
   ],
   "scripts": {
-    "sync-skill": "node scripts/sync-skill-upper.mjs",
-    "test": "npm run sync-skill && node --test test/*.test.js",
+    "bundle-skill": "node ../../scripts/bundle-plugins.mjs dsh",
+    "test": "npm run bundle-skill && node --test test/*.test.js",
     "prepack": "npm test"
   },
   "keywords": [
@@ -45,15 +46,29 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
     "@deepseek-ai/dsh-jobs": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-session": "^0.1.5-rc.2",
     "@deepseek-ai/dsh-skill": "^0.1.5-rc.2",
     "@deepseek-ai/dsh-subprocess": "^0.1.5-rc.2",
     "@deepseek-ai/dsh-tools": "^0.1.5-rc.2"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-agent": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-brand": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-code-runtime": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-http-proxy": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-invariants": "0.1.5-rc.2",
     "@deepseek-ai/dsh-jobs": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-llm": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-scope": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-session": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-session-projection": "0.1.5-rc.2",
     "@deepseek-ai/dsh-skill": "0.1.5-rc.2",
     "@deepseek-ai/dsh-subprocess": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-tools": "0.1.5-rc.2"
+    "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-tools": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-user-approval": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-util-values": "0.1.5-rc.2"
   }
 }

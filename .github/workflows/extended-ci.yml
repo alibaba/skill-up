@@ -3,6 +3,8 @@ name: Extended CI
 # Deterministic, credential-free checks that are suitable for merge-queue
 # gating. Live-model tests live in model-e2e.yml and run only on demand.
 on:
+  pull_request:
+    branches: [main]
   merge_group:
   workflow_dispatch:
 
@@ -15,10 +17,7 @@ permissions: {}
 jobs:
   e2e-windows:
     name: E2E (none runtime, Windows)
-    # Merge-group code stays on an ephemeral runner so it cannot persist hooks
-    # or tools for a later secret-bearing job. Maintainer dispatches exercise
-    # the trusted self-hosted Windows runner.
-    runs-on: ${{ fromJSON(github.event_name == 'merge_group' && '["windows-2025"]' || '["self-hosted","Windows","X64","trusted"]') }}
+    runs-on: [self-hosted, Windows, X64, trusted]
     timeout-minutes: 20
     permissions:
       contents: read
@@ -28,7 +27,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Verify self-hosted Windows prerequisites
+      - name: Verify Windows prerequisites
         shell: powershell
         run: |
           git --version

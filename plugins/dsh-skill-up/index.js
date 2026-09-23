@@ -11,16 +11,24 @@ import {
   splitSkillDocument,
   summarizeResult,
 } from './lib/core.js'
+import {
+  candidateCase,
+  compareResults,
+  defaultObservationDirectory,
+  ObservationCollector,
+  ObservationStore,
+  stageCandidateCase,
+} from './lib/observer.js'
 
 export const name = 'dsh-skill-up'
-export const inject = ['tools', 'skills', 'subprocess', 'jobs']
+export const inject = ['tools', 'skills', 'subprocess', 'jobs', 'sessions']
 
 const OUTPUT_LIMIT_BYTES = 1024 * 1024
 const SPILL_LIMIT_BYTES = 16 * 1024 * 1024
 const TOOL_GUIDANCE = `
 ## DeepSeek Harness integration
 
-When the skill_up_validate, skill_up_run, and skill_up_summary tools are available,
+When the skill_up_validate, skill_up_run, skill_up_summary, and skill_up_compare tools are available,
 prefer them over assembling equivalent shell commands. Treat a user-provided new
 input or scenario as regression evidence for an existing Skill: add or refine a
 case, run a baseline before editing the Skill, improve the Skill from observed
@@ -114,6 +122,7 @@ function spawnSpec(executable, args, workspace, env, signal) {
 export function apply(ctx, config = {}) {
   const skillUpBin = config.skillUpBin || 'skill-up'
   const credentialEnv = config.credentialEnv || []
+  const observerConfig = config.observer || {}
   const skillFile = fileURLToPath(new URL('./dist/skill-upper/SKILL.md', import.meta.url))
   const skillDir = dirname(skillFile)
   const skillContent = splitSkillDocument(readFileSync(skillFile, 'utf8'))
@@ -125,6 +134,15 @@ export function apply(ctx, config = {}) {
     resourceBase: { kind: 'directory', path: skillDir },
     content: `${TOOL_GUIDANCE}\n${skillContent}`,
   })
+
+  if (observerConfig.enabled === true) {
+    const store = new ObservationStore(defaultObservationDirectory(observerConfig.dataDir))
+    const collector = new ObservationCollector(store, { hostVersion: observerConfig.hostVersion || '' })
+    ctx.on('session/event', (session, event) => {
+      collector.handle(session, event)
+    }, { global: true })
+    registerObservationTools(ctx, store, skillUpBin, credentialEnv)
+  }
 
   ctx.tools.register(defineTool({
     name: 'skill_up_validate',
@@ -243,4 +261,165 @@ export function apply(ctx, config = {}) {
       return summarizeResult(document, resultFile.relative)
     },
   }))
+
+  ctx.tools.register(defineTool({
+    name: 'skill_up_compare',
+    description: 'Compare per-case business statuses from preserved baseline and post-change result.json reports.',
+    parameters: {
+      before_result_path: { type: 'string', required: true, description: 'Workspace-relative baseline result.json path.' },
+      after_result_path: { type: 'string', required: true, description: 'Workspace-relative post-change result.json path.' },
+    },
+    output: toolOutput({
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        before_path: { type: 'string', required: true },
+        after_path: { type: 'string', required: true },
+        same_cases: { type: 'boolean', required: true },
+        cases: {
+          type: 'array',
+          required: true,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              id: { type: 'string', required: true },
+              before: { type: 'string', required: true },
+              after: { type: 'string', required: true },
+              changed: { type: 'boolean', required: true },
+            },
+          },
+        },
+      },
+    }),
+    async execute(args, exec) {
+      const workspace = exec.agent?.session.header.cwd || process.cwd()
+      const beforeFile = resolveWorkspaceFile(workspace, args.before_result_path, 'before_result_path')
+      const afterFile = resolveWorkspaceFile(workspace, args.after_result_path, 'after_result_path')
+      return compareResults(
+        JSON.parse(readFileSync(beforeFile.absolute, 'utf8')),
+        JSON.parse(readFileSync(afterFile.absolute, 'utf8')),
+        beforeFile.relative,
+        afterFile.relative,
+      )
+    },
+  }))
+}
+
+function observationTool(name, description, parameters, execute) {
+  return defineTool({
+    name,
+    description,
+    parameters,
+    output: toolOutput({ type: 'object', additionalProperties: true }),
+    execute,
+  })
+}
+
+function registerObservationTools(ctx, store, skillUpBin, credentialEnv) {
+  ctx.tools.register(observationTool(
+    'list_skill_observations',
+    'List locally stored, explicitly attributed Skill observations.',
+    {},
+    async () => ({
+      observations: store.list().map((item) => ({
+        id: item.id,
+        skill: item.skill.name,
+        review: item.review.status,
+        outcome: item.outcome.status,
+        observed_at: item.timing.observed_at,
+      })),
+    }),
+  ))
+  ctx.tools.register(observationTool(
+    'get_skill_observation',
+    'Read one local Skill observation.',
+    { observation_id: { type: 'string', required: true } },
+    async (args) => store.get(args.observation_id),
+  ))
+  ctx.tools.register(observationTool(
+    'record_observation_feedback',
+    'Attach explicit user feedback to an existing Skill observation.',
+    {
+      observation_id: { type: 'string', required: true },
+      sentiment: { type: 'string', enum: ['positive', 'negative', 'mixed', 'neutral'] },
+      comment: { type: 'string' },
+    },
+    async (args) => store.feedback(args.observation_id, args.sentiment || '', args.comment || ''),
+  ))
+  ctx.tools.register(observationTool(
+    'link_observation_report',
+    'Attach a validated baseline or post-change result.json report to an observation.',
+    {
+      observation_id: { type: 'string', required: true },
+      phase: { type: 'string', enum: ['baseline', 'post_change'], required: true },
+      result_path: { type: 'string', required: true, description: 'Workspace-relative result.json path.' },
+    },
+    async (args, exec) => {
+      const workspace = exec.agent?.session.header.cwd || process.cwd()
+      const resultFile = resolveWorkspaceFile(workspace, args.result_path, 'result_path')
+      const summary = summarizeResult(JSON.parse(readFileSync(resultFile.absolute, 'utf8')), resultFile.relative)
+      const observation = store.addEvidence(args.observation_id, {
+        kind: `skill_up_${args.phase}_report`,
+        ref: resultFile.relative,
+        summary: `${summary.passed} passed, ${summary.failed} failed, ${summary.errors} errors`,
+      })
+      return { observation_id: observation.id, phase: args.phase, result_path: resultFile.relative, summary }
+    },
+  ))
+  ctx.tools.register(observationTool(
+    'review_skill_observation',
+    'Approve or reject one observation after explicit user review.',
+    {
+      observation_id: { type: 'string', required: true },
+      status: { type: 'string', enum: ['approved', 'rejected'], required: true },
+    },
+    async (args) => store.review(args.observation_id, args.status),
+  ))
+  ctx.tools.register(observationTool(
+    'preview_observation_case',
+    'Preview a candidate regression case without writing files.',
+    { observation_id: { type: 'string', required: true } },
+    async (args) => {
+      const candidate = candidateCase(store.get(args.observation_id))
+      return { case_id: candidate.id, yaml: candidate.yaml }
+    },
+  ))
+  ctx.tools.register(observationTool(
+    'write_observation_case',
+    'Write an approved observation as a candidate case, update eval.yaml, and validate the suite.',
+    {
+      observation_id: { type: 'string', required: true },
+      skill_root: { type: 'string', required: true, description: 'Workspace-relative Skill root.' },
+    },
+    async (args, exec) => {
+      const workspace = exec.agent?.session.header.cwd || process.cwd()
+      const staged = stageCandidateCase(workspace, args.skill_root, store.get(args.observation_id))
+      try {
+        const env = forwardedEnvironment(credentialEnv)
+        const executable = await ctx.subprocess.resolveExecutable(skillUpBin, env, exec.signal)
+        const handle = ctx.subprocess.spawn(spawnSpec(
+          executable,
+          ['validate', staged.relativeEvalPath],
+          workspace,
+          env,
+          exec.signal,
+        ))
+        const outcome = await awaitProcess(handle)
+        const output = collectOutput(handle)
+        if (outcome.exitCode !== 0) {
+          throw new Error(`skill-up validate failed: ${(output.stderr || output.stdout).trim()}`)
+        }
+        store.commitApprovedCandidate(args.observation_id, staged.candidateYaml, () => staged.commit())
+        return {
+          case_path: staged.casePath,
+          eval_path: staged.evalPath,
+          validation: 'passed',
+        }
+      } catch (error) {
+        staged.rollback()
+        throw error
+      }
+    },
+  ))
 }

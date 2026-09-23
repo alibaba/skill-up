@@ -16,6 +16,10 @@ import (
 // ListSkillFiles returns a list of files to sync for a skill,
 // applying include patterns followed by exclude patterns. The evals directory
 // is always excluded because it belongs to the evaluation harness.
+//
+// The source directory is resolved through symlinks first: filepath.Walk does
+// not follow a symlinked root, which would otherwise silently select only the
+// link node itself.
 func ListSkillFiles(sourceDir string, include, exclude []string) ([]string, error) {
 	if err := validateSkillFilePatterns(include); err != nil {
 		return nil, err
@@ -24,8 +28,13 @@ func ListSkillFiles(sourceDir string, include, exclude []string) ([]string, erro
 		return nil, err
 	}
 
-	selector := skillFileSelector{sourceDir: sourceDir, include: include, exclude: exclude}
-	if err := filepath.Walk(sourceDir, selector.visit); err != nil {
+	resolvedDir, err := filepath.EvalSymlinks(sourceDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve skill source %s: %w", sourceDir, err)
+	}
+
+	selector := skillFileSelector{sourceDir: resolvedDir, include: include, exclude: exclude}
+	if err := filepath.Walk(resolvedDir, selector.visit); err != nil {
 		return nil, err
 	}
 
@@ -149,6 +158,7 @@ func installSkill(ctx context.Context, rt Runtime, source, target string, includ
 		return err
 	}
 
+	uploaded := 0
 	for _, file := range files {
 		srcPath := filepath.Join(source, file)
 		info, err := os.Stat(srcPath)
@@ -164,6 +174,15 @@ func installSkill(ctx context.Context, rt Runtime, source, target string, includ
 		if err := rt.UploadFile(ctx, srcPath, relDstPath); err != nil {
 			return err
 		}
+		uploaded++
+	}
+
+	// A skill install that uploads nothing is never intentional: it means the
+	// source was empty, unreadable, or the include/exclude filters matched
+	// nothing — and silently running with_skill without the skill invalidates
+	// the evaluation. Fail loudly instead.
+	if uploaded == 0 {
+		return fmt.Errorf("skill source %s selected 0 files (include=%v exclude=%v): refusing to install an empty skill", source, include, exclude)
 	}
 
 	return nil
@@ -197,6 +216,9 @@ func excludeInstallTarget(workspace, source, target string, exclude []string) ([
 	}
 	relTarget, err := filepath.Rel(sourcePath, targetPath)
 	if err != nil {
+		if !strings.EqualFold(filepath.VolumeName(sourcePath), filepath.VolumeName(targetPath)) {
+			return exclude, false, nil
+		}
 		return nil, false, fmt.Errorf("resolve skill target relative to source: %w", err)
 	}
 	if filepath.IsAbs(relTarget) || relTarget == ".." || strings.HasPrefix(relTarget, ".."+string(filepath.Separator)) {

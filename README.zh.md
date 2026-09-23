@@ -31,6 +31,9 @@
     <a href="https://github.com/alibaba/skill-up/releases">
       <img src="https://img.shields.io/github/v/release/alibaba/skill-up" alt="Release" />
     </a>
+    <a href="plugins/dsh-skill-up/README.md">
+      <img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-4D6BFE" alt="DeepSeek Harness Plugin" />
+    </a>
   </p>
 
   <p align="center">
@@ -58,7 +61,7 @@
 - **skill-upper 从评测到演进的闭环**：通过自然对话创建评测、诊断失败、自动修复或补充用例并重新运行 skill-up，让 eval 评测集持续演进。
 - **声明式评测配置**：通过 YAML（`eval.yaml` + `cases/*.yaml`）定义评测环境、引擎、模型和用例。
 - **多引擎支持**：内置支持 Qoder CLI、Claude Code、Codex；亦可通过 `engine.custom` 接入用户自定义 Agent（本地传输，详见 [docs/design/custom-engine.md](docs/design/custom-engine.md)）。
-- **DeepSeek Harness 插件**：通过内置的 `skill-upper` Skill 和 DSH 原生工具，把新输入转化为回归用例，为既有 Skill 建立 baseline、按失败证据优化，并重跑同一批用例完成验证。详见 [`plugins/dsh-skill-up`](plugins/dsh-skill-up/README.md)。
+- **DeepSeek Harness 插件**：通过内置的 `skill-upper` Skill、显式启用的持久化观察采集、审批门禁回归用例、隔离运行与状态对比，验证有证据的 Skill 改进。详见 [`plugins/dsh-skill-up`](plugins/dsh-skill-up/README.md)。
 - **灵活评分**：支持 `rule_based`（规则匹配）、`script`（脚本评分）、`agent_judge`（Agent 评分）三种评估策略。
 - **结构化报告**：输出 Anthropic 兼容的 `grading.json`、`benchmark.json`、`benchmark.md`，以及 `result.json`、JUnit XML 和 HTML 报告。
 - **Anthropic 兼容**：通过 `skill-up import` 导入 `evals.json`，或使用 `--auto` 自动识别。
@@ -79,6 +82,13 @@
 推荐通过仓库内置的 **skill-upper** Agent Skill 使用 skill-up。它可以让
 AI Agent 通过对话创建评测、运行 skill-up、理解失败原因、修复 Skill 或
 eval、补充回归用例，并持续完成下一轮迭代。
+
+参与仓库开发时，只修改 `skills/skill-upper/` 这一份唯一源码。插件 bundle
+生成到被忽略的构建目录中，不跟踪副本，也不使用软链；本地打包前运行
+`make bundle-plugins`。
+`make package-plugins VERSION=<version>` 会生成自包含的 Codex 和 DSH
+安装包。GitHub tag release 会同时附带两个安装包及其校验和；本仓库不会将
+任一插件发布到外部 marketplace 或 npm。
 
 ### 第一步：安装 skill-upper
 

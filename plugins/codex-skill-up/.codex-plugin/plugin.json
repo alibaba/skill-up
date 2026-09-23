@@ -1,5 +1,5 @@
 {
-  "name": "skill-up-observer",
+  "name": "codex-skill-up",
   "version": "0.1.0",
   "description": "Capture privacy-aware Skill observations locally and turn approved observations into candidate skill-up regression cases.",
   "author": {
@@ -7,7 +7,7 @@
   },
   "skills": "./skills/",
   "interface": {
-    "displayName": "Skill Up Observer",
+    "displayName": "Skill Up for Codex",
     "shortDescription": "Review Skill usage and create regression cases.",
     "longDescription": "Observes explicitly attributed Skill interactions through Codex lifecycle hooks, redacts common credentials before local persistence, and requires human approval before writing a candidate evaluation case.",
     "developerName": "Alibaba skill-up maintainers",

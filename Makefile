@@ -1,8 +1,9 @@
-.PHONY: build test test-plugin test-action vet fmt fmt-check lint lint-new revive verify tidy clean install hooks e2e lint-tools coverage coverage-badge
+.PHONY: build test test-plugin test-action bundle-plugins bundle-codex-plugin package-plugins package-codex-plugin package-dsh-plugin vet fmt fmt-check lint lint-new revive verify tidy clean install hooks e2e lint-tools coverage coverage-badge
 
 CMD := ./cmd/skill-up
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 VERSION := $(shell echo $(VERSION) | sed 's/^v//')
+PLUGIN_ARCHIVE_VERSION := $(patsubst v%,%,$(VERSION))
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 # GOPROXY and GOPRIVATE defaults; override locally via environment if needed
 # (e.g. `GOPROXY=https://goproxy.cn,direct make build` for mainland China users)
@@ -28,8 +29,25 @@ build: hooks
 test: test-plugin
 	go test -race ./...
 
-test-plugin:
-	python3 -m unittest discover -s plugins/skill-up-observer/tests -p 'test*.py'
+test-plugin: bundle-codex-plugin
+	python3 -m unittest discover -s plugins/codex-skill-up/tests -p 'test*.py'
+
+bundle-plugins:
+	node scripts/bundle-plugins.mjs all
+
+bundle-codex-plugin:
+	node scripts/bundle-plugins.mjs codex
+
+package-plugins: package-codex-plugin package-dsh-plugin
+
+package-codex-plugin:
+	SKILL_UP_CODEX_PLUGIN_VERSION=$(PLUGIN_ARCHIVE_VERSION) node scripts/bundle-plugins.mjs codex
+	tar -C dist/plugins -czf dist/codex-skill-up_$(PLUGIN_ARCHIVE_VERSION).tar.gz codex-skill-up
+	@echo "created dist/codex-skill-up_$(PLUGIN_ARCHIVE_VERSION).tar.gz"
+
+package-dsh-plugin:
+	SKILL_UP_DSH_PLUGIN_VERSION=$(PLUGIN_ARCHIVE_VERSION) node scripts/bundle-plugins.mjs dsh-package
+	cd dist/plugins/dsh-skill-up && npm pack --ignore-scripts --pack-destination ../..
 
 test-action:
 	python3 -m unittest discover -s action -p '*_test.py'

@@ -135,21 +135,21 @@ internal/           Private implementation — never import from outside the mod
 pkg/                Publicly importable APIs (semver-stable; change with care)
   skillup/          Embeddable evaluation API
   transcript/       Transcript parsing helpers
-plugins/            Agent host plugins; each plugin owns its manifest, hooks, MCP, and Skills
-skills/skill-upper/ Distributable Agent Skill that guides AI agents through the
+plugins/            Agent host plugin sources; complete bundles are generated under ignored dist/
+  codex-skill-up/    Codex hooks/MCP adapter; packaging adds shared Skill/schema
+  dsh-skill-up/     DeepSeek Harness bundle with a generated skill-upper copy under dist/
+skills/skill-upper/ Canonical source for the distributable Agent Skill that guides AI agents through the
                     skill-up eval workflow (scaffolding, running, interpreting).
                     Contains SKILL.md, assets/
                     templates, references/, and its own evals/ suite. Not part of
                     `go build`; consumed by Agent Engines (Cursor, Claude Code,
                     Qoder, etc.) at runtime.
-plugins/            Optional Agent-harness integrations kept outside the Go CLI.
-  dsh-skill-up/     DeepSeek Harness bundle exposing skill-up tools and the
-                    canonical skill-upper Skill.
 e2e/                End-to-end tests (build-tag gated) + testdata/
 examples/           Example fixtures and debug inputs
 docs/               Design docs, user manuals, and the VitePress site
                     (built & deployed to GitHub Pages by .github/workflows/docs.yml)
 schemas/evalevent/  Versioned machine-readable evaluation event protocol schemas
+schemas/skill-observation/ Host-neutral observation schema and conformance fixtures
 ```
 
 ### Boundary rules

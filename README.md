@@ -31,6 +31,9 @@
     <a href="https://github.com/alibaba/skill-up/releases">
       <img src="https://img.shields.io/github/v/release/alibaba/skill-up" alt="Release" />
     </a>
+    <a href="plugins/dsh-skill-up/README.md">
+      <img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-4D6BFE" alt="DeepSeek Harness Plugin" />
+    </a>
   </p>
 
   <p align="center">
@@ -58,7 +61,7 @@
 - **Eval-to-Evolution Loop with skill-upper**: Create evals through natural conversation, diagnose failures, automatically repair or expand cases, and rerun skill-up until the eval suite evolves.
 - **Declarative Eval Config**: Define evaluation environment, engine, model, and cases through YAML (`eval.yaml` + `cases/*.yaml`).
 - **Multi-Engine Support**: Works with Qoder CLI, Claude Code, and Codex as built-in Agent Engines, plus user-defined agents via `engine.custom` (local transport — see [docs/design/custom-engine.md](docs/design/custom-engine.md)).
-- **DeepSeek Harness Plugin**: Use the bundled `skill-upper` Skill and native DSH tools to turn new inputs into regression cases, baseline an existing Skill, improve it, and verify the same cases again. See [`plugins/dsh-skill-up`](plugins/dsh-skill-up/README.md).
+- **DeepSeek Harness Plugin**: Use the bundled `skill-upper` Skill, opt-in durable observation capture, approval-gated regression cases, isolated runs, and status comparison to verify evidence-backed Skill improvements. See [`plugins/dsh-skill-up`](plugins/dsh-skill-up/README.md).
 - **Flexible Judging**: Supports `rule_based`, `script`, and `agent_judge` evaluation strategies.
 - **Structured Reports**: Outputs Anthropic-compatible `grading.json`, `benchmark.json`, `benchmark.md`, plus `result.json`, JUnit XML, and HTML reports.
 - **Anthropic Compatible**: Import `evals.json` via `skill-up import`, or auto-detect with `--auto`.
@@ -80,6 +83,13 @@ The recommended way to use skill-up is through **skill-upper**, the Agent Skill
 shipped in this repository. It lets your AI agent create evals, run skill-up,
 understand failures, fix the Skill or its evals, add regression coverage, and
 repeat the loop through conversation.
+
+For repository development, `skills/skill-upper/` is the only editable source.
+Plugin bundles are generated into ignored build directories rather than tracked
+copies or symlinks; run `make bundle-plugins` when preparing them locally.
+`make package-plugins VERSION=<version>` creates self-contained Codex and DSH
+archives. Tagged GitHub releases attach both archives and their checksums; this
+repository does not publish either plugin to an external marketplace or npm.
 
 ### 1. Install skill-upper
 
@@ -323,9 +333,10 @@ skill-up/
 │   └── report/            # JSON, JUnit, HTML, and benchmark reports
 ├── pkg/                   # Publicly importable APIs
 ├── plugins/               # Agent host plugin bundles
-├── schemas/evalevent/     # Versioned evaluation event JSON Schemas
-├── skills/skill-upper/    # Distributable workflow Skill
-├── plugins/dsh-skill-up/  # DeepSeek Harness integration bundle
+│   ├── codex-skill-up/    # Codex adapter; release bundles add shared assets
+│   └── dsh-skill-up/      # DSH bundle with a generated dist/ Skill copy
+├── schemas/               # Evaluation-event and host-neutral observation contracts
+├── skills/skill-upper/    # Canonical source for the distributable workflow Skill
 ├── docs/                  # VitePress documentation
 ├── e2e/                   # End-to-end tests and fixtures
 └── examples/              # Example evaluations and fixtures

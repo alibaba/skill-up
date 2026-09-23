@@ -9,6 +9,12 @@ on:
     paths:
       - ".github/scripts/install-gh.sh"
       - ".github/workflows/release.yml"
+      - "Makefile"
+      - "scripts/bundle-plugins.mjs"
+      - "plugins/dsh-skill-up/**"
+      - "plugins/codex-skill-up/**"
+      - "schemas/skill-observation/**"
+      - "skills/skill-upper/**"
 
 permissions: {}
 
@@ -42,6 +48,23 @@ jobs:
           set -euo pipefail
           gh --version
           gh api "repos/${GITHUB_REPOSITORY}" --jq .full_name
+
+      - name: Set up Node.js for plugin packaging
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '20'
+          package-manager-cache: false
+
+      - name: Verify plugin release archives
+        run: |
+          set -euo pipefail
+          make package-plugins VERSION=v0.0.0-test
+          test -f dist/codex-skill-up_0.0.0-test.tar.gz
+          test -f dist/alibaba-dsh-skill-up-0.0.0-test.tgz
+          tar -tzf dist/codex-skill-up_0.0.0-test.tar.gz > "$RUNNER_TEMP/codex-skill-up-files"
+          tar -tzf dist/alibaba-dsh-skill-up-0.0.0-test.tgz > "$RUNNER_TEMP/dsh-skill-up-files"
+          grep -Fqx 'codex-skill-up/schemas/skill-observation/v1alpha1/observation.schema.json' "$RUNNER_TEMP/codex-skill-up-files"
+          grep -Fqx 'package/dist/skill-observation/v1alpha1/observation.schema.json' "$RUNNER_TEMP/dsh-skill-up-files"
 
   build:
     name: Build release artifacts
@@ -78,6 +101,12 @@ jobs:
           # Release artifacts must not consume caches writable by other jobs.
           cache: false
 
+      - name: Set up Node.js for plugin packaging
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '20'
+          package-manager-cache: false
+
       - name: Build release artifacts with GoReleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:
@@ -91,12 +120,28 @@ jobs:
           # This token is read-only in the build job and cannot publish.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Package host plugins
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          make package-plugins VERSION="$RELEASE_TAG"
+          checksum_file=$(find dist -maxdepth 1 -name '*_checksums.txt' -print -quit)
+          if [ -z "$checksum_file" ]; then
+            echo "::error::GoReleaser checksum file is missing"
+            exit 1
+          fi
+          codex_archive="codex-skill-up_${RELEASE_TAG#v}.tar.gz"
+          dsh_archive="alibaba-dsh-skill-up-${RELEASE_TAG#v}.tgz"
+          (cd dist && sha256sum "$codex_archive" "$dsh_archive" >> "$(basename "$checksum_file")")
+
       - name: Upload release artifacts for approval
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-dist-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             dist/*.tar.gz
+            dist/*.tgz
             dist/*.zip
             dist/*_checksums.txt
             dist/CHANGELOG.md
@@ -148,6 +193,7 @@ jobs:
         with:
           subject-path: |
             release-dist/*.tar.gz
+            release-dist/*.tgz
             release-dist/*.zip
             release-dist/*_checksums.txt
 
@@ -157,7 +203,7 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          assets=(release-dist/*.tar.gz release-dist/*.zip release-dist/*_checksums.txt)
+          assets=(release-dist/*.tar.gz release-dist/*.tgz release-dist/*.zip release-dist/*_checksums.txt)
           notes=(--generate-notes)
           if [ -s release-dist/CHANGELOG.md ]; then
             notes=(--notes-file release-dist/CHANGELOG.md)

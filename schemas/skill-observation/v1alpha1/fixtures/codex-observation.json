@@ -1,0 +1,41 @@
+{
+  "schema_version": "v1alpha1",
+  "id": "obs_111111111111111111111111",
+  "host": {
+    "name": "codex",
+    "adapter_version": "v1alpha1"
+  },
+  "skill": {
+    "name": "demo-skill"
+  },
+  "attribution": {
+    "method": "explicit",
+    "confidence": 1,
+    "evidence": [
+      "user prompt explicitly referenced $demo-skill"
+    ]
+  },
+  "input": {
+    "text": "Use $demo-skill for this request."
+  },
+  "outcome": {
+    "status": "completed",
+    "final_message": "Done."
+  },
+  "correlation": {
+    "session_id": "codex-session",
+    "turn_id": "codex-turn"
+  },
+  "timing": {
+    "observed_at": "2026-09-21T00:00:00Z",
+    "completed_at": "2026-09-21T00:00:01Z"
+  },
+  "privacy": {
+    "storage": "local",
+    "consent": "test_fixture",
+    "redactions": []
+  },
+  "review": {
+    "status": "candidate"
+  }
+}
