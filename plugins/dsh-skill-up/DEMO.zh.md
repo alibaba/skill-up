@@ -1,31 +1,37 @@
 # DSH 插件用例：让 `code-stats` 排除依赖目录
 
-这个用例只解决一个容易看懂的问题：统计项目源码时，`node_modules` 里的第三方文件不应算进项目自己的代码。演示项目有 `README.md`、`main.go`、`util.go` 三个自有文件，以及 `node_modules/demo-lib/index.js` 一个依赖文件。预期结果是 **3 个文件**，扩展名只有 `.go` 和 `.md`。
+演示项目有 `README.md`、`main.go`、`util.go` 三个自有文件，以及 `node_modules/demo-lib/index.js` 一个依赖文件。统计项目代码时应得到 **3 个文件**，扩展名只有 `.go` 和 `.md`。以下截图来自隔离的本地演示项目，画面只保留对话内容。
 
-## 1. 调用 Skill，发现误计数
+## 1. 调用：发现依赖文件被计入
 
-在 DSH 中调用 `skill` 工具加载原版 `code-stats`，要求按 Skill 的完整格式统计项目。第一次回答把依赖文件也算进去：`Total Files: 4`，扩展名统计多出 `.js: 1`，最大文件列表还出现了 `index.js`。
+用户输入：“用 code-stats 统计这个项目的文件和扩展名。”
 
-![修改前的统计结果：4 个文件](../../docs/public/dsh-code-stats-before.jpg)
+DSH 调用原版 `code-stats` 后报告 `Total Files: 4`，扩展名表多出 `.js: 1`，最大文件列表还出现了依赖目录中的 `index.js`。
 
-开启插件的本地观察功能后，观察记录显示 `code-stats` 确实通过 DSH 的 `skill` 工具加载，归因方式为 `instrumented`。针对这次调用记录反馈：统计项目自有代码时不应计入 `node_modules`。此时观察仍是 `candidate`；记录反馈和预览用例都不会自动修改 Skill 或写入回归用例。
+![简短调用输入与错误的 4 个文件统计](../../docs/public/dsh-code-stats-before.jpg)
 
-![观察记录中的反馈](../../docs/public/dsh-code-stats-feedback.jpg)
+## 2. 反馈：把错误留作回归线索
 
-## 2. 补回归用例，再修改 Skill
+用户输入：“刚才把 node_modules 也算进去了。请记下这个问题，并给我看看回归用例草稿。”
 
-根据反馈，人工补充 [`exclude-dependencies.yaml`](../../examples/code-stats/evals/cases/exclude-dependencies.yaml)：用例自行创建上述四个文件，要求统计 `./project`，断言总文件数为 3、`.go` 为 2、`.md` 为 1，并且扩展名表中没有 `.js`。这样前后两次评测使用同一个输入和同一组断言。
+插件的本地观察记录确认 `code-stats` 曾通过 DSH 的 `skill` 工具加载，归因方式为 `instrumented`。反馈被记为 `negative`，预览了候选用例；候选状态仍是 `candidate`，预览不会自动写入用例。
 
-先用原版 Skill 跑基线，用例 **FAIL**：结果仍为 4 个文件，包含 `.js: 1`。随后修改 [`code-stats/SKILL.md`](../../examples/code-stats/SKILL.md) 的扫描规则，让它默认排除 `node_modules/`、`.git/`、`dist/`、`build/`；只有用户明确要求时才统计这些目录。
+![简短反馈输入与已记录反馈的确认](../../docs/public/dsh-code-stats-feedback.jpg)
 
-## 3. 重跑并比较
+## 3. 改进：更新扫描规则并重试
 
-修改后用同一用例重跑，结果为 **PASS**：`Total Files: 3`，只有 `.go: 2` 和 `.md: 1`。直接再次调用 DSH 中的 Skill，回答也从 4 个文件变为 3 个文件。
+用户输入：“把 code-stats 改成默认跳过 node_modules，再统计一次确认。”
 
-![修改后的统计结果：3 个文件](../../docs/public/dsh-code-stats-after.jpg)
+隔离演示中的 Skill 加入排除规则后，同一项目的统计变为 `Total Files: 3`，不再出现依赖目录的 `.js`。仓库里的 [`code-stats/SKILL.md`](../../examples/code-stats/SKILL.md) 将规则补全为默认排除 `node_modules/`、`.git/`、`dist/` 和 `build/`；用户明确要求时仍可统计这些目录。
 
-插件的 `skill_up_compare` 读取前后保存的报告，确认用例集合相同，并显示 `exclude-dependencies` 从 **FAIL → PASS**。
+![简短改进输入、Skill 修改说明与 3 个文件的结果](../../docs/public/dsh-code-stats-after.jpg)
 
-![同一用例的前后对比](../../docs/public/dsh-code-stats-compare.jpg)
+## 4. 验证：同一回归用例从失败变为通过
 
-这次演示的前后评测各运行一次，证明的是这次实际运行的结果，并不代表模型输出的统计稳定性。观察与报告关联的试验中，模型曾自行调用批准工具；因此这里不把观察审批边界算作已验证，也不把自动写用例当作演示结果。可核验的闭环是：真实 Skill 调用 → 反馈记录 → 人工补回归用例并修改 Skill → 同用例重跑和报告对比。
+用户输入：“比较 code-stats 回归用例修改前后的评测结果。”
+
+人工补充的 [`exclude-dependencies.yaml`](../../examples/code-stats/evals/cases/exclude-dependencies.yaml) 自行创建上述四个文件，要求统计 `./project`，并断言总文件数为 3、`.go` 为 2、`.md` 为 1、扩展名表中没有 `.js`。原版 Skill 跑出的基线为 **FAIL**（4 个文件）；改进后用同一用例重跑为 **PASS**（3 个文件）。`skill_up_compare` 读取保存的两份报告，确认用例集合相同。
+
+![简短验证输入与同一用例的 FAIL 到 PASS 对比](../../docs/public/dsh-code-stats-compare.jpg)
+
+前后评测各运行一次，图中结果只证明这次实际运行的变化。观察与报告关联的试验中，模型曾自行调用批准工具，因此审批边界尚未得到验证；本例也没有把自动写用例算作演示结果。
