@@ -1,10 +1,10 @@
 id: exclude-dependencies
-title: 统计项目代码时排除依赖目录
-description: 验证代码统计不会把 node_modules 中的第三方文件算作项目源码
+title: Exclude dependency directories from code statistics
+description: Verify that third-party files in node_modules are not counted as project source
 
 input:
   prompt: |
-    请先调用 skill 工具加载 code-stats，然后严格按照 Skill 自己的目录扫描规则统计 ./project 的文件与扩展名分布，不要自行添加忽略规则。按 Skill 规定的完整格式报告。
+    Load the code-stats skill, then use its own scanning rules to report the file and extension statistics for ./project. Do not add exclusion rules of your own. Follow the skill's full output format.
 
 context:
   files:
