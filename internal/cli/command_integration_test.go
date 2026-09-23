@@ -60,7 +60,7 @@ func TestValidateCommandRunEReportsLoadedCases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("validate RunE returned error: %v", err)
 	}
-	if !strings.Contains(output, "eval.yaml is valid") || !strings.Contains(output, "loaded 3 case(s)") {
+	if !strings.Contains(output, "eval.yaml is valid") || !strings.Contains(output, "loaded 4 case(s)") {
 		t.Fatalf("validate output = %q, want success with case count", output)
 	}
 }

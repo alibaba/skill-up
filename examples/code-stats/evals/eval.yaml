@@ -23,6 +23,7 @@ cases:
     - evals/cases/analyze-directory.yaml
     - evals/cases/top-extensions.yaml
     - evals/cases/current-directory-format.yaml
+    - evals/cases/exclude-dependencies.yaml
   defaults:
     timeout_seconds: 900
     max_turns: 5
