@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- 为 code-stats 示例增加“统计项目源码时排除依赖目录”的回归用例，检查文件总数和扩展名统计。
+- Add a code-stats regression case that verifies project source counts exclude dependency directories.
 - Tagged releases now attach self-contained Codex and DeepSeek Harness
   plugin archives assembled with the canonical `skill-upper` source, including
   checksums and attestations without publishing to an external registry. Plugin
