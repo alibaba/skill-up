@@ -6,7 +6,7 @@
   <h1>skill-up</h1>
 
   <p align="center">
-    <b>The evaluation and evolution tool for Agent Skills.</b>
+    <b>Evaluate Agent Skills, agents, and workspaces. Evolve Skills with evidence.</b>
   </p>
 
   <p align="center">
@@ -49,17 +49,21 @@
 
 ## Overview
 
-**skill-up** is an evaluation and evolution tool for Agent Skills.
+**skill-up** is a CLI for evaluating Agent Skills, agents, and their workspaces. It runs declarative cases against an Agent Engine, grades the response and workspace changes, and produces reports locally or in CI.
 
-- **Evaluation** makes Skill quality measurable and repeatable: declarative YAML cases run across multiple Agent Engines, use rule, script, or Agent judges, and produce structured reports locally or in CI.
-- **Evolution** turns those results into the next improvement: through conversation, **skill-upper** reads failures, automatically repairs or expands the eval suite, reruns skill-up, and keeps iterating with you.
+- **Skill evaluation** measures a Skill's behavior across cases and can compare runs with and without the Skill.
+- **Agent evaluation** runs the same cases without installing a Skill, so you can assess an engine or custom agent on its own.
+- **Workspace evaluation** checks how an agent works with files and repositories, using case fixtures or an existing local workspace.
+- **Skill evolution** uses **skill-upper** to inspect failures, repair or expand the eval suite, and rerun skill-up through conversation.
 
-![How skill-up evaluates and evolves Agent Skills through automatic eval repair and iteration](docs/public/skill-up-overview.png)
+![The Skill evaluation and evolution workflow with skill-upper](docs/public/skill-up-overview.png)
 
 ## Features
 
 - **Eval-to-Evolution Loop with skill-upper**: Create evals through natural conversation, diagnose failures, automatically repair or expand cases, and rerun skill-up until the eval suite evolves.
 - **Declarative Eval Config**: Define evaluation environment, engine, model, and cases through YAML (`eval.yaml` + `cases/*.yaml`).
+- **Environment Provisioning**: Prepare a local, Docker, or OpenSandbox runtime for each case, install configured real or mocked MCP servers into supported Agent Engines, and upload `context.repo_fixture` and `context.files` into the workspace.
+- **Skill-Optional Runs and Workspace Cases**: Evaluate an agent without a Skill, prepare repository fixtures per case, or run against an existing local workspace with `--workspace`.
 - **Multi-Engine Support**: Works with Qoder CLI, Claude Code, and Codex as built-in Agent Engines, plus user-defined agents via `engine.custom` (local transport — see [docs/design/custom-engine.md](docs/design/custom-engine.md)).
 - **DeepSeek Harness Plugin**: Use the bundled `skill-upper` Skill, opt-in durable observation capture, approval-gated regression cases, isolated runs, and status comparison to verify evidence-backed Skill improvements. See [`plugins/dsh-skill-up`](plugins/dsh-skill-up/README.md).
 - **Flexible Judging**: Supports `rule_based`, `script`, and `agent_judge` evaluation strategies.
@@ -69,18 +73,20 @@
 
 ## Why skill-up
 
-The official [Agent Skills evaluation guide](https://agentskills.io/skill-creation/evaluating-skills) describes the right evaluation loop: write realistic cases, run with and without the Skill, grade outputs, aggregate results, and iterate. `skill-up` turns that workflow into a reusable CLI:
+[Harness engineering](https://openai.com/index/harness-engineering/) treats an agent's environment, tools, constraints, and feedback loops as parts of the system to design and improve. [Behavioral evals](https://developers.googleblog.com/the-anatomy-of-harness-engineering-how-to-evaluate-iterate-and-guard-ai-coding-agents/) make expected agent actions observable and help catch regressions. `skill-up` contributes evaluation and feedback to this work: repeatable prompts and workspace setups, checks on responses, tool calls, and file changes, and structured reports.
+
+For Skills, the official [Agent Skills evaluation guide](https://agentskills.io/skill-creation/evaluating-skills) describes a further loop: run with and without the Skill, grade outputs, aggregate results, and iterate. `skill-up` supports these workflows:
 
 - Replaces ad hoc run folders with a declarative `eval.yaml` + `cases/*.yaml` format.
 - Closes the improvement loop: skill-upper can interpret failed reports, repair or add eval cases, and drive the next skill-up run through conversation.
-- Automates workspace setup, Skill installation, Agent Engine invocation, judging, and report generation.
+- Automates workspace setup, optional Skill installation, Agent Engine invocation, judging, and report generation.
 - Supports multiple engines (`claude_code`, `codex`, `qodercli`, `qwen_code`) instead of tying the workflow to one client.
 - Keeps compatibility with Anthropic-style `evals.json` while adding richer judges, CI-friendly commands, and structured reports.
 
 ## Quick Start: Evolve a Skill with skill-upper
 
-The recommended way to use skill-up is through **skill-upper**, the Agent Skill
-shipped in this repository. It lets your AI agent create evals, run skill-up,
+For Skill evolution, use **skill-upper**, the Agent Skill shipped in this
+repository. It lets your AI agent create evals, run skill-up,
 understand failures, fix the Skill or its evals, add regression coverage, and
 repeat the loop through conversation.
 
@@ -160,6 +166,49 @@ See the official documentation for
 [User Configuration](https://alibaba.github.io/skill-up/guide/user-config).
 Windows-specific setup and limitations are covered in the
 [Windows guide](https://alibaba.github.io/skill-up/guide/windows).
+
+## Evaluate an agent or workspace without a Skill
+
+An agent-only eval does not need `SKILL.md`. Set `skills: []` explicitly: when
+`skills` is omitted and skill-up finds a `SKILL.md` above the config, it installs
+that Skill automatically. Put `eval.yaml` and case files under `evals/`, then
+pass the config path explicitly. Case and fixture paths resolve from the
+discovered Skill root, or from the directory containing `evals/` if none is found.
+
+```yaml
+# evals/eval.yaml
+schema_version: v1alpha1
+environment:
+  type: none
+skills: []
+engine:
+  name: codex
+cases:
+  files:
+    - evals/cases/agent-response.yaml
+```
+
+```yaml
+# evals/cases/agent-response.yaml
+input:
+  prompt: Reply with READY.
+expect:
+  must_contain: [READY]
+```
+
+```bash
+skill-up validate ./evals/eval.yaml
+skill-up run ./evals/eval.yaml
+```
+
+For repository tasks, a case can use `context.repo_fixture` to prepare a fresh
+workspace and `expect` or a judge to check the result. To evaluate an agent in
+an already prepared local directory, use a case written for that directory and
+run `skill-up run ./evals/eval.yaml --workspace /path/to/project --parallelism 1`.
+The existing directory is preserved, but the agent and case setup can change
+its contents. This option requires `environment.type: none`, one case at a time,
+and benchmark mode off. See [Writing Evals](docs/guide/writing-evals.md)
+and the [CLI Reference](docs/guide/cli-reference.md#skill-up-run).
 
 ## User config
 

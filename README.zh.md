@@ -6,7 +6,7 @@
   <h1>skill-up</h1>
 
   <p align="center">
-    <b>Agent Skill 的评测与演进工具。</b>
+    <b>评测 Agent Skill、Agent 与 Workspace，基于证据演进 Skill。</b>
   </p>
 
   <p align="center">
@@ -49,17 +49,21 @@
 
 ## 简介
 
-**skill-up** 是 Agent Skill 的评测与演进工具。
+**skill-up** 是评测 Agent Skill、Agent 及其 Workspace 的 CLI。它用声明式用例驱动 Agent Engine，检查响应和 Workspace 变更，并在本地或 CI 生成报告。
 
-- **评测（Evaluation）**让 Skill 质量可度量、可复现：声明式 YAML 用例可在多个 Agent Engine 中运行，通过规则、脚本或 Agent Judge 评分，并在本地或 CI 中生成结构化报告。
-- **演进（Evolution）**把评测结果变成下一轮改进：通过对话，**skill-upper** 读取失败、自动修复或补充 eval 用例、重新运行 skill-up，并与你持续迭代。
+- **Skill 评测**：验证 Skill 在不同用例中的行为，并可对比安装与不安装 Skill 的结果。
+- **Agent 评测**：不安装 Skill，直接评估内置或自定义 Agent 的表现。
+- **Workspace 评测**：使用用例 fixture 或已有本地目录，检查 Agent 对文件和代码仓库的处理结果。
+- **Skill 演进**：**skill-upper** 通过对话分析失败、修复或补充评测用例，并重新运行 skill-up。
 
-![skill-up 通过自动修复和迭代 eval 来评测并演进 Agent Skill](docs/public/skill-up-overview.png)
+![skill-upper 驱动的 Skill 评测与演进流程](docs/public/skill-up-overview.png)
 
 ## 特性
 
 - **skill-upper 从评测到演进的闭环**：通过自然对话创建评测、诊断失败、自动修复或补充用例并重新运行 skill-up，让 eval 评测集持续演进。
 - **声明式评测配置**：通过 YAML（`eval.yaml` + `cases/*.yaml`）定义评测环境、引擎、模型和用例。
+- **运行环境准备**：为每个用例准备本地、Docker 或 OpenSandbox 环境，在支持的 Agent Engine 中安装配置的真实或 Mock MCP Server，并将 `context.repo_fixture` 和 `context.files` 上传到 workspace。
+- **可选 Skill 与 Workspace 用例**：无需安装 Skill 即可评测 Agent；可按用例准备代码仓库 fixture，或用 `--workspace` 评测已有本地目录。
 - **多引擎支持**：内置支持 Qoder CLI、Claude Code、Codex；亦可通过 `engine.custom` 接入用户自定义 Agent（本地传输，详见 [docs/design/custom-engine.md](docs/design/custom-engine.md)）。
 - **DeepSeek Harness 插件**：通过内置的 `skill-upper` Skill、显式启用的持久化观察采集、审批门禁回归用例、隔离运行与状态对比，验证有证据的 Skill 改进。详见 [`plugins/dsh-skill-up`](plugins/dsh-skill-up/README.md)。
 - **灵活评分**：支持 `rule_based`（规则匹配）、`script`（脚本评分）、`agent_judge`（Agent 评分）三种评估策略。
@@ -69,17 +73,19 @@
 
 ## 为什么需要 skill-up
 
-官方的 [Agent Skills 评测指南](https://agentskills.io/skill-creation/evaluating-skills) 说明了正确的评测循环：编写真实用例，分别运行 with/without Skill，评分输出，汇总结果，然后持续迭代。`skill-up` 的价值是把这套流程产品化成一个可复用的 CLI：
+[Harness engineering](https://openai.com/index/harness-engineering/) 将 Agent 的运行环境、工具、约束和反馈循环都视为需要设计与改进的系统部分；[行为评测](https://developers.googleblog.com/the-anatomy-of-harness-engineering-how-to-evaluate-iterate-and-guard-ai-coding-agents/) 则让预期动作可观察，并帮助发现回归。`skill-up` 提供其中的评测与反馈环节：用可复现的提示词和 Workspace 运行 Agent，检查响应、工具调用和文件变更，并生成结构化报告。
+
+评测 Skill 时，官方的 [Agent Skills 评测指南](https://agentskills.io/skill-creation/evaluating-skills) 还强调安装与不安装 Skill 的对比、评分汇总和持续迭代。`skill-up` 用同一套 CLI 支持这些流程：
 
 - 用声明式的 `eval.yaml` + `cases/*.yaml` 取代临时拼出来的运行目录。
 - 补齐持续改进闭环：skill-upper 可以解读失败报告、修复或新增 eval 用例，并通过对话驱动下一轮 skill-up 运行。
-- 自动完成 workspace 准备、Skill 安装、Agent Engine 调用、评分和报告生成。
+- 自动完成 Workspace 准备、按需安装 Skill、调用 Agent Engine、评分和生成报告。
 - 支持多个引擎（`claude_code`、`codex`、`qodercli`、`qwen_code`），不绑定单一客户端。
 - 兼容 Anthropic 风格的 `evals.json`，同时提供更丰富的 judge、适合 CI 的命令和结构化报告。
 
 ## 快速上手：使用 skill-upper 演进 Skill
 
-推荐通过仓库内置的 **skill-upper** Agent Skill 使用 skill-up。它可以让
+演进 Skill 时，可使用仓库内置的 **skill-upper** Agent Skill。它可以让
 AI Agent 通过对话创建评测、运行 skill-up、理解失败原因、修复 Skill 或
 eval、补充回归用例，并持续完成下一轮迭代。
 
@@ -156,6 +162,48 @@ curl -fsSL https://raw.githubusercontent.com/alibaba/skill-up/main/install.sh | 
 [用户配置](https://alibaba.github.io/skill-up/zh/guide/user-config)。
 Windows 的安装方式与已知限制请参阅
 [Windows 指南](https://alibaba.github.io/skill-up/zh/guide/windows)。
+
+## 不依赖 Skill 评测 Agent 或 Workspace
+
+Agent 评测集不需要 `SKILL.md`，但应显式设置 `skills: []`：省略 `skills` 时，
+如果 skill-up 在配置文件的上层目录找到 `SKILL.md`，就会自动安装该 Skill。
+将 `eval.yaml` 和用例放在 `evals/` 下，并显式传入配置路径。用例和 fixture
+路径相对于找到的 Skill 根目录解析；找不到时则相对于 `evals/` 所在目录。
+
+```yaml
+# evals/eval.yaml
+schema_version: v1alpha1
+environment:
+  type: none
+skills: []
+engine:
+  name: codex
+cases:
+  files:
+    - evals/cases/agent-response.yaml
+```
+
+```yaml
+# evals/cases/agent-response.yaml
+input:
+  prompt: Reply with READY.
+expect:
+  must_contain: [READY]
+```
+
+```bash
+skill-up validate ./evals/eval.yaml
+skill-up run ./evals/eval.yaml
+```
+
+评测代码仓库任务时，可在用例中用 `context.repo_fixture` 准备独立的
+Workspace，再通过 `expect` 或 Judge 检查结果。评测已准备好的本地目录时，
+先编写适用于该目录的用例，再运行
+`skill-up run ./evals/eval.yaml --workspace /path/to/project --parallelism 1`。
+skill-up 会保留这个目录，但 Agent 和用例准备步骤可能修改其中内容。此参数仅
+支持 `environment.type: none`、串行用例且关闭 benchmark。详见
+[编写评测](docs/zh/guide/writing-evals.md)和
+[CLI 命令参考](docs/zh/guide/cli-reference.md#skill-up-run)。
 
 ## CLI 命令概览
 

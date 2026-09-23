@@ -37,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    recursively copying its own target, and snapshot paths are handled literally
    on POSIX shells.
 
+### Changed
+- Clarify in the English and Chinese READMEs that the evaluation CLI also
+  supports agent-only and workspace evaluations without a Skill, alongside
+  the Skill evolution workflow, and place its evaluation loop in the context
+  of harness engineering. Describe per-case MCP installation and workspace
+  fixture uploads.
+
 ### Fixed
 - DeepSeek Harness plugin tests now use a committed lockfile and an exact
   `0.1.5-rc.2` host peer set, preventing newer release candidates from making
