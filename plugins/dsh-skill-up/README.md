@@ -14,6 +14,26 @@ The intended workflow starts from a real new input or scenario:
 The plugin grounds each improvement in gaps revealed by the supplied scenario
 and verifies case status instead of treating process exit alone as proof.
 
+## 示例：排除依赖目录后统计项目代码
+
+[`code-stats` 示例](../../examples/code-stats/)会统计文件数量、行数和扩展名分布。
+新增的[回归用例](../../examples/code-stats/evals/cases/exclude-dependencies.yaml)在一个只有
+3 个自有文件的小项目里放入 `node_modules/example-package/index.js`，检查统计结果仍是
+3 个文件、2 个 `.go` 文件和 1 个 `.md` 文件，且不出现 `.js` 行。这样能直接发现把
+第三方依赖误算成项目代码的问题。
+
+可以先检查用例配置：
+
+```bash
+skill-up validate examples/code-stats/evals/eval.yaml
+```
+
+下面是真实 DSH 会话中的另一项演示：通过 `skill_up_compare` 查看发布通知 Skill
+的同一个回归用例在修改前后从 FAIL 变为 PASS。截图展示的是该发布通知用例，
+不是上面的 `code-stats` 用例的运行结果。
+
+![DSH 中的 skill_up_compare 逐用例对比](../../docs/public/dsh-skill-up-compare.jpg)
+
 ## Install from a checkout
 
 Prerequisites:
