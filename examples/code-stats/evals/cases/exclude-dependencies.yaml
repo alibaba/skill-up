@@ -4,12 +4,21 @@ description: 验证代码统计不会把 node_modules 中的第三方文件算�
 
 input:
   prompt: |
-    请使用 code-stats 统计当前项目自己维护的代码，按 Skill 规定的完整格式报告。
+    请先调用 skill 工具加载 code-stats，然后严格按照 Skill 自己的目录扫描规则统计 ./project 的文件与扩展名分布，不要自行添加忽略规则。按 Skill 规定的完整格式报告。
 
 context:
-  repo_fixture: evals/fixtures/repos/sample-project
   files:
-    node_modules/example-package/index.js: |
+    project/README.md: |
+      # Demo Project
+    project/main.go: |
+      package main
+
+      func main() {}
+    project/util.go: |
+      package main
+
+      func helper() {}
+    project/node_modules/demo-lib/index.js: |
       export function externalDependency() {
         return 'third-party code';
       }

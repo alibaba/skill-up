@@ -14,6 +14,9 @@ The intended workflow starts from a real new input or scenario:
 The plugin grounds each improvement in gaps revealed by the supplied scenario
 and verifies case status instead of treating process exit alone as proof.
 
+For a worked Chinese walkthrough of this feedback cycle using `code-stats`,
+see [DEMO.zh.md](DEMO.zh.md).
+
 ## Install from a checkout
 
 Prerequisites:
