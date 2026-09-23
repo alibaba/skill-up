@@ -1,7 +1,7 @@
 # Distribution-specific guidance
 
 This file is an extension point for packaged distributions of `skill-upper`.
-The canonical GitHub release intentionally contains no platform-specific
+The canonical source tree intentionally contains no platform-specific
 instructions here. A distributor may replace this file while assembling its
 package, provided that the replacement:
 

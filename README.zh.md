@@ -90,11 +90,6 @@ npx skills add https://github.com/alibaba/skill-up/tree/main/skills/skill-upper 
 npx skills add https://github.com/alibaba/skill-up/tree/main/skills/skill-upper -g -a claude-code -y
 ```
 
-每个 GitHub Release 还会发布带 checksum 的
-`skill-upper_<version>.tar.gz`。内部分发方应直接消费这个不可变的 canonical
-包，只替换 `references/distribution.md` 中的平台特有提示；其余 Skill 文件不应
-再复制或独立维护。
-
 通常不需要提前安装 skill-up。skill-upper 运行时会检查 CLI；如果缺失，
 它会引导 Agent 完成安装。
 

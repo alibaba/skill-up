@@ -8,10 +8,7 @@ on:
     branches: [main]
     paths:
       - ".github/scripts/install-gh.sh"
-      - ".github/scripts/package_skill_upper.py"
-      - ".github/scripts/package_skill_upper_test.py"
       - ".github/workflows/release.yml"
-      - "skills/skill-upper/**"
 
 permissions: {}
 
@@ -45,9 +42,6 @@ jobs:
           set -euo pipefail
           gh --version
           gh api "repos/${GITHUB_REPOSITORY}" --jq .full_name
-
-      - name: Verify skill-upper release packaging
-        run: python3 -m unittest discover -s .github/scripts -p '*_test.py'
 
   build:
     name: Build release artifacts
@@ -96,15 +90,6 @@ jobs:
           # The changelog provider reads repository history through the API.
           # This token is read-only in the build job and cannot publish.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Package canonical skill-upper Skill
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          python3 .github/scripts/package_skill_upper.py \
-            --version "${RELEASE_TAG}" \
-            --output-dir dist
 
       - name: Upload release artifacts for approval
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -1,4 +1,4 @@
-.PHONY: build test test-plugin test-release test-action vet fmt fmt-check lint lint-new revive verify tidy clean install hooks e2e lint-tools coverage coverage-badge
+.PHONY: build test test-plugin test-action vet fmt fmt-check lint lint-new revive verify tidy clean install hooks e2e lint-tools coverage coverage-badge
 
 CMD := ./cmd/skill-up
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -25,14 +25,11 @@ export GOPRIVATE GOPROXY GOBIN GOCACHE GOLANGCI_LINT_CACHE GOFLAGS PATH
 build: hooks
 	go build $(LDFLAGS) -o bin/skill-up ./cmd/skill-up
 
-test: test-plugin test-release
+test: test-plugin
 	go test -race ./...
 
 test-plugin:
 	python3 -m unittest discover -s plugins/skill-up-observer/tests -p 'test*.py'
-
-test-release:
-	python3 -m unittest discover -s .github/scripts -p '*_test.py'
 
 test-action:
 	python3 -m unittest discover -s action -p '*_test.py'
