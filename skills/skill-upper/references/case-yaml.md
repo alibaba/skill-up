@@ -1,13 +1,13 @@
-# case.yaml 字段参考（skill-up）
+# case.yaml field reference (skill-up)
 
-每个 `evals/cases/*.yaml` 是一个评测用例。用例 ID = 文件名（去掉 `.yaml`）。语义与 skill-up 内置 schema 一致。
+Each `evals/cases/*.yaml` defines one evaluation case. The case ID is the filename without `.yaml`. These examples follow the built-in skill-up schema.
 
-## 单轮用例骨架
+## Single-turn case
 
 ```yaml
 id: find-null-bug
-title: 应该识别出空指针 bug
-description: 验证 Skill 能在代码审查中发现 null 解引用问题
+title: Identify a null dereference bug
+description: Verify that the Skill detects a null dereference during code review
 
 input:
   prompt: |
@@ -37,32 +37,33 @@ judge:
     - exit_code: 0
 ```
 
-## 多轮对话
+## Multi-turn conversation
 
 ```yaml
 input:
   turns:
     - role: user
-      content: "sdd_bootstrap: task=实现用户登录功能"
+      content: "sdd_bootstrap: task=implement user login"
       post_condition:
-        must_contain_any: ["Research", "分析"]
-        on_fail: skip_remaining      # 或 fail
+        must_contain_any: ["Research", "analysis"]
+        on_fail: skip_remaining      # or fail
       capture:
         - variable: phase
           pattern: "(?P<value>Research|Implementation)"
     - role: user
-      content: "跳过 Research，直接帮我写代码"
+      content: "Skip Research and write the code directly"
 ```
 
-`post_condition`：每轮结束后检查输出。`on_fail: skip_remaining` 标为 SKIP，`fail` 直接 FAIL 整个用例。
+`post_condition` checks the response after each turn. `on_fail: skip_remaining` marks the remaining turns SKIP; `fail` fails the whole case.
 
-`capture`：从响应中捕获值，用于后续轮次的 `{{variable}}` 模板替换。
-  • 提取器：`pattern`（正则）或 `jsonpath`，必须且仅指定一个
-  • 优先使用 `(?P<value>...)` 命名组
-  • 未匹配/空值 → 用例进入 ERROR 状态
-  • 作用域仅限当前用例执行
+`capture` extracts values from the response for `{{variable}}` substitution in later turns:
 
-### 按轮次 Judge 断言
+- Specify exactly one extractor: `pattern` (regular expression) or `jsonpath`.
+- Prefer a named `(?P<value>...)` capture group.
+- No match or an empty value puts the case in ERROR state.
+- Captured values are scoped to this case execution.
+
+### Per-turn judge assertions
 
 ```yaml
 judge:
@@ -70,7 +71,7 @@ judge:
   success:
     - turn_response_contains:
         turn: 2
-        contains_any: ["必须完成", "不能跳过", "Research"]
+        contains_any: ["must complete", "cannot skip", "Research"]
     - turn_response_not_contains:
         turn: 2
         not_contains: ["LGTM"]
@@ -82,9 +83,9 @@ judge:
         name: delete_file
 ```
 
-仅 `status=completed` 的轮次可被断言；引用不存在或未完成的轮次会导致断言失败。
+Only turns with `status=completed` can be asserted. Referencing a missing or incomplete turn fails the assertion.
 
-## context — 初始化工作区
+## context: initialize the workspace
 
 ```yaml
 context:
@@ -103,7 +104,7 @@ context:
     "config.json": '{"debug": true}'
 ```
 
-## expect — 零成本门槛检查
+## expect: inexpensive gate checks
 
 ```yaml
 expect:
@@ -125,17 +126,17 @@ expect:
   golden_file: "expected.txt"
 ```
 
-expect 不通过时，judge 会被跳过。用它来快速过滤明显不合格的输出，节省 token。
+If `expect` fails, the judge is skipped. Use it to reject clearly unsuitable results before spending judge tokens.
 
-**与 `cases.defaults.expect` 合并：**
+**Merging with `cases.defaults.expect`:**
 
-- 如果 `eval.yaml` 的 `cases.defaults.expect` 定义了默认检查（如 `exit_code: 0`, `must_not_contain: ["TODO"]`），每个用例的 expect 会与之合并
-- 切片字段（`must_contain`, `must_not_contain`, `files_exist`, `files_not_exist`, `file_contains`）追加去重；标量字段（`exit_code`, `golden_file`）由用例覆盖
-- 用例未设 expect 时，直接使用默认值
+- A case's `expect` merges with any defaults defined in `eval.yaml`, such as `exit_code: 0` or `must_not_contain: ["TODO"]`.
+- List fields (`must_contain`, `must_not_contain`, `files_exist`, `files_not_exist`, `file_contains`) append and deduplicate. Case values override scalar fields (`exit_code`, `golden_file`).
+- If a case omits `expect`, the defaults apply directly.
 
-## 常见写法
+## Common patterns
 
-- **纯文本路由 Skill**：`expect.must_contain` + `judge.rule_based.output_contains`
-- **MCP 工具校验**：`judge.rule_based.success[tool_called]`
-- **语义质量评估**：`judge.agent_judge.criteria`
-- **复杂结构化断言**：`judge.script`，在脚本里读 `$EVAL_TRANSCRIPT_PATH` 等自由判断
+- **Text-routing Skill:** `expect.must_contain` and `judge.rule_based.output_contains`.
+- **MCP tool use:** `judge.rule_based.success[tool_called]`.
+- **Semantic quality:** `judge.agent_judge.criteria`.
+- **Complex structured checks:** `judge.script`, which can read `$EVAL_TRANSCRIPT_PATH` and other inputs.

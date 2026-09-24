@@ -1,65 +1,52 @@
-# 安装 / 升级 / 排错
+# Install, upgrade, and troubleshoot
 
-这里区分两个独立组件：
+There are two separate components:
 
-- `skill-up`：运行评测的 CLI 二进制。
-- observation host plugin：可选的 Codex 或 DSH 插件，用于采集和审核真实
-  Skill 使用记录。普通评测不需要安装插件。
+- `skill-up`: the CLI binary that runs evaluations.
+- An observation host plugin: an optional Codex or DSH integration for capturing and reviewing real Skill usage. Ordinary evaluations do not require a plugin.
 
-`skill-up` 以预编译单二进制发布在 [GitHub Releases](https://github.com/alibaba/skill-up/releases)，无运行时依赖（不需要 Go、Python、Node 等即可使用官方安装脚本）。
+`skill-up` is distributed as a prebuilt standalone binary through [GitHub Releases](https://github.com/alibaba/skill-up/releases). The official installer does not require Go, Python, or Node at runtime.
 
-> **平台**：仅支持 **macOS / Linux**，暂不支持 Windows。
+> **Platforms:** macOS and Linux only. Windows is not currently supported.
 
-## 官方安装脚本（macOS / Linux）
+## Official installer (macOS and Linux)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/alibaba/skill-up/main/install.sh | bash
 ```
 
-脚本行为概要：
+The script detects the OS (`darwin` or `linux`) and architecture (`amd64` or `arm64`), downloads the matching release archive and checksums, installs to `~/.local/bin/skill-up` by default, and verifies the checksum when `sha256sum` or `shasum` is available.
 
-- 识别 OS（darwin / linux）与架构（amd64 / arm64）
-- 从 GitHub Releases 下载对应压缩包与校验文件
-- 默认安装到 `~/.local/bin/skill-up`
-- 可用 `sha256sum` / `shasum` 校验（若本机有相应工具）
-
-### 版本与安装目录
+### Version and installation directory
 
 ```bash
-# 固定版本（可为 vX.Y.Z 或 X.Y.Z，脚本会规范化为带 v 的 tag）
+# Pin a version (vX.Y.Z or X.Y.Z; the script normalizes the tag).
 export SKILL_UP_VERSION=v0.1.0
 curl -fsSL https://raw.githubusercontent.com/alibaba/skill-up/main/install.sh | bash
 
-# 自定义目录
+# Choose a different directory.
 export INSTALL_DIR="$HOME/bin"
 curl -fsSL https://raw.githubusercontent.com/alibaba/skill-up/main/install.sh | bash
 ```
 
-## 验证安装
+## Verify the installation
 
 ```bash
 skill-up --version
 skill-up --help
 ```
 
-## 安装 observation host plugin（可选）
+## Install an observation host plugin (optional)
 
-只有在用户要求使用 observation capture/review 时才安装。仓库当前没有接入
-公开 marketplace 或 npm；两个自包含安装包都来自
-[GitHub Releases](https://github.com/alibaba/skill-up/releases)。以下示例用
-`0.13.0`，实际使用时替换为目标 release 版本。
+Install a plugin only when the user requests observation capture or review. The repository does not currently publish these packages through a public marketplace or npm. Both self-contained archives come from [GitHub Releases](https://github.com/alibaba/skill-up/releases). The examples use `0.13.0`; replace it with the desired release version.
 
-### Codex（`codex-skill-up`）
+### Codex (`codex-skill-up`)
 
-要求：支持插件与 lifecycle hooks 的当前 Codex CLI 或 ChatGPT 桌面端，以及
-`python3`。Codex IDE extension 不支持该插件。
+Requires a current Codex CLI or ChatGPT desktop app with plugin and lifecycle hook support, plus `python3`. The Codex IDE extension does not support this plugin.
 
-如果此前从旧 checkout 安装过名为 `skill-up-observer` 的本地插件，先在
-Plugins Directory 中卸载或禁用旧插件，再安装 `codex-skill-up`，避免两组 hooks
-同时运行。原 `$CODEX_HOME/plugin-data/skill-up-observer` 数据目录保持不变。
+If the old local plugin named `skill-up-observer` was installed from a checkout, uninstall or disable it in the Plugins Directory before installing `codex-skill-up` so both sets of hooks do not run. The existing `$CODEX_HOME/plugin-data/skill-up-observer` directory remains intact.
 
-Codex 的本地插件通过 marketplace 发现，不能直接对 tarball 执行安装。下载并
-解压到一个独立的本地 marketplace：
+Codex discovers local plugins through a marketplace; it cannot install the tarball directly. Download and extract it into a separate local marketplace:
 
 ```bash
 export SKILL_UP_VERSION=0.13.0
@@ -72,7 +59,7 @@ curl -fL \
 tar -xzf /tmp/codex-skill-up.tar.gz -C "$SKILL_UP_MARKETPLACE/plugins"
 ```
 
-在 `$SKILL_UP_MARKETPLACE/.agents/plugins/marketplace.json` 写入：
+Create `$SKILL_UP_MARKETPLACE/.agents/plugins/marketplace.json`:
 
 ```json
 {
@@ -97,20 +84,18 @@ tar -xzf /tmp/codex-skill-up.tar.gz -C "$SKILL_UP_MARKETPLACE/plugins"
 }
 ```
 
-注册并检查 marketplace：
+Register and inspect the marketplace:
 
 ```bash
 codex plugin marketplace add "$SKILL_UP_MARKETPLACE"
 codex plugin marketplace list
 ```
 
-然后重启 ChatGPT 桌面端，在 Plugins Directory 中选择 **Skill Up Local**，安装
-**codex-skill-up**，并在提示时审核、信任其 hooks。安装后新建对话验证
-`skill-upper` 以及 `mark_skill_invocation`、`record_skill_feedback` 等工具可用。
+Restart the ChatGPT desktop app, select **Skill Up Local** in the Plugins Directory, install **codex-skill-up**, and review and trust its hooks when prompted. In a new conversation, verify that `skill-upper` and tools such as `mark_skill_invocation` and `record_skill_feedback` are available.
 
-### DeepSeek Harness（DSH）
+### DeepSeek Harness (DSH)
 
-要求：`dsh` 0.1.5-rc.2 或更新版本、`pnpm`，以及 PATH 中可用的 `skill-up`。
+Requires `dsh` 0.1.5-rc.2 or later, `pnpm`, and `skill-up` on `PATH`.
 
 ```bash
 export SKILL_UP_VERSION=0.13.0
@@ -121,8 +106,7 @@ dsh plugin --profile web add "/tmp/alibaba-dsh-skill-up-${SKILL_UP_VERSION}.tgz"
 dsh --profile web --dump-config
 ```
 
-安装本身不会同意采集。需要 observation workflow 时，在该 profile 的
-`cordis.patch.yml` 中将插件配置显式设为：
+Installation alone does not opt in to capture. For the observation workflow, explicitly configure the plugin in the profile's `cordis.patch.yml`:
 
 ```yaml
 - id: skill-up
@@ -133,49 +117,48 @@ dsh --profile web --dump-config
       enabled: true
 ```
 
-重新启动该 DSH profile，再确认 observation tools 可用。若只需要运行评测，
-保持 `observer.enabled: false` 即可。
+Restart that DSH profile and verify the observation tools. If only evaluation runs are needed, leave `observer.enabled: false`.
 
-## 升级
+## Upgrade
 
-再次执行安装脚本即可覆盖旧二进制（可先设 `SKILL_UP_VERSION` 锁定版本）。
+Run the installer again to replace the old binary. Set `SKILL_UP_VERSION` first to pin a release.
 
-## 排错
+## Troubleshooting
 
 ### `command not found: skill-up`
 
-通常是 `~/.local/bin` 不在 `PATH`。
+Usually `~/.local/bin` is missing from `PATH`.
 
-**macOS（zsh）**：
+**macOS (zsh):**
 
 ```bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-**Linux（bash）**：
+**Linux (bash):**
 
 ```bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-### 下载失败 / 网络受限
+### Download fails or network is restricted
 
-- 配置代理：`export HTTPS_PROXY=http://your-proxy:port`
-- 或从 [Releases](https://github.com/alibaba/skill-up/releases) 手动下载对应 `skill-up_*_*.tar.gz` 与 `checksums.txt`，解压后将二进制放到 PATH 内并 `chmod +x`
+- Configure a proxy: `export HTTPS_PROXY=http://your-proxy:port`.
+- Or download the matching `skill-up_*_*.tar.gz` and `checksums.txt` from [Releases](https://github.com/alibaba/skill-up/releases), extract the binary into a directory on `PATH`, and run `chmod +x` on it.
 
-### macOS "无法验证开发者"
+### macOS says it cannot verify the developer
 
 ```bash
 xattr -d com.apple.quarantine "$(which skill-up)"
 ```
 
-或在「系统设置 → 隐私与安全性」中允许。
+Alternatively, allow it in System Settings → Privacy & Security.
 
-### 从源码构建
+### Build from source
 
-已与仓库 schema 一致，适合开发：
+For development against the repository's current schema:
 
 ```bash
 make build

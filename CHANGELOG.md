@@ -38,6 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    on POSIX shells.
 
 ### Changed
+- Publish the canonical `skill-upper` instructions and reference guides in
+  English while retaining the Chinese overview and language-specific eval
+  fixtures.
 - Clarify in the English and Chinese READMEs that the evaluation CLI also
   supports agent-only and workspace evaluations without a Skill, alongside
   the Skill evolution workflow, and place its evaluation loop in the context
