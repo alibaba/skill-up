@@ -3,6 +3,9 @@
 An Agent Skill that helps you evaluate and evolve other Agent Skills using the
 `skill-up` CLI.
 
+The canonical Skill instructions and references are in English. A localized
+overview is available in [README.zh.md](README.zh.md).
+
 ## What it does
 
 `skill-upper` guides you through an evaluation-to-evolution loop:

@@ -1,8 +1,8 @@
-# eval.yaml 字段参考（skill-up）
+# eval.yaml field reference (skill-up)
 
-`eval.yaml` 是评测入口，声明「在什么环境、用什么 Engine、跑哪些用例、如何出报告」。内容对齐 [skill-up 用户手册 - 编写评测](https://alibaba.github.io/skill-up/zh/guide/writing-evals.html)。
+`eval.yaml` is the evaluation entry point. It specifies the environment, Agent Engine, cases, judge, and reports. See the [writing evaluations guide](https://alibaba.github.io/skill-up/guide/writing-evals.html).
 
-## 完整字段骨架
+## Full configuration example
 
 ```yaml
 schema_version: v1alpha1
@@ -13,18 +13,18 @@ environment:
 mcp:
   servers:
     - name: github
-      mode: real                  # real；mocked 预留
-      transport: http             # http | stdio；可按 endpoint/command 推断
+      mode: real                  # real; mocked is reserved
+      transport: http             # http | stdio; inferred from endpoint/command when omitted
       config_ref: evals/fixtures/mcp/github.yaml
 
 skills:
   - source: local_path
     path: .
-    include: [SKILL.md, "references/**", "scripts/**"]  # 可选；不配置表示全部文件
-    exclude: [".qoder/repowiki/**"]                     # 可选；exclude 优先
+    include: [SKILL.md, "references/**", "scripts/**"]  # Optional; all files by default
+    exclude: [".qoder/repowiki/**"]                     # Optional; exclude takes priority
 
 engine:
-  name: claude_code               # claude_code | codex | qodercli（也兼容 qoder-cli）
+  name: claude_code               # claude_code | codex | qodercli (qoder-cli also accepted)
   model:
     provider: anthropic
     name: claude-sonnet-4-6
@@ -36,10 +36,10 @@ cases:
   defaults:
     timeout_seconds: 300
     max_turns: 12
-    collect_artifacts:          # 可选：用 glob 采集 workspace 产物文件
+    collect_artifacts:          # Optional: workspace files selected by glob
       - "**/*.json"
       - "report/**"
-    expect:                     # 可选：默认 expect 检查，应用于所有用例
+    expect:                     # Optional: gate checks for every case
       exit_code: 0
       must_not_contain:
         - "TODO"
@@ -52,11 +52,11 @@ cases:
 judge:
   type: agent_judge
   model: anthropic/claude-sonnet-4-6
-  skills:                         # 可选：仅安装给 judge agent 的评分 Skill
+  skills:                         # Optional: rubric Skills installed only for the judge
     - source: local_path
       path: evals/fixtures/judge-rubric
   criteria:
-    - "按 judge-rubric 中的细则判断输出是否满足要求"
+    - "Apply the scoring rules in judge-rubric to assess the output"
 
 benchmark:
   enabled: false
@@ -66,27 +66,23 @@ report:
   artifacts: [transcript]
 ```
 
-`cases.parallelism` 可被 `skill-up run --parallelism N`（1–256）临时覆盖。
-临时启用基线对比时，可以使用 `skill-up run --baseline`，等价于为本次运行设置 `benchmark.enabled: true`。
+`skill-up run --parallelism N` temporarily overrides `cases.parallelism` (1–256). `skill-up run --baseline` temporarily sets `benchmark.enabled: true`.
 
-`collect_artifacts`（`cases.defaults` 级，或单个 `case.yaml` 内追加）用 [doublestar](https://github.com/bmatcuk/doublestar) glob（`*` 单层、`**` 跨目录）声明要采集的 workspace 文件。无论 Agent 成功/失败/超时，命中文件都会保留相对路径下载到 `<output-dir>/<case>/<config>/outputs/workspace/`。两层按并集去重合并。它与 `report.artifacts`（产物*类型*）、`agent_judge` 的 git diff（字符串）正交。
+`collect_artifacts`, defined in `cases.defaults` or a case file, selects workspace files using [doublestar](https://github.com/bmatcuk/doublestar) globs (`*` within one directory; `**` across directories). Matching files are downloaded with relative paths to `<output-dir>/<case>/<config>/outputs/workspace/` even if the agent fails or times out. Default and case patterns form a deduplicated union. This is separate from `report.artifacts` (artifact types) and the git diff string passed to `agent_judge`.
 
-`skills[].include` / `skills[].exclude` 同样使用 doublestar glob，路径相对
-`skills[].path` 且使用 `/` 分隔。`include` 为空时默认包含全部文件；
-`exclude` 后应用并优先。`evals/` 始终不会安装。显式配置 include 时要包含
-`SKILL.md`。`judge.skills` 也支持同样的过滤字段。
+`skills[].include` and `skills[].exclude` use doublestar globs relative to `skills[].path`, with `/` separators. An empty `include` selects all files; `exclude` is applied afterward and takes priority. `evals/` is never installed. An explicit `include` must contain `SKILL.md`. `judge.skills` supports the same filters.
 
-`judge.skills` 仅支持 `judge.type: agent_judge`，用于给 judge agent 安装可复用的评分 Rubric Skill。它不会安装到主运行 agent；顶层 `skills` 也不会自动安装到 judge。benchmark 下 `with_skill` / `without_skill` 都会安装 judge Skills，因为它们属于评分工具。路径相对 Skill 根目录解析，安装依赖具体 Agent adapter 的原生 Skill 支持；不要把 Skill 文件内容复制进 `criteria`。
+`judge.skills` is supported only with `judge.type: agent_judge`. These reusable rubric Skills install for the judge, not the run agent. Top-level `skills` are not automatically installed for the judge. Both `with_skill` and `without_skill` benchmark runs install judge Skills because they are scoring tools. Paths are resolved relative to the Skill root. Installation requires native Skill support in the selected Agent adapter; do not paste Skill contents into `criteria`.
 
-## 运行环境
+## Execution environments
 
-| type | 适用场景 | 说明 |
+| Type | Use | Requirements |
 | --- | --- | --- |
-| `none` | 纯文本 I/O、不强依赖沙箱 | 冷启动最快 |
-| `opensandbox` | 需要远程沙箱（文件、命令执行等） | 需 `OPENSANDBOX_API_KEY`；服务地址等可放在 `environment.kwargs` 或 `OPENSANDBOX_BASE_URL` |
-| `docker` | 本地容器隔离，无需远程服务 | 需本地 `docker` CLI 和 Docker daemon；镜像需提前拉取 |
+| `none` | Text I/O without a required sandbox | Fastest startup |
+| `opensandbox` | Remote sandbox for files and commands | `OPENSANDBOX_API_KEY`; service settings in `environment.kwargs` or `OPENSANDBOX_BASE_URL` |
+| `docker` | Local container isolation | Docker CLI and daemon; pull the image beforehand |
 
-### OpenSandbox 示例
+### OpenSandbox example
 
 ```yaml
 environment:
@@ -101,42 +97,41 @@ environment:
     file_transfer_parallelism: "8"
 ```
 
-常用 `kwargs`：`base_url`、`extensions`（JSON 字符串）、`request_timeout_seconds`、`file_transfer_parallelism` 等。鉴权密钥来自环境变量 `OPENSANDBOX_API_KEY`。
+Common `kwargs` include `base_url`, `extensions` (a JSON string), `request_timeout_seconds`, and `file_transfer_parallelism`. Authentication comes from `OPENSANDBOX_API_KEY`.
 
-### Docker 示例
+### Docker example
 
 ```yaml
 environment:
   type: docker
-  image: node:22                    # 必填，需提前 docker pull
-  workspace_mount: /workspace       # 默认 /workspace
+  image: node:22                    # Required; pull the image first
+  workspace_mount: /workspace       # Default: /workspace
   env:
     NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
   setup_steps:
     - run: npm install -g typescript
-  entrypoint: ["sleep", "infinity"] # 默认 sleep infinity
+  entrypoint: ["sleep", "infinity"] # Default: sleep infinity
 ```
 
-前置条件：本地 `docker` CLI 和 Docker daemon。`network_policy: deny_all` 以 `--network=none` 创建容器；`allow_declared` 暂不支持。
-
+Docker CLI and daemon are required. `network_policy: deny_all` creates a container with `--network=none`; `allow_declared` is not yet supported.
 
 ## MCP
 
-- `mode: real` 会把真实 MCP Server 装进 Agent。
-- HTTP MCP 可 inline 或 `config_ref` 指向 `evals/fixtures/mcp/*.yaml`。
-- stdio MCP 可配置 `command` / `args`。
-- 环境变量引用：`${VAR}` 或整值 `$VAR`；`required_env` 会注入 Agent 环境。
-- eval 级 `mcp` 是默认配置；用例可在 `cases/*.yaml` 里声明自己的 `mcp.servers`（MVP 仅 `mode: mocked`）按 `name` 整条覆盖同名 Server，从而在相同 Server/工具名下切换 mocked fixture。`config_ref` 仍相对 Skill 目录解析。
+- `mode: real` installs a real MCP server for the agent.
+- HTTP MCP may be configured inline or with `config_ref` pointing to `evals/fixtures/mcp/*.yaml`.
+- Stdio MCP accepts `command` and `args`.
+- Environment references use `${VAR}` or a whole-value `$VAR`; `required_env` injects variables into the agent environment.
+- Evaluation-level `mcp` provides defaults. A case may declare `mcp.servers` (currently `mode: mocked` only), replacing a same-named server as a whole to swap mocked fixtures under the same server and tool names. `config_ref` remains relative to the Skill root.
 
-## Engine 与模型
+## Engine and model
 
-- `engine.model` 可选；省略时由引擎本地默认模型接管。
-- `provider` / `name` 组合在 CLI 中形如 `anthropic/claude-sonnet-4-6`、`openai/gpt-4` 等。
-- `qodercli` 通常无需配置 `model`。
+- `engine.model` is optional; if omitted, the engine chooses its local default model.
+- CLI model IDs combine `provider` and `name`, such as `anthropic/claude-sonnet-4-6` or `openai/gpt-4`.
+- `qodercli` usually needs no `model` configuration.
 
-### `engine.kwargs` —— agent 私有开关
+### `engine.kwargs`: engine-specific switches
 
-`engine.kwargs` 是字符串键值对，每个 agent 只读取自己关心的 key，未知 key 被忽略。无人认识的 key（拼写错误，如 `bypas_sandbox`）会在 verbose 日志里打 DEBUG，`-v` 可见。CLI 等价开关：`--engine-kwarg key=value`（别名 `--ek`），可重复。优先级 `--engine-kwarg` > `engine.kwargs` > 缺省。
+`engine.kwargs` is a map of string keys and values. Each agent reads only keys it recognizes; unknown keys are ignored and reported at DEBUG level with `-v` (useful for typos such as `bypas_sandbox`). The repeatable CLI equivalent is `--engine-kwarg key=value` or `--ek key=value`. Priority: CLI option > `engine.kwargs` > default.
 
 ```yaml
 engine:
@@ -145,15 +140,15 @@ engine:
     bypass_sandbox: "true"
 ```
 
-| key | agent | true 时行为 | 缺省 / false |
-|---|---|---|---|
-| `bypass_sandbox` | `codex` | 命令行强制 `--dangerously-bypass-approvals-and-sandbox`，覆盖根据 runtime 自动决定的 sandbox flag。用于宿主内核不支持 Landlock 的场景（典型：部分 CI 容器） | 维持现状：`none` runtime 用 `--sandbox workspace-write`，其它 runtime 已是 bypass |
-| `bypass_sandbox` | `claude_code` | no-op（claude 现有命令已固定 `--permission-mode=bypassPermissions`） | no-op |
-| `bypass_sandbox` | `qodercli` | no-op（qoder CLI 无对应 flag） | no-op |
+| Key | Agent | Behavior when true | Default or false |
+| --- | --- | --- | --- |
+| `bypass_sandbox` | `codex` | Forces `--dangerously-bypass-approvals-and-sandbox`, overriding the runtime-derived sandbox flag. Useful where the host kernel lacks Landlock support, such as some CI containers. | `none` uses `--sandbox workspace-write`; other runtimes already bypass the sandbox. |
+| `bypass_sandbox` | `claude_code` | No-op; Claude already uses `--permission-mode=bypassPermissions`. | No-op. |
+| `bypass_sandbox` | `qodercli` | No-op; qoder CLI has no corresponding flag. | No-op. |
 
-## 常见错误
+## Common errors
 
-- `opensandbox` 但未配置鉴权或 `base_url` → 运行时失败
-- `engine.model` 与网关不匹配 → 连接报错
-- `cases.files` 路径不存在 → validate 失败
-- 所有相对路径相对于 **Skill 根目录**（`SKILL.md` 所在目录）
+- `opensandbox` without authentication or `base_url`: runtime failure.
+- `engine.model` incompatible with the gateway: connection error.
+- Missing `cases.files` path: validation failure.
+- All relative paths are relative to the **Skill root**, the directory containing `SKILL.md`.
