@@ -421,16 +421,18 @@ export class ObservationCollector {
   }
 }
 
-export function collectSkillFeedback(store, skillName) {
+export function collectSkillFeedback(store, skillName, { offset = 0, limit = 20 } = {}) {
   if (!SKILL_NAME.test(String(skillName || ''))) throw new Error('invalid skill name')
+  if (!Number.isInteger(offset) || offset < 0) throw new Error('offset must be a non-negative integer')
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('limit must be between 1 and 100')
   const observations = store.list().filter((item) => item.skill.name === skillName)
   const withFeedback = observations.filter((item) => item.feedback || item.followups?.length)
   return {
     skill: skillName,
     total_observations: observations.length,
     feedback_observations: withFeedback.length,
-    truncated: withFeedback.length > 20,
-    observations: withFeedback.slice(0, 20).map((item) => ({
+    next_offset: offset + limit < withFeedback.length ? offset + limit : null,
+    observations: withFeedback.slice(offset, offset + limit).map((item) => ({
       id: item.id,
       observed_at: item.timing.observed_at,
       input: item.input.text,

@@ -208,6 +208,26 @@ test('a late next turn is not linked to an old Skill observation', () => {
   assert.equal(store.get(observation.id).followups, undefined)
 })
 
+test('historical feedback collection can page through all matching observations', () => {
+  const records = Array.from({ length: 21 }, (_, index) => ({
+    id: `obs_${String(index).padStart(24, '0')}`,
+    skill: { name: 'code-stats' },
+    timing: { observed_at: '2026-09-24T00:00:00Z' },
+    input: { text: `Run ${index}` },
+    outcome: { status: 'completed' },
+    followups: [{ turn_id: '2', text: `Feedback ${index}`, observed_at: '2026-09-24T00:01:00Z' }],
+  }))
+  const store = { list: () => records }
+  const first = collectSkillFeedback(store, 'code-stats')
+  assert.equal(first.observations.length, 20)
+  assert.equal(first.next_offset, 20)
+  const second = collectSkillFeedback(store, 'code-stats', { offset: first.next_offset })
+  assert.equal(second.observations.length, 1)
+  assert.equal(second.next_offset, null)
+  assert.equal(second.observations[0].input, 'Run 20')
+  assert.throws(() => collectSkillFeedback(store, 'code-stats', { limit: 0 }), /limit/)
+})
+
 test('DSH scopes reused tool call IDs to their session', () => {
   const store = new ObservationStore(mkdtempSync(join(tmpdir(), 'dsh-observer-concurrent-')))
   const collector = new ObservationCollector(store)

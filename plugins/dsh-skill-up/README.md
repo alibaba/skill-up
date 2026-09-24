@@ -111,8 +111,9 @@ collection consent boundary. The adapter listens to committed `session/event`
 records, redacts common credential shapes, stores files with private
 permissions, and ignores unattributed turns as well as the control Skills
 `skill-upper`, `codex-skill-up`, and `dsh-skill-up`. Data is not uploaded.
-`collect_skill_feedback` returns up to 20 recent observations for one Skill,
-including confirmed feedback and next-turn follow-up candidates. Ask DSH to
+`collect_skill_feedback` returns 20 observations per page by default for one
+Skill, including confirmed feedback and next-turn follow-up candidates. Follow
+`next_offset` to review all pages. Ask DSH to
 summarize recurring issues with observation IDs before proposing a change.
 An external scheduler may send that review request periodically; the plugin
 does not schedule reviews or edit Skills by itself.
