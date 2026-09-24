@@ -27,6 +27,7 @@ The engine determines the protocol. For example, `provider: dashscope` with a
 | --- | --- | --- | --- |
 | `claude_code` | Anthropic-compatible; `ANTHROPIC_API_KEY` and `ANTHROPIC_BASE_URL` | Passes an explicit model through to Claude Code | Missing credentials delegate to Claude Code's local login. |
 | `codex` | OpenAI-compatible; `OPENAI_API_KEY` and `OPENAI_BASE_URL` | A non-OpenAI provider requires a base URL before skill-up emits a custom Codex provider and model override | Without the required custom-provider endpoint, the model override is omitted and Codex uses local settings. Missing credentials may delegate to local login. |
+| `opencode` | OpenAI or Anthropic credentials through the runtime environment; custom endpoints through inline OpenCode config | Passes `provider/model` to `opencode run` | Missing credentials delegate to OpenCode's local login. |
 | `qodercli` | Qoder-managed auth; Global uses `QODER_PERSONAL_ACCESS_TOKEN`, CN uses `QODERCN_PERSONAL_ACCESS_TOKEN` (or the `QODER_CN_ACCESS_TOKEN` input alias), with local-login fallback | Passes through non-empty model names/IDs and historical tiers after trimming whitespace; Qoder validates availability | `engine.kwargs.edition` selects `global` (default) or `cn` and switches the CLI, installer, auth, and session root together. Provider routing and `base_url` are not forwarded. Explicit model failures never silently fall back to the default. |
 | `qwen_code` | OpenAI-compatible; `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_MODEL` | Passes an explicit model to Qwen Code | Missing credentials may delegate to Qwen OAuth or another existing local login. |
 | Custom engine | Defined by `engine.custom` | Receives the configured provider/model values through session input and template variables | Capabilities and auth behavior belong to the custom-engine contract. |
@@ -39,7 +40,7 @@ Before each case, skill-up runs a static runtime preflight: the adapter's
 availability check followed by its `--version` command. With `environment.type:
 none`, the host installation is never modified; a configured concrete version
 is only validated against the host CLI. In an isolated runtime, supported npm
-adapters (`claude_code`, `codex`, and `qwen_code`) install the configured
+adapters (`claude_code`, `codex`, `opencode`, and `qwen_code`) install the configured
 exact semantic version before the same preflight. For compatibility, tags,
 ranges, and other non-exact selectors are retained as requested configuration
 but warned and ignored rather than passed to an installer.

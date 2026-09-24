@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Add an `opencode` Agent Engine for local and isolated runtimes, including
+  CLI installation, JSON event transcripts, multi-turn session resume, and
+  runtime-scoped MCP and provider configuration.
 - Tagged releases now attach self-contained Codex and DeepSeek Harness
   plugin archives assembled with the canonical `skill-upper` source, including
   checksums and attestations without publishing to an external registry. Plugin

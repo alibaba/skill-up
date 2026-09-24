@@ -87,7 +87,7 @@ skills:
 
 # ========== 5. Agent Engine ==========
 engine:
-  name: claude_code               # claude_code / codex / qodercli (also accepts qoder-cli) / qwen_code (also accepts qwen-code, qwen)
+  name: claude_code               # claude_code / codex / opencode / qodercli / qwen_code
   version: 2.1.0                  # Optional concrete CLI version; see version lifecycle below
   model:
     provider: anthropic
@@ -640,6 +640,7 @@ Capture semantics:
 | `claude_code` | Yes | `--resume` flag with session ID |
 | `qodercli` | Yes | `-r <session-id>` flag |
 | `codex` | Yes | `codex resume <thread-id>` command |
+| `opencode` | Yes | `opencode run --session <session-id>` |
 | `qwen_code` | Not yet | Falls back to batch mode |
 | `custom` | Opt-in | `conversation_mode: stateful` with `SessionInput.session_id`; otherwise batch mode |
 
@@ -1081,6 +1082,37 @@ skill-up run ./evals/eval.yaml --engine qodercli --provider qoder --model 'team/
 
 The provider above only disambiguates CLI parsing; Qoder still owns routing and
 authentication. Configure any custom model in Qoder first.
+
+### OpenCode engine
+
+Set `engine.name: opencode`. With `environment.type: none`, skill-up uses the
+installed local `opencode` command and its existing login. With `docker` or
+`opensandbox`, skill-up installs the `opencode-ai` CLI in the isolated runtime.
+The same engine configuration works in either mode:
+
+```yaml
+environment:
+  type: none                    # Change to opensandbox or docker for isolation
+engine:
+  name: opencode
+  model:
+    provider: openai
+    name: gpt-5
+```
+
+OpenCode receives the model as `provider/model`. An explicit API key is passed
+through the runtime environment; without one, OpenCode uses its own login.
+`engine.model.base_url` adds a provider endpoint through OpenCode's inline
+configuration. For a custom OpenAI-compatible provider, set its provider ID,
+model name, and base URL. Real and mocked MCP servers are also passed through
+inline configuration without editing the project's `opencode.json`.
+OpenCode returns JSON events, including the session ID, tool calls, response,
+and token usage; multi-turn cases resume with that exact session ID.
+
+OpenCode automatically approves tool permissions for non-interactive runs.
+On `none`, its tools execute with local user permissions. Use `docker` or
+`opensandbox` when the evaluation needs isolation. Sandboxed runs require the
+model endpoint and MCP servers to be reachable from inside the runtime.
 
 ### qwen_code credentials
 

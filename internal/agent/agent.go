@@ -202,6 +202,7 @@ var (
 	_ SessionResumer = (*ClaudeCodeAgent)(nil)
 	_ SessionResumer = (*QoderCLIAgent)(nil)
 	_ SessionResumer = (*CodexAgent)(nil)
+	_ SessionResumer = (*OpenCodeAgent)(nil)
 )
 
 // BaseAgent provides common functionality for agents.
