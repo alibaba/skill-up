@@ -29,6 +29,7 @@ func TestCapabilitiesForEngine(t *testing.T) {
 	}{
 		{engine: "claude_code", protocol: ProtocolAnthropic, modelPolicy: ModelPolicyPassthrough, supportsBaseURL: true, supportsVersion: true},
 		{engine: "codex", protocol: ProtocolOpenAI, modelPolicy: ModelPolicyCodexProvider, supportsBaseURL: true, supportsVersion: true, kwarg: KwargBypassSandbox},
+		{engine: "opencode", protocol: ProtocolOpenAI, modelPolicy: ModelPolicyPassthrough, supportsBaseURL: true, supportsVersion: true},
 		{engine: "qoder-cli", protocol: ProtocolQoder, modelPolicy: ModelPolicyPassthrough, kwarg: KwargEdition},
 		{engine: "qwen", protocol: ProtocolOpenAI, modelPolicy: ModelPolicyPassthrough, supportsBaseURL: true, supportsVersion: true},
 		{engine: "custom-agent", protocol: ProtocolCustom, modelPolicy: ModelPolicyPassthrough},
@@ -115,6 +116,28 @@ func TestResolveAdapterConfig_ModelPolicies(t *testing.T) {
 			}
 			if tt.wantWarning != "" && !containsWarning(got.Warnings, tt.wantWarning) {
 				t.Fatalf("warnings = %v, want substring %q", got.Warnings, tt.wantWarning)
+			}
+		})
+	}
+}
+
+func TestResolveAdapterConfig_OpenCode(t *testing.T) {
+	t.Parallel()
+	const version = "1.2.3"
+	for _, tt := range []struct {
+		provider string
+		protocol credential.Protocol
+	}{
+		{provider: testDashscopeProvider, protocol: credential.ProtocolOpenAI},
+		{provider: agentProviderAnthropic, protocol: credential.ProtocolAnthropic},
+	} {
+		t.Run(tt.provider, func(t *testing.T) {
+			t.Parallel()
+			got := ResolveAdapterConfig(credential.ResolvedAgentConfig{
+				Engine: "opencode", Provider: tt.provider, Model: "coder", Version: version, BaseURL: "https://example.test/v1", APIKey: "test-key",
+			}, nil)
+			if got.Protocol != string(tt.protocol) || got.AppliedProvider != tt.provider || got.AppliedModel != "coder" || got.AppliedVersion != version || got.AppliedBaseURL != "https://example.test/v1" || got.AppliedAPIKey != "test-key" {
+				t.Fatalf("resolved OpenCode configuration = %+v", got)
 			}
 		})
 	}
@@ -230,6 +253,7 @@ providers:
 		provider string
 	}{
 		{engine: "codex", protocol: credential.ProtocolOpenAI, apiKey: "openai-key", baseURL: "https://openai.example.test/v1", provider: "adapter_gateway"},
+		{engine: "opencode", protocol: credential.ProtocolOpenAI, apiKey: "openai-key", baseURL: "https://openai.example.test/v1", provider: "adapter_gateway"},
 		{engine: "claude_code", protocol: credential.ProtocolAnthropic, apiKey: "anthropic-key", baseURL: "https://anthropic.example.test", provider: "adapter_gateway"}, //nolint:gosec // test credential
 	}
 	for _, tt := range tests {

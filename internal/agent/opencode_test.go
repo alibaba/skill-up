@@ -71,6 +71,47 @@ func TestOpenCodeMCPConfigAndProviderAreRuntimeScoped(t *testing.T) {
 	}
 }
 
+func TestOpenCodeMCPPreservesRuntimeConfiguration(t *testing.T) {
+	if goruntime.GOOS == platform.GOOSWindows {
+		t.Skip("runtime configuration probe uses a POSIX shell")
+	}
+	initial := `{"plugin":["existing-plugin"],"permission":{"bash":"ask"},"mcp":{"existing":{"type":"local","command":["existing-server"]}},"provider":{"other":{"npm":"existing-provider"}}}`
+	rt, err := runtime.NewRuntime(runtime.Config{Type: "none", WorkspaceDir: t.TempDir(), Env: map[string]string{"OPENCODE_CONFIG_CONTENT": initial}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close() //nolint:errcheck
+	ag := NewOpenCodeAgent(Config{ModelProvider: "acme", ModelName: "coder", BaseURL: "https://llm.example/v1"})
+	if err := ag.InstallMCP(context.Background(), rt, runtime.MCPConfig{Servers: []runtime.MCPServerConfig{{Name: "added", Transport: "stdio", Command: "added-server"}}}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := rt.Exec(context.Background(), `printf '%s' "$OPENCODE_CONFIG_CONTENT"`, runtime.ExecOptions{})
+	if err != nil || result.ExitCode != 0 {
+		t.Fatalf("read runtime config: result=%+v err=%v", result, err)
+	}
+	var cfg struct {
+		Plugin     []string                   `json:"plugin"`
+		Permission map[string]string          `json:"permission"`
+		MCP        map[string]json.RawMessage `json:"mcp"`
+		Provider   map[string]json.RawMessage `json:"provider"`
+	}
+	if err := json.Unmarshal([]byte(result.Stdout), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Plugin) != 1 || cfg.Plugin[0] != "existing-plugin" || cfg.Permission["bash"] != "ask" {
+		t.Fatalf("existing OpenCode settings lost: %+v", cfg)
+	}
+	if cfg.MCP["existing"] == nil || cfg.MCP["added"] == nil {
+		t.Fatalf("MCP config = %+v", cfg.MCP)
+	}
+	if cfg.Provider["other"] == nil || cfg.Provider["acme"] == nil {
+		t.Fatalf("provider config = %+v", cfg.Provider)
+	}
+}
+
 func TestOpenCodeCustomAnthropicProvider(t *testing.T) {
 	t.Parallel()
 	rt := &qwenTestRuntime{workspace: t.TempDir()}

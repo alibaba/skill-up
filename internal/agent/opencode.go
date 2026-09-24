@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -84,7 +83,10 @@ func (a *OpenCodeAgent) CheckCredentials(ctx context.Context) error {
 
 // InstallMCP passes a per-runtime MCP configuration to OpenCode without writing
 // to the caller's project configuration. OpenCode merges this inline config.
-func (a *OpenCodeAgent) InstallMCP(_ context.Context, rt Runtime, mcpCfg runtime.MCPConfig) error {
+func (a *OpenCodeAgent) InstallMCP(ctx context.Context, rt Runtime, mcpCfg runtime.MCPConfig) error {
+	if len(mcpCfg.Servers) == 0 && a.Cfg.BaseURL == "" {
+		return nil
+	}
 	servers := make(map[string]any, len(mcpCfg.Servers))
 	env := make(map[string]string)
 	for i, server := range mcpCfg.Servers {
@@ -95,14 +97,9 @@ func (a *OpenCodeAgent) InstallMCP(_ context.Context, rt Runtime, mcpCfg runtime
 		servers[server.Name] = entry
 		maps.Copy(env, serverEnv)
 	}
-	configValue := make(map[string]any)
-	if existing := os.Getenv("OPENCODE_CONFIG_CONTENT"); existing != "" {
-		if err := json.Unmarshal([]byte(existing), &configValue); err != nil {
-			return fmt.Errorf("parse OPENCODE_CONFIG_CONTENT: %w", err)
-		}
-		if configValue == nil {
-			configValue = make(map[string]any)
-		}
+	configValue, err := readOpenCodeRuntimeConfig(ctx, rt)
+	if err != nil {
+		return err
 	}
 	if len(servers) > 0 {
 		if existing, ok := configValue["mcp"].(map[string]any); ok {
@@ -132,6 +129,26 @@ func (a *OpenCodeAgent) InstallMCP(_ context.Context, rt Runtime, mcpCfg runtime
 	env["OPENCODE_CONFIG_CONTENT"] = string(config)
 	rt.MergeEnv(env)
 	return nil
+}
+
+func readOpenCodeRuntimeConfig(ctx context.Context, rt Runtime) (map[string]any, error) {
+	current, err := rt.Exec(ctx, `printf '%s' "$OPENCODE_CONFIG_CONTENT"`, ExecOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("read runtime OpenCode configuration: %w", err)
+	}
+	if current.ExitCode != 0 {
+		return nil, fmt.Errorf("read runtime OpenCode configuration (exit %d): %s", current.ExitCode, current.Stderr)
+	}
+	configValue := make(map[string]any)
+	if current.Stdout != "" {
+		if err := json.Unmarshal([]byte(current.Stdout), &configValue); err != nil {
+			return nil, fmt.Errorf("parse OPENCODE_CONFIG_CONTENT: %w", err)
+		}
+		if configValue == nil {
+			configValue = make(map[string]any)
+		}
+	}
+	return configValue, nil
 }
 
 func openCodeMCPServer(server runtime.MCPServerConfig, index int) (map[string]any, map[string]string, error) {
