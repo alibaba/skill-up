@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    on POSIX shells.
 
 ### Changed
-- Pin the GitHub Action runner image build and live model E2E to QoderCLI 1.1.41,
+- Upgrade the GitHub Action runner image and live model E2E to QoderCLI 1.1.41,
   and run two QoderCLI self-eval cases concurrently.
 - Clarify in the English and Chinese READMEs that the evaluation CLI also
   supports agent-only and workspace evaluations without a Skill, alongside
