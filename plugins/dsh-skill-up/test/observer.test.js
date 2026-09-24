@@ -128,6 +128,7 @@ test('next-turn user feedback is durably linked as an unclassified candidate', (
   assert.equal(recorded.followups.length, 1)
   assert.equal(recorded.followups[0].turn_id, '2')
   assert.doesNotMatch(JSON.stringify(recorded), /plain-secret/)
+  assert.ok(recorded.privacy.redactions.includes('secret_assignment'))
   assert.equal(recorded.feedback, undefined)
   assert.equal(recorded.review.status, 'candidate')
   const collected = collectSkillFeedback(store, 'code-stats')
@@ -139,6 +140,57 @@ test('next-turn user feedback is durably linked as an unclassified candidate', (
   }))
   resumed.handle(session, event('turn/end', 2, { reason: { kind: 'completed' } }))
   assert.equal(store.get(observation.id).followups.length, 1)
+})
+
+test('a new follow-up invalidates review approval but replay does not', () => {
+  const store = new ObservationStore(mkdtempSync(join(tmpdir(), 'dsh-observer-followup-review-')))
+  const collector = new ObservationCollector(store)
+  const session = { id: 'review-session' }
+  collector.handle(session, event('turn/start', 1))
+  collector.handle(session, event('user/message', 1, {
+    source: { kind: 'user' }, content: [{ type: 'text', text: 'Use demo-skill' }],
+  }))
+  collector.handle(session, event('user/message', 1, {
+    source: { kind: 'skill-invocation', name: 'demo-skill' }, content: [],
+  }))
+  const [observation] = collector.handle(session, event('turn/end', 1, { reason: { kind: 'completed' } }))
+
+  store.review(observation.id, 'approved')
+  store.addFollowup(observation.id, 2, 'That result is wrong', new Date().toISOString())
+  assert.equal(store.get(observation.id).review.status, 'candidate')
+
+  store.review(observation.id, 'approved')
+  store.addFollowup(observation.id, 2, 'That result is wrong', new Date().toISOString())
+  assert.equal(store.get(observation.id).review.status, 'approved')
+  assert.equal(store.get(observation.id).followups.length, 1)
+
+  store.review(observation.id, 'rejected')
+  store.addFollowup(observation.id, 3, 'A different issue appeared', new Date().toISOString())
+  assert.equal(store.get(observation.id).review.status, 'candidate')
+})
+
+test('explicit approval after the follow-up message stays approved', () => {
+  const store = new ObservationStore(mkdtempSync(join(tmpdir(), 'dsh-observer-approval-order-')))
+  const collector = new ObservationCollector(store)
+  const session = { id: 'approval-session' }
+  collector.handle(session, event('turn/start', 1))
+  collector.handle(session, event('user/message', 1, {
+    source: { kind: 'user' }, content: [{ type: 'text', text: 'Use demo-skill' }],
+  }))
+  collector.handle(session, event('user/message', 1, {
+    source: { kind: 'skill-invocation', name: 'demo-skill' }, content: [],
+  }))
+  const [observation] = collector.handle(session, event('turn/end', 1, { reason: { kind: 'completed' } }))
+  store.review(observation.id, 'approved')
+
+  collector.handle(session, event('turn/start', 2))
+  collector.handle(session, event('user/message', 2, {
+    source: { kind: 'user' }, content: [{ type: 'text', text: 'Approve the candidate case' }],
+  }))
+  assert.equal(store.get(observation.id).review.status, 'candidate')
+  store.review(observation.id, 'approved')
+  collector.handle(session, event('turn/end', 2, { reason: { kind: 'completed' } }))
+  assert.equal(store.get(observation.id).review.status, 'approved')
 })
 
 test('follow-ups are not assigned across sessions or ambiguous Skill calls', () => {

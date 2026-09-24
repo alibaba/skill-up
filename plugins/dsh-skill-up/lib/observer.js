@@ -224,6 +224,7 @@ export class ObservationStore {
       if (observation.followups.some((item) => item.turn_id === String(turnId))) return
       observation.followups.push({ turn_id: String(turnId), text: redacted.text, observed_at: observedAt })
       observation.privacy.redactions = mergeStrings(observation.privacy.redactions || [], redacted.categories)
+      observation.review = { status: 'candidate' }
     })
   }
 
@@ -318,9 +319,11 @@ export class ObservationCollector {
     if (event.type === 'user/message') {
       const source = event.data.source || {}
       if (source.kind === 'user' && !turn.prompt) {
-        const value = redact(textContent(event.data.content))
+        const promptText = textContent(event.data.content)
+        const value = redact(promptText)
         turn.prompt = value.text
         turn.redactions = mergeStrings(turn.redactions, value.categories)
+        if (turn.prompt) this.linkFollowup(session, turnNumber, turn, promptText)
       } else if (source.kind === 'skill-invocation') {
         this.mark(turn, source.name, 'explicit', `DSH user invocation loaded /${source.name}`)
       }
@@ -365,16 +368,6 @@ export class ObservationCollector {
     }
     if (!turn.prompt) return []
 
-    const previous = this.store.list().filter((item) => (
-      item.correlation.session_id === String(session.id)
-      && item.correlation.turn_id === String(turnNumber - 1)
-      && item.outcome.status === 'completed'
-      && Date.parse(turn.observedAt) - Date.parse(item.timing.completed_at) >= 0
-      && Date.parse(turn.observedAt) - Date.parse(item.timing.completed_at) <= FOLLOWUP_WINDOW_MS
-    ))
-    if (previous.length === 1) {
-      this.store.addFollowup(previous[0].id, turnNumber, turn.prompt, turn.observedAt)
-    }
     if (turn.skills.size === 0) return []
 
     const saved = []
@@ -409,6 +402,19 @@ export class ObservationCollector {
       if (this.store.save(observation)) saved.push(observation)
     }
     return saved
+  }
+
+  linkFollowup(session, turnNumber, turn, promptText) {
+    const previous = this.store.list().filter((item) => (
+      item.correlation.session_id === String(session.id)
+      && item.correlation.turn_id === String(turnNumber - 1)
+      && item.outcome.status === 'completed'
+      && Date.parse(turn.observedAt) - Date.parse(item.timing.completed_at) >= 0
+      && Date.parse(turn.observedAt) - Date.parse(item.timing.completed_at) <= FOLLOWUP_WINDOW_MS
+    ))
+    if (previous.length === 1) {
+      this.store.addFollowup(previous[0].id, turnNumber, promptText, turn.observedAt)
+    }
   }
 
   mark(turn, rawName, method, evidence) {
