@@ -15,7 +15,7 @@ The plugin grounds each improvement in gaps revealed by the supplied scenario
 and verifies case status instead of treating process exit alone as proof.
 
 For a worked example of this feedback cycle using `code-stats`,
-see [DEMO.md](DEMO.md).
+see the [repository demo](https://github.com/alibaba/skill-up/blob/main/plugins/dsh-skill-up/DEMO.md).
 
 ## Install from a checkout
 
@@ -62,8 +62,14 @@ dsh plugin --profile web add ./alibaba-dsh-skill-up-<version>.tgz
 - An opt-in observer reads DSH's durable session events and stores only
   explicitly invoked Skills or Skills successfully loaded through the `skill`
   tool. It never persists inferred attribution.
+- After a completed single-Skill turn, the next user turn in the same session,
+  within one hour,
+  is stored as an unclassified follow-up candidate. This captures natural
+  feedback without requiring the user to know an observation ID. Unrelated
+  follow-ups can also be captured, so review them before treating them as feedback.
 - With the observer enabled, `list_skill_observations`,
-  `get_skill_observation`, `record_observation_feedback`,
+  `get_skill_observation`, `collect_skill_feedback`,
+  `record_observation_feedback`,
   `link_observation_report`,
   `preview_observation_case`, `review_skill_observation`, and
   `write_observation_case` provide the local review and approval workflow.
@@ -105,6 +111,11 @@ collection consent boundary. The adapter listens to committed `session/event`
 records, redacts common credential shapes, stores files with private
 permissions, and ignores unattributed turns as well as the control Skills
 `skill-upper`, `codex-skill-up`, and `dsh-skill-up`. Data is not uploaded.
+`collect_skill_feedback` returns up to 20 recent observations for one Skill,
+including confirmed feedback and next-turn follow-up candidates. Ask DSH to
+summarize recurring issues with observation IDs before proposing a change.
+An external scheduler may send that review request periodically; the plugin
+does not schedule reviews or edit Skills by itself.
 
 Review is a separate boundary: collection creates `candidate` observations.
 Listing, reading, feedback attachment, and preview do not authorize a case

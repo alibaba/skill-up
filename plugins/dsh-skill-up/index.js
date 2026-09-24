@@ -13,6 +13,7 @@ import {
 } from './lib/core.js'
 import {
   candidateCase,
+  collectSkillFeedback,
   compareResults,
   defaultObservationDirectory,
   ObservationCollector,
@@ -336,6 +337,12 @@ function registerObservationTools(ctx, store, skillUpBin, credentialEnv) {
     'Read one local Skill observation.',
     { observation_id: { type: 'string', required: true } },
     async (args) => store.get(args.observation_id),
+  ))
+  ctx.tools.register(observationTool(
+    'collect_skill_feedback',
+    'Review recent observations and unclassified next-turn user follow-ups for one Skill. Cite observation IDs; describe a pattern only when multiple independent records support it. Follow-ups are candidates, not confirmed feedback.',
+    { skill_name: { type: 'string', required: true } },
+    async (args) => collectSkillFeedback(store, args.skill_name),
   ))
   ctx.tools.register(observationTool(
     'record_observation_feedback',

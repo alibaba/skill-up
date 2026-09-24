@@ -1,6 +1,6 @@
 # From observed Skill use to a verified improvement
 
-This example uses `code-stats` on a small project with three owned files (`README.md`, `main.go`, and `util.go`) and one dependency file (`node_modules/demo-lib/index.js`). A source code summary should count **three files** and report only `.go` and `.md` extensions. The screenshots show real DSH conversations in an isolated local project, with sidebar history excluded.
+This example uses `code-stats` on a small project with three owned files (`README.md`, `main.go`, and `util.go`) and one dependency file (`node_modules/demo-lib/index.js`). A source code summary should count **three files** and report only `.go` and `.md` extensions. The screenshots show DSH conversations in an isolated local project, with sidebar history excluded. The feedback capture below was also verified in one resumed DSH ACP session.
 
 ## 1. Invoke the Skill
 
@@ -10,23 +10,32 @@ With the original Skill, DSH counts **four files**. The extension table includes
 
 ![The request and the incorrect four-file result](../../docs/public/dsh-code-stats-before.jpg)
 
-## 2. Review the captured observation
+## 2. Give natural feedback
 
-User: “Use the plugin's observation tools to review the code-stats run that counted four files. Check whether all counted files belong to project source, and summarize any accuracy issue with evidence. Don't edit anything.”
+User: “That count includes node_modules. Please treat dependency files separately; do not change the Skill yet.”
 
-The plugin automatically captured the successful `skill` tool invocation, the request, and the final answer after the preceding turn. No feedback had been attached to that observation. DSH calls `list_skill_observations` and `get_skill_observation`, reads the four-file observation, checks the project files, and identifies the dependency file being counted as project code. It explains the accuracy issue without changing the Skill.
+The opt-in observer links this next user turn to the completed `code-stats` observation in the same session. The user does not need to supply an observation ID or ask DSH to record feedback. The stored `followups` entry retains the user's words as an **unclassified candidate**, rather than inventing a sentiment or assuming every follow-up is feedback. In the resumed-session run, the record was:
 
-![DSH reading the captured Skill observation](../../docs/public/dsh-code-stats-observe-tools.jpg)
+```json
+{
+  "id": "obs_ecda987921b963d8bca091bc",
+  "skill": "code-stats",
+  "turn_id": "1",
+  "followups": [{ "turn_id": "2", "text": "That count includes node_modules. Please treat dependency files separately; do not change the Skill yet." }]
+}
+```
 
-![DSH independently identifying the dependency-counting problem](../../docs/public/dsh-code-stats-observe.jpg)
+## 3. Review collected feedback later
 
-## 3. Confirm the observation with feedback
+User: “Review the collected code-stats feedback. Summarize the issue and suggest a Skill change with evidence. Do not edit files.”
 
-User: “Add negative feedback to the code-stats run that counted four files: it included a dependency file. Don't change the Skill yet.”
+DSH calls `collect_skill_feedback`, which returns the original request and answer together with the linked follow-up. It cites observation `obs_ecda987921b963d8bca091bc`, identifies `node_modules/demo-lib/index.js` in the four-file result, and suggests excluding dependency directories from the default source count. This is one observed issue, not evidence of a recurring pattern. Collection and review do not edit the Skill or write a regression case. A scheduler can send this review request later; scheduling is external to the plugin.
 
-The plugin attaches the feedback to the original four-file observation. The observation remains a `candidate`; collecting feedback does not edit the Skill or write a regression case.
-
-![The feedback request and recorded feedback](../../docs/public/dsh-code-stats-feedback.jpg)
+```text
+Observation: 4 files, including node_modules/demo-lib/index.js
+Follow-up:   "That count includes node_modules..."
+Suggestion:  Exclude dependency directories from the default source count.
+```
 
 ## 4. Improve and retry
 
@@ -44,4 +53,4 @@ The hand-authored [`exclude-dependencies.yaml`](../../examples/code-stats/evals/
 
 ![The comparison request and the case changing from FAIL to PASS](../../docs/public/dsh-code-stats-compare.jpg)
 
-Observation capture is automatic; summarization starts when a user asks DSH to review observations. The plugin does not proactively send improvement suggestions. Feedback should identify the relevant run: an ambiguous reference attached to the analysis turn during a separate probe. Each evaluation phase ran once, so the results establish this run's outcome rather than model reliability. Another report-linking probe triggered an unrequested model approval call; approval enforcement is not demonstrated here. The regression case was written and reviewed by a maintainer, not automatically generated from the candidate.
+Observation and immediate same-session follow-up capture are automatic when the observer is enabled; summarization starts when a user or external scheduler asks DSH to review collected feedback. The plugin does not proactively send suggestions. Follow-ups are candidates and must be checked for relevance. Each evaluation phase ran once, so the results establish this run's outcome rather than model reliability. The regression case was written and reviewed by a maintainer, not automatically generated from the observation.

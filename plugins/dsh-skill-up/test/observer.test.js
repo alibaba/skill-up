@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   candidateCase,
+  collectSkillFeedback,
   compareResults,
   ObservationCollector,
   ObservationStore,
@@ -100,6 +101,111 @@ test('DSH model-selected skill is recorded only after a successful tool result',
     message: { content: [{ type: 'tool-result', toolCallId: 'call-2', isError: true }] },
   }))
   assert.deepEqual(collector.handle(session, event('turn/end', 3, { reason: { kind: 'completed' } })), [])
+})
+
+test('next-turn user feedback is durably linked as an unclassified candidate', () => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-observer-followup-'))
+  const store = new ObservationStore(root)
+  const session = { id: 'followup-session' }
+  const collector = new ObservationCollector(store)
+  collector.handle(session, event('turn/start', 1))
+  collector.handle(session, event('user/message', 1, {
+    source: { kind: 'user' }, content: [{ type: 'text', text: 'Use code-stats on ./project' }],
+  }))
+  collector.handle(session, event('user/message', 1, {
+    source: { kind: 'skill-invocation', name: 'code-stats' }, content: [],
+  }))
+  const [observation] = collector.handle(session, event('turn/end', 1, { reason: { kind: 'completed' } }))
+
+  // A restarted collector still finds the preceding observation in local storage.
+  const resumed = new ObservationCollector(store)
+  resumed.handle(session, event('turn/start', 2))
+  resumed.handle(session, event('user/message', 2, {
+    source: { kind: 'user' }, content: [{ type: 'text', text: 'It counted node_modules. Please exclude dependencies. OPENAI_API_KEY=plain-secret' }],
+  }))
+  resumed.handle(session, event('turn/end', 2, { reason: { kind: 'completed' } }))
+  const recorded = store.get(observation.id)
+  assert.equal(recorded.followups.length, 1)
+  assert.equal(recorded.followups[0].turn_id, '2')
+  assert.doesNotMatch(JSON.stringify(recorded), /plain-secret/)
+  assert.equal(recorded.feedback, undefined)
+  assert.equal(recorded.review.status, 'candidate')
+  const collected = collectSkillFeedback(store, 'code-stats')
+  assert.equal(collected.feedback_observations, 1)
+  assert.equal(collected.observations[0].id, observation.id)
+  resumed.handle(session, event('turn/start', 2))
+  resumed.handle(session, event('user/message', 2, {
+    source: { kind: 'user' }, content: [{ type: 'text', text: 'It counted node_modules.' }],
+  }))
+  resumed.handle(session, event('turn/end', 2, { reason: { kind: 'completed' } }))
+  assert.equal(store.get(observation.id).followups.length, 1)
+})
+
+test('follow-ups are not assigned across sessions or ambiguous Skill calls', () => {
+  const store = new ObservationStore(mkdtempSync(join(tmpdir(), 'dsh-observer-ambiguous-')))
+  const collector = new ObservationCollector(store)
+  const session = { id: 'multi-skill' }
+  collector.handle(session, event('turn/start', 1))
+  collector.handle(session, event('user/message', 1, {
+    source: { kind: 'user' }, content: [{ type: 'text', text: 'Use both Skills' }],
+  }))
+  for (const name of ['skill-a', 'skill-b']) {
+    collector.handle(session, event('user/message', 1, {
+      source: { kind: 'skill-invocation', name }, content: [],
+    }))
+  }
+  collector.handle(session, event('turn/end', 1, { reason: { kind: 'completed' } }))
+  for (const current of [session, { id: 'other-session' }]) {
+    collector.handle(current, event('turn/start', 2))
+    collector.handle(current, event('user/message', 2, {
+      source: { kind: 'user' }, content: [{ type: 'text', text: 'This result is wrong' }],
+    }))
+    collector.handle(current, event('turn/end', 2, { reason: { kind: 'completed' } }))
+  }
+  assert.ok(store.list().every((item) => !item.followups))
+})
+
+test('feedback stays linked when the next turn also invokes a Skill', () => {
+  const store = new ObservationStore(mkdtempSync(join(tmpdir(), 'dsh-observer-reinvoke-')))
+  const collector = new ObservationCollector(store)
+  const session = { id: 'reinvoke-session' }
+  for (const turn of [1, 2]) {
+    collector.handle(session, event('turn/start', turn))
+    collector.handle(session, event('user/message', turn, {
+      source: { kind: 'user' },
+      content: [{ type: 'text', text: turn === 1 ? 'Count the files' : 'That included dependencies. Try again.' }],
+    }))
+    collector.handle(session, event('user/message', turn, {
+      source: { kind: 'skill-invocation', name: 'code-stats' }, content: [],
+    }))
+    collector.handle(session, event('turn/end', turn, { reason: { kind: 'completed' } }))
+  }
+  const first = store.list().find((item) => item.correlation.turn_id === '1')
+  assert.equal(first.followups[0].text, 'That included dependencies. Try again.')
+  assert.equal(store.list().length, 2)
+})
+
+test('a late next turn is not linked to an old Skill observation', () => {
+  const store = new ObservationStore(mkdtempSync(join(tmpdir(), 'dsh-observer-late-')))
+  const collector = new ObservationCollector(store)
+  const session = { id: 'late-session' }
+  collector.handle(session, event('turn/start', 1))
+  collector.handle(session, event('user/message', 1, {
+    source: { kind: 'user' }, content: [{ type: 'text', text: 'Use demo-skill' }],
+  }))
+  collector.handle(session, event('user/message', 1, {
+    source: { kind: 'skill-invocation', name: 'demo-skill' }, content: [],
+  }))
+  const [observation] = collector.handle(session, event('turn/end', 1, { reason: { kind: 'completed' } }))
+  store.update(observation.id, (item) => {
+    item.timing.completed_at = '2020-01-01T00:00:00.000Z'
+  })
+  collector.handle(session, event('turn/start', 2))
+  collector.handle(session, event('user/message', 2, {
+    source: { kind: 'user' }, content: [{ type: 'text', text: 'Unrelated later request' }],
+  }))
+  collector.handle(session, event('turn/end', 2, { reason: { kind: 'completed' } }))
+  assert.equal(store.get(observation.id).followups, undefined)
 })
 
 test('DSH scopes reused tool call IDs to their session', () => {
