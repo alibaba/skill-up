@@ -29,7 +29,7 @@ features:
     link: /guide/writing-evals
     linkText: Configuration reference
   - title: Multi-Engine Support
-    details: Works with Qoder CLI, Claude Code, and Codex as Agent Engines.
+    details: Works with Qoder CLI, Claude Code, Codex, OpenCode, and Qwen Code as Agent Engines.
   - title: Flexible Judging
     details: Supports rule_based, script, and agent_judge evaluation strategies.
     link: /guide/writing-evals#grading-strategies

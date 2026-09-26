@@ -72,6 +72,8 @@ func CapabilitiesForEngine(engineName string) Capabilities {
 			SupportsVersion: agentkind.SupportsVersion(engineName),
 			SupportedKwargs: slices.Clone(codexKwargs),
 		}
+	case agentkind.OpenCode:
+		return Capabilities{Protocol: ProtocolOpenAI, ModelPolicy: ModelPolicyPassthrough, SupportsBaseURL: true, SupportsVersion: agentkind.SupportsVersion(engineName)}
 	case agentkind.QoderCLI, agentkind.QoderAlias, agentkind.QoderCLIAlias:
 		return Capabilities{
 			Protocol:        ProtocolQoder,
@@ -102,6 +104,9 @@ func ResolveAdapterConfig(params credential.ResolvedAgentConfig, resolver *crede
 	params.Warnings = slices.Clone(params.Warnings)
 
 	capabilities := CapabilitiesForEngine(params.Engine)
+	if params.Engine == agentkind.OpenCode && params.Provider == agentProviderAnthropic {
+		capabilities.Protocol = ProtocolAnthropic
+	}
 	params.Protocol = string(capabilities.Protocol)
 	connection := resolveModelConnection(params, resolver, capabilities.Protocol)
 	params.AppliedAPIKey = connection.APIKey

@@ -5,7 +5,7 @@ import "testing"
 func TestVersionContract(t *testing.T) {
 	t.Parallel()
 
-	if !SupportsVersion(Codex) || SupportsVersion(QoderCLI) {
+	if !SupportsVersion(Codex) || !SupportsVersion(OpenCode) || !IsBuiltin(OpenCode) || SupportsVersion(QoderCLI) {
 		t.Fatal("unexpected built-in version capabilities")
 	}
 	for _, version := range []string{"1.2.3", "v1.2.3", "1.2.3-beta.1+build.4"} {

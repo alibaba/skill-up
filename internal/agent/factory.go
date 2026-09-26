@@ -36,6 +36,8 @@ func DetectAgent(engineName string, cfg Config) (Agent, error) {
 		return NewClaudeCodeAgent(cfg), nil
 	case agentkind.Codex:
 		return NewCodexAgent(cfg), nil
+	case agentkind.OpenCode:
+		return NewOpenCodeAgent(cfg), nil
 	case agentkind.QwenCode, agentkind.QwenCodeAlias, agentkind.QwenAlias:
 		return NewQwenCodeAgent(cfg), nil
 	default:

@@ -18,6 +18,7 @@ const (
 	ClaudeCode      = "claude_code"
 	ClaudeCodeAlias = "claude-code"
 	Codex           = "codex"
+	OpenCode        = "opencode"
 	QoderCLI        = "qodercli"
 	QoderAlias      = "qoder"
 	QoderCLIAlias   = "qoder-cli"
@@ -30,6 +31,7 @@ var builtinNames = map[string]struct{}{
 	ClaudeCode:      {},
 	ClaudeCodeAlias: {},
 	Codex:           {},
+	OpenCode:        {},
 	QoderCLI:        {},
 	QoderAlias:      {},
 	QoderCLIAlias:   {},
@@ -57,7 +59,7 @@ func IsBuiltin(name string) bool {
 // an engine version.
 func SupportsVersion(name string) bool {
 	switch name {
-	case ClaudeCode, ClaudeCodeAlias, Codex, QwenCode, QwenCodeAlias, QwenAlias:
+	case ClaudeCode, ClaudeCodeAlias, Codex, OpenCode, QwenCode, QwenCodeAlias, QwenAlias:
 		return true
 	default:
 		return false

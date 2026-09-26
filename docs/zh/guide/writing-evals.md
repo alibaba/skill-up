@@ -87,7 +87,7 @@ skills:
 
 # ========== 5. Agent Engine ==========
 engine:
-  name: claude_code               # claude_code / codex / qodercli（也兼容 qoder-cli）/ qwen_code（也兼容 qwen-code、qwen）
+  name: claude_code               # claude_code / codex / opencode / qodercli / qwen_code
   version: 2.1.0                  # 可选的 CLI 具体版本；语义见下文
   # kwargs:
   #   edition: cn                 # qodercli 可选：global（默认）/ cn
@@ -596,6 +596,7 @@ input:
 | `claude_code` | 是 | `--resume` 标志 + 会话 ID |
 | `qodercli` | 是 | `-r <session-id>` 标志 |
 | `codex` | 是 | `codex resume <thread-id>` 命令 |
+| `opencode` | 是 | `opencode run --session <session-id>` |
 | `qwen_code` | 尚不支持 | 回退为批量模式 |
 | `custom` | 尚不支持 | 回退为批量模式 |
 
@@ -1017,6 +1018,32 @@ skill-up run ./evals/eval.yaml --engine qodercli --provider qoder --model 'team/
 ```
 
 这里的 provider 仅用于消除 CLI 解析歧义，路由和认证仍由 Qoder 管理。自定义模型需先在 Qoder 中配置。
+
+### OpenCode 引擎
+
+配置 `engine.name: opencode`。`environment.type: none` 调用本地已安装的
+`opencode` 并沿用其登录态；`docker` 或 `opensandbox` 会在隔离环境内安装
+`opencode-ai` CLI。两种模式使用相同的 Engine 配置：
+
+```yaml
+environment:
+  type: none                    # 隔离运行时改为 opensandbox 或 docker
+engine:
+  name: opencode
+  model:
+    provider: openai
+    name: gpt-5
+```
+
+模型以 `provider/model` 传给 OpenCode。显式 API key 经运行时环境变量传入；
+未配置时使用 OpenCode 自身的登录态。`engine.model.base_url` 会通过 OpenCode
+的进程内配置指定端点。自定义 OpenAI 兼容供应商需填写 provider ID、模型名和
+base URL。真实与模拟 MCP Server 也通过进程内配置传入，不改项目的
+`opencode.json`。JSON 事件用于提取会话 ID、工具调用、回答与 token 用量；
+多轮用例通过该会话 ID 继续。
+
+非交互运行会自动批准工具权限。`none` 模式下工具使用本机用户权限；需要隔离时
+使用 `docker` 或 `opensandbox`，并确保模型端点与 MCP Server 可从沙箱访问。
 
 ### qwen_code 凭据说明
 
