@@ -85,6 +85,19 @@
         "comment": { "type": "string" }
       }
     },
+    "followups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["turn_id", "text", "observed_at"],
+        "properties": {
+          "turn_id": { "type": "string", "minLength": 1 },
+          "text": { "type": "string", "minLength": 1 },
+          "observed_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
     "correlation": {
       "type": "object",
       "additionalProperties": false,

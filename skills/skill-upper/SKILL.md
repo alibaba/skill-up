@@ -96,8 +96,9 @@ evaluation runs, which remain multi-engine.
    evaluate the behavior. Prefer paths and short summaries over copied file
    contents.
 4. In Codex, use `record_skill_feedback` during the observed turn. In DSH,
-   wait until the completed turn has produced an observation, then use
-   `record_observation_feedback` with its ID. Never invent sentiment or comments.
+   the observer stores the next user turn in the same session as an unclassified
+   follow-up candidate. For explicit feedback, use `record_observation_feedback`
+   with the completed observation's ID. Never invent sentiment or comments.
 
 Both adapters redact common credential shapes before local persistence, but still
 avoid sending secrets to marker tools. If the request is capture-only, stop

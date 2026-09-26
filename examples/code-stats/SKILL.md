@@ -12,6 +12,7 @@ Analyzes code files and generates statistics about a codebase.
 
 When invoked, this skill will:
 1. Scan the specified directory (defaults to current directory)
+   - Exclude `node_modules/`, `.git/`, `dist/`, and `build/` unless the user explicitly asks to count them. These are dependencies, repository metadata, or generated output rather than project source.
 2. Count total lines, files by extension
 3. Report the largest files
 4. Output results in a structured format
@@ -48,7 +49,7 @@ If a file has no extension, group it under `(no ext)` in both extension sections
 
 ## Process
 
-1. Use `Bash` with `find` to locate all code files
+1. Use `Bash` with `find` to locate project files, pruning the excluded directories
 2. Use `Bash` with `wc -l` to count lines per file
 3. Group files with no extension under `(no ext)`
 4. Sort both extension summaries by total line count in descending order
