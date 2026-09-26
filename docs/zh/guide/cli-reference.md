@@ -141,6 +141,17 @@ skill-up validate ./evals/eval.yaml
 - 必填字段是否完整
 - 字段值是否合法
 
+当评测配置位于某个 skill 目录内（skill 根目录下存在 `SKILL.md`）时，`validate`
+还会检查该 skill 的内容完整性，逐条输出 warning——默认不改变退出码：
+
+- SKILL.md 以闭合的 YAML frontmatter（`---` 围栏）开头
+- frontmatter 中 `name`、`description` 字段非空
+- 正文中引用的 `references/`、`assets/`、`scripts/` 相对路径在磁盘上存在。
+  正文按 CommonMark 解析：正文行文、本地链接/图片目标、以及引用路径的行内代码
+  均参与检查；代码块、远程 URL 和原始 HTML 视为文档示例或外部资源，不参与检查
+
+传入 `--strict` 可将这些 warning 提升为校验失败（退出码 1）。
+
 ---
 
 ## skill-up list-cases

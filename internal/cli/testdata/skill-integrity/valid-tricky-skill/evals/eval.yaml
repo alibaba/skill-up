@@ -1,0 +1,11 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+
+engine:
+  name: claude_code
+
+cases:
+  files:
+    - evals/cases/smoke.yaml

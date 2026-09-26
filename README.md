@@ -292,7 +292,7 @@ skill-up import ./evals/evals.json --output ./evals
 | Command                              | Description                                 |
 | ------------------------------------ | ------------------------------------------- |
 | `skill-up run [path]`                | Run evaluation cases and produce reports    |
-| `skill-up validate [path]`           | Validate `eval.yaml` and case files         |
+| `skill-up validate [path]`           | Validate `eval.yaml`, case files, and skill integrity |
 | `skill-up list-cases [path]`         | List all cases referenced by the config     |
 | `skill-up report <result.json>`      | Generate reports from a previous run        |
 | `skill-up import <evals.json>`       | Import Anthropic `evals.json` to YAML cases |
