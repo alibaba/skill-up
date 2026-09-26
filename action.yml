@@ -70,8 +70,8 @@ outputs:
 # NOTE: Docker container actions run on Linux runners only.
 runs:
   using: docker
-  # v0.1.0; update the digest deliberately when publishing a verified image.
-  image: docker://ghcr.io/alibaba/skill-up-runner@sha256:f90aa1a320dadd14f354c12013dbbf78df262ece0e4f82683b8a70140a65bbcf
+  # skill-up 0.7.0 / QoderCLI 1.1.41; QoderCLI self-eval passed in run 35971524657.
+  image: docker://ghcr.io/alibaba/skill-up-runner@sha256:9c8b81434c655ccf58d43926e6e1cb955fe3548157f18e3cbb9b30962b396d62
   args:
     - --engine
     - ${{ inputs.engine }}
