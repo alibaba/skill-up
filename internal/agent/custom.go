@@ -502,6 +502,39 @@ func (a *CustomAgent) readRawResult(ctx context.Context, rt Runtime, custom *cus
 	return string(data), true
 }
 
+// synthesizeTimeoutOutput writes a minimal session-result JSON to the engine's
+// configured output path after a deadline kill left no file behind, and
+// returns the payload so the caller can grade it like any engine output. The
+// payload keeps the documented contract (exit_code always present) with a
+// stderr marker naming it as synthesized; transcripts and usage stay empty
+// because the killed process took them with it. Path safety mirrors
+// readRawResult: workspacePath re-validates the target against symlinks the
+// engine may have created between run start and the kill.
+func (a *CustomAgent) synthesizeTimeoutOutput(ctx context.Context, rt Runtime, outputFile string, prep *customRunPrep) (string, bool) {
+	safe, err := workspacePath(rt, outputFile)
+	if err != nil {
+		logging.WarnContextf(ctx, "CustomAgent: refusing to synthesize timeout output at %s: %v", outputFile, err)
+		return "", false
+	}
+	payload := map[string]any{
+		"engine":        a.Name(),
+		"exit_code":     124,
+		"duration_ms":   time.Since(prep.start).Milliseconds(),
+		"final_message": "",
+		"stderr":        "skill-up: case deadline exceeded before the engine wrote its session result (synthesized artifact; the engine's transcript was lost with the killed process)",
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		logging.WarnContextf(ctx, "CustomAgent: cannot encode synthesized timeout output: %v", err)
+		return "", false
+	}
+	if err := persistRuntimeArtifact(ctx, rt, safe, string(data)); err != nil {
+		logging.WarnContextf(ctx, "CustomAgent: cannot write synthesized timeout output %s: %v", safe, err)
+		return "", false
+	}
+	return string(data), true
+}
+
 // parsedSessionResult mirrors the SessionResult JSON contract but keeps
 // exit_code as a pointer so a missing field can be distinguished from 0.
 type parsedSessionResult struct {
