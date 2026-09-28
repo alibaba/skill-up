@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runtime-scoped MCP and provider configuration. OpenCode treats slashed model
   IDs as opaque when no provider is specified; skill-up does not infer a
   provider from `--model`.
+- Prepare OpenCode routing and CLI installation in the GitHub Action runner
+  image, with live none-runtime and OpenSandbox model E2E coverage. The
+  published Action image needs a compatible skill-up release before OpenCode
+  is available to Action callers.
 - DSH's opt-in observer now links the next same-session user turn after a
   single completed Skill use as an unclassified follow-up candidate.
   `collect_skill_feedback` gathers recent observations and follow-ups for

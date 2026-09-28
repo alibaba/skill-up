@@ -18,9 +18,9 @@ build:
     (api.anthropic.com / api.openai.com).
   * Results are also exported to ``$GITHUB_OUTPUT`` for downstream steps.
 
-The agent engines (claude / codex / qodercli / qwen) and skill-up are baked into the
-Docker image (see Dockerfile), so the runtime install paths are skipped when the
-binaries are already present.
+The Dockerfile installs the agent CLIs for future runner images. The pinned
+Action image supplies a released skill-up CLI; engine support depends on that
+CLI version and the image digest published in action.yml.
 """
 
 import argparse
@@ -50,6 +50,7 @@ PROVIDERS = {
 ENGINE_PROTOCOL = {
     "claude_code": "anthropic",
     "codex": "openai",
+    "opencode": "openai",
     "qodercli": None,
     "qwen_code": "openai",
 }
@@ -102,7 +103,7 @@ def resolve_base_url(engine, provider, base_url):
 def engine_env(engine, api_key, base_url):
     """Route the unified api-key / base-url into engine-scoped env vars.
 
-    These are read by the agent CLI itself (claude / codex / qodercli / qwen). engine=""
+    These are read by the agent CLI itself (claude / codex / opencode / qodercli / qwen). engine=""
     returns {} — the caller takes the unified_base_url_env + ``skill-up --api-key``
     pass-through path instead.
     """
@@ -115,10 +116,10 @@ def engine_env(engine, api_key, base_url):
             env["ANTHROPIC_AUTH_TOKEN"] = api_key
         if base_url:
             env["ANTHROPIC_BASE_URL"] = base_url
-    elif engine in ("codex", "qwen_code"):
-        # Both speak the OpenAI wire protocol and read OPENAI_API_KEY /
-        # OPENAI_BASE_URL (qwen_code is a Gemini CLI fork talking to any
-        # OpenAI-compatible endpoint; see internal/agent/qwen_code.go).
+    elif engine in ("codex", "opencode", "qwen_code"):
+        # These engines speak the OpenAI wire protocol. The model provider's
+        # key and endpoint are also exported below for skill-up to configure
+        # custom providers such as dashscope inside OpenCode.
         if api_key:
             env["OPENAI_API_KEY"] = api_key
         if base_url:
@@ -145,7 +146,7 @@ def engine_model_env(engine, model):
         return {}
     if engine == "claude_code":
         return {"ANTHROPIC_MODEL": model}
-    if engine in ("codex", "qwen_code"):
+    if engine in ("codex", "opencode", "qwen_code"):
         return {"OPENAI_MODEL": model}
     return {}
 
@@ -465,6 +466,7 @@ def main():
     # 3. Engine availability preflight (fail-fast).
     engine_check = {
         "codex": "command -v codex >/dev/null && codex --version",
+        "opencode": "command -v opencode >/dev/null && opencode --version",
         "claude_code": "command -v claude >/dev/null",
         "qodercli": "command -v qodercli >/dev/null",
     }.get(inputs.engine)

@@ -7,10 +7,10 @@ name: Skill Upper Self-Eval
 #
 # NOTE: the runner image bakes a pinned skill-up version from GitHub Releases,
 # so an engine can only be dogfooded here
-# once a skill-up RELEASE ships it. qwen_code is intentionally NOT in the matrix
-# yet — the released skill-up would reject `--engine qwen_code` as unsupported.
-# Add the row once a release includes the engine (the action image already
-# bakes the qwen CLI, and action/main.py already maps qwen_code -> openai).
+# once a skill-up RELEASE ships it. qwen_code and opencode are intentionally
+# absent from the matrix until a release supports them and action.yml pins a
+# matching runner image digest. Their CLI installation and Action routing are
+# prepared in the image recipe and action/main.py.
 #
 # Uses `uses: ./` (the action from this checkout) so it validates the PR's own
 # version before any release tag exists. All model traffic is pinned to
