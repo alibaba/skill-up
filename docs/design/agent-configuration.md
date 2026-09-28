@@ -128,9 +128,12 @@ becoming a second provider/model/credential resolver.
 Because `/` is also valid inside an opaque upstream model ID, skill-up uses the
 following compatibility behavior:
 
-OpenCode is an explicit-provider exception: its adapter requires `--provider`
-or `engine.model.provider` when the model ID contains `/`. A bare
-`--model provider/name` does not implicitly declare a provider for OpenCode.
+OpenCode does not apply this legacy split. Without `--provider`,
+`engine.model.provider`, or `engine.model.base_url`, a slashed `--model` value
+remains opaque and is passed to OpenCode unchanged. An explicit provider is
+combined with the full model ID.
+If `engine.model.base_url` is set without a provider, the adapter uses its
+default `openai` provider while preserving the full opaque model ID.
 
 | Input | Current interpretation |
 | --- | --- |

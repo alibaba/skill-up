@@ -1102,10 +1102,12 @@ engine:
 
 OpenCode receives the model as `provider/model`. An explicit API key is passed
 through the runtime environment; without one, OpenCode uses its own login.
-For OpenCode, set `engine.model.provider` or `--provider` explicitly whenever
-the model ID contains `/`. The legacy `--model provider/model` form does not
-declare an OpenCode provider implicitly. Use `--provider gateway --model org/model`
-to send `gateway/org/model` to OpenCode.
+For OpenCode, `--model org/model` with no provider or base URL is passed through unchanged;
+skill-up does not infer `org` as the provider. To select a provider explicitly,
+use `--provider gateway --model org/model`, which sends `gateway/org/model` to
+OpenCode. `engine.model.provider` works the same way. When only `base_url` is
+configured, the adapter uses `openai/org/model` so the full model ID reaches
+that endpoint.
 `engine.model.base_url` adds a provider endpoint through OpenCode's inline
 configuration. For a custom OpenAI-compatible provider, set its provider ID,
 model name, and base URL. Real and mocked MCP servers are also passed through

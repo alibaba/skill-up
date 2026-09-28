@@ -10,9 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Add an `opencode` Agent Engine for local and isolated runtimes, including
   CLI installation, JSON event transcripts, multi-turn session resume, and
-  runtime-scoped MCP and provider configuration. Slashed model IDs require an
-  explicit provider; the historical `--model provider/model` inference does not
-  apply to OpenCode.
+  runtime-scoped MCP and provider configuration. OpenCode treats slashed model
+  IDs as opaque when no provider is specified; skill-up does not infer a
+  provider from `--model`.
 - DSH's opt-in observer now links the next same-session user turn after a
   single completed Skill use as an unclassified follow-up candidate.
   `collect_skill_feedback` gathers recent observations and follow-ups for

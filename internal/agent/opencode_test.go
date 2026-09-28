@@ -30,11 +30,7 @@ func TestOpenCodeFactoryAndCommands(t *testing.T) {
 	if openCode.Cfg.SkillPath != ".opencode/skills" || openCode.Cfg.CheckCmd != "command -v opencode" {
 		t.Fatalf("OpenCode defaults = %+v", openCode.Cfg)
 	}
-	model, err := openCode.model()
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd := buildOpenCodeRunCmd("-fix 'this'", model, "ses_123")
+	cmd := buildOpenCodeRunCmd("-fix 'this'", openCode.model(), "ses_123")
 	for _, want := range []string{"opencode run --format json", "--model 'anthropic/claude-test'", "--session 'ses_123'", "-- " + shellQuote("-fix 'this'")} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("command %q missing %q", cmd, want)
@@ -51,51 +47,45 @@ func TestOpenCodeModelProviderPrecedesSlashedModelID(t *testing.T) {
 		name      string
 		config    Config
 		wantModel string
-		wantError bool
 	}{
 		{name: "explicit provider and slashed model", config: Config{ModelProvider: "gateway", ModelName: "org/model"}, wantModel: "gateway/org/model"},
-		{name: "slashed model without provider", config: Config{ModelName: "org/model"}, wantError: true},
-		{name: "slashed model with endpoint only", config: Config{ModelName: "org/model", BaseURL: "https://llm.example/v1"}, wantError: true},
+		{name: "slashed model without provider", config: Config{ModelName: "org/model"}, wantModel: "org/model"},
+		{name: "slashed model with endpoint only", config: Config{ModelName: "org/model", BaseURL: "https://llm.example/v1"}, wantModel: "openai/org/model"},
 		{name: "plain model with endpoint only", config: Config{ModelName: "model", BaseURL: "https://llm.example/v1"}, wantModel: "openai/model"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := NewOpenCodeAgent(tt.config).model()
-			if tt.wantError {
-				if err == nil || !strings.Contains(err.Error(), "explicit provider") {
-					t.Fatalf("model() = %q, err = %v, want explicit-provider error", got, err)
-				}
-				return
-			}
-			if err != nil || got != tt.wantModel {
+			if got := NewOpenCodeAgent(tt.config).model(); got != tt.wantModel {
 				t.Fatalf("model() = %q, want %q", got, tt.wantModel)
 			}
 		})
 	}
 }
 
-func TestOpenCodeRejectsImplicitProviderBeforeRun(t *testing.T) {
+func TestOpenCodePassesSlashedModelWithoutProvider(t *testing.T) {
 	t.Parallel()
 	ag := NewOpenCodeAgent(Config{ModelName: "gateway/org/model"})
-	if err := ag.CheckCredentials(context.Background()); err == nil || !strings.Contains(err.Error(), "explicit provider") {
+	if err := ag.CheckCredentials(context.Background()); err != nil {
 		t.Fatalf("CheckCredentials() error = %v", err)
 	}
-	result, err := ag.Run(context.Background(), &qwenTestRuntime{workspace: t.TempDir()}, runtime.ExecOptions{}, []transcript.Message{{Role: transcript.RoleUser, Content: "test"}})
-	if err == nil || result == nil || result.ExitCode == 0 {
+	rt := &qwenTestRuntime{workspace: t.TempDir(), execResult: runtime.ExecResult{Stdout: `{"type":"text","sessionID":"ses_123","part":{"type":"text","text":"ok"}}`}}
+	result, err := ag.Run(context.Background(), rt, runtime.ExecOptions{}, []transcript.Message{{Role: transcript.RoleUser, Content: "test"}})
+	if err != nil || result.FinalMessage != "ok" || !strings.Contains(rt.lastCommand, "--model 'gateway/org/model'") {
 		t.Fatalf("Run() result = %+v, error = %v", result, err)
 	}
 }
 
-func TestOpenCodeRejectsLegacyCLIProviderInference(t *testing.T) {
+func TestOpenCodeKeepsLegacyCLIModelOpaque(t *testing.T) {
 	t.Parallel()
 	params := credential.ResolveRunnerConfig(config.EngineConfig{Name: agentkind.OpenCode}, nil, credential.CLIOverrides{Model: "openai/gpt-5"})
 	ag, err := DetectAgentWithResolvedConfig(ResolveAdapterConfig(params, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ag.CheckCredentials(context.Background()); err == nil || !strings.Contains(err.Error(), "explicit provider") {
-		t.Fatalf("legacy --model provider/model error = %v", err)
+	openCode, ok := ag.(*OpenCodeAgent)
+	if !ok || openCode.Cfg.ModelProvider != "" || openCode.model() != "openai/gpt-5" {
+		t.Fatalf("resolved adapter = %#v, want opaque model with no provider", ag)
 	}
 }
 
@@ -182,8 +172,8 @@ func TestOpenCodeCustomAnthropicProvider(t *testing.T) {
 	if !strings.Contains(rt.mergedEnv["OPENCODE_CONFIG_CONTENT"], `"npm":"@ai-sdk/anthropic"`) {
 		t.Fatalf("wrong custom provider package: %s", rt.mergedEnv["OPENCODE_CONFIG_CONTENT"])
 	}
-	if model, err := ag.model(); err != nil || model != "acme/claude-test" {
-		t.Fatalf("model = %q, error = %v", model, err)
+	if ag.model() != "acme/claude-test" {
+		t.Fatalf("model = %q", ag.model())
 	}
 }
 
