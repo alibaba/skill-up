@@ -1042,8 +1042,41 @@ base URL。真实与模拟 MCP Server 也通过进程内配置传入，不改项
 `opencode.json`。JSON 事件用于提取会话 ID、工具调用、回答与 token 用量；
 多轮用例通过该会话 ID 继续。
 
+对 OpenCode 而言，不指定 provider 或 base URL 时，`--model org/model` 会原样传入，
+skill-up 不会从中推断 provider。显式指定 `--provider gateway --model org/model`
+时，会传入 `gateway/org/model`；YAML 中的 `engine.model.provider` 规则相同。
+只有 base URL 时，适配器使用 `openai/org/model`，保留完整的上游模型 ID。
+
 非交互运行会自动批准工具权限。`none` 模式下工具使用本机用户权限；需要隔离时
 使用 `docker` 或 `opensandbox`，并确保模型端点与 MCP Server 可从沙箱访问。
+
+#### DashScope OpenAI 兼容接口
+
+在 `evals/eval.yaml` 中配置 provider、上游模型 ID 和端点：
+
+```yaml
+environment:
+  type: none # 隔离运行改为 opensandbox 或 docker
+engine:
+  name: opencode
+  model:
+    provider: dashscope
+    name: qwen-plus
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+```
+
+通过 `DASHSCOPE_API_KEY` 环境变量或 `--api-key` 提供密钥，不要写入评测文件。
+若密钥由 macOS Keychain 中的 `keychain-secrets` 工具管理，可这样注入：
+
+```bash
+python3 /path/to/keychain_secrets.py run DASHSCOPE_API_KEY -- \
+  skill-up run ./evals/eval.yaml
+```
+
+skill-up 向 OpenCode 传入 `--model dashscope/qwen-plus`，并通过进程内配置注入
+`dashscope` provider、`@ai-sdk/openai-compatible`、`baseURL` 和模型 ID；密钥
+由运行时环境变量引用。请按地域或业务空间替换端点，并选择当前密钥有权限调用的模型。
+如果模型 ID 含 `/`，将完整 ID 填在 `name` 或 `--model` 中，skill-up 不会拆分。
 
 ### qwen_code 凭据说明
 

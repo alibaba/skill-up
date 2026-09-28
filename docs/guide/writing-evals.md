@@ -1120,6 +1120,38 @@ On `none`, its tools execute with local user permissions. Use `docker` or
 `opensandbox` when the evaluation needs isolation. Sandboxed runs require the
 model endpoint and MCP servers to be reachable from inside the runtime.
 
+#### DashScope OpenAI-compatible endpoint
+
+Configure a provider ID, the upstream model ID, and the endpoint in
+`evals/eval.yaml`:
+
+```yaml
+environment:
+  type: none # Use opensandbox or docker for an isolated run
+engine:
+  name: opencode
+  model:
+    provider: dashscope
+    name: qwen-plus
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+```
+
+Supply the API key through `DASHSCOPE_API_KEY` or `--api-key`; keep it out of
+the eval file. For example, if the key is stored in macOS Keychain using the
+`keychain-secrets` helper:
+
+```bash
+python3 /path/to/keychain_secrets.py run DASHSCOPE_API_KEY -- \
+  skill-up run ./evals/eval.yaml
+```
+
+skill-up passes `dashscope/qwen-plus` as OpenCode's `--model` value. It injects
+an inline `dashscope` provider with `@ai-sdk/openai-compatible`, the configured
+`baseURL`, and the model ID. The key is referenced through a runtime environment
+variable. Replace the endpoint with the URL for your DashScope region or
+workspace, and use a model that the key can access. For a model ID containing
+slashes, keep the entire ID in `name` (or `--model`); skill-up does not split it.
+
 ### qwen_code credentials
 
 [Qwen Code](https://github.com/QwenLM/qwen-code) is an open-source terminal coding agent optimized for Qwen models. The engine name is `qwen_code` (aliases: `qwen-code`, `qwen`), backed by the `@qwen-code/qwen-code` CLI. skill-up installs it on demand via `npm install -g @qwen-code/qwen-code` (Node.js 20+ is bootstrapped automatically), so a manual install is optional.
