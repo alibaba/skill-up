@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- DSH's opt-in observer now links the next same-session user turn after a
+  single completed Skill use as an unclassified follow-up candidate.
+  `collect_skill_feedback` gathers recent observations and follow-ups for
+  review before proposing a Skill change.
+- Add a code-stats regression case that verifies project source counts exclude dependency directories.
 - Tagged releases now attach self-contained Codex and DeepSeek Harness
   plugin archives assembled with the canonical `skill-upper` source, including
   checksums and attestations without publishing to an external registry. Plugin

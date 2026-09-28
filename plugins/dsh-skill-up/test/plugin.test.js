@@ -48,16 +48,17 @@ test('observer tools and durable event listener are opt-in', async () => {
 
   assert.equal(listeners.has('session/event'), true)
   assert.deepEqual(listeners.get('session/event').options, { global: true })
-  assert.deepEqual(tools.slice(0, 7).map((tool) => tool.name), [
+  assert.deepEqual(tools.slice(0, 8).map((tool) => tool.name), [
     'list_skill_observations',
     'get_skill_observation',
+    'collect_skill_feedback',
     'record_observation_feedback',
     'link_observation_report',
     'review_skill_observation',
     'preview_observation_case',
     'write_observation_case',
   ])
-  assert.deepEqual(tools.slice(7).map((tool) => tool.name), [
+  assert.deepEqual(tools.slice(8).map((tool) => tool.name), [
     'skill_up_validate',
     'skill_up_run',
     'skill_up_summary',
@@ -79,6 +80,14 @@ test('observer tools and durable event listener are opt-in', async () => {
   const listed = await tools.find((tool) => tool.name === 'list_skill_observations').execute({}, {})
   assert.equal(listed.observations.length, 1)
   assert.equal(listed.observations[0].skill, 'demo-skill')
+  observe(session, { type: 'turn/start', data: { turn: 2 } })
+  observe(session, {
+    type: 'user/message',
+    data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'The count included dependencies.' }] },
+  })
+  observe(session, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } })
+  const collected = await tools.find((tool) => tool.name === 'collect_skill_feedback').execute({ skill_name: 'demo-skill' }, {})
+  assert.equal(collected.observations[0].followup_candidates[0].text, 'The count included dependencies.')
 })
 
 test('approved observation case write rolls back failed validation', async () => {

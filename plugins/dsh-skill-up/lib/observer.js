@@ -20,6 +20,7 @@ const SKILL_NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/
 const CONTROL_SKILLS = new Set(['skill-upper', 'skill-up-observer', 'codex-skill-up', 'dsh-skill-up'])
 const REVIEW_STATUSES = new Set(['candidate', 'approved', 'rejected'])
 const FEEDBACK_SENTIMENTS = new Set(['', 'positive', 'negative', 'mixed', 'neutral'])
+const FOLLOWUP_WINDOW_MS = 60 * 60 * 1000
 
 const REDACTION_RULES = [
   ['bearer_token', /\bbearer\s+[a-z0-9._~+/=-]{12,}/giu],
@@ -118,6 +119,9 @@ export function validateObservation(observation) {
   if (observation.feedback && !FEEDBACK_SENTIMENTS.has(observation.feedback.sentiment || '')) {
     throw new Error('invalid feedback.sentiment')
   }
+  if (observation.followups && (!Array.isArray(observation.followups) || observation.followups.some((item) => (
+    !String(item?.turn_id || '') || !String(item?.text || '') || !String(item?.observed_at || '')
+  )))) throw new Error('invalid followups')
 }
 
 function observationId(observation) {
@@ -207,6 +211,18 @@ export class ObservationStore {
     const redacted = redact(comment)
     return this.update(id, (observation) => {
       observation.feedback = { ...(sentiment ? { sentiment } : {}), ...(redacted.text ? { comment: redacted.text } : {}) }
+      observation.privacy.redactions = mergeStrings(observation.privacy.redactions || [], redacted.categories)
+      observation.review = { status: 'candidate' }
+    })
+  }
+
+  addFollowup(id, turnId, text, observedAt) {
+    const redacted = redact(text)
+    if (!redacted.text) return this.get(id)
+    return this.update(id, (observation) => {
+      observation.followups ||= []
+      if (observation.followups.some((item) => item.turn_id === String(turnId))) return
+      observation.followups.push({ turn_id: String(turnId), text: redacted.text, observed_at: observedAt })
       observation.privacy.redactions = mergeStrings(observation.privacy.redactions || [], redacted.categories)
       observation.review = { status: 'candidate' }
     })
@@ -303,9 +319,11 @@ export class ObservationCollector {
     if (event.type === 'user/message') {
       const source = event.data.source || {}
       if (source.kind === 'user' && !turn.prompt) {
-        const value = redact(textContent(event.data.content))
+        const promptText = textContent(event.data.content)
+        const value = redact(promptText)
         turn.prompt = value.text
         turn.redactions = mergeStrings(turn.redactions, value.categories)
+        if (turn.prompt) this.linkFollowup(session, turnNumber, turn, promptText)
       } else if (source.kind === 'skill-invocation') {
         this.mark(turn, source.name, 'explicit', `DSH user invocation loaded /${source.name}`)
       }
@@ -350,6 +368,8 @@ export class ObservationCollector {
     }
     if (!turn.prompt) return []
 
+    if (turn.skills.size === 0) return []
+
     const saved = []
     for (const [name, attribution] of turn.skills) {
       const completed = event.data.reason?.kind === 'completed'
@@ -384,6 +404,19 @@ export class ObservationCollector {
     return saved
   }
 
+  linkFollowup(session, turnNumber, turn, promptText) {
+    const previous = this.store.list().filter((item) => (
+      item.correlation.session_id === String(session.id)
+      && item.correlation.turn_id === String(turnNumber - 1)
+      && item.outcome.status === 'completed'
+      && Date.parse(turn.observedAt) - Date.parse(item.timing.completed_at) >= 0
+      && Date.parse(turn.observedAt) - Date.parse(item.timing.completed_at) <= FOLLOWUP_WINDOW_MS
+    ))
+    if (previous.length === 1) {
+      this.store.addFollowup(previous[0].id, turnNumber, promptText, turn.observedAt)
+    }
+  }
+
   mark(turn, rawName, method, evidence) {
     const name = String(rawName || '').toLowerCase()
     if (!SKILL_NAME.test(name) || CONTROL_SKILLS.has(name)) return
@@ -391,6 +424,28 @@ export class ObservationCollector {
     if (!current || (current.method === 'instrumented' && method === 'explicit')) {
       turn.skills.set(name, { method, confidence: 1, evidence: [evidence] })
     }
+  }
+}
+
+export function collectSkillFeedback(store, skillName, { offset = 0, limit = 20 } = {}) {
+  if (!SKILL_NAME.test(String(skillName || ''))) throw new Error('invalid skill name')
+  if (!Number.isInteger(offset) || offset < 0) throw new Error('offset must be a non-negative integer')
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('limit must be between 1 and 100')
+  const observations = store.list().filter((item) => item.skill.name === skillName)
+  const withFeedback = observations.filter((item) => item.feedback || item.followups?.length)
+  return {
+    skill: skillName,
+    total_observations: observations.length,
+    feedback_observations: withFeedback.length,
+    next_offset: offset + limit < withFeedback.length ? offset + limit : null,
+    observations: withFeedback.slice(offset, offset + limit).map((item) => ({
+      id: item.id,
+      observed_at: item.timing.observed_at,
+      input: item.input.text,
+      outcome: item.outcome,
+      feedback: item.feedback || null,
+      followup_candidates: item.followups || [],
+    })),
   }
 }
 
