@@ -1,0 +1,19 @@
+id: mixed-turns
+title: Fixed and simulated turns in one conversation
+
+user_simulator:
+  scenario: |
+    You want a staging configuration with two replicas. Answer questions
+    using only those facts. Do not authorize a deployment.
+
+input:
+  turns:
+    - role: user
+      content: "Help me configure a deployment."
+    - role: user
+      respond: "Answer the agent's question about the environment and replica count."
+    - role: user
+      content: "Change the replica count to three. Do not deploy."
+
+expect:
+  must_contain: ["ENV=staging", "REPLICAS=3", "DEPLOY=NO"]

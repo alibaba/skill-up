@@ -1,0 +1,35 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+
+skills:
+  - source: local_path
+    path: .
+
+engine:
+  name: codex
+  model: {}
+
+# This connection is independent of the Codex engine and judge.
+user_simulator:
+  provider: openai
+  protocol: openai
+  model: gpt-4.1-mini
+  timeout_seconds: 30
+
+cases:
+  files:
+    - evals/cases/mixed-turns.yaml
+    - evals/cases/autonomous-turns.yaml
+  defaults:
+    timeout_seconds: 300
+    max_turns: 6
+  parallelism: 1
+
+judge:
+  type: rule_based
+
+report:
+  formats: [json]
+  artifacts: [transcript]

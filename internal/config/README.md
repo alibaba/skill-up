@@ -18,6 +18,7 @@ Package `config` defines the evaluation configuration data model and provides lo
 | `MCPConfig` / `MCPServer` | Model Context Protocol server definitions |
 | `SkillRef` | Reference to a skill to install |
 | `EngineConfig` / `ModelConfig` | Agent engine and model provider settings |
+| `UserSimulatorModel` / `UserSimulatorScenario` | Optional simulator model and per-case scenario |
 | `CasesConfig` / `CaseDefaults` / `RetryPolicy` | Test-case collection settings and defaults |
 | `JudgeConfig` / `Rule` | Evaluation judge strategy and assertion rules |
 | `BenchmarkConfig` | Baseline comparison toggle |
@@ -44,6 +45,7 @@ The defaults as of the embedded `defaults.yaml`:
 | `environment.workspace_mount` | `/workspace` |
 | `engine.name` | `claude_code` |
 | `engine.model` | *(empty — no default provider or model name)* |
+| `user_simulator` | *(empty — user simulation is opt-in)* |
 | `cases.defaults.timeout_seconds` | `300` |
 | `cases.defaults.max_turns` | `10` |
 | `cases.parallelism` | `1` |
