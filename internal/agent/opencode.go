@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -374,48 +373,49 @@ func parseOpenCodeEvents(output, instruction string) (*SessionResult, string) {
 	res := &SessionResult{Transcript: transcript.Transcript{{Role: transcript.RoleUser, Content: instruction, Turn: 1}}}
 	var textParts []string
 	var eventError string
-	scanner := bufio.NewScanner(strings.NewReader(output))
-	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
-	for scanner.Scan() {
-		var event openCodeEvent
-		if json.Unmarshal(scanner.Bytes(), &event) != nil {
-			continue
-		}
-		if event.SessionID != "" {
-			res.SessionID = event.SessionID
-		}
-		switch event.Type {
-		case toolStatusError:
-			eventError = event.Error.Data.Message
-			if eventError == "" {
-				eventError = event.Error.Name
+	for line := range strings.SplitSeq(output, "\n") {
+		decoder := json.NewDecoder(strings.NewReader(line))
+		for {
+			var event openCodeEvent
+			if decoder.Decode(&event) != nil {
+				break
 			}
-			res.Transcript = append(res.Transcript, transcript.Message{Role: transcript.RoleError, Content: eventError, Turn: 1})
-		case customResponseText:
-			if event.Part.Text != "" {
-				textParts = append(textParts, event.Part.Text)
-				res.Transcript = append(res.Transcript, transcript.Message{Role: transcript.RoleAssistant, Content: event.Part.Text, Turn: 1})
+			if event.SessionID != "" {
+				res.SessionID = event.SessionID
 			}
-		case "tool_use":
-			res.Transcript = append(res.Transcript, transcript.Message{
-				Role: transcript.RoleToolCall, Turn: 1,
-				ToolCall: &transcript.ToolCallInfo{ID: event.Part.CallID, Name: event.Part.Tool, Arguments: event.Part.State.Input},
-			})
-			if event.Part.State.Status == "completed" || event.Part.State.Status == toolStatusError {
-				status := toolStatusSuccess
-				content := event.Part.State.Output
-				if event.Part.State.Status == toolStatusError {
-					status = toolStatusError
-					content = event.Part.State.Error
+			switch event.Type {
+			case toolStatusError:
+				eventError = event.Error.Data.Message
+				if eventError == "" {
+					eventError = event.Error.Name
 				}
+				res.Transcript = append(res.Transcript, transcript.Message{Role: transcript.RoleError, Content: eventError, Turn: 1})
+			case customResponseText:
+				if event.Part.Text != "" {
+					textParts = append(textParts, event.Part.Text)
+					res.Transcript = append(res.Transcript, transcript.Message{Role: transcript.RoleAssistant, Content: event.Part.Text, Turn: 1})
+				}
+			case "tool_use":
 				res.Transcript = append(res.Transcript, transcript.Message{
-					Role: transcript.RoleToolResult, Turn: 1,
-					ToolResult: &transcript.ToolResultInfo{CallID: event.Part.CallID, Status: status, Content: content},
+					Role: transcript.RoleToolCall, Turn: 1,
+					ToolCall: &transcript.ToolCallInfo{ID: event.Part.CallID, Name: event.Part.Tool, Arguments: event.Part.State.Input},
 				})
+				if event.Part.State.Status == "completed" || event.Part.State.Status == toolStatusError {
+					status := toolStatusSuccess
+					content := event.Part.State.Output
+					if event.Part.State.Status == toolStatusError {
+						status = toolStatusError
+						content = event.Part.State.Error
+					}
+					res.Transcript = append(res.Transcript, transcript.Message{
+						Role: transcript.RoleToolResult, Turn: 1,
+						ToolResult: &transcript.ToolResultInfo{CallID: event.Part.CallID, Status: status, Content: content},
+					})
+				}
+			case "step_finish":
+				res.InputTokens += event.Part.Tokens.Input
+				res.OutputTokens += event.Part.Tokens.Output
 			}
-		case "step_finish":
-			res.InputTokens += event.Part.Tokens.Input
-			res.OutputTokens += event.Part.Tokens.Output
 		}
 	}
 	res.FinalMessage = strings.Join(textParts, "\n")

@@ -202,6 +202,30 @@ func TestOpenCodeRunAndResumeAcrossRuntimeKinds(t *testing.T) {
 	}
 }
 
+func TestOpenCodeRunWithConcatenatedJSONEvents(t *testing.T) {
+	t.Parallel()
+	events := []string{
+		`{"type":"step_start","sessionID":"ses_123","part":{"type":"step-start"}}`,
+		`{"type":"text","sessionID":"ses_123","part":{"type":"text","text":"SKILL_UP_DASHSCOPE_OK"}}`,
+		`{"type":"step_finish","sessionID":"ses_123","part":{"type":"step-finish","tokens":{"input":10,"output":3}}}`,
+	}
+	streams := []string{
+		strings.Join(events, ""),
+		events[0] + strings.Repeat(" ", 16*1024*1024) + events[1] + events[2],
+		"OpenCode warning\n" + events[0] + "\nnoisy stdout\n" + events[1] + events[2],
+	}
+	for _, stream := range streams {
+		rt := &qwenTestRuntime{workspace: t.TempDir(), execResult: runtime.ExecResult{Stdout: stream}}
+		result, err := NewOpenCodeAgent(Config{}).Run(context.Background(), rt, runtime.ExecOptions{}, []transcript.Message{{Role: transcript.RoleUser, Content: "test"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.SessionID != "ses_123" || result.FinalMessage != "SKILL_UP_DASHSCOPE_OK" || result.InputTokens != 10 || result.OutputTokens != 3 {
+			t.Fatalf("unexpected session result: %+v", result)
+		}
+	}
+}
+
 func TestOpenCodeEmptyOutputFails(t *testing.T) {
 	t.Parallel()
 	rt := &qwenTestRuntime{workspace: t.TempDir()}
