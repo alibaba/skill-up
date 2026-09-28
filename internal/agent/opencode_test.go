@@ -39,6 +39,28 @@ func TestOpenCodeFactoryAndCommands(t *testing.T) {
 	}
 }
 
+func TestOpenCodeModelProviderPrecedesSlashedModelID(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		config    Config
+		wantModel string
+	}{
+		{name: "explicit provider and slashed model", config: Config{ModelProvider: "gateway", ModelName: "org/model"}, wantModel: "gateway/org/model"},
+		{name: "slashed model without provider", config: Config{ModelName: "org/model"}, wantModel: "org/model"},
+		{name: "slashed model with endpoint only", config: Config{ModelName: "org/model", BaseURL: "https://llm.example/v1"}, wantModel: "org/model"},
+		{name: "plain model with endpoint only", config: Config{ModelName: "model", BaseURL: "https://llm.example/v1"}, wantModel: "openai/model"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := NewOpenCodeAgent(tt.config).model(); got != tt.wantModel {
+				t.Fatalf("model() = %q, want %q", got, tt.wantModel)
+			}
+		})
+	}
+}
+
 func TestOpenCodeMCPConfigAndProviderAreRuntimeScoped(t *testing.T) {
 	t.Parallel()
 	rt := &qwenTestRuntime{workspace: t.TempDir()}

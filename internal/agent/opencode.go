@@ -316,11 +316,14 @@ func (a *OpenCodeAgent) execute(ctx context.Context, rt Runtime, opts ExecOption
 
 func (a *OpenCodeAgent) model() string {
 	model := strings.TrimSpace(a.Cfg.ModelName)
-	if model == "" || strings.Contains(model, "/") {
+	if model == "" {
 		return model
 	}
 	if provider := strings.TrimSpace(a.Cfg.ModelProvider); provider != "" {
 		return provider + "/" + model
+	}
+	if strings.Contains(model, "/") {
+		return model
 	}
 	if a.Cfg.BaseURL != "" {
 		return agentProviderOpenAI + "/" + model
