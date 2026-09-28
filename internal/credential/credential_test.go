@@ -76,6 +76,29 @@ func TestResolveRunnerConfig_ExplicitProviderTreatsAutoAsOpaqueModel(t *testing.
 	}
 }
 
+func TestResolveRunnerConfig_OpenCodeDoesNotInferProviderFromModel(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name           string
+		configProvider string
+		cli            CLIOverrides
+		wantProvider   string
+		wantModel      string
+	}{
+		{name: "legacy prefix stays opaque", cli: CLIOverrides{Model: "openai/gpt-5"}, wantModel: "openai/gpt-5"},
+		{name: "explicit provider preserves opaque model", cli: CLIOverrides{Provider: "gateway", Model: "org/model"}, wantProvider: "gateway", wantModel: "org/model"},
+		{name: "configured provider survives model override", configProvider: "gateway", cli: CLIOverrides{Model: "org/model"}, wantProvider: "gateway", wantModel: "org/model"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := ResolveRunnerConfig(config.EngineConfig{Name: "opencode", Model: config.ModelConfig{Provider: tt.configProvider}}, nil, tt.cli)
+			if got.Provider != tt.wantProvider || got.Model != tt.wantModel {
+				t.Fatalf("resolved provider/model = %q/%q, want %q/%q", got.Provider, got.Model, tt.wantProvider, tt.wantModel)
+			}
+		})
+	}
+}
+
 func TestMaskAPIKey(t *testing.T) {
 	t.Parallel()
 

@@ -238,6 +238,12 @@ func applyCLIModelOverride(params *ResolvedAgentConfig, cliProvider, cliModel st
 	if cliModel == "" {
 		return
 	}
+	if params.Engine == agentkind.OpenCode {
+		// OpenCode must not infer a provider from a slashed model ID.
+		params.Model = cliModel
+		params.ModelSource = ValueSourceCLI
+		return
+	}
 
 	params.Provider, params.Model = ResolveModelRef(cliModel, resolver)
 	if params.Provider != "" {

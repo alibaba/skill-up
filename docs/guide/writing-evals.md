@@ -1002,7 +1002,7 @@ skill-up run ./evals/eval.yaml \
 ```
 
 Without `--provider`, the historical `provider/model` form remains supported
-when the prefix is a known or configured provider:
+for existing engines when the prefix is a known or configured provider:
 
 ```bash
 skill-up run ./evals/eval.yaml --engine codex --model openai/gpt-5.4
@@ -1102,6 +1102,10 @@ engine:
 
 OpenCode receives the model as `provider/model`. An explicit API key is passed
 through the runtime environment; without one, OpenCode uses its own login.
+For OpenCode, set `engine.model.provider` or `--provider` explicitly whenever
+the model ID contains `/`. The legacy `--model provider/model` form does not
+declare an OpenCode provider implicitly. Use `--provider gateway --model org/model`
+to send `gateway/org/model` to OpenCode.
 `engine.model.base_url` adds a provider endpoint through OpenCode's inline
 configuration. For a custom OpenAI-compatible provider, set its provider ID,
 model name, and base URL. Real and mocked MCP servers are also passed through

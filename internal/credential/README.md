@@ -108,7 +108,8 @@ Once `provider` is determined, `model` should follow the same provider-scoped re
 
 1. CLI `--model` overrides the current role's model. With `--provider`, it is
    opaque; without `--provider`, a known/configured `provider/name` prefix is
-   accepted for compatibility.
+   accepted for compatibility by existing engines. OpenCode requires an
+   explicit provider when its model ID contains `/`.
 2. Explicit configuration on the agent role itself
 3. If the current role has a provider, prefer the provider-scoped environment variable, e.g. `${PROVIDER}_MODEL`
 4. If this is a judge agent without independent configuration, reuse the runner agent model

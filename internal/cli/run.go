@@ -111,7 +111,7 @@ func init() {
 	runCmd.Flags().String("engine", "", "Override engine name")
 	runCmd.Flags().String(runtimeFlagName, "", "Override environment.type (none, opensandbox, docker)")
 	runCmd.Flags().String("provider", "", "Override model provider; when set, --model is treated as an opaque model name")
-	runCmd.Flags().String("model", "", "Override model (opaque when --provider is set; otherwise also accepts legacy provider/name)")
+	runCmd.Flags().String("model", "", "Override model (opaque when --provider is set; otherwise accepts legacy provider/name for engines other than opencode)")
 	runCmd.Flags().String("api-key", "", "API key for the model provider")
 	runCmd.Flags().Int("parallelism", 0, "Override cases.parallelism. Must be between 1 and 256 when specified")
 	runCmd.Flags().Bool("baseline", false, "Override benchmark.enabled to true for this run")

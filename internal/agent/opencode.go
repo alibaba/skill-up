@@ -71,6 +71,9 @@ func defaultOpenCodeInstallCmdForVersion(version string) string {
 
 // CheckCredentials leaves local OpenCode login available when no key is supplied.
 func (a *OpenCodeAgent) CheckCredentials(ctx context.Context) error {
+	if _, err := a.model(); err != nil {
+		return err
+	}
 	if a.Cfg.ModelProvider == agentProviderAnthropic || a.Cfg.Protocol == string(credential.ProtocolAnthropic) {
 		a.logCredentialStatus(ctx, credential.EnvAnthropicAPIKey, credential.EnvAnthropicBaseURL,
 			"ANTHROPIC_API_KEY not set, opencode will rely on existing login state if available")
@@ -253,6 +256,10 @@ func (*OpenCodeAgent) ReturnsIncrementalSessionResults() bool { return true }
 
 func (a *OpenCodeAgent) execute(ctx context.Context, rt Runtime, opts ExecOptions, instruction, sessionID string) (finalResult *SessionResult, finalErr error) {
 	defer func() { a.annotateSessionResult(finalResult) }()
+	model, err := a.model()
+	if err != nil {
+		return &SessionResult{Engine: a.Name(), ExitCode: 1, Artifacts: &SessionArtifacts{}}, err
+	}
 	if err := requireBashTargetShell(rt); err != nil {
 		return nil, fmt.Errorf("%s: %w", a.Name(), err)
 	}
@@ -271,9 +278,9 @@ func (a *OpenCodeAgent) execute(ctx context.Context, rt Runtime, opts ExecOption
 		return &SessionResult{Engine: a.Name(), ExitCode: 1, Artifacts: &SessionArtifacts{}}, err
 	}
 	cmd, delivery, err := deliverPrompt(ctx, rt, opts, instruction, promptCommandBuilder{
-		Inline: func(prompt string) string { return buildOpenCodeRunCmd(prompt, a.model(), sessionID) },
+		Inline: func(prompt string) string { return buildOpenCodeRunCmd(prompt, model, sessionID) },
 		StdinFile: func(path string) string {
-			return buildOpenCodeRunCmd("", a.model(), sessionID) + " -- \"$(cat " + shellQuote(path) + ")\""
+			return buildOpenCodeRunCmd("", model, sessionID) + " -- \"$(cat " + shellQuote(path) + ")\""
 		},
 	})
 	if err != nil {
@@ -314,21 +321,21 @@ func (a *OpenCodeAgent) execute(ctx context.Context, rt Runtime, opts ExecOption
 	return parsed, nil
 }
 
-func (a *OpenCodeAgent) model() string {
+func (a *OpenCodeAgent) model() (string, error) {
 	model := strings.TrimSpace(a.Cfg.ModelName)
 	if model == "" {
-		return model
+		return model, nil
 	}
 	if provider := strings.TrimSpace(a.Cfg.ModelProvider); provider != "" {
-		return provider + "/" + model
+		return provider + "/" + model, nil
 	}
 	if strings.Contains(model, "/") {
-		return model
+		return "", fmt.Errorf("opencode model %q contains '/' without an explicit provider; set engine.model.provider or --provider", model)
 	}
 	if a.Cfg.BaseURL != "" {
-		return agentProviderOpenAI + "/" + model
+		return agentProviderOpenAI + "/" + model, nil
 	}
-	return model
+	return model, nil
 }
 
 func buildOpenCodeRunCmd(instruction, model, sessionID string) string {
