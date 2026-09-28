@@ -67,6 +67,24 @@ func TestSimulatedReplyFailurePreservesEarlierTurns(t *testing.T) {
 	}
 }
 
+func TestGeneratedFirstTurnPopulatesReportedPrompt(t *testing.T) {
+	ag := &mockResumerAgent{mockAgent: mockAgent{name: "simulated"}}
+	simulator := &scriptedSimulator{decisions: []usersimulator.Decision{{Action: "reply", Message: "Use staging"}}}
+	e := newTestEvaluator(EvalOptions{Agent: ag, Simulator: simulator, EvalCfg: &config.EvalConfig{
+		Engine: config.EngineConfig{Name: "codex"},
+		Cases:  config.CasesConfig{Defaults: config.CaseDefaults{MaxTurns: 2}},
+		Judge:  config.JudgeConfig{Type: "rule_based"},
+	}})
+	caseCfg := &config.CaseConfig{ID: "generated-first", UserSimulator: &config.UserSimulatorScenario{Scenario: "staging"}, Input: config.Input{Turns: []config.Turn{
+		{Role: "user", Respond: "Start the conversation"},
+		{Role: "user", Content: "Now summarize"},
+	}}}
+	result := e.executeCaseOnce(context.Background(), caseCfg, "with_skill", &mockRuntime{workspace: t.TempDir()}, ag)
+	if result.Prompt != "Use staging" || len(result.TurnResults) != 2 || result.TurnResults[0].Content != "Use staging" {
+		t.Fatalf("reported prompt or turns do not match the sent message: %+v", result)
+	}
+}
+
 func TestAutonomousSimulationRequiresSessionIDBeforeResume(t *testing.T) {
 	ag := &strictIncrementalMockResumerAgent{mockResumerAgent: &mockResumerAgent{
 		mockAgent: mockAgent{name: "strict"},

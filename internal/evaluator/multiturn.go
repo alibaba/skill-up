@@ -1064,6 +1064,9 @@ func (e *defaultEvaluator) executeMultiTurnCase(
 	turnResults, aggregateSession, execErr := e.executeMultiTurn(ctx, rt, caseCfg, runAgent, agentExecOpts)
 	result.TurnResults = turnResults
 	result.TurnsTotal = len(turnResults)
+	if len(turnResults) > 0 && turnResults[0].Content != "" {
+		result.Prompt = turnResults[0].Content
+	}
 
 	finalizeArtifacts(aggregateSession)
 	result.SessionResult = normalizeSessionResult(aggregateSession)
