@@ -591,6 +591,65 @@ input:
         on_fail: fail
 ```
 
+### Simulated user replies
+
+Configure a separate model for the simulated user in `eval.yaml`:
+
+```yaml
+user_simulator:
+  provider: simulation
+  protocol: openai
+  model: your-model-id
+  timeout_seconds: 30
+```
+
+The model uses the OpenAI Chat Completions API. Set `SIMULATION_API_KEY` and
+`SIMULATION_BASE_URL`, or configure the same provider in
+`~/.skill-up/credentials.yaml`. For `provider: openai`, the standard OpenAI
+endpoint is used when no base URL is configured. The simulator runs outside the
+agent workspace and uses its own model connection.
+
+In a case, `user_simulator.scenario` describes the user's goal and known
+information. A `respond` turn generates one user message from the scenario,
+the turn instruction, and the preceding conversation. Fixed `content` turns
+can appear before or after it:
+
+```yaml
+user_simulator:
+  scenario: |
+    Generate a staging configuration with two replicas.
+    Do not approve deployment. Do not invent missing information.
+input:
+  turns:
+    - role: user
+      content: "Create a deployment configuration."
+    - role: user
+      respond: "Answer the agent's current configuration question."
+    - role: user
+      content: "Change the replica count to three."
+```
+
+For a conversation whose later turns are fully determined by the simulator,
+provide a fixed opening prompt and omit `turns`:
+
+```yaml
+user_simulator:
+  scenario: |
+    Generate a staging configuration with two replicas.
+    Answer follow-up questions, reject deployment, and end when the
+    configuration and verification steps have been explained.
+input:
+  prompt: "Create a deployment configuration."
+constraints:
+  max_turns: 8
+```
+
+The initial prompt counts as turn one. The evaluator enforces `max_turns` and
+records a limit error when the simulator asks to continue beyond it. A
+simulator stop ends the dialogue and is recorded in the turn results; the
+configured judge still determines PASS or FAIL. Simulated cases require an
+engine that supports session resumption.
+
 ### `post_condition` — inter-turn gate
 
 `post_condition` checks the agent's response after each turn. It is a **gate**,

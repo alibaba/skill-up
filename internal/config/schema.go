@@ -9,15 +9,16 @@ import (
 
 // EvalConfig is the root document loaded from evals/eval.yaml (v1alpha1).
 type EvalConfig struct {
-	SchemaVersion string          `yaml:"schema_version"`
-	Environment   Environment     `yaml:"environment"`
-	MCP           MCPConfig       `yaml:"mcp"`
-	Skills        []SkillRef      `yaml:"skills"`
-	Engine        EngineConfig    `yaml:"engine"`
-	Cases         CasesConfig     `yaml:"cases"`
-	Judge         JudgeConfig     `yaml:"judge"`
-	Benchmark     BenchmarkConfig `yaml:"benchmark"`
-	Report        ReportConfig    `yaml:"report"`
+	SchemaVersion string             `yaml:"schema_version"`
+	Environment   Environment        `yaml:"environment"`
+	MCP           MCPConfig          `yaml:"mcp"`
+	Skills        []SkillRef         `yaml:"skills"`
+	Engine        EngineConfig       `yaml:"engine"`
+	Cases         CasesConfig        `yaml:"cases"`
+	Judge         JudgeConfig        `yaml:"judge"`
+	UserSimulator UserSimulatorModel `yaml:"user_simulator,omitempty"`
+	Benchmark     BenchmarkConfig    `yaml:"benchmark"`
+	Report        ReportConfig       `yaml:"report"`
 }
 
 // Environment defines the runtime environment for evaluation.
@@ -117,6 +118,14 @@ type ModelConfig struct {
 	// Legacy compatibility field: retained so existing v1alpha1 files continue
 	// to load. Use engine.kwargs or engine.custom.kwargs instead.
 	Params map[string]string `yaml:"params,omitempty"`
+}
+
+// UserSimulatorModel selects the independent model used to simulate user turns.
+type UserSimulatorModel struct {
+	Provider       string `yaml:"provider"`
+	Protocol       string `yaml:"protocol"`
+	Model          string `yaml:"model"`
+	TimeoutSeconds int    `yaml:"timeout_seconds,omitempty"`
 }
 
 // CasesConfig describes the test cases configuration.
@@ -270,15 +279,16 @@ type ReportConfig struct {
 
 // CaseConfig is a single test case loaded from the case files listed in evals/eval.yaml.
 type CaseConfig struct {
-	ID          string      `yaml:"id"`
-	Title       string      `yaml:"title"`
-	Description string      `yaml:"description"`
-	Tag         string      `yaml:"tag"` // trigger_test, functional_test
-	Input       Input       `yaml:"input"`
-	Context     Context     `yaml:"context"`
-	Constraints Constraints `yaml:"constraints"`
-	Expect      Expect      `yaml:"expect"`
-	Judge       JudgeConfig `yaml:"judge,omitempty"`
+	ID            string                 `yaml:"id"`
+	Title         string                 `yaml:"title"`
+	Description   string                 `yaml:"description"`
+	Tag           string                 `yaml:"tag"` // trigger_test, functional_test
+	Input         Input                  `yaml:"input"`
+	Context       Context                `yaml:"context"`
+	Constraints   Constraints            `yaml:"constraints"`
+	Expect        Expect                 `yaml:"expect"`
+	Judge         JudgeConfig            `yaml:"judge,omitempty"`
+	UserSimulator *UserSimulatorScenario `yaml:"user_simulator,omitempty"`
 	// MCP declares case-level MCP server overrides. Servers are merged with
 	// eval-level mcp.servers by name: a same-name entry replaces the whole
 	// eval-level server, and a new name is appended. In the MVP, case-level
@@ -305,10 +315,16 @@ type Input struct {
 	Turns  []Turn `yaml:"turns,omitempty"`
 }
 
+// UserSimulatorScenario describes the simulated user's goal for one case.
+type UserSimulatorScenario struct {
+	Scenario string `yaml:"scenario"`
+}
+
 // Turn is a single conversation turn.
 type Turn struct {
 	Role           string         `yaml:"role"` // user
 	Content        string         `yaml:"content"`
+	Respond        string         `yaml:"respond,omitempty"`
 	PostCondition  *PostCondition `yaml:"post_condition,omitempty"`
 	Capture        []CaptureRule  `yaml:"capture,omitempty"`
 	TimeoutSeconds int            `yaml:"timeout_seconds,omitempty"`
