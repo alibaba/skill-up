@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add an `opencode` Agent Engine for local and isolated runtimes, including
   CLI installation, JSON event transcripts, multi-turn session resume, and
   runtime-scoped MCP and provider configuration.
+- DSH's opt-in observer now links the next same-session user turn after a
+  single completed Skill use as an unclassified follow-up candidate.
+  `collect_skill_feedback` gathers recent observations and follow-ups for
+  review before proposing a Skill change.
+- Add a code-stats regression case that verifies project source counts exclude dependency directories.
 - Tagged releases now attach self-contained Codex and DeepSeek Harness
   plugin archives assembled with the canonical `skill-upper` source, including
   checksums and attestations without publishing to an external registry. Plugin
@@ -41,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    on POSIX shells.
 
 ### Changed
+- Upgrade the GitHub Action runner image and live model E2E to QoderCLI 1.1.41,
+  and run two QoderCLI self-eval cases concurrently.
+- Publish the canonical `skill-upper` instructions and reference guides in
+  English while retaining the Chinese overview and language-specific eval
+  fixtures.
 - Clarify in the English and Chinese READMEs that the evaluation CLI also
   supports agent-only and workspace evaluations without a Skill, alongside
   the Skill evolution workflow, and place its evaluation loop in the context

@@ -1,8 +1,8 @@
-# 从 Anthropic evals.json 迁移（skill-up）
+# Migrate from Anthropic evals.json (skill-up)
 
-若使用 Anthropic skill-creator 生成过 Skill，目录下可能有 `evals/evals.json`。skill-up 可以直接消费它，也可一次性转成原生 YAML。
+A Skill created with Anthropic skill-creator may contain `evals/evals.json`. skill-up can run it directly or convert it once to native YAML.
 
-## 方式一：`--auto` 直接跑（零配置）
+## Option 1: Run directly with `--auto`
 
 ```bash
 cd my-skill/
@@ -11,52 +11,47 @@ skill-up run ./my-skill/ --auto
 skill-up run --auto --engine codex
 ```
 
-**适用**：快速 CI 回归、多 Engine 验证、与 Anthropic evals 源文件保持同步。
+Use this for quick CI regression, validation across engines, and staying in sync with the Anthropic source file.
 
-**限制**：
+Limitations:
 
-- 不支持多轮对话
-- `expectations` 往往映射为 `agent_judge.criteria`，消耗评审 token
-- 不便在 `--auto` 路径上叠加复杂 `opensandbox` / MCP / 强 `expect` 门槛（需转 YAML 后编辑）
+- Multi-turn conversations are unsupported.
+- `expectations` often become `agent_judge.criteria`, which consumes judge tokens.
+- Advanced OpenSandbox, MCP, or strict `expect` gates are easier to add after converting to YAML.
 
-## 方式二：`import` 转原生 yaml（深度定制）
+## Option 2: Convert to native YAML with `import`
 
 ```bash
 skill-up import ./evals/evals.json
 skill-up import ./evals/evals.json --output ./evals-v2
 ```
 
-生成 `eval.yaml` + `cases/*.yaml` 后，你可以：
+The generated `eval.yaml` and `cases/*.yaml` can then be edited to add deterministic `expect` gates, use `rule_based` or `script` judges, configure multi-turn `turns`, or add `environment.type: opensandbox` and MCP.
 
-- 添加 `expect` 确定性门槛
-- 使用 `rule_based` / `script` 替代或补充 LLM 评判
-- 配置多轮 `turns`
-- 配置 `environment.type: opensandbox`、MCP 等
-
-## 对比
+## Comparison
 
 | | `--auto` | `import` |
 | --- | --- | --- |
-| 操作 | 运行时读取 | 一次性落盘 YAML |
-| 同步 | evals.json 更新即生效 | 之后独立维护 YAML |
-| 定制 | 受限于 JSON | 完全可控 |
+| Operation | Read at run time | Write YAML once |
+| Updates | Follow `evals.json` changes | Maintain YAML independently |
+| Customization | Limited by JSON | Fully editable |
 
-> 可先用 `--auto` 跑通，再对重试用例 `import` 手改。
+A practical sequence is to run `--auto`, import cases that need richer checks, and maintain their YAML separately.
 
-## evals.json 映射（摘要）
+## Field mapping (summary)
 
 | evals.json | skill-up YAML |
 | --- | --- |
 | `prompt` | `input.prompt` |
-| `expectations` | 默认 `judge.agent_judge.criteria` |
-| `expected_output` | 常为 `description` |
-| `files` | `context.files` 等 |
+| `expectations` | `judge.agent_judge.criteria` by default |
+| `expected_output` | Often `description` |
+| `files` | `context.files`, etc. |
 
-## 推荐路径
+## Suggested workflow
 
-1. `skill-up run --auto` 验证可走通  
-2. `skill-up import ./evals/evals.json --output ./evals-native`  
-3. 编辑 YAML：补 `expect`、`rule_based`、`opensandbox` / MCP  
-4. `skill-up run ./evals-native/eval.yaml`
+1. Run `skill-up run --auto` to verify the source evaluation works.
+2. Run `skill-up import ./evals/evals.json --output ./evals-native`.
+3. Edit YAML to add `expect`, `rule_based`, OpenSandbox, or MCP as needed.
+4. Run `skill-up run ./evals-native/eval.yaml`.
 
-Ideal：Anthropic 迭代 Skill → skill-up `--auto` 进 CI → 深度场景转 YAML 长期维护。
+This allows Anthropic-side Skill iteration with `--auto` in CI, then native YAML for deeper long-term scenarios.

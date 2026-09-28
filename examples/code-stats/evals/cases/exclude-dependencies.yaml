@@ -1,0 +1,39 @@
+id: exclude-dependencies
+title: Exclude dependency directories from code statistics
+description: Verify that third-party files in node_modules are not counted as project source
+
+input:
+  prompt: |
+    Load the code-stats skill, then use its own scanning rules to report the file and extension statistics for ./project. Do not add exclusion rules of your own. Follow the skill's full output format.
+
+context:
+  files:
+    project/README.md: |
+      # Demo Project
+    project/main.go: |
+      package main
+
+      func main() {}
+    project/util.go: |
+      package main
+
+      func helper() {}
+    project/node_modules/demo-lib/index.js: |
+      export function externalDependency() {
+        return 'third-party code';
+      }
+
+constraints:
+  timeout_seconds: 900
+  max_turns: 5
+
+judge:
+  type: rule_based
+  success:
+    - output_matches:
+        all:
+          - '(?m)^- Total Files: 3$'
+          - '(?m)^\| \.go \| 2 \| [0-9]+ \|$'
+          - '(?m)^\| \.md \| 1 \| [0-9]+ \|$'
+        not:
+          - '(?m)^\| \.js \|'
