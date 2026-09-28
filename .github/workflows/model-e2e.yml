@@ -89,11 +89,11 @@ jobs:
           npm install -g '@qwen-code/qwen-code@0.20.1'
           qwen --version
 
-      - name: Install qodercli (pinned v1.1.21)
+      - name: Install qodercli (pinned v1.1.41)
         if: steps.secrets.outputs.available == 'true'
         env:
-          QODER_VERSION: "1.1.21"
-          QODER_SHA256: "f979e907faa7ec5d74759c4cf87f2357d4f82eab35dadf98692a5a43c1055cdb"
+          QODER_VERSION: "1.1.41"
+          QODER_SHA256: "1c2d174b098eb472a9ac19a80b89a664fdcb7d37dca09e64f44243faa4e3eca7"
         run: |
           set -euo pipefail
           tarball=$(mktemp)

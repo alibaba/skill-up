@@ -38,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    on POSIX shells.
 
 ### Changed
+- Upgrade the GitHub Action runner image and live model E2E to QoderCLI 1.1.41,
+  and run two QoderCLI self-eval cases concurrently.
 - Publish the canonical `skill-upper` instructions and reference guides in
   English while retaining the Chinese overview and language-specific eval
   fixtures.
