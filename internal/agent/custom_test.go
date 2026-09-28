@@ -271,6 +271,38 @@ func TestCustomAgent_RunLocal_KwargsInOutputFilePath(t *testing.T) {
 	}
 }
 
+func TestCustomAgent_RunLocal_InputFileOmitsKwargs(t *testing.T) {
+	t.Parallel()
+	rt := newCustomTestRuntime(t)
+	// custom.kwargs is adapter configuration, not part of the payload handed to
+	// the engine: the local transport materializes the SessionInput inside the
+	// runtime workspace, where the engine's child processes — including the
+	// agent under test — can read it. The kwarg must still reach the engine
+	// through its declared command line.
+	ag := customLocalAgent(&config.CustomEngineConfig{
+		Transport:      "local",
+		ResponseFormat: "text",
+		Kwargs:         map[string]string{"profile": "strict"},
+		Local: &config.CustomLocalConfig{
+			Command: "sh",
+			Args: []string{"-c", `set -e
+test -s "${input_file}" || { echo "input file missing" >&2; exit 1; }
+case "$(cat "${input_file}")" in
+  *'"kwargs"'*) echo "kwargs leaked into the workspace input file" >&2; exit 1 ;;
+esac
+printf '%s' "${kwargs.profile}"`},
+		},
+	})
+
+	res, err := ag.Run(context.Background(), rt, ExecOptions{}, userMessages())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.FinalMessage != "strict" {
+		t.Fatalf("final_message = %q, want strict (kwargs must still render into local.args)", res.FinalMessage)
+	}
+}
+
 func TestCustomAgent_RunLocal_ClearedStaleOutputRegistered(t *testing.T) {
 	t.Parallel()
 	rt := newCustomTestRuntime(t)

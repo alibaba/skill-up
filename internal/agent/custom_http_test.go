@@ -297,6 +297,61 @@ func TestCustomAgent_RunHTTP_RequestBodyRendersKwargs(t *testing.T) {
 	}
 }
 
+func TestCustomAgent_RunHTTP_DefaultBodyOmitsKwargs(t *testing.T) {
+	t.Parallel()
+	// The default body is the SessionInput, which must not carry the
+	// custom.kwargs map implicitly: an engine opts in per key through
+	// request_body / headers instead.
+	var got map[string]json.RawMessage
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &got)
+		_, _ = io.WriteString(w, `{"exit_code":0,"final_message":"ok"}`)
+	}))
+	defer srv.Close()
+
+	custom := httpEngine(srv.URL)
+	custom.Kwargs = map[string]string{"profile": "strict"}
+	rt := newCustomTestRuntime(t)
+	if _, err := httpAgent(custom, "").Run(context.Background(), rt, ExecOptions{}, userMessages()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if raw, ok := got["kwargs"]; ok {
+		t.Fatalf("default SessionInput body carried custom.kwargs: %s", raw)
+	}
+}
+
+func TestCustomAgent_RunHTTP_RequestBodyInjectsKwargsStructure(t *testing.T) {
+	t.Parallel()
+	// The explicit opt-in must keep working: a request_body value that is
+	// exactly ${kwargs} is injected as the kwargs JSON object.
+	var raw map[string]json.RawMessage
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &raw)
+		_, _ = io.WriteString(w, `{"exit_code":0,"final_message":"ok"}`)
+	}))
+	defer srv.Close()
+
+	custom := httpEngine(srv.URL)
+	custom.Kwargs = map[string]string{"profile": "strict"}
+	custom.HTTP.RequestBody = map[string]any{"params": "${kwargs}"}
+	rt := newCustomTestRuntime(t)
+	if _, err := httpAgent(custom, "").Run(context.Background(), rt, ExecOptions{}, userMessages()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(raw["params"]) == 0 || raw["params"][0] != '{' {
+		t.Fatalf("params was not injected as a JSON object: %s", raw["params"])
+	}
+	var params map[string]string
+	if err := json.Unmarshal(raw["params"], &params); err != nil {
+		t.Fatalf("decode params: %v", err)
+	}
+	if params["profile"] != "strict" {
+		t.Fatalf("params = %v, want the opted-in kwarg map", params)
+	}
+}
+
 func TestCustomAgent_RunHTTP_RendersHeaderWithAPIKey(t *testing.T) {
 	t.Parallel()
 	var auth string

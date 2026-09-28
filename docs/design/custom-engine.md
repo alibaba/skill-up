@@ -119,7 +119,10 @@ Before completing an integration, confirm each item:
 
 - It can read `SessionInput.messages` and treat it as the complete conversation
   history.
-- It can read `SessionInput.kwargs`, treating every value as a string.
+- It receives every `custom.kwargs` value it needs through a template it declares
+  (`${kwargs.<key>}` in `custom.local.args` / `custom.env` / `custom.http.headers`,
+  or `${kwargs}` in `custom.http.request_body`), treating each value as a string.
+  `SessionInput` itself carries no kwargs map.
 - When it needs workspace files, it relies only on `custom.http.files` or on explicit
   paths inside the local runtime workspace.
 - It returns a parseable `SessionResult` for both success and failure.
@@ -213,7 +216,7 @@ only where the transport genuinely requires it:
 | --- | --- | --- | --- |
 | Input | `SessionInput` | Written to `custom.local.input_file` | JSON body; multipart `payload` when files are present |
 | Multi-turn | Batch sends complete history; stateful sends the current user message plus prior `session_id` | Read from the input file | Read from the request body / payload |
-| Custom params | `custom.kwargs` | Appear in the input file, can be templated | Appear in the request body / payload, can be templated |
+| Custom params | `custom.kwargs` | Referenced as `${kwargs.<key>}` from `args` / `cwd` / `env`; never embedded in the workspace input file | Referenced as `${kwargs.<key>}` from `headers` / `request_body`, or injected wholesale with `${kwargs}` |
 | Credentials | `${api_key}` referenced explicitly, never auto-injected | Injected via `custom.env` | Injected via `custom.http.headers` |
 | Workspace input | Passed only when explicitly declared | Agent runs directly inside the runtime workspace | Uploaded explicitly via `custom.http.files` |
 | Result | `SessionResult` | stdout or `output_file` | HTTP response body |
@@ -323,12 +326,17 @@ custom:
 ```
 
 `kwargs` values may also reference built-in template variables (for example
-`${case_id}` or `${prompt}`); they are rendered per case before being placed into the
-session input and exposed as `${kwargs.<key>}`.
+`${case_id}` or `${prompt}`); they are rendered per case and exposed as
+`${kwargs.<key>}`.
 
-After resolution, `kwargs` flows into the local input file and the HTTP request body,
-and can also be referenced through template variables. All kwargs values are treated
-as strings; if the agent needs a number or boolean, it must parse it itself.
+After resolution, `kwargs` reach the engine only through the templates the engine
+declares — `custom.local.args` / `custom.local.cwd` / `custom.env` for a local engine,
+or `custom.http.headers` / `custom.http.request_body` for an HTTP one. They are
+**never** embedded in `SessionInput`: the local transport writes that payload into the
+runtime workspace, where the agent under test and every other process in that
+directory can read it, so an implicit copy of the kwargs map would bypass the
+command-line rejection described under *Credential handling*. All kwargs values are
+treated as strings; if the agent needs a number or boolean, it must parse it itself.
 
 ## Agent artifact archiving boundary
 
@@ -426,10 +434,6 @@ uploads are present.
   "workspace": "/tmp/skill-up/workspace",
   "model": "openai/gpt-4.1",
   "session_id": "session-from-the-previous-turn",
-  "kwargs": {
-    "profile": "strict",
-    "max_files": "20"
-  },
   "messages": [
     { "role": "user", "content": "First read the current directory." },
     { "role": "assistant", "content": "Done." },
@@ -439,6 +443,15 @@ uploads are present.
   "timeout_seconds": 300
 }
 ```
+
+`SessionInput` deliberately carries no `custom.kwargs` map. The local transport
+materializes this payload inside the runtime workspace, so every field is readable by
+the engine's child processes — including the agent under test — and by any other
+process working in that directory. The same strict resolver that keeps `${kwargs}` /
+`${kwargs_json}` / `${session_input}` out of command lines therefore keeps the kwargs
+map out of the payload. Wire each kwarg explicitly through `${kwargs.<key>}` in
+`custom.local.args` / `custom.env` / `custom.http.headers`, or pass the whole map with
+`${kwargs}` in `custom.http.request_body`.
 
 `messages[*].role` supports `system`, `user`, `assistant`, and `tool`.
 
@@ -809,6 +822,10 @@ The hardening below is enforced in code; treat each item as part of the contract
   agent.
 - kwargs keys that collide with a built-in template variable (`model`, `case_id`,
   `max_turns`, `workspace`, …) are rejected at validation; rename them.
+- `SessionInput` carries no `custom.kwargs` map. The local transport writes that
+  payload into the runtime workspace, so an implicit copy of the kwargs map would
+  bypass the command-line rejection above — the file is readable by the agent under
+  test. kwargs must be wired explicitly through the templates above.
 
 ### Workspace confinement
 
