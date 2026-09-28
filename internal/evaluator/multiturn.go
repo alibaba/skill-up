@@ -109,7 +109,7 @@ func (e *defaultEvaluator) executeMultiTurn(
 		}
 		content, source, err := resolveTurnMessage(ctx, state, turn, turnNum, origin, simulator, caseCfg.UserSimulator)
 		if err != nil {
-			return state.turnResults, lastSessionResult, err
+			return state.turnResults, buildAggregateResult(state, lastSessionResult), err
 		}
 
 		step := configuredTurn{

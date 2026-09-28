@@ -19,6 +19,54 @@ type scriptedSimulator struct {
 	policies  []usersimulator.ResponsePolicy
 }
 
+type failingSimulator struct{}
+
+func (failingSimulator) Next(context.Context, string, string, []usersimulator.Exchange, usersimulator.ResponsePolicy) (usersimulator.Decision, error) {
+	return usersimulator.Decision{}, errors.New("simulator unavailable")
+}
+
+func TestSimulatedReplyFailurePreservesEarlierTurns(t *testing.T) {
+	ag := &strictIncrementalMockResumerAgent{mockResumerAgent: &mockResumerAgent{
+		mockAgent: mockAgent{name: "incremental"},
+		runTurnFunc: func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, msg transcript.Message, _ string) (*agent.SessionResult, error) {
+			return &agent.SessionResult{
+				FinalMessage: "reply to " + msg.Content,
+				SessionID:    "session-1",
+				InputTokens:  msg.Turn,
+				OutputTokens: msg.Turn * 2,
+				DurationMs:   int64(msg.Turn * 10),
+				Transcript: transcript.Transcript{
+					{Role: transcript.RoleUser, Content: msg.Content},
+					{Role: transcript.RoleAssistant, Content: "reply to " + msg.Content},
+				},
+				Artifacts: &agent.SessionArtifacts{Files: []agent.ArtifactFile{{Name: "turn.txt", Content: msg.Content}}},
+			}, nil
+		},
+	}}
+	e := newTestEvaluator(EvalOptions{Agent: ag, Simulator: failingSimulator{}, EvalCfg: &config.EvalConfig{Cases: config.CasesConfig{Defaults: config.CaseDefaults{MaxTurns: 3}}}})
+	caseCfg := &config.CaseConfig{ID: "simulator-failure", UserSimulator: &config.UserSimulatorScenario{Scenario: "staging"}, Input: config.Input{Turns: []config.Turn{
+		{Role: "user", Content: "first"},
+		{Role: "user", Content: "second"},
+		{Role: "user", Respond: "answer the question"},
+	}}}
+	results, aggregate, err := e.executeMultiTurn(context.Background(), &mockRuntime{workspace: t.TempDir()}, caseCfg, ag, agent.ExecOptions{})
+	if err == nil || !strings.Contains(err.Error(), "simulator unavailable") {
+		t.Fatalf("error = %v, want simulator failure", err)
+	}
+	if ag.turnCall != 2 || len(results) != 2 || aggregate == nil || aggregate.Turns != 2 {
+		t.Fatalf("calls=%d results=%+v aggregate=%+v", ag.turnCall, results, aggregate)
+	}
+	if len(aggregate.Transcript) != 4 || aggregate.Transcript[0].Content != "first" || aggregate.Transcript[2].Content != "second" {
+		t.Errorf("lost prior transcript: %+v", aggregate.Transcript)
+	}
+	if aggregate.InputTokens != 3 || aggregate.OutputTokens != 6 || aggregate.DurationMs != 30 {
+		t.Errorf("lost prior usage: %+v", aggregate)
+	}
+	if aggregate.Artifacts == nil || len(aggregate.Artifacts.Files) != 2 {
+		t.Errorf("lost prior artifacts: %+v", aggregate.Artifacts)
+	}
+}
+
 func TestAutonomousSimulationRequiresSessionIDBeforeResume(t *testing.T) {
 	ag := &strictIncrementalMockResumerAgent{mockResumerAgent: &mockResumerAgent{
 		mockAgent: mockAgent{name: "strict"},
