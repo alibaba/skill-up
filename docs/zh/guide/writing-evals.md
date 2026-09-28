@@ -1023,17 +1023,7 @@ skill-up run ./evals/eval.yaml --engine qodercli --provider qoder --model 'team/
 
 配置 `engine.name: opencode`。`environment.type: none` 调用本地已安装的
 `opencode` 并沿用其登录态；`docker` 或 `opensandbox` 会在隔离环境内安装
-`opencode-ai` CLI。两种模式使用相同的 Engine 配置：
-
-```yaml
-environment:
-  type: none                    # 隔离运行时改为 opensandbox 或 docker
-engine:
-  name: opencode
-  model:
-    provider: openai
-    name: gpt-5
-```
+`opencode-ai` CLI。下方已验证的 DashScope 配置适用于本地和沙箱模式。
 
 模型以 `provider/model` 传给 OpenCode。显式 API key 经运行时环境变量传入；
 未配置时使用 OpenCode 自身的登录态。`engine.model.base_url` 会通过 OpenCode
@@ -1066,11 +1056,10 @@ engine:
 ```
 
 通过 `DASHSCOPE_API_KEY` 环境变量或 `--api-key` 提供密钥，不要写入评测文件。
-若密钥由 macOS Keychain 中的 `keychain-secrets` 工具管理，可这样注入：
+设置好进程环境中的 `DASHSCOPE_API_KEY` 后运行：
 
 ```bash
-python3 /path/to/keychain_secrets.py run DASHSCOPE_API_KEY -- \
-  skill-up run ./evals/eval.yaml
+skill-up run ./evals/eval.yaml
 ```
 
 skill-up 向 OpenCode 传入 `--model dashscope/qwen3.8-max`，并通过进程内配置注入

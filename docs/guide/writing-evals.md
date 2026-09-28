@@ -1088,17 +1088,7 @@ authentication. Configure any custom model in Qoder first.
 Set `engine.name: opencode`. With `environment.type: none`, skill-up uses the
 installed local `opencode` command and its existing login. With `docker` or
 `opensandbox`, skill-up installs the `opencode-ai` CLI in the isolated runtime.
-The same engine configuration works in either mode:
-
-```yaml
-environment:
-  type: none                    # Change to opensandbox or docker for isolation
-engine:
-  name: opencode
-  model:
-    provider: openai
-    name: gpt-5
-```
+The tested DashScope configuration below works in both modes.
 
 OpenCode receives the model as `provider/model`. An explicit API key is passed
 through the runtime environment; without one, OpenCode uses its own login.
@@ -1137,12 +1127,10 @@ engine:
 ```
 
 Supply the API key through `DASHSCOPE_API_KEY` or `--api-key`; keep it out of
-the eval file. For example, if the key is stored in macOS Keychain using the
-`keychain-secrets` helper:
+the eval file. With `DASHSCOPE_API_KEY` set in the process environment, run:
 
 ```bash
-python3 /path/to/keychain_secrets.py run DASHSCOPE_API_KEY -- \
-  skill-up run ./evals/eval.yaml
+skill-up run ./evals/eval.yaml
 ```
 
 skill-up passes `dashscope/qwen3.8-max` as OpenCode's `--model` value. It injects
