@@ -1132,7 +1132,7 @@ engine:
   name: opencode
   model:
     provider: dashscope
-    name: qwen-plus
+    name: qwen3.8-max
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 ```
 
@@ -1145,11 +1145,13 @@ python3 /path/to/keychain_secrets.py run DASHSCOPE_API_KEY -- \
   skill-up run ./evals/eval.yaml
 ```
 
-skill-up passes `dashscope/qwen-plus` as OpenCode's `--model` value. It injects
+skill-up passes `dashscope/qwen3.8-max` as OpenCode's `--model` value. It injects
 an inline `dashscope` provider with `@ai-sdk/openai-compatible`, the configured
 `baseURL`, and the model ID. The key is referenced through a runtime environment
 variable. Replace the endpoint with the URL for your DashScope region or
-workspace, and use a model that the key can access. For a model ID containing
+workspace, and use a model that the key can access. The example uses the
+[documented `qwen3.8-max` model ID](https://help.aliyun.com/zh/model-studio/qwen3-8-max).
+For a model ID containing
 slashes, keep the entire ID in `name` (or `--model`); skill-up does not split it.
 
 ### qwen_code credentials

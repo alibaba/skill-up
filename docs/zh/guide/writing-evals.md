@@ -1061,7 +1061,7 @@ engine:
   name: opencode
   model:
     provider: dashscope
-    name: qwen-plus
+    name: qwen3.8-max
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 ```
 
@@ -1073,9 +1073,10 @@ python3 /path/to/keychain_secrets.py run DASHSCOPE_API_KEY -- \
   skill-up run ./evals/eval.yaml
 ```
 
-skill-up 向 OpenCode 传入 `--model dashscope/qwen-plus`，并通过进程内配置注入
+skill-up 向 OpenCode 传入 `--model dashscope/qwen3.8-max`，并通过进程内配置注入
 `dashscope` provider、`@ai-sdk/openai-compatible`、`baseURL` 和模型 ID；密钥
-由运行时环境变量引用。请按地域或业务空间替换端点，并选择当前密钥有权限调用的模型。
+由运行时环境变量引用。示例使用[官方模型调用 ID `qwen3.8-max`](https://help.aliyun.com/zh/model-studio/qwen3-8-max)。
+请按地域或业务空间替换端点，并选择当前密钥有权限调用的模型。
 如果模型 ID 含 `/`，将完整 ID 填在 `name` 或 `--model` 中，skill-up 不会拆分。
 
 ### qwen_code 凭据说明
