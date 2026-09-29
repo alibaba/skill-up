@@ -192,6 +192,21 @@ func TestSimulatedRepliesPreserveLiteralPlaceholders(t *testing.T) {
 	}
 }
 
+func TestUnsupportedSimulatorEngineRetainsBenchmarkVariant(t *testing.T) {
+	ag := &mockAgent{name: "batch-only"}
+	e := newTestEvaluator(EvalOptions{Agent: ag, EvalCfg: &config.EvalConfig{Benchmark: config.BenchmarkConfig{Enabled: true}}})
+	caseCfg := &config.CaseConfig{ID: "unsupported", Input: config.Input{Prompt: "start"}, UserSimulator: &config.UserSimulatorScenario{Scenario: "answer questions"}}
+	for _, variant := range []string{"with_skill", "without_skill"} {
+		result := e.executeCaseOnce(context.Background(), caseCfg, variant, &mockRuntime{workspace: t.TempDir()}, ag)
+		if result.Configuration != variant || result.Error == nil || !strings.Contains(result.Error.Error(), "does not support session resumption") {
+			t.Fatalf("variant %q result = %+v", variant, result)
+		}
+	}
+	if ag.runCall.Load() != 0 {
+		t.Fatalf("unsupported engine ran %d times", ag.runCall.Load())
+	}
+}
+
 func TestUserSimulationAutonomousStopAndLimit(t *testing.T) {
 	for _, test := range []struct {
 		name       string

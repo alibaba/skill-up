@@ -481,6 +481,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 		if caseCfg.UserSimulator != nil {
 			result.Status = judge.StatusError
 			result.Error = fmt.Errorf("agent %s does not support session resumption required by user simulation", runAgent.Name())
+			result.Configuration = configName
 			return result
 		}
 		logging.WarnContextf(
