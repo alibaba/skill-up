@@ -64,6 +64,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixture uploads.
 
 ### Fixed
+- `SessionInput` no longer carries the `custom.kwargs` map. The local transport
+  writes that payload into the runtime workspace, so the map was readable by
+  the agent under test, bypassing the config-time rule that already rejects
+  `${kwargs}` / `${kwargs_json}` / `${session_input}` in command-line contexts
+  because a kwarg value may be credential-shaped. Wire kwargs explicitly with
+  `${kwargs.<key>}` in `custom.local.args` / `custom.env` /
+  `custom.http.headers`, or with `${kwargs}` in `custom.http.request_body`.
 - DeepSeek Harness plugin tests now use a committed lockfile and an exact
   `0.1.5-rc.2` host peer set, preventing newer release candidates from making
   CI dependency resolution nondeterministic.

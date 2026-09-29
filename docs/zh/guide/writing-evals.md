@@ -218,7 +218,7 @@ engine:
   - `text`：把 stdout 整体当作 `final_message`，skill-up 自动按输入消息 + 助手回复合成 minimal transcript，使 judge 仍能拿到一段对话。仅适合不输出结构化结果的简易脚本。
 - **`timeout_seconds`**（可选）—— 单次调用的超时时间。未设时回退到 case 级 timeout；两者都设置时 skill-up 取较小值，保证传给 agent 的预算与真实墙钟一致。
 - **`env`**（可选）—— 凭据 / 敏感参数通道。值会以进程环境变量形式注入到 agent。**这是唯一允许携带凭据的字段**：`command` / `args` / `cwd` / `input_file` / `output_file` 在配置加载阶段会拒绝凭据形态的值。
-- **`kwargs`**（可选）—— 非敏感开关，模板里以 `${kwargs.<key>}` 暴露。与 `env` 不同，kwargs 也走严格凭据检查，不允许携带凭据值或凭据形态的 key（如 `token` / `api_key` / `bearerToken` 等）。
+- **`kwargs`**（可选）—— 非敏感开关，模板里以 `${kwargs.<key>}` 暴露。与 `env` 不同，kwargs 也走严格凭据检查，不允许携带凭据值或凭据形态的 key（如 `token` / `api_key` / `bearerToken` 等）。kwargs **不会**被写进 `SessionInput` 载荷：local 传输会把该载荷落到工作区，被测 agent 可直接读取，因此需要哪个 kwarg，就在 `args` / `cwd` / `env`（或 `http.headers` / `http.request_body`）里用 `${kwargs.<key>}` 显式引用。
 
 `command` / `args` / `cwd` / `env` / `input_file` / `output_file` 中可用的模板变量：
 `${workspace}`、`${input_file}`、`${output_file}`、`${model}`、`${model_provider}`、`${model_name}`、`${case_id}`、`${variant}`、`${max_turns}`、`${timeout_seconds}`、`${kwargs.<key>}`，以及环境变量形式 `${VAR}` / `${VAR:-default}` / `${VAR?error message}`。
@@ -254,7 +254,7 @@ engine:
 
 HTTP 要点：
 
-- 请求体默认是 `SessionInput` JSON。`request_body` 中某个值若恰好是 `${session_input}` / `${messages}` / `${kwargs}`，会以 JSON 结构注入（而非字符串）。
+- 请求体默认是 `SessionInput` JSON，其中不含 `custom.kwargs`。`request_body` 中某个值若恰好是 `${session_input}` / `${messages}` / `${kwargs}`，会以 JSON 结构注入（而非字符串）——需要整份 kwargs 时用 `${kwargs}` 显式注入。
 - 配置了 `http.files` 后请求变为 `multipart/form-data`：JSON 体移到 `payload` 字段，每个命中的文件作为独立 part 上传到固定表单字段 `files`，其 workspace 相对路径放在该 part 的 `filename` 里（服务端应读取每个 `files` part 的 `filename`，而不是按路径找表单 key）。`path` 为 workspace 相对文件或 glob；`required: false` 时缺失/未命中会跳过。
 - 凭据必须从 `headers`（或 `request_body`）引用，不能写进 `http.url` —— URL 渲染出 `${api_key}` 会被拒绝，避免泄漏到请求日志。
 - 非 2xx 响应按调用错误处理。Agent 在 `artifacts.files[].url` 返回的产物会被 GET 下载（仅 http/https、不跟随重定向、有大小与时间上限）到报告目录。

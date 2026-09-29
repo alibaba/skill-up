@@ -257,7 +257,7 @@ Key fields (full contract in [docs/design/custom-engine.md](../design/custom-eng
     A custom HTTP `request_body` can place that value with `${session_id}`; it is an empty string on the first invocation.
 - **`timeout_seconds`** (optional) — per-call deadline. Falls back to the case-level timeout when unset; when both are set, skill-up takes the smaller of the two so the value handed to the agent matches the real wall-clock budget.
 - **`env`** (optional) — credentials and secret parameters. Values are injected into the agent process as environment variables. **This is the only channel allowed to carry credentials**: `command` / `args` / `cwd` / `input_file` / `output_file` reject secret-shaped values at config load.
-- **`kwargs`** (optional) — non-secret knobs exposed to templates as `${kwargs.<key>}`. Unlike `env`, kwargs are subject to the same strict secret-rejection as command-line fields, so they must not carry credentials or credential-shaped keys.
+- **`kwargs`** (optional) — non-secret knobs exposed to templates as `${kwargs.<key>}`. Unlike `env`, kwargs are subject to the same strict secret-rejection as command-line fields, so they must not carry credentials or credential-shaped keys. kwargs are never embedded in the `SessionInput` payload — the local transport writes that payload into the workspace, where the agent under test can read it — so wire each one into the engine through `${kwargs.<key>}` in `args` / `cwd` / `env` (or `http.headers` / `http.request_body`).
 
 Template variables available in `command` / `args` / `cwd` / `env` / `input_file` / `output_file`:
 `${workspace}`, `${input_file}`, `${output_file}`, `${model}`, `${model_provider}`, `${model_name}`, `${case_id}`, `${variant}`, `${max_turns}`, `${timeout_seconds}`, `${kwargs.<key>}`, plus environment variables via `${VAR}` / `${VAR:-default}` / `${VAR?error message}`.
@@ -293,7 +293,7 @@ engine:
 
 HTTP specifics:
 
-- The request body defaults to the `SessionInput` JSON. A `request_body` field whose value is exactly `${session_input}`, `${messages}`, or `${kwargs}` is injected as a JSON structure (not a string).
+- The request body defaults to the `SessionInput` JSON, which never carries the `custom.kwargs` map. A `request_body` field whose value is exactly `${session_input}`, `${messages}`, or `${kwargs}` is injected as a JSON structure (not a string) — use `${kwargs}` to opt the whole map into the request explicitly.
 - With `http.files`, the request becomes `multipart/form-data`: the JSON body moves to the `payload` field and each matched file is uploaded as a separate part under the fixed form field name `files`, with its workspace-relative path carried in that part's `filename` (so the server reads each `files` part's `filename`, not a per-path form key). `path` is a workspace-relative file or glob; `required: false` skips a missing/empty match.
 - Credentials must be referenced from `headers` (or `request_body`), never from `http.url` — a URL that renders `${api_key}` is rejected to keep the key out of request logs.
 - A non-2xx response is treated as an invocation error. Artifacts the agent returns under `artifacts.files[].url` are GET-downloaded (http/https only, no redirects, size/time bounded) into the report directory.

@@ -253,7 +253,7 @@ func (a *CustomAgent) prepareRun(rt Runtime, opts ExecOptions, messages []transc
 		return nil, fmt.Errorf("render custom.kwargs: %w", err)
 	}
 
-	sess := a.buildSessionInput(rt, opts, messages, sessionID, renderedKwargs, timeoutSec)
+	sess := a.buildSessionInput(rt, opts, messages, sessionID, timeoutSec)
 	// Marshal the session input once and share the bytes between the template
 	// expansion (${session_input}) and the on-disk input file, avoiding a second
 	// copy of what for long transcripts can be tens of MB per case.
@@ -1014,16 +1014,26 @@ func (a *CustomAgent) errorResult(exitCode int) *SessionResult {
 // to ${input_file}) and the http transport (sent as the request body
 // or multipart payload field) use the same shape, so it is exported here as
 // a public type rather than buried in a transport implementation.
+//
+// It deliberately carries no custom.kwargs map. The local transport
+// materializes this payload inside the runtime workspace, where it is readable
+// by the engine's own child processes and by anything else working in that
+// directory — including the agent under test. The config-time resolver already
+// refuses ${kwargs} / ${kwargs_json} / ${session_input} in command-line
+// contexts precisely because an aggregate kwargs map may embed a
+// credential-shaped value, so shipping the same map in the workspace file
+// would hand it over anyway. Engines that need a kwarg receive it explicitly
+// via ${kwargs.<key>} in custom.local.args / custom.env / custom.http.headers,
+// or the whole map via ${kwargs} in custom.http.request_body.
 type SessionInput struct {
-	CaseID         string            `json:"case_id,omitempty"`
-	Variant        string            `json:"variant,omitempty"`
-	Workspace      string            `json:"workspace,omitempty"`
-	Model          string            `json:"model,omitempty"`
-	SessionID      string            `json:"session_id,omitempty"`
-	Kwargs         map[string]string `json:"kwargs,omitempty"`
-	Messages       []SessionMessage  `json:"messages"`
-	MaxTurns       int               `json:"max_turns,omitempty"`
-	TimeoutSeconds int               `json:"timeout_seconds,omitempty"`
+	CaseID         string           `json:"case_id,omitempty"`
+	Variant        string           `json:"variant,omitempty"`
+	Workspace      string           `json:"workspace,omitempty"`
+	Model          string           `json:"model,omitempty"`
+	SessionID      string           `json:"session_id,omitempty"`
+	Messages       []SessionMessage `json:"messages"`
+	MaxTurns       int              `json:"max_turns,omitempty"`
+	TimeoutSeconds int              `json:"timeout_seconds,omitempty"`
 }
 
 // SessionMessage is one entry in SessionInput.Messages: a role/content pair
@@ -1033,7 +1043,11 @@ type SessionMessage struct {
 	Content string `json:"content"`
 }
 
-func (a *CustomAgent) buildSessionInput(rt Runtime, opts ExecOptions, messages []transcript.Message, sessionID string, kwargs map[string]string, timeoutSec int) SessionInput {
+// buildSessionInput assembles the payload handed to the engine. Rendered
+// kwargs are intentionally not part of it: the payload is written into the
+// workspace the engine runs in, so adapter parameters must reach the engine
+// through its declared templates instead (see SessionInput).
+func (a *CustomAgent) buildSessionInput(rt Runtime, opts ExecOptions, messages []transcript.Message, sessionID string, timeoutSec int) SessionInput {
 	msgs := make([]SessionMessage, 0, len(messages))
 	for _, m := range messages {
 		msgs = append(msgs, SessionMessage{Role: string(m.Role), Content: m.Content})
@@ -1045,7 +1059,6 @@ func (a *CustomAgent) buildSessionInput(rt Runtime, opts ExecOptions, messages [
 		Workspace:      rt.Workspace(),
 		Model:          formatAgentModel(a.Cfg.ModelProvider, a.Cfg.ModelName),
 		SessionID:      sessionID,
-		Kwargs:         kwargs,
 		Messages:       msgs,
 		MaxTurns:       meta.MaxTurns,
 		TimeoutSeconds: timeoutSec,
