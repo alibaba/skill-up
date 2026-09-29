@@ -104,6 +104,22 @@ func TestAutonomousSimulationRequiresSessionIDBeforeResume(t *testing.T) {
 	}
 }
 
+func TestAutonomousSimulationRejectsMissingSessionIDForNonStrictResumer(t *testing.T) {
+	ag := &mockResumerAgent{mockAgent: mockAgent{name: "non-strict"}, runTurnFunc: func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ transcript.Message, _ string) (*agent.SessionResult, error) {
+		return &agent.SessionResult{FinalMessage: "Which environment?"}, nil
+	}}
+	simulator := &scriptedSimulator{decisions: []usersimulator.Decision{{Action: "reply", Message: "staging"}}}
+	e := newTestEvaluator(EvalOptions{Agent: ag, Simulator: simulator, EvalCfg: &config.EvalConfig{Cases: config.CasesConfig{Defaults: config.CaseDefaults{MaxTurns: 3}}}})
+	caseCfg := &config.CaseConfig{ID: "needs-session-non-strict", UserSimulator: &config.UserSimulatorScenario{Scenario: "staging"}, Input: config.Input{Prompt: "Create config"}}
+	results, _, err := e.executeMultiTurn(context.Background(), &mockRuntime{workspace: t.TempDir()}, caseCfg, ag, agent.ExecOptions{})
+	if err == nil || !strings.Contains(err.Error(), "no session_id") || ag.turnCall != 1 {
+		t.Fatalf("results=%+v calls=%d error=%v", results, ag.turnCall, err)
+	}
+	if len(results) != 1 || results[0].Status != TurnError {
+		t.Fatalf("turn results = %+v", results)
+	}
+}
+
 func TestSimulatedTurnExecutionErrorKeepsSource(t *testing.T) {
 	ag := &mockResumerAgent{mockAgent: mockAgent{name: "error"}, runTurnFunc: func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, msg transcript.Message, _ string) (*agent.SessionResult, error) {
 		if msg.Turn == 2 {

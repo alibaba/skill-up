@@ -135,7 +135,7 @@ func (e *defaultEvaluator) executeMultiTurn(
 			if turnNum >= maxTurns {
 				return state.turnResults, buildAggregateResult(state, lastSessionResult), fmt.Errorf("user simulation reached max_turns=%d", maxTurns)
 			}
-			if requireSessionID && state.sessionID == "" {
+			if state.sessionID == "" {
 				err := fmt.Errorf("case %s turn %d: engine returned no session_id; turn %d cannot resume", caseCfg.ID, turnNum, turnNum+1)
 				state.turnResults[len(state.turnResults)-1].Status = TurnError
 				state.turnResults[len(state.turnResults)-1].Reason = err.Error()
