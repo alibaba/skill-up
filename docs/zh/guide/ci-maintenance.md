@@ -55,7 +55,7 @@ Ruleset 必须使用下表的 Job 展示名称。`build` 等 Job ID 只是实现
 
 Release 工作流还需要 `actions/download-artifact` 和 `actions/attest`。如果仓库使用受限 Action 白名单，必须在第一次 tag 发布前允许这两个官方仓库；工作流中的引用仍必须固定到完整 commit SHA。
 
-Zizmor 在 Model E2E 中报告的三个 `adhoc-packages` 属于已接受的低风险例外：这些固定版本的全局 CLI 正是测试对象，不是应用依赖。任何 High 或 Medium 级别的 Zizmor 发现都必须在合并前修复或完成显式评审。
+Zizmor 在 Model E2E 中报告的四个 `adhoc-packages` 属于已接受的低风险例外：Claude Code、Codex、OpenCode 和 Qwen Code 的固定版本全局 CLI 正是测试对象，不是应用依赖。任何 High 或 Medium 级别的 Zizmor 发现都必须在合并前修复或完成显式评审。
 
 ## Secrets 与 Environments
 

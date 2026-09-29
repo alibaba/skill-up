@@ -57,7 +57,7 @@ Every workflow must set top-level `permissions: {}` and grant permissions per jo
 
 The release workflow also requires `actions/download-artifact` and `actions/attest`. Add both official repositories to a restricted Actions allowlist before the first tag release; keeping their workflow references pinned to full commit SHAs is still mandatory.
 
-Zizmor's three `adhoc-packages` findings in Model E2E are accepted low-severity exceptions: those exact-version global CLI installations are the test subjects, not application dependencies. Any High or Medium Zizmor finding must be fixed or explicitly reviewed before merge.
+Zizmor's four `adhoc-packages` findings in Model E2E are accepted low-severity exceptions: the exact-version global CLI installations for Claude Code, Codex, OpenCode, and Qwen Code are the test subjects, not application dependencies. Any High or Medium Zizmor finding must be fixed or explicitly reviewed before merge.
 
 ## Secrets and environments
 
