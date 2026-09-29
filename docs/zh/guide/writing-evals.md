@@ -746,6 +746,32 @@ judge:
 - `$EVAL_TRANSCRIPT_PATH` 仅在运行时生成了可用 transcript 路径时才会设置；若未设置，脚本中会收到空值
 - 脚本的标准输出会作为评估理由记录到报告中
 
+### 多个独立 judge
+
+同一次 Agent 执行需要同时检查确定性结果和语义质量时，使用 `judges`：
+
+```yaml
+judges:
+  - id: functional
+    type: script
+    script_path: evals/fixtures/scripts/check-quality.sh
+    timeout_seconds: 30
+  - id: semantic
+    type: agent_judge
+    model: anthropic/claude-sonnet-4-6
+    criteria:
+      - "结果满足用户意图"
+    pass_threshold: 0.7
+```
+
+被测 Agent 只执行一次。每个 judge 独立记录状态、断言、诊断和产物。`expect` 仍是前置门控：失败时所有 judge 都跳过；通过后即使前一个 judge 失败或出错，后面的 judge 仍会执行。全部 judge 通过时用例才通过。列表顺序决定执行顺序，不表示 judge 之间有数据依赖。
+
+eval 和 case 都可配置 `judges`。case 级列表整体替换 eval 级列表；case 级单数 `judge` 也可覆盖 eval 级列表。同一文档不能同时配置 `judge` 和 `judges`；成员 ID 必须唯一，仅使用小写字母、数字、`_` 和 `-`。
+
+首版多 judge 仅支持 `none` runtime，给每个成员提供独立的工作区副本。其他 runtime 会在被测 Agent 启动前报隔离能力不支持。`none` runtime 仍运行在宿主机上，外部服务、网络状态及工作区外的写入不受隔离。工作区内的相对符号链接会保留；指向外部或使用绝对路径的符号链接会导致快照失败。
+
+报告分别展示门控、各 judge 和总体结果。`evaluation.json` 保存完整分组结果；`grading.json` 为兼容格式，每个 judge 对应一个顶层断言。增加 Agent 评审标准不会改变脚本 judge 的权重。多个 case 现在即可引用同一个 `script_path`；连同辅助文件一起打包脚本属于后续功能。
+
 ### judge: agent_judge — LLM 评审
 
 让 LLM 按你定义的标准来评分，适合需要语义理解的场景：

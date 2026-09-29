@@ -586,6 +586,17 @@ func (r *Runner) writeCaseArtifacts(ws *report.IterationWorkspace, res *evaluato
 			return err
 		}
 	}
+	if len(res.JudgeResults) > 0 {
+		grouped := &report.GroupedEvaluation{
+			Version:      1,
+			Gates:        res.ExpectResult,
+			JudgeResults: res.JudgeResults,
+			Aggregation:  report.GroupAggregation{Strategy: "all_required", Status: res.Status},
+		}
+		if err := ws.WriteEvaluation(res.CaseID, cfgName, grouped); err != nil {
+			return err
+		}
+	}
 
 	var assertions []string
 	if res.Grading != nil {
@@ -769,6 +780,8 @@ func evalResultToCaseResult(res *evaluator.EvalResult) report.CaseResult {
 		InputTokens:     res.InputTokens,
 		OutputTokens:    res.OutputTokens,
 		Grading:         res.Grading,
+		Gates:           res.ExpectResult,
+		JudgeResults:    res.JudgeResults,
 		JudgeSkills:     res.JudgeSkills,
 		Configuration:   res.Configuration,
 		Prompt:          res.Prompt,
@@ -785,6 +798,13 @@ func evalResultToCaseResult(res *evaluator.EvalResult) report.CaseResult {
 		cr.JudgeDurationMs = judgeSession.DurationMs
 		cr.JudgeInputTokens = judgeSession.InputTokens
 		cr.JudgeOutputTokens = judgeSession.OutputTokens
+	}
+	for _, outcome := range res.JudgeResults {
+		cr.JudgeDurationMs += outcome.DurationMs
+		if outcome.Session != nil {
+			cr.JudgeInputTokens += outcome.Session.InputTokens
+			cr.JudgeOutputTokens += outcome.Session.OutputTokens
+		}
 	}
 	if res.Error != nil {
 		cr.Error = res.Error.Error()

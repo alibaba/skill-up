@@ -141,6 +141,20 @@ type Result struct {
 	JudgeContext *ContextMetadata `json:"judge_context,omitempty"`
 }
 
+// Outcome preserves one independent judge's result and diagnostic session.
+type Outcome struct {
+	ID         string               `json:"id"`
+	Type       string               `json:"type"`
+	Status     Status               `json:"status"`
+	Result     *Result              `json:"result,omitempty"`
+	Error      string               `json:"error,omitempty"`
+	SkipReason string               `json:"skip_reason,omitempty"`
+	Artifacts  string               `json:"artifacts_dir,omitempty"`
+	DurationMs int64                `json:"duration_ms"`
+	Session    *agent.SessionResult `json:"-"`
+	Skills     []SkillInfo          `json:"judge_skills,omitempty"`
+}
+
 // ContextMetadata is report-facing metadata for agent_judge context
 // materialization and prompt delivery.
 type ContextMetadata struct {

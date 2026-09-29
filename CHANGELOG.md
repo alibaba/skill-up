@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Support independent `judges` on one case in the `none` runtime, combining
+  reusable script checks and semantic Agent review of one execution. Results
+  retain separate gate, judge, and overall decisions in reports.
 - Add an `opencode` Agent Engine for local and isolated runtimes, including
   CLI installation, JSON event transcripts, multi-turn session resume, and
   runtime-scoped MCP and provider configuration. OpenCode treats slashed model

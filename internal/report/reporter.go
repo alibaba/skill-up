@@ -133,25 +133,27 @@ func (in Input) PrimaryCaseResults() []CaseResult {
 
 // CaseResult represents the result of a single case execution.
 type CaseResult struct {
-	CaseID            string            `json:"case_id"`
-	Title             string            `json:"title"`
-	Status            judge.Status      `json:"status"`
-	DurationMs        int64             `json:"duration_ms"`
-	Turns             int               `json:"turns"`
-	InputTokens       int               `json:"input_tokens"`
-	OutputTokens      int               `json:"output_tokens"`
-	JudgeDurationMs   int64             `json:"judge_duration_ms,omitempty"`
-	JudgeInputTokens  int               `json:"judge_input_tokens,omitempty"`
-	JudgeOutputTokens int               `json:"judge_output_tokens,omitempty"`
-	Error             string            `json:"error,omitempty"`
-	Grading           *judge.Result     `json:"grading"`
-	JudgeSkills       []judge.SkillInfo `json:"judge_skills,omitempty"`
-	Configuration     string            `json:"configuration,omitempty"`    // "with_skill" or "without_skill"
-	Prompt            string            `json:"prompt,omitempty"`           // input prompt sent to the agent
-	Response          string            `json:"response,omitempty"`         // agent final message
-	ObservedModel     string            `json:"observed_model,omitempty"`   // model explicitly reported by the agent
-	ObservedVersion   string            `json:"observed_version,omitempty"` // CLI version reported by static runtime inspection
-	TurnResults       []CaseTurnResult  `json:"turn_results,omitempty"`     // per-turn outcomes; nil for single-turn
+	CaseID            string              `json:"case_id"`
+	Title             string              `json:"title"`
+	Status            judge.Status        `json:"status"`
+	DurationMs        int64               `json:"duration_ms"`
+	Turns             int                 `json:"turns"`
+	InputTokens       int                 `json:"input_tokens"`
+	OutputTokens      int                 `json:"output_tokens"`
+	JudgeDurationMs   int64               `json:"judge_duration_ms,omitempty"`
+	JudgeInputTokens  int                 `json:"judge_input_tokens,omitempty"`
+	JudgeOutputTokens int                 `json:"judge_output_tokens,omitempty"`
+	Error             string              `json:"error,omitempty"`
+	Grading           *judge.Result       `json:"grading"`
+	Gates             *judge.ExpectResult `json:"gates,omitempty"`
+	JudgeResults      []judge.Outcome     `json:"judge_results,omitempty"`
+	JudgeSkills       []judge.SkillInfo   `json:"judge_skills,omitempty"`
+	Configuration     string              `json:"configuration,omitempty"`    // "with_skill" or "without_skill"
+	Prompt            string              `json:"prompt,omitempty"`           // input prompt sent to the agent
+	Response          string              `json:"response,omitempty"`         // agent final message
+	ObservedModel     string              `json:"observed_model,omitempty"`   // model explicitly reported by the agent
+	ObservedVersion   string              `json:"observed_version,omitempty"` // CLI version reported by static runtime inspection
+	TurnResults       []CaseTurnResult    `json:"turn_results,omitempty"`     // per-turn outcomes; nil for single-turn
 }
 
 // CaseTurnResult holds the outcome of a single turn for reporting purposes.

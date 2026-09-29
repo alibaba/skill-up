@@ -88,28 +88,30 @@ type embeddedSummary struct {
 }
 
 type embeddedCase struct {
-	ID                string            `json:"id"`
-	Title             string            `json:"title,omitempty"`
-	Status            string            `json:"status"`
-	AgentDurationMs   int64             `json:"agent_duration_ms"`
-	AgentDuration     string            `json:"agent_duration"`
-	InputTokens       int               `json:"input_tokens"`
-	OutputTokens      int               `json:"output_tokens"`
-	AgentTokens       int               `json:"agent_tokens"`
-	JudgeDurationMs   int64             `json:"judge_duration_ms"`
-	JudgeDuration     string            `json:"judge_duration"`
-	JudgeInputTokens  int               `json:"judge_input_tokens"`
-	JudgeOutputTokens int               `json:"judge_output_tokens"`
-	JudgeTokens       int               `json:"judge_tokens"`
-	Turns             int               `json:"turns"`
-	Error             string            `json:"error,omitempty"`
-	Grading           *embeddedGrading  `json:"grading,omitempty"`
-	Configuration     string            `json:"configuration,omitempty"`
-	Prompt            string            `json:"prompt,omitempty"`
-	Response          string            `json:"response,omitempty"`
-	Baseline          *embeddedCase     `json:"baseline,omitempty"`
-	TurnResults       []embeddedTurn    `json:"turn_results,omitempty"`
-	JudgeSkills       []judge.SkillInfo `json:"judge_skills,omitempty"`
+	ID                string              `json:"id"`
+	Title             string              `json:"title,omitempty"`
+	Status            string              `json:"status"`
+	AgentDurationMs   int64               `json:"agent_duration_ms"`
+	AgentDuration     string              `json:"agent_duration"`
+	InputTokens       int                 `json:"input_tokens"`
+	OutputTokens      int                 `json:"output_tokens"`
+	AgentTokens       int                 `json:"agent_tokens"`
+	JudgeDurationMs   int64               `json:"judge_duration_ms"`
+	JudgeDuration     string              `json:"judge_duration"`
+	JudgeInputTokens  int                 `json:"judge_input_tokens"`
+	JudgeOutputTokens int                 `json:"judge_output_tokens"`
+	JudgeTokens       int                 `json:"judge_tokens"`
+	Turns             int                 `json:"turns"`
+	Error             string              `json:"error,omitempty"`
+	Grading           *embeddedGrading    `json:"grading,omitempty"`
+	Configuration     string              `json:"configuration,omitempty"`
+	Prompt            string              `json:"prompt,omitempty"`
+	Response          string              `json:"response,omitempty"`
+	Baseline          *embeddedCase       `json:"baseline,omitempty"`
+	TurnResults       []embeddedTurn      `json:"turn_results,omitempty"`
+	JudgeSkills       []judge.SkillInfo   `json:"judge_skills,omitempty"`
+	Gates             *judge.ExpectResult `json:"gates,omitempty"`
+	JudgeResults      []judge.Outcome     `json:"judge_results,omitempty"`
 }
 
 // embeddedTurn holds per-turn data for the HTML report JavaScript.
@@ -173,6 +175,8 @@ func caseResultToEmbeddedCase(cr CaseResult) embeddedCase {
 		Response:          cr.Response,
 		TurnResults:       caseTurnResultsToEmbedded(cr.TurnResults),
 		JudgeSkills:       cr.JudgeSkills,
+		Gates:             cr.Gates,
+		JudgeResults:      cr.JudgeResults,
 	}
 	if cr.Grading != nil {
 		eg := &embeddedGrading{

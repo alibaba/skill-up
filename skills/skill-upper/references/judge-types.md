@@ -1,6 +1,6 @@
 # Choose and configure a judge (skill-up)
 
-skill-up evaluates in two stages: `expect` (inexpensive gate checks) and `judge` (quality evaluation). A failed `expect` skips the judge, so use it for straightforward checks first. Each case selects exactly one judge type.
+skill-up evaluates in two stages: `expect` (inexpensive gate checks) and `judge` or `judges` (quality evaluation). A failed `expect` skips all judges, so use it for straightforward checks first. Use a singular `judge` for one strategy or `judges` for several independent scores from the same agent run.
 
 ## Choose a judge
 
@@ -69,6 +69,22 @@ judge:
 ```
 
 The script runs from the case workspace root. Exit code `0` means PASS; any other code means FAIL. Available environment variables include `$EVAL_FINAL_MESSAGE`, `$EVAL_EXIT_CODE`, and `$EVAL_TRANSCRIPT_PATH` when available.
+
+## judges: combine reusable checks and semantic review
+
+```yaml
+judges:
+  - id: functional
+    type: script
+    script_path: evals/fixtures/scripts/check-quality.sh
+  - id: semantic
+    type: agent_judge
+    model: anthropic/claude-sonnet-4-6
+    criteria:
+      - "The result satisfies the user intent"
+```
+
+Every judge evaluates the same agent run in its own workspace copy. The case passes only if every judge passes. This is currently supported for `environment.type: none`; other runtime types fail before the tested agent starts. `evaluation.json` contains grouped results. The compatibility `grading.json` reports one top-level assertion per judge.
 
 ## Relative cost
 

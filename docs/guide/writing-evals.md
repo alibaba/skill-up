@@ -792,6 +792,32 @@ Script contract:
 - `$EVAL_TRANSCRIPT_PATH` is set only when a transcript was produced; otherwise it is empty
 - Stdout from the script is captured as the grading rationale in the report
 
+### Multiple independent judges
+
+Use `judges` when one agent run needs both a deterministic check and semantic review:
+
+```yaml
+judges:
+  - id: functional
+    type: script
+    script_path: evals/fixtures/scripts/check-quality.sh
+    timeout_seconds: 30
+  - id: semantic
+    type: agent_judge
+    model: anthropic/claude-sonnet-4-6
+    criteria:
+      - "The result meets the user's intent"
+    pass_threshold: 0.7
+```
+
+Each member has its own status, assertions, diagnostics, and artifacts. All members inspect the same agent execution; the evaluated agent does not run again. `expect` remains a gate: if it fails, all judges are skipped. Otherwise every member runs, even if an earlier member fails or errors. The case passes only when every member passes. List order controls execution order but does not pass data between judges.
+
+`judges` can be defined at eval or case level. A case-level list replaces the full eval-level list. A case-level singular `judge` also replaces an eval-level list. A document cannot contain both `judge` and `judges`, and member IDs must be unique lowercase identifiers containing letters, digits, `_`, or `-`.
+
+This first release supports multi-judge execution with the `none` runtime. Each member receives a separate copy of the workspace. Other runtimes report an unsupported-isolation error before the agent starts. A `none` runtime runs on the host, so external services, network state, and writes outside its workspace are not isolated. Relative symlinks within the workspace are preserved; external or absolute symlinks cause snapshot creation to fail.
+
+Reports show gates, member results, and the overall decision separately. `evaluation.json` stores the complete grouped result; `grading.json` contains one top-level expectation per judge for compatibility. Adding Agent criteria does not change a script judge's weight. Multiple cases can reference the same `script_path` today; packaging helper files with a script is a separate feature.
+
 ### judge: agent_judge — LLM rubric
 
 Let an LLM grade against rubric criteria — useful when semantic understanding is required:
