@@ -19,7 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is available to Action callers.
 - Add scenario-driven simulated user replies for mixed fixed/model-generated
   turns and autonomous multi-turn evaluations, with an independent OpenAI-compatible
-  model connection and bounded execution.
+  model connection and bounded execution. The canonical `skill-upper` guidance,
+  templates, and regression case now cover both modes.
 - DSH's opt-in observer now links the next same-session user turn after a
   single completed Skill use as an unclassified follow-up candidate.
   `collect_skill_feedback` gathers recent observations and follow-ups for

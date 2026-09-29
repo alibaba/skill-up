@@ -1,0 +1,40 @@
+id: scaffold-with-user-simulator
+title: 为交互式评测配置独立的用户模拟模型
+description: |
+  验证 skill-upper 能否在保留固定轮次的同时生成模拟回复，
+  并为自主对话配置轮次上限和独立模型连接。
+
+context:
+  repo_fixture: evals/fixtures/skills/sample-no-evals
+  git:
+    init: true
+
+input:
+  prompt: |
+    请为当前目录下的 code-review-helper Skill 搭建交互式评测。
+    使用 claude_code 引擎和 none 环境，不要复用引擎或 judge 的模型配置来模拟用户。
+    在 eval.yaml 中独立配置 user_simulator：provider 为 simulation，
+    protocol 为 openai，model 为 test-model；不要写入任何真实密钥。
+    请创建两个用例并写入 cases.files：
+    1. evals/cases/mixed-conversation.yaml：固定开场和结尾，中间用 respond
+       根据 Agent 的提问生成用户回复；case 的 scenario 提供已知事实。
+    2. evals/cases/autonomous-conversation.yaml：固定 input.prompt，
+       由 simulator 决定后续回复和何时结束；设置 constraints.max_turns 为 6。
+    最后只执行 skill-up validate，不要发起真实模型评测。
+
+expect:
+  files_exist:
+    - evals/eval.yaml
+    - evals/cases/mixed-conversation.yaml
+    - evals/cases/autonomous-conversation.yaml
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "eval.yaml 独立配置 user_simulator.provider=simulation、protocol=openai、model=test-model，且不包含明文密钥"
+    - "mixed-conversation.yaml 有 case 级 user_simulator.scenario，input.turns 同时包含固定 content 和模拟 respond，且固定结尾仍保留"
+    - "autonomous-conversation.yaml 有 case 级 user_simulator.scenario、固定 input.prompt、constraints.max_turns=6，不枚举后续 turns"
+    - "eval.yaml 的 cases.files 正确引用两个用例，模拟模型不取自 engine.model 或 judge.model"
+    - "若说明运行条件，应指出模拟器凭据由 simulation provider 单独提供，轮次上限由 evaluator 强制执行，最终通过与否由 judge 决定"
+  pass_threshold: 1.0

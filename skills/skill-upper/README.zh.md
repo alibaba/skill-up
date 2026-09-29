@@ -8,6 +8,7 @@
 
 - **定位** 目标 Skill，理解其能力边界
 - **搭建** `evals/eval.yaml` 和 `evals/cases/*.yaml` 脚手架，选择合适的 judge 类型
+- **模拟** 依赖 Agent 回复的用户轮次，支持固定轮次混排或自主对话，并单独配置模拟模型
 - **校验** 配置，在运行前发现 schema 错误
 - **运行** 评测，调用真实 Agent Engine（Claude Code、Codex、qodercli 等）
 - **诊断** 结构化报告和输出证据中的失败原因

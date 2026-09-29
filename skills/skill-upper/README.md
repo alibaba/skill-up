@@ -12,6 +12,7 @@ overview is available in [README.zh.md](README.zh.md).
 
 - **Locate** the target Skill and understand its capabilities
 - **Scaffold** `evals/eval.yaml` and `evals/cases/*.yaml` with proper judge types
+- **Simulate** responsive user turns with an independent model, alongside fixed turns or across an autonomous conversation
 - **Validate** configuration before running
 - **Run** evaluations against real Agent Engines (Claude Code, Codex, qodercli, etc.)
 - **Diagnose** failures from structured reports and output evidence
