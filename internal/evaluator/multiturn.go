@@ -234,6 +234,10 @@ func (e *defaultEvaluator) executeConfiguredTurn(ctx context.Context, rt runtime
 }
 
 func resolveTurnMessage(ctx context.Context, state *multiTurnState, turn config.Turn, turnNum int, origin string, simulator usersimulator.Simulator, scenario *config.UserSimulatorScenario) (content string, source string, err error) {
+	if origin == "simulated" {
+		// A generated reply is already user text; placeholders in it are literal.
+		return turn.Content, origin, nil
+	}
 	content, err = substituteTurnContent(state, turn, turnNum)
 	if err != nil {
 		return "", "", err

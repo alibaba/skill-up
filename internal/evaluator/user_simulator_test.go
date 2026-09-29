@@ -151,6 +151,47 @@ func TestUserSimulationMixedTurns(t *testing.T) {
 	}
 }
 
+func TestSimulatedRepliesPreserveLiteralPlaceholders(t *testing.T) {
+	const reply = "Use Hello {{name}} as the email template; keep the placeholder literal."
+	for _, test := range []struct {
+		name      string
+		input     config.Input
+		decisions []usersimulator.Decision
+	}{
+		{
+			name: "mixed",
+			input: config.Input{Turns: []config.Turn{
+				{Role: "user", Content: "Create an email template"},
+				{Role: "user", Respond: "Answer the clarification"},
+			}},
+			decisions: []usersimulator.Decision{{Action: "reply", Message: reply}},
+		},
+		{
+			name:      "autonomous",
+			input:     config.Input{Prompt: "Create an email template"},
+			decisions: []usersimulator.Decision{{Action: "reply", Message: reply}, {Action: "stop", Reason: "done"}},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var sent []string
+			ag := &mockResumerAgent{mockAgent: mockAgent{name: "simulated"}, runTurnFunc: func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, msg transcript.Message, _ string) (*agent.SessionResult, error) {
+				sent = append(sent, msg.Content)
+				return &agent.SessionResult{FinalMessage: "ack", SessionID: "session-1"}, nil
+			}}
+			e := newTestEvaluator(EvalOptions{Agent: ag, Simulator: &scriptedSimulator{decisions: test.decisions}, EvalCfg: &config.EvalConfig{
+				Engine: config.EngineConfig{Name: "codex"},
+				Cases:  config.CasesConfig{Defaults: config.CaseDefaults{MaxTurns: 3}},
+				Judge:  config.JudgeConfig{Type: "rule_based"},
+			}})
+			caseCfg := &config.CaseConfig{ID: test.name, UserSimulator: &config.UserSimulatorScenario{Scenario: "Preserve a template placeholder"}, Input: test.input}
+			result := e.executeCaseOnce(context.Background(), caseCfg, "with_skill", &mockRuntime{workspace: t.TempDir()}, ag)
+			if result.Error != nil || len(sent) != 2 || sent[1] != reply || len(result.TurnResults) != 2 || result.TurnResults[1].Content != reply || result.TurnResults[1].Source != simulatedSource {
+				t.Fatalf("error=%v sent=%q turns=%+v", result.Error, sent, result.TurnResults)
+			}
+		})
+	}
+}
+
 func TestUserSimulationAutonomousStopAndLimit(t *testing.T) {
 	for _, test := range []struct {
 		name       string
