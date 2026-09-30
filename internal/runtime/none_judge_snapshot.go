@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // noneJudgeSnapshot holds a frozen copy of a none runtime workspace.
@@ -66,7 +67,7 @@ func copyJudgeTree(ctx context.Context, source, target string) error {
 		return err
 	}
 	defer root.Close() //nolint:errcheck
-	var directories []judgeDirectoryMode
+	var directories []judgeDirectoryMetadata
 	err = filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -86,17 +87,18 @@ func copyJudgeTree(ctx context.Context, source, target string) error {
 		switch {
 		case entry.IsDir():
 			if rel == "." {
+				directories = append(directories, judgeDirectoryMetadata{path: out, mode: 0o700, modified: info.ModTime()})
 				return nil // retain the private 0700 temporary-directory boundary
 			}
 			if err := os.MkdirAll(out, 0o700); err != nil {
 				return err
 			}
-			directories = append(directories, judgeDirectoryMode{path: out, mode: info.Mode().Perm()})
+			directories = append(directories, judgeDirectoryMetadata{path: out, mode: info.Mode().Perm(), modified: info.ModTime()})
 			return nil
 		case entry.Type()&os.ModeSymlink != 0:
 			return copyJudgeSymlink(root, source, path, rel)
 		case entry.Type().IsRegular():
-			return copyJudgeFile(ctx, path, out, info.Mode().Perm())
+			return copyJudgeFile(ctx, path, out, info.Mode().Perm(), info.ModTime())
 		default:
 			return fmt.Errorf("judge snapshot cannot copy special file: %s", path)
 		}
@@ -104,16 +106,20 @@ func copyJudgeTree(ctx context.Context, source, target string) error {
 	if err != nil {
 		return err
 	}
-	return restoreJudgeDirectoryModes(directories)
+	return restoreJudgeDirectoryMetadata(directories)
 }
 
-type judgeDirectoryMode struct {
-	path string
-	mode os.FileMode
+type judgeDirectoryMetadata struct {
+	path     string
+	mode     os.FileMode
+	modified time.Time
 }
 
-func restoreJudgeDirectoryModes(directories []judgeDirectoryMode) error {
+func restoreJudgeDirectoryMetadata(directories []judgeDirectoryMetadata) error {
 	for i := len(directories) - 1; i >= 0; i-- {
+		if err := os.Chtimes(directories[i].path, directories[i].modified, directories[i].modified); err != nil {
+			return err
+		}
 		if err := os.Chmod(directories[i].path, directories[i].mode); err != nil {
 			return err
 		}
@@ -133,7 +139,7 @@ func copyJudgeSymlink(root *os.Root, source, path, rel string) error {
 	return root.Symlink(link, rel)
 }
 
-func copyJudgeFile(ctx context.Context, source, target string, mode os.FileMode) error {
+func copyJudgeFile(ctx context.Context, source, target string, mode os.FileMode, modified time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -155,6 +161,9 @@ func copyJudgeFile(ctx context.Context, source, target string, mode os.FileMode)
 		return err
 	}
 	if err := out.Close(); err != nil {
+		return err
+	}
+	if err := os.Chtimes(target, modified, modified); err != nil {
 		return err
 	}
 	return os.Chmod(target, mode)

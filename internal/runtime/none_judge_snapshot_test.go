@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 type cancelingJudgeReader struct {
@@ -111,5 +112,60 @@ func TestJudgeSnapshotRejectsExternalSymlink(t *testing.T) {
 	if snapshot, err := noneRT.CaptureJudgeSnapshot(context.Background()); err == nil {
 		_ = snapshot.Close()
 		t.Fatal("external symlink accepted")
+	}
+}
+
+func TestJudgeSnapshotPreservesModificationTimesAndFreshness(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	buildDir := filepath.Join(workspace, "build")
+	if err := os.Mkdir(buildDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Lexical copy order puts the output before its source: assigning copy-time
+	// mtimes would make a previously fresh build output appear stale.
+	paths := []string{"build/z-source", "build/a-output", "build", "."}
+	base := time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC)
+	want := make(map[string]time.Time)
+	for i, rel := range paths {
+		path := filepath.Join(workspace, rel)
+		if i < 2 {
+			if err := os.WriteFile(path, []byte("build input"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		modified := base.Add(time.Duration(i) * time.Hour)
+		if err := os.Chtimes(path, modified, modified); err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want[rel] = info.ModTime()
+	}
+	rt := &NoneRuntime{workspace: workspace, cfg: Config{Type: "none"}}
+	snapshot, err := rt.CaptureJudgeSnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer snapshot.Close() //nolint:errcheck
+	for range 2 {
+		fork, cleanup, err := snapshot.Fork(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, rel := range paths {
+			info, err := os.Stat(filepath.Join(fork.Workspace(), rel))
+			if err != nil || !info.ModTime().Equal(want[rel]) {
+				cleanup()
+				t.Fatalf("fork mtime for %s: info=%v error=%v, want %v", rel, info, err, want[rel])
+			}
+		}
+		if err := os.Chtimes(filepath.Join(fork.Workspace(), "build/z-source"), time.Now(), time.Now()); err != nil {
+			cleanup()
+			t.Fatal(err)
+		}
+		cleanup()
 	}
 }

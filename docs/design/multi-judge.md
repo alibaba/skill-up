@@ -64,7 +64,9 @@ without requiring concrete-type dispatch in the evaluator.
 
 Only `NoneRuntime` implements it today. It copies the full workspace to temporary
 storage and creates a new copy for each member. Internal relative symlinks are
-preserved; absolute or escaping links and special files are rejected. Copying
+preserved, as are regular-file/directory modification times and permission bits
+(the workspace root stays private with mode 0700). Absolute or escaping links
+and special files are rejected. Copying
 observes cancellation. This isolates workspace file changes, not host processes,
 network access, credentials, or effects on external services. Snapshot failure
 produces ERROR with skipped members. Temporary snapshots are deleted after use;
@@ -232,6 +234,11 @@ Run the copied eval with the same case selector and a separate output directory.
 Expect process exit 1, script FAIL, semantic PASS and aggregate FAIL. Inspect the
 semantic transcript for the actual directory check rather than relying only on
 its verdict. Keep this injection out of the normal example.
+
+Both scenarios were rerun after fixing snapshot modification-time preservation,
+with the same verdicts and successful archived-material readback. A regression
+test additionally preserves source/output freshness and directory modification
+times across capture and independent forks.
 
 Only this selected case and the controlled negative variant were run against the
 real model. The other three code-stats cases and the six-case skill-upper suite
