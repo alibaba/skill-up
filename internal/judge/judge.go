@@ -83,6 +83,10 @@ type Input struct {
 	// should write or download its own run artifacts.
 	ArtifactDir string
 
+	// ContextArtifactDir is the context archive path relative to case outputs.
+	// Empty preserves the legacy judge/context layout for standalone callers.
+	ContextArtifactDir string
+
 	// SessionResult is the full engine output, available for advanced judges.
 	SessionResult *agent.SessionResult
 

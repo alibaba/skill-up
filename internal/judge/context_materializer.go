@@ -106,7 +106,7 @@ func MaterializeJudgeContext(ctx context.Context, rt runtime.Runtime, cfg *confi
 		RuntimeDir: runtimeDir,
 		Manifest: ContextManifest{
 			Profile:         effective.profile,
-			MaterializedDir: judgeContextArtifactDir,
+			MaterializedDir: contextArchiveDir(in),
 		},
 	}
 
@@ -146,6 +146,13 @@ func MaterializeJudgeContext(ctx context.Context, rt runtime.Runtime, cfg *confi
 
 	logging.InfoContextf(ctx, "judge context materialized profile=%s dir=%s", effective.profile, hostDir)
 	return mc, nil
+}
+
+func contextArchiveDir(in Input) string {
+	if in.ContextArtifactDir != "" {
+		return in.ContextArtifactDir
+	}
+	return judgeContextArtifactDir
 }
 
 func resolveJudgeContext(cfg *config.JudgeContextConfig) effectiveJudgeContext {
@@ -272,7 +279,7 @@ func writeMaterialFile(ctx context.Context, rt runtime.Runtime, mc *Materialized
 	if err := uploadRuntimeFile(ctx, rt, hostPath, runtimePath); err != nil {
 		return "", "", err
 	}
-	return runtimePath, materialManifestPath(safeName), nil
+	return runtimePath, materialManifestPath(mc, safeName), nil
 }
 
 func copyMaterialFile(ctx context.Context, rt runtime.Runtime, mc *MaterializedContext, fileName, sourcePath string) (runtimePath string, manifestPath string, bytes int, err error) {
@@ -319,15 +326,15 @@ func copyMaterialFile(ctx context.Context, rt runtime.Runtime, mc *MaterializedC
 	if err := uploadRuntimeFile(ctx, rt, hostPath, runtimePath); err != nil {
 		return "", "", 0, err
 	}
-	return runtimePath, materialManifestPath(safeName), int(copied), nil
+	return runtimePath, materialManifestPath(mc, safeName), int(copied), nil
 }
 
 func materialRuntimePath(mc *MaterializedContext, safeName string) string {
 	return filepath.Join(mc.RuntimeDir, filepath.ToSlash(safeName))
 }
 
-func materialManifestPath(safeName string) string {
-	return pathpkg.Join(judgeContextArtifactDir, filepath.ToSlash(safeName))
+func materialManifestPath(mc *MaterializedContext, safeName string) string {
+	return pathpkg.Join(mc.Manifest.MaterializedDir, filepath.ToSlash(safeName))
 }
 
 func safeMaterialRelPath(fileName string) (string, error) {

@@ -740,6 +740,7 @@ func (e *defaultEvaluator) runJudgePhaseWithSpan(
 	}
 	if judgeCfg.Type == judgeTypeAgentJudge {
 		judgeInput.ArtifactDir = e.prepareOutputDir(ctx, configName, caseCfg.ID, artifactRoot)
+		judgeInput.ContextArtifactDir = filepath.ToSlash(filepath.Join(filepath.Dir(artifactRoot), "context"))
 	}
 
 	cleanupScript := configureScriptJudge(ctx, j, judgeInput.Transcript, strictTimeout)

@@ -2,6 +2,7 @@ package evaluator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/alibaba/skill-up/internal/agent"
 	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/judge"
+	"github.com/alibaba/skill-up/internal/report"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
@@ -243,4 +245,82 @@ type snapshotCapableRuntime struct {
 
 func (r *snapshotCapableRuntime) CaptureJudgeSnapshot(ctx context.Context) (runtime.JudgeSnapshot, error) {
 	return r.provider.CaptureJudgeSnapshot(ctx)
+}
+
+func TestMultiJudgePersistedContextReferencesResolve(t *testing.T) {
+	ws, err := report.NewIterationWorkspace(t.TempDir(), "sample", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt, err := runtime.NewRuntime(runtime.Config{Type: "none", WorkspaceDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+	members := []config.JudgeConfig{
+		{ID: "quality", Type: "agent_judge", Criteria: []string{"quality"}},
+		{ID: "style", Type: "agent_judge", Criteria: []string{"style"}},
+	}
+	ag := &mockAgent{name: "test", output: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["checked"],"failures":[]}]}`}
+	e := newTestEvaluator(EvalOptions{Agent: ag, OutputDir: ws.IterationDir(), EvalCfg: &config.EvalConfig{Judges: &members}})
+	result := e.executeCase(context.Background(), &config.CaseConfig{ID: "case", Input: config.Input{Prompt: "hello"}}, ConfigurationWithSkill, rt, nil)
+	if result.Status != judge.StatusPass || len(result.JudgeResults) != 2 {
+		t.Fatalf("result=%+v", result)
+	}
+	if err := ws.WriteEvaluation("case", ConfigurationWithSkill, &report.GroupedEvaluation{
+		Version: 1, JudgeResults: result.JudgeResults,
+		Aggregation: report.GroupAggregation{Strategy: result.AggregationStrategy, Status: result.Status},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(ws.ConfigDir("case", ConfigurationWithSkill), "evaluation.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted report.GroupedEvaluation
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	outputs := filepath.Join(ws.ConfigDir("case", ConfigurationWithSkill), "outputs")
+	for _, outcome := range persisted.JudgeResults {
+		assertPersistedJudgeContext(t, outputs, outcome)
+	}
+}
+
+func assertPersistedJudgeContext(t *testing.T, outputs string, outcome judge.Outcome) {
+	t.Helper()
+	metadata := outcome.Result.JudgeContext
+	want := "judge/" + outcome.ID + "/context"
+	if metadata == nil || metadata.MaterializedDir != want || metadata.Manifest == nil {
+		t.Fatalf("metadata=%+v want=%s", metadata, want)
+	}
+	manifestData, err := os.ReadFile(filepath.Join(outputs, filepath.FromSlash(metadata.MaterializedDir), "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest judge.ContextManifest
+	if err := json.Unmarshal(manifestData, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.MaterializedDir != want {
+		t.Fatalf("manifest dir=%q", manifest.MaterializedDir)
+	}
+	for _, source := range []*judge.ContextManifest{metadata.Manifest, &manifest} {
+		checked := 0
+		for _, material := range source.Materials {
+			if material.Path == "" {
+				continue
+			}
+			checked++
+			if _, err := os.Stat(filepath.Join(outputs, filepath.FromSlash(material.Path))); err != nil {
+				t.Fatalf("judge %s material %s: %v", outcome.ID, material.Path, err)
+			}
+		}
+		if checked == 0 {
+			t.Fatal("no persisted material paths checked")
+		}
+	}
 }
