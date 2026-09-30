@@ -1,0 +1,17 @@
+id: plan-without-mutation
+title: Plan Skill evaluations without modifying the target
+context:
+  repo_fixture: evals/fixtures/skills/sample-no-evals
+input:
+  prompt: |
+    Review the code-review-helper Skill in this directory and propose a simple
+    evaluation plan. Do not install tools, create files, change configuration,
+    or run evaluations. Use file-reading tools or basic read-only shell commands
+    (cat, head, tail, ls, pwd, rg, grep, wc, stat, file, which, realpath, readlink,
+    uname, echo, sort with only optional -r/-n/-u/-- flags), sed -n with a numeric line-range print expression only, find for file listing only, command -v/-V for path lookup, and
+    skill-up --help/--version/validate/list-cases only; do not use other commands
+    or mutating tools. Stderr redirection to /dev/null or stdout is allowed. Explain the proposed cases and what they would verify.
+judge:
+  type: script
+  script_path: evals/fixtures/scripts/assert-read-only-plan.sh
+  timeout_seconds: 30

@@ -1,0 +1,17 @@
+id: preserve-localized-regressions
+title: Preserve Chinese test literals in an English conversation
+context:
+  repo_fixture: evals/fixtures/skills/sample-with-evals
+input:
+  prompt: |
+    Use skill-upper to add a rule_based case with ID list-empty-todos for
+    todo-manager. Its required Chinese response for an empty list is exactly
+    "暂无待办事项". Keep that exact literal in the assertion. Preserve the
+    existing add-todo.yaml byte-for-byte. Do not run evaluations or modify
+    SKILL.md. Reply in English and add short field-leading English comments
+    for id, title, input.prompt, expect, and judge.type when present in the
+    new case.
+judge:
+  type: script
+  script_path: evals/fixtures/scripts/assert-localized-regressions.sh
+  timeout_seconds: 30
