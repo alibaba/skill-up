@@ -64,6 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixture uploads.
 
 ### Fixed
+- Make `skill-upper` credential checks report configuration presence without
+  printing secret values, and account for engine-specific authentication and
+  saved credentials before treating a missing environment variable as a blocker.
 - `SessionInput` no longer carries the `custom.kwargs` map. The local transport
   writes that payload into the runtime workspace, so the map was readable by
   the agent under test, bypassing the config-time rule that already rejects

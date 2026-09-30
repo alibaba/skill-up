@@ -194,13 +194,25 @@ Expect: `✓ eval.yaml is valid (loaded N case(s))`.
 
 ### Step 5: Prepare credentials
 
-Priority: `--api-key` > env (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `QODER_PERSONAL_ACCESS_TOKEN`) > `~/.skill-up/credentials.yaml`.
+Check authentication for the selected engine and provider. Provider API keys
+resolve from `--api-key`, environment variables, or `~/.skill-up/credentials.yaml`;
+engine-specific tokens and saved login sessions follow the engine's auth rules.
+Never dump environment variables or credential files, or print secret values
+into tool output, logs, or the conversation. Check only whether a relevant
+variable has a non-empty value. For example, for an OpenAI API-key workflow:
 
 ```bash
-printenv | grep -E 'ANTHROPIC_API_KEY|OPENAI_API_KEY|QODER_PERSONAL_ACCESS_TOKEN'
+if printenv OPENAI_API_KEY | grep -q .; then
+  printf '%s\n' 'OPENAI_API_KEY: configured'
+else
+  printf '%s\n' 'OPENAI_API_KEY: not configured in the environment'
+fi
 ```
 
-If missing, **stop and ask**; do not write secrets into YAML without consent.
+An absent environment variable does not rule out file-based credentials or an
+existing engine login. If the selected authentication path is unavailable,
+**stop and ask** the user to configure it locally; do not ask them to paste a
+secret into the conversation or write secrets into YAML without consent.
 
 For `opensandbox`, also ensure `OPENSANDBOX_API_KEY` (and related env) as needed.
 
