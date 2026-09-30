@@ -595,6 +595,10 @@ input:
 
 Configure a separate model for the simulated user in `eval.yaml`:
 
+The model ID below is a placeholder, not a runnable configuration. For a
+live-tested local OpenCode/DashScope configuration, see
+[the user simulator example](https://github.com/alibaba/skill-up/tree/main/examples/user-simulator).
+
 ```yaml
 user_simulator:
   provider: simulation

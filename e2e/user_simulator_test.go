@@ -27,7 +27,7 @@ func TestUserSimulator_DashScope(t *testing.T) {
 	if key == "" {
 		t.Skip("DASHSCOPE_API_KEY not set")
 	}
-	evalPath := filepath.Join(getProjectRoot(), "examples", "user-simulator", "evals", "eval-dashscope.yaml")
+	evalPath := filepath.Join(getProjectRoot(), "examples", "user-simulator", "evals", "eval.yaml")
 	outputDir := t.TempDir()
 	preserveWorkspaceArtifacts(t, outputDir)
 	result := Run(t, RunConfig{

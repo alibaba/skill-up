@@ -135,6 +135,10 @@ Add this block only when a case has `user_simulator.scenario`. It selects a
 separate model for simulated user messages; neither `engine.model` nor
 `judge.model` supplies its configuration.
 
+The model ID below is a placeholder, not a runnable configuration. For a
+live-tested local OpenCode/DashScope configuration, see
+[the user simulator example](https://github.com/alibaba/skill-up/tree/main/examples/user-simulator).
+
 ```yaml
 user_simulator:
   provider: simulation

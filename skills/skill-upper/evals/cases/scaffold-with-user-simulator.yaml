@@ -1,8 +1,8 @@
 id: scaffold-with-user-simulator
 title: 为交互式评测配置独立的用户模拟模型
 description: |
-  验证 skill-upper 能否在保留固定轮次的同时生成模拟回复，
-  并为自主对话配置轮次上限和独立模型连接。
+  配置生成回归用例：检查固定与模拟轮次混排、自主对话轮次上限及独立模型连接。
+  test-model 仅为配置占位符；本用例不验证真实模型回复链路。
 
 context:
   repo_fixture: evals/fixtures/skills/sample-no-evals

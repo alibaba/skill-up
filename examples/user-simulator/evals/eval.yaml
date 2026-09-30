@@ -8,15 +8,18 @@ skills:
     path: .
 
 engine:
-  name: codex
-  model: {}
+  name: opencode
+  model:
+    provider: dashscope
+    name: qwen3.6-plus
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 
-# This connection is independent of the Codex engine and judge.
+# Resolve simulator credentials separately through SIMULATION_API_KEY.
 user_simulator:
-  provider: openai
+  provider: simulation
   protocol: openai
-  model: gpt-4.1-mini
-  timeout_seconds: 30
+  model: qwen3.6-plus
+  timeout_seconds: 60
 
 cases:
   files:
@@ -31,5 +34,5 @@ judge:
   type: rule_based
 
 report:
-  formats: [json]
+  formats: [json, html]
   artifacts: [transcript]
