@@ -1,0 +1,38 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+
+skills:
+  - source: local_path
+    path: .
+
+engine:
+  name: opencode
+  model:
+    provider: dashscope
+    name: qwen3.6-plus
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+# Resolve simulator credentials separately through SIMULATION_API_KEY.
+user_simulator:
+  provider: simulation
+  protocol: openai
+  model: qwen3.6-plus
+  timeout_seconds: 60
+
+cases:
+  files:
+    - evals/cases/mixed-turns.yaml
+    - evals/cases/autonomous-turns.yaml
+  defaults:
+    timeout_seconds: 300
+    max_turns: 6
+  parallelism: 1
+
+judge:
+  type: rule_based
+
+report:
+  formats: [json, html]
+  artifacts: [transcript]
