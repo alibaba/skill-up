@@ -40,7 +40,14 @@ func TestMultiJudgeEvaluatesOneExecutionWithIndependentWorkspaces(t *testing.T) 
 		EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none"}, Judges: &members},
 	})
 	caseCfg := &config.CaseConfig{ID: "case", Input: config.Input{Prompt: "create file"}}
-	result := e.executeCase(context.Background(), caseCfg, "with_skill", rt, nil)
+	provider, ok := rt.(runtime.JudgeSnapshotProvider)
+	if !ok {
+		t.Fatal("none runtime lacks snapshot capability")
+	}
+	result := e.executeCase(context.Background(), caseCfg, "with_skill", &snapshotCapableRuntime{Runtime: rt, provider: provider}, nil)
+	if result.AggregationStrategy != "all_required" {
+		t.Fatalf("aggregation strategy=%q", result.AggregationStrategy)
+	}
 	if result.Status != judge.StatusFail || len(result.JudgeResults) != 2 {
 		t.Fatalf("status=%s outcomes=%+v error=%v", result.Status, result.JudgeResults, result.Error)
 	}
@@ -87,7 +94,7 @@ func makeFailingJudgeScript(t *testing.T) string {
 func TestAggregateJudgeOutcomesDoesNotFlattenCriteria(t *testing.T) {
 	pass := judge.NewResult([]judge.AssertionResult{{Passed: true}, {Passed: true}, {Passed: false}}, 1, 1)
 	pass.Status = judge.StatusPass // an agent_judge threshold may permit one failed criterion
-	result, status := aggregateJudgeOutcomes([]JudgeOutcome{
+	result, status := judge.DefaultOutcomeAggregator().Aggregate([]JudgeOutcome{
 		{ID: "script", Type: "script", Status: judge.StatusFail},
 		{ID: "semantic", Type: "agent_judge", Status: judge.StatusPass, Result: pass},
 	}, 1, 1)
@@ -224,4 +231,16 @@ func TestMultiJudgeCaseDeadlinePreservesTimeoutError(t *testing.T) {
 	if got, ok := retryReasonForResult(result); !ok || got != "timeout" {
 		t.Fatalf("retry reason=%q ok=%t", got, ok)
 	}
+}
+
+// This adapter proves that evaluator dispatch depends on the capability rather
+// than the concrete NoneRuntime type, while exercising real snapshot isolation.
+type snapshotCapableRuntime struct {
+	runtime.Runtime
+
+	provider runtime.JudgeSnapshotProvider
+}
+
+func (r *snapshotCapableRuntime) CaptureJudgeSnapshot(ctx context.Context) (runtime.JudgeSnapshot, error) {
+	return r.provider.CaptureJudgeSnapshot(ctx)
 }

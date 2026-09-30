@@ -29,6 +29,7 @@ import (
 	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/evaluator"
+	"github.com/alibaba/skill-up/internal/judge"
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/observability"
 	"github.com/alibaba/skill-up/internal/report"
@@ -587,11 +588,15 @@ func (r *Runner) writeCaseArtifacts(ws *report.IterationWorkspace, res *evaluato
 		}
 	}
 	if len(res.JudgeResults) > 0 {
+		strategy := res.AggregationStrategy
+		if strategy == "" {
+			strategy = judge.DefaultOutcomeAggregator().Strategy()
+		}
 		grouped := &report.GroupedEvaluation{
 			Version:      1,
 			Gates:        res.ExpectResult,
 			JudgeResults: res.JudgeResults,
-			Aggregation:  report.GroupAggregation{Strategy: "all_required", Status: res.Status},
+			Aggregation:  report.GroupAggregation{Strategy: strategy, Status: res.Status},
 		}
 		if err := ws.WriteEvaluation(res.CaseID, cfgName, grouped); err != nil {
 			return err

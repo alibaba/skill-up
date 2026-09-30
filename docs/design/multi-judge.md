@@ -1,0 +1,166 @@
+# Independent multi-judge evaluation
+
+Status: implemented in PR #290 for the `none` runtime, with internal extension
+interfaces. Numerical scores, configurable policies, validator bundles, and
+additional runtime adapters are future work.
+
+Related issue: [#246](https://github.com/alibaba/skill-up/issues/246).
+Usage: [Writing evals](../guide/writing-evals.md#multiple-independent-judges).
+
+## Problem and goals
+
+A generated change may need deterministic validation and semantic review.
+Running the evaluated agent twice changes the input being evaluated. Asking an
+Agent judge to run a script also leaves script execution and interpretation under
+that agent's control: it does not inherit the framework's script exit-code verdict,
+timeout handling, or independent attribution.
+
+Run the evaluated agent once, then preserve an independent verdict for each named
+judge. A script failure must remain visible even if semantic review passes. Extra
+Agent criteria must not silently increase that judge's weight in the case verdict.
+
+## Configuration and compatibility
+
+```yaml
+judges:
+  - id: functional
+    type: script
+    script_path: evals/scripts/check.sh
+  - id: semantic
+    type: agent_judge
+    criteria:
+      - The change addresses the request without unrelated modifications.
+    pass_threshold: 1.0
+```
+
+Each member has a unique ID. Eval-level lists supply defaults; a case-level list
+replaces the entire list. A case-level singular `judge` also replaces an inherited
+list. A document cannot contain both `judge` and `judges`. Legacy singular configs
+retain their execution and reporting behavior. `expect` is a separate hard gate.
+No public aggregation-policy configuration is introduced by this implementation.
+
+## Execution and isolation
+
+1. Resolve and validate the judge plan; reject runtimes lacking snapshot capability
+   before invoking the evaluated agent.
+2. Execute the evaluated agent and run `expect` gates. A failed gate skips all
+   members and produces a failed case with gate evidence.
+3. Capture the completed workspace once.
+4. Run each member sequentially in its own fork of that snapshot, using the same
+   agent transcript and execution metadata. A completed member's FAIL or ERROR
+   does not prevent later members from running. Case cancellation skips pending
+   members; member deadlines are bounded by the case deadline.
+5. Preserve member outcomes, aggregate the case, and clean up forks and snapshot.
+
+List order is execution order, not a dependency graph. Member output is not passed
+to another member. Judges can execute additional review-agent sessions; the
+original evaluated-agent execution is not repeated.
+
+`runtime.JudgeSnapshotProvider` is an optional capability alongside `Runtime`.
+It captures a `runtime.JudgeSnapshot`, which provides `Fork` and `Close`. A fork
+must be ready to use, isolated from sibling forks, the snapshot, and the original
+workspace; the caller owns its cleanup. A future runtime implements this contract
+without requiring concrete-type dispatch in the evaluator.
+
+Only `NoneRuntime` implements it today. It copies the full workspace to temporary
+storage and creates a new copy for each member. Internal relative symlinks are
+preserved; absolute or escaping links and special files are rejected. Copying
+observes cancellation. This isolates workspace file changes, not host processes,
+network access, credentials, or effects on external services. Snapshot failure
+produces ERROR with skipped members. Temporary snapshots are deleted after use;
+this is not a durable replay or regrading feature.
+
+## Verdict and result contracts
+
+`judge.OutcomeAggregator` separates policy from execution. Its `Strategy` names
+the policy and `Aggregate` combines leaf outcomes into compatibility grading.
+`DefaultOutcomeAggregator` selects `AllRequiredAggregator`; the evaluator records
+that strategy and the report uses it rather than inventing its own policy name.
+A gate failure retains its own case status instead of aggregating skipped members.
+
+The current policy is `all_required`:
+
+- PASS: every executed member passes.
+- FAIL: at least one member fails and no member has ERROR or SKIP.
+- ERROR: at least one member errors or is skipped after judging begins.
+
+Each member contributes one assertion to compatibility grading. Leaf criteria
+remain in that member's result, including permitted failed criteria when an Agent
+judge meets its `pass_threshold`. Script exit 0 means PASS; nonzero means FAIL;
+execution failures and strict multi-judge timeouts mean ERROR.
+
+`evaluation.json` version 1 is the canonical grouped artifact: `gates`,
+`judge_results`, and `aggregation` (strategy and status). Members retain ID, type,
+status, result/evidence, errors, skip reason, duration, and artifact references.
+`grading.json` is a compatibility projection; its pass rate is the fraction of
+passing member verdicts, not an arbitrary numerical quality score. Reports retain
+the group structure. Existing benchmark summaries remain based on case verdicts.
+
+## Comparison with Harbor
+
+Reference: Harbor main at
+[`58789aad577f432a4590209a8fd901f8c894f382`](https://github.com/harbor-framework/harbor/tree/58789aad577f432a4590209a8fd901f8c894f382).
+This comparison is based on source inspection, not runtime experiments.
+
+| Layer | Harbor | skill-up in this PR |
+| --- | --- | --- |
+| Evaluation output | Named numerical rewards | Named judge verdicts and evidence |
+| Default script protocol | `reward.json` or `reward.txt` | Exit code and diagnostic output |
+| Attribution | Reward map itself contains numerical values | Each judge has execution status and artifacts |
+| Aggregation | Metrics across trial rewards; separate multi-step policy | `all_required` within one case |
+| Custom implementation | Imported verifier class | Built-in judge factory; scripts as external validators |
+| Environment | Abstract environment; shared or separate verifier | Optional snapshot capability; `none` adapter |
+| Supporting files | Tests directory upload or image-owned tests | Script entry-path reuse; no validator bundle contract |
+
+Harbor's [default verifier](https://github.com/harbor-framework/harbor/blob/58789aad577f432a4590209a8fd901f8c894f382/src/harbor/verifier/verifier.py)
+reads numerical rewards after script execution. Multiple reward keys do not by
+themselves represent independently executed judges with individual deadlines and
+errors. Its [verifier factory](https://github.com/harbor-framework/harbor/blob/58789aad577f432a4590209a8fd901f8c894f382/src/harbor/verifier/factory.py)
+also accepts custom verifier classes.
+
+Harbor's [metric aggregation](https://github.com/harbor-framework/harbor/blob/58789aad577f432a4590209a8fd901f8c894f382/src/harbor/metrics/base.py)
+aggregates across trial reward maps, treating missing maps or keys as zero. Its
+[multi-step aggregation](https://github.com/harbor-framework/harbor/blob/58789aad577f432a4590209a8fd901f8c894f382/src/harbor/trial/trial.py#L790)
+supports per-key mean or final-step reward; steps without verifier results are
+excluded from the mean denominator. These policies are distinct from independent
+judges over one agent execution. A separate verifier environment receives collected
+artifacts rather than an automatic copy of the complete agent workspace.
+
+## Future extension boundaries
+
+The following are proposals, not supported YAML or result fields:
+
+1. **Numerical judge scores.** Add optional named finite scores alongside verdicts
+   and evidence, with explicit scale and direction. Keep execution errors distinct
+   from legitimate zero scores and keep assertion pass rates unchanged. Specify
+   result-version compatibility before extending serialized artifacts.
+2. **Case policies.** Select an `OutcomeAggregator` through a validated configuration
+   contract when concrete use cases require weights, thresholds, or required versus
+   optional judges. Define ERROR, SKIP, missing-score and denominator semantics;
+   never infer weights from the number of leaf criteria. Update report and benchmark
+   consumers with the policy, not just the evaluator.
+3. **Benchmark metrics.** Aggregate numerical dimensions across cases and repeated
+   runs separately from case acceptance. Define missing-value and failure policies
+   explicitly rather than copying Harbor's zero substitution implicitly.
+4. **Runtime adapters and declared inputs.** Implement snapshot/fork for another
+   runtime only with evidence that sibling judges cannot alter each other's inputs.
+   Artifact-only verification can be a separate input contract. Durable regrading
+   additionally needs retained inputs, configuration and validator identities.
+5. **Reusable validator bundles.** Extend script-path reuse with supporting modules,
+   data, explicit parameters, dependency/environment requirements, and versioned
+   JSON input/output. Retain exit-code compatibility. Directory packaging and
+   installation/readback must be verified together.
+6. **External judge adapters.** Prefer a versioned process protocol when an external
+   implementation is needed; adding a Go interface does not create a public plugin
+   ABI. The current judge and runtime types remain internal.
+
+## Validation boundaries
+
+Tests cover independent workspace forks, one evaluated-agent execution, gate
+short-circuiting, timeout/error handling, unsupported runtimes, grouped reports,
+and compatibility grading. A runtime wrapper exercising the snapshot capability
+proves dispatch does not require a concrete `NoneRuntime`. Aggregation tests cover
+status precedence and preservation of member weight.
+
+Docker/OpenSandbox multi-judge execution, numerical scoring, weighted policies,
+validator bundles, and durable replay are not validated or claimed by this PR.

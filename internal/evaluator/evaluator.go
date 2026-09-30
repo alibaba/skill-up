@@ -105,6 +105,9 @@ type EvalResult struct {
 	// JudgeResults preserves each independent judge result in multi-judge cases.
 	JudgeResults []JudgeOutcome
 
+	// AggregationStrategy identifies the multi-judge policy, including gate failures.
+	AggregationStrategy string
+
 	// JudgeSession is the separate agent session used by agent_judge. It is
 	// preserved even when the judge fails to produce a valid grading result.
 	JudgeSession *agent.SessionResult
@@ -464,7 +467,8 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 		return result
 	}
 	if judgePlan.Multi {
-		if _, ok := rt.(*runtime.NoneRuntime); !ok {
+		result.AggregationStrategy = judge.DefaultOutcomeAggregator().Strategy()
+		if _, ok := rt.(runtime.JudgeSnapshotProvider); !ok {
 			result.Status = judge.StatusError
 			result.Error = fmt.Errorf("multi-judge workspace isolation is not supported by %T", rt)
 			return result

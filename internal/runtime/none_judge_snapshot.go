@@ -10,14 +10,14 @@ import (
 	"strings"
 )
 
-// JudgeSnapshot holds a frozen copy of a none runtime workspace.
-type JudgeSnapshot struct {
+// noneJudgeSnapshot holds a frozen copy of a none runtime workspace.
+type noneJudgeSnapshot struct {
 	path string
 	cfg  Config
 }
 
 // CaptureJudgeSnapshot freezes the complete workspace before any judge runs.
-func (r *NoneRuntime) CaptureJudgeSnapshot(ctx context.Context) (*JudgeSnapshot, error) {
+func (r *NoneRuntime) CaptureJudgeSnapshot(ctx context.Context) (JudgeSnapshot, error) {
 	dir, err := os.MkdirTemp("", "skill-up-judge-snapshot-*")
 	if err != nil {
 		return nil, err
@@ -28,11 +28,11 @@ func (r *NoneRuntime) CaptureJudgeSnapshot(ctx context.Context) (*JudgeSnapshot,
 	}
 	cfg := r.cfg
 	cfg.Env = maps.Clone(r.cfg.Env)
-	return &JudgeSnapshot{path: dir, cfg: cfg}, nil
+	return &noneJudgeSnapshot{path: dir, cfg: cfg}, nil
 }
 
 // Fork returns an independent runtime and cleanup function for one judge.
-func (s *JudgeSnapshot) Fork(ctx context.Context) (Runtime, func(), error) {
+func (s *noneJudgeSnapshot) Fork(ctx context.Context) (Runtime, func(), error) {
 	dir, err := os.MkdirTemp("", "skill-up-judge-*")
 	if err != nil {
 		return nil, nil, err
@@ -58,7 +58,7 @@ func (s *JudgeSnapshot) Fork(ctx context.Context) (Runtime, func(), error) {
 }
 
 // Close removes the frozen copy.
-func (s *JudgeSnapshot) Close() error { return os.RemoveAll(s.path) }
+func (s *noneJudgeSnapshot) Close() error { return os.RemoveAll(s.path) }
 
 func copyJudgeTree(ctx context.Context, source, target string) error {
 	root, err := os.OpenRoot(target)

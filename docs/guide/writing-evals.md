@@ -794,6 +794,9 @@ Script contract:
 
 ### Multiple independent judges
 
+For execution contracts, isolation limits, and planned extensions, see the
+[Multi-judge design](../design/multi-judge.md).
+
 Use `judges` when one agent run needs both a deterministic check and semantic review:
 
 ```yaml

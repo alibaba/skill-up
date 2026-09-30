@@ -32,13 +32,13 @@ func (e *defaultEvaluator) runMultipleJudges(
 	input judge.Input,
 	result *EvalResult,
 ) EvalResult {
-	noneRuntime, ok := rt.(*runtime.NoneRuntime)
+	snapshotProvider, ok := rt.(runtime.JudgeSnapshotProvider)
 	if !ok {
 		result.Status = judge.StatusError
 		result.Error = fmt.Errorf("multi-judge workspace isolation is not supported by %T", rt)
 		return *result
 	}
-	snapshot, err := noneRuntime.CaptureJudgeSnapshot(ctx)
+	snapshot, err := snapshotProvider.CaptureJudgeSnapshot(ctx)
 	if err != nil {
 		result.Status = judge.StatusError
 		result.Error = err
@@ -93,7 +93,7 @@ func (e *defaultEvaluator) runMultipleJudges(
 		outcome.DurationMs = time.Since(started).Milliseconds()
 		result.JudgeResults = append(result.JudgeResults, outcome)
 	}
-	result.Grading, result.Status = aggregateJudgeOutcomes(result.JudgeResults, result.Turns, turnsTotal)
+	result.Grading, result.Status = judge.DefaultOutcomeAggregator().Aggregate(result.JudgeResults, result.Turns, turnsTotal)
 	if result.Status == judge.StatusError {
 		result.Error = multiJudgeError(ctx, result.JudgeResults, causes)
 	}
@@ -143,41 +143,4 @@ func summarizeJudgeErrors(outcomes []JudgeOutcome) string {
 		}
 	}
 	return "judges failed to complete: " + strings.Join(details, "; ")
-}
-
-func aggregateJudgeOutcomes(outcomes []JudgeOutcome, turnsExecuted, turnsTotal int) (*judge.Result, judge.Status) {
-	assertions := make([]judge.AssertionResult, 0, len(outcomes))
-	status := judge.StatusPass
-	for _, outcome := range outcomes {
-		passed := outcome.Status == judge.StatusPass
-		var evidence []string
-		if outcome.Error != "" {
-			evidence = append(evidence, outcome.Error)
-		}
-		if outcome.SkipReason != "" {
-			evidence = append(evidence, outcome.SkipReason)
-		}
-		if outcome.Result != nil {
-			for _, assertion := range outcome.Result.AssertionResults {
-				if !assertion.Passed && assertion.Evidence != "" {
-					evidence = append(evidence, assertion.Evidence)
-				}
-			}
-		}
-		assertions = append(assertions, judge.AssertionResult{
-			Text: "judge " + outcome.ID + " (" + outcome.Type + ")", Passed: passed,
-			Evidence: string(outcome.Status) + ": " + strings.Join(evidence, "; "),
-		})
-		switch outcome.Status {
-		case judge.StatusError, judge.StatusSkip:
-			status = judge.StatusError
-		case judge.StatusFail:
-			if status != judge.StatusError {
-				status = judge.StatusFail
-			}
-		}
-	}
-	grading := judge.NewResult(assertions, turnsExecuted, turnsTotal)
-	grading.Status = status
-	return grading, status
 }
