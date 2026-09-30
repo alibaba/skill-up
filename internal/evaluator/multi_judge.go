@@ -47,6 +47,7 @@ func (e *defaultEvaluator) runMultipleJudges(
 				ID: member.ID, Type: member.Type, Status: judge.StatusSkip, SkipReason: "snapshot_failed",
 			})
 		}
+		result.Grading, result.Status = judge.DefaultOutcomeAggregator().Aggregate(result.JudgeResults, result.Turns, turnsTotal)
 		return *result
 	}
 	defer snapshot.Close() //nolint:errcheck

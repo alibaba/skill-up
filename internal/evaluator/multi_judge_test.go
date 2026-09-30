@@ -169,6 +169,9 @@ func TestMultiJudgeSnapshotFailureKeepsConfiguration(t *testing.T) {
 	if result.Status != judge.StatusError || result.Configuration != ConfigurationWithoutSkill || len(result.JudgeResults) != 1 {
 		t.Fatalf("status=%s config=%q outcomes=%+v", result.Status, result.Configuration, result.JudgeResults)
 	}
+	if result.Grading == nil || result.Grading.Status != judge.StatusError || result.Grading.Summary.Total != len(members) || result.Error == nil {
+		t.Fatalf("snapshot error=%v grading=%+v", result.Error, result.Grading)
+	}
 }
 
 func TestMultiJudgeMemberTimeoutKeepsLaterResult(t *testing.T) {
