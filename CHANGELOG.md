@@ -64,6 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixture uploads.
 
 ### Fixed
+- Preserve localized regression literals and unrelated existing cases in
+  `skill-upper`; add read-only planning and external-evidence review paths,
+  explicit field-comment guidance, and behavioral regression cases.
 - Make `skill-upper` credential checks report configuration presence without
   printing secret values, and account for engine-specific authentication and
   saved credentials before treating a missing environment variable as a blocker.
