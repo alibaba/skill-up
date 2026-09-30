@@ -607,11 +607,17 @@ user_simulator:
   timeout_seconds: 30
 ```
 
-The model uses the OpenAI Chat Completions API. Set `SIMULATION_API_KEY` and
+Set `protocol: openai` for OpenAI Chat Completions, or `protocol: anthropic`
+for Anthropic Messages. Set `SIMULATION_API_KEY` and
 `SIMULATION_BASE_URL`, or configure the same provider in
 `~/.skill-up/credentials.yaml`. For `provider: openai`, the standard OpenAI
 endpoint is used when no base URL is configured. The simulator runs outside the
-agent workspace and uses its own model connection.
+agent workspace and uses its own model connection. For `provider: anthropic`
+with `protocol: anthropic`, `ANTHROPIC_API_KEY` and optional
+`ANTHROPIC_BASE_URL` configure the connection; the official endpoint is the fallback.
+Custom providers require an explicit base URL for their selected protocol.
+Anthropic replies are bounded to 1024 output tokens with thinking disabled;
+truncated responses and tool calls are rejected.
 
 In a case, `user_simulator.scenario` describes the user's goal and known
 information. A `respond` turn generates one user message from the scenario,

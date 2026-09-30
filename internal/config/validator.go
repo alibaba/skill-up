@@ -103,8 +103,8 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 		if strings.TrimSpace(cfg.UserSimulator.Provider) == "" || strings.TrimSpace(cfg.UserSimulator.Model) == "" {
 			errs = append(errs, "user_simulator.provider and user_simulator.model are required")
 		}
-		if cfg.UserSimulator.Protocol != "openai" {
-			errs = append(errs, "user_simulator.protocol must be openai")
+		if !validUserSimulatorProtocol(cfg.UserSimulator.Protocol) {
+			errs = append(errs, "user_simulator.protocol must be openai or anthropic")
 		}
 		if cfg.UserSimulator.TimeoutSeconds < 0 {
 			errs = append(errs, "user_simulator.timeout_seconds must be non-negative")
@@ -501,8 +501,8 @@ func (v *Validator) ValidateCasesWithEvalDefaults(eval *EvalConfig, cases []*Cas
 		return err
 	}
 	for _, c := range cases {
-		if c.UserSimulator != nil && (eval.UserSimulator.Provider == "" || eval.UserSimulator.Model == "" || eval.UserSimulator.Protocol != "openai") {
-			return fmt.Errorf("case %s: user_simulator requires eval-level provider, protocol: openai, and model", c.ID)
+		if c.UserSimulator != nil && (eval.UserSimulator.Provider == "" || eval.UserSimulator.Model == "" || !validUserSimulatorProtocol(eval.UserSimulator.Protocol)) {
+			return fmt.Errorf("case %s: user_simulator requires eval-level provider, protocol: openai or anthropic, and model", c.ID)
 		}
 		effectiveJudge := mergeJudgeConfigForValidation(eval.Judge, c.Judge)
 		if errs := validateJudgeTypeAndRequiredFields(effectiveJudge); len(errs) > 0 {
@@ -888,4 +888,8 @@ func validateNetworkPolicy(env Environment) []string {
 		}
 	}
 	return errs
+}
+
+func validUserSimulatorProtocol(protocol string) bool {
+	return protocol == "openai" || protocol == "anthropic"
 }

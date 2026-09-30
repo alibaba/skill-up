@@ -123,3 +123,7 @@ Validator -> Validator : validateEvalConfig()
 Validator -> Validator : validateCaseConfig()
 @enduml
 ```
+
+The optional user simulator has its own provider and model. Its `protocol` accepts
+`openai` (Chat Completions) or `anthropic` (Messages); custom providers must
+configure a base URL matching that protocol.

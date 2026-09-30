@@ -123,7 +123,7 @@ type ModelConfig struct {
 // UserSimulatorModel selects the independent model used to simulate user turns.
 type UserSimulatorModel struct {
 	Provider       string `yaml:"provider"`
-	Protocol       string `yaml:"protocol"`
+	Protocol       string `yaml:"protocol"` // openai (Chat Completions) or anthropic (Messages).
 	Model          string `yaml:"model"`
 	TimeoutSeconds int    `yaml:"timeout_seconds,omitempty"`
 }

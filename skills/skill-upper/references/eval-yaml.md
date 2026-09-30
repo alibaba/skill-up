@@ -147,13 +147,18 @@ user_simulator:
   timeout_seconds: 30
 ```
 
-The simulator uses the OpenAI Chat Completions protocol. With the separate
+The simulator supports `protocol: openai` (Chat Completions) and
+`protocol: anthropic` (Messages). With the separate
 `simulation` provider, configure `SIMULATION_API_KEY` and
 `SIMULATION_BASE_URL`, or the `simulation` entry in
 `~/.skill-up/credentials.yaml`. Alternatively, `provider: openai` uses
 `OPENAI_API_KEY`, optional `OPENAI_BASE_URL`, and the standard OpenAI endpoint
 when no base URL is set. The agent's `--api-key` override does not configure
-the simulator. Do not write secret values in `eval.yaml`.
+the simulator. With `provider: anthropic` and `protocol: anthropic`, use
+`ANTHROPIC_API_KEY` and optional `ANTHROPIC_BASE_URL` (official endpoint fallback).
+Custom providers require an explicit base URL matching the selected protocol.
+Anthropic replies use 1024 output tokens with thinking disabled; truncation and
+tool calls are rejected. Do not write secret values in `eval.yaml`.
 
 Set `cases.defaults.max_turns` as the suite default, and override it with
 `constraints.max_turns` for a particular case. The evaluator, rather than the

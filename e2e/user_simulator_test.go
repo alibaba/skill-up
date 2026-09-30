@@ -19,6 +19,17 @@ import (
 // TestUserSimulator_DashScope exercises the SDK simulator and a real resumed
 // OpenCode conversation together, using the runnable DashScope example.
 func TestUserSimulator_DashScope(t *testing.T) {
+	runUserSimulatorDashScope(t, "eval.yaml", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+}
+
+// TestUserSimulator_DashScopeAnthropic uses Messages for the simulator while
+// retaining Chat Completions for the agent; both cases verify session continuity.
+func TestUserSimulator_DashScopeAnthropic(t *testing.T) {
+	runUserSimulatorDashScope(t, "eval-anthropic.yaml", "https://dashscope.aliyuncs.com/apps/anthropic")
+}
+
+func runUserSimulatorDashScope(t *testing.T, evalFile, simulatorBaseURL string) {
+	t.Helper()
 	skipIfNotFullE2E(t)
 	if _, err := exec.LookPath("opencode"); err != nil {
 		t.Skip("opencode not installed locally")
@@ -27,13 +38,13 @@ func TestUserSimulator_DashScope(t *testing.T) {
 	if key == "" {
 		t.Skip("DASHSCOPE_API_KEY not set")
 	}
-	evalPath := filepath.Join(getProjectRoot(), "examples", "user-simulator", "evals", "eval.yaml")
+	evalPath := filepath.Join(getProjectRoot(), "examples", "user-simulator", "evals", evalFile)
 	outputDir := t.TempDir()
 	preserveWorkspaceArtifacts(t, outputDir)
 	result := Run(t, RunConfig{
 		Env: []string{
 			"SIMULATION_API_KEY=" + key,
-			"SIMULATION_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1",
+			"SIMULATION_BASE_URL=" + simulatorBaseURL,
 		},
 		Timeout: 12 * time.Minute,
 	}, "run", evalPath, "--output-dir", outputDir)

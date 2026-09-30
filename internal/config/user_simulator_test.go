@@ -18,6 +18,16 @@ func TestValidateUserSimulatorConfiguration(t *testing.T) {
 	if err := validator.ValidateEvalConfig(eval); err != nil {
 		t.Fatal(err)
 	}
+	for _, protocol := range []string{"openai", "anthropic"} {
+		eval.UserSimulator.Protocol = protocol
+		if err := validator.ValidateEvalConfig(eval); err != nil {
+			t.Fatal(err)
+		}
+		simulated := &CaseConfig{Input: Input{Prompt: "start"}, UserSimulator: &UserSimulatorScenario{Scenario: "staging only"}}
+		if err := validator.ValidateCasesWithEvalDefaults(eval, []*CaseConfig{simulated}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	eval.UserSimulator.Protocol = "unsupported"
 	if err := validator.ValidateEvalConfig(eval); err == nil || !strings.Contains(err.Error(), "protocol") {
 		t.Fatalf("unsupported protocol error = %v", err)

@@ -198,7 +198,7 @@ Expect: `✓ eval.yaml is valid (loaded N case(s))`.
 
 For the agent model, priority is `--api-key` > env (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `QODER_PERSONAL_ACCESS_TOKEN`) > `~/.skill-up/credentials.yaml`.
 
-The user simulator resolves credentials by its own `user_simulator.provider`. For `provider: simulation`, set `SIMULATION_API_KEY` and `SIMULATION_BASE_URL`, or configure the `simulation` provider in `~/.skill-up/credentials.yaml`. For `provider: openai`, use `OPENAI_API_KEY` and optionally `OPENAI_BASE_URL`; its standard endpoint is the fallback. `--api-key` for the agent does not supply the simulator connection. Never put a raw key in eval YAML.
+The user simulator resolves credentials by its own `user_simulator.provider`. For `provider: simulation`, set `SIMULATION_API_KEY` and `SIMULATION_BASE_URL`, or configure the `simulation` provider in `~/.skill-up/credentials.yaml`. For `provider: openai`, use `OPENAI_API_KEY` and optionally `OPENAI_BASE_URL`; its standard endpoint is the fallback. Choose `protocol: openai` for Chat Completions or `protocol: anthropic` for Messages; custom base URLs must match that protocol. For `provider: anthropic` with `protocol: anthropic`, use `ANTHROPIC_API_KEY` and optional `ANTHROPIC_BASE_URL` (official endpoint fallback). `--api-key` for the agent does not supply the simulator connection. Never put a raw key in eval YAML.
 
 ```bash
 for name in ANTHROPIC_API_KEY OPENAI_API_KEY QODER_PERSONAL_ACCESS_TOKEN SIMULATION_API_KEY SIMULATION_BASE_URL; do

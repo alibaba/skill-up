@@ -49,3 +49,19 @@ The canonical `skill-upper` simulator scaffolding case was also run with this
 model and OpenCode: the file-existence check and all five judge criteria passed.
 That regression generates and validates YAML with a placeholder simulator model;
 it does not invoke that placeholder. See the [Skill regression entry](../../skills/skill-upper/README.md#user-simulator-scaffolding-regression).
+
+`evals/eval-anthropic.yaml` runs the same cases with Anthropic Messages for the
+simulator. The agent keeps its independent Chat Completions connection:
+
+```bash
+export SIMULATION_BASE_URL=https://dashscope.aliyuncs.com/apps/anthropic
+./bin/skill-up validate ./examples/user-simulator/evals/eval-anthropic.yaml
+./bin/skill-up run ./examples/user-simulator/evals/eval-anthropic.yaml
+```
+
+This variant was also live-tested with OpenCode 1.14.24 and `qwen3.8-max`:
+both cases passed, including autonomous stop and stable session IDs. This verifies
+DashScope's Messages-compatible endpoint; Anthropic's official Claude endpoint
+was not live-tested. `TestUserSimulator_DashScopeAnthropic` retains this regression
+in the credential-gated full E2E suite. Run both protocol tests with
+`-run '^TestUserSimulator_DashScope(Anthropic)?$'` using the flags above.
