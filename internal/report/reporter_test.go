@@ -411,6 +411,32 @@ func TestHTMLReporter_SynthesizedTurnFailurePassRateScript(t *testing.T) {
 	}
 }
 
+func TestHTMLReporter_RendersSimulatorTurnMetadata(t *testing.T) {
+	input := Input{CaseResults: []CaseResult{{
+		CaseID: "simulated", Status: judge.StatusPass,
+		TurnResults: []CaseTurnResult{{TurnNumber: 1, Content: "hello", Source: "simulated", Response: "done", Status: "completed", StopReason: "goal reached"}},
+	}}}
+	path := filepath.Join(t.TempDir(), "report.html")
+	if err := (&HTMLReporter{OutputPath: path}).Write(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	for _, want := range []string{`"source":"simulated"`, `"stop_reason":"goal reached"`} {
+		if !strings.Contains(content, want) {
+			t.Errorf("HTML report is missing simulator metadata %q", want)
+		}
+	}
+	for _, want := range []string{"esc(tr.source) + ' user</span>'", "Simulator stopped: ' + esc(tr.stop_reason)"} {
+		if !strings.Contains(htmlTemplate, want) {
+			t.Errorf("HTML conversation renderer is missing %q", want)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // MarkdownReporter
 // ---------------------------------------------------------------------------

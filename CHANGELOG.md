@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   image, with live none-runtime and OpenSandbox model E2E coverage. The
   published Action image needs a compatible skill-up release before OpenCode
   is available to Action callers.
+- Add scenario-driven simulated user replies for mixed fixed/model-generated
+  turns and autonomous multi-turn evaluations, with an independent OpenAI Chat
+  Completions or Anthropic Messages model connection and bounded execution. The canonical `skill-upper` guidance,
+  templates, and regression case now cover both modes. The default example uses the
+  live-tested local OpenCode/DashScope `qwen3.8-max` configuration; credential-gated
+  model E2Es check both dialogue modes, session continuity, and actual
+  `skill-upper` scaffolding with an explicitly configured judge. Simulator decisions accept
+  complete JSON code fences while retaining strict field and policy validation.
 - DSH's opt-in observer now links the next same-session user turn after a
   single completed Skill use as an unclassified follow-up candidate.
   `collect_skill_feedback` gathers recent observations and follow-ups for
