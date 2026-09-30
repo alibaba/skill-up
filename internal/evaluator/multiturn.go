@@ -245,6 +245,9 @@ func resolveTurnMessage(ctx context.Context, state *multiTurnState, turn config.
 	if turn.Respond == "" {
 		return content, origin, nil
 	}
+	if turnNum > 1 && state.sessionID == "" {
+		return "", "", fmt.Errorf("turn %d: engine returned no session_id; generated follow-up cannot resume", turnNum)
+	}
 	instruction, err := substituteTurnContent(state, config.Turn{Content: turn.Respond}, turnNum)
 	if err != nil {
 		return "", "", err

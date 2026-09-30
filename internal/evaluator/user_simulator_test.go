@@ -251,3 +251,37 @@ func TestUserSimulationAutonomousStopAndLimit(t *testing.T) {
 		})
 	}
 }
+
+func TestMixedSimulationRejectsMissingSessionBeforeModelCall(t *testing.T) {
+	ag := &mockResumerAgent{mockAgent: mockAgent{name: "non-strict"}, runTurnFunc: func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ transcript.Message, _ string) (*agent.SessionResult, error) {
+		return &agent.SessionResult{
+			FinalMessage: "Which environment?", InputTokens: 7, OutputTokens: 3, DurationMs: 10,
+			Transcript: transcript.Transcript{{Role: transcript.RoleUser, Content: "Create config"}, {Role: transcript.RoleAssistant, Content: "Which environment?"}},
+		}, nil
+	}}
+	simulator := &scriptedSimulator{decisions: []usersimulator.Decision{{Action: "reply", Message: "staging"}}}
+	e := newTestEvaluator(EvalOptions{Agent: ag, Simulator: simulator, EvalCfg: &config.EvalConfig{}})
+	caseCfg := &config.CaseConfig{ID: "mixed-needs-session", UserSimulator: &config.UserSimulatorScenario{Scenario: "staging"}, Input: config.Input{Turns: []config.Turn{
+		{Role: "user", Content: "Create config"}, {Role: "user", Respond: "Answer the question"},
+	}}}
+	results, aggregate, err := e.executeMultiTurn(context.Background(), &mockRuntime{workspace: t.TempDir()}, caseCfg, ag, agent.ExecOptions{})
+	if err == nil || !strings.Contains(err.Error(), "no session_id") || ag.turnCall != 1 || len(simulator.histories) != 0 {
+		t.Fatalf("calls=%d simulator calls=%d error=%v", ag.turnCall, len(simulator.histories), err)
+	}
+	if len(results) != 1 || aggregate == nil || aggregate.InputTokens != 7 || aggregate.OutputTokens != 3 || aggregate.DurationMs != 10 || len(aggregate.Transcript) != 2 {
+		t.Fatalf("completed turns were lost: results=%+v aggregate=%+v", results, aggregate)
+	}
+}
+
+func TestInitialSimulatedMessageDoesNotRequireSessionID(t *testing.T) {
+	ag := &mockResumerAgent{mockAgent: mockAgent{name: "non-strict"}, runTurnFunc: func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, msg transcript.Message, _ string) (*agent.SessionResult, error) {
+		return &agent.SessionResult{FinalMessage: "reply to " + msg.Content}, nil
+	}}
+	simulator := &scriptedSimulator{decisions: []usersimulator.Decision{{Action: "reply", Message: "Create staging config"}}}
+	e := newTestEvaluator(EvalOptions{Agent: ag, Simulator: simulator, EvalCfg: &config.EvalConfig{}})
+	caseCfg := &config.CaseConfig{ID: "generated-opening", UserSimulator: &config.UserSimulatorScenario{Scenario: "staging"}, Input: config.Input{Turns: []config.Turn{{Role: "user", Respond: "Start the conversation"}}}}
+	results, _, err := e.executeMultiTurn(context.Background(), &mockRuntime{workspace: t.TempDir()}, caseCfg, ag, agent.ExecOptions{})
+	if err != nil || len(results) != 1 || ag.turnCall != 1 || len(simulator.histories) != 1 || results[0].Content != "Create staging config" {
+		t.Fatalf("results=%+v error=%v", results, err)
+	}
+}
