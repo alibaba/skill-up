@@ -68,7 +68,8 @@ judge:
 # Example for agent_judge, useful when semantic evaluation is needed:
 # judge:
 #   type: agent_judge
-#   model: anthropic/claude-sonnet-4-6
+#   # Use with an OpenCode/DashScope eval-level engine configuration.
+#   model: dashscope/qwen3.8-max
 #   criteria:
 #     - "Output correctly identifies user intent"
 #     - "Does not fabricate non-existent fields"

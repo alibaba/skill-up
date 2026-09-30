@@ -953,7 +953,12 @@ func (e *defaultEvaluator) executeMultiTurnCase(
 	// Workspace diff hooks.
 	var cleanupArtifacts func()
 	finalizeArtifacts := func(*agent.SessionResult) {}
-	if judgeNeedsWorkspaceDiff(judgeCfg) {
+	plan, planErr := config.ResolveJudgePlan(e.evalCfg, caseCfg)
+	if planErr != nil {
+		result.Status, result.Error = judge.StatusError, planErr
+		return *result
+	}
+	if judgePlanNeedsWorkspaceDiff(plan) {
 		cleanupArtifacts, finalizeArtifacts = e.prepareWorkspaceArtifacts(ctx, rt, caseCfg)
 		defer cleanupArtifacts()
 	}

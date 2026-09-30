@@ -198,13 +198,23 @@ func buildJudgeSkillProperties(cr CaseResult) *junitProperties {
 // Turn-scoped assertions already include turn numbers in their text field,
 // making CI failure output directly actionable.
 func buildFailureBody(cr CaseResult) string {
-	if cr.Grading == nil {
+	if cr.Grading == nil && len(cr.JudgeResults) == 0 {
 		return ""
 	}
 	var lines []string
-	for _, ar := range cr.Grading.AssertionResults {
-		if !ar.Passed {
-			lines = append(lines, fmt.Sprintf("- %s: %s", ar.Text, ar.Evidence))
+	if cr.Gates != nil {
+		for _, failure := range cr.Gates.Failures {
+			lines = append(lines, fmt.Sprintf("- gate %s: %s", failure.Rule, failure.Detail))
+		}
+	}
+	for _, member := range cr.JudgeResults {
+		lines = append(lines, fmt.Sprintf("- judge %s (%s): %s %s", member.ID, member.Type, member.Status, member.Error))
+	}
+	if cr.Grading != nil {
+		for _, ar := range cr.Grading.AssertionResults {
+			if !ar.Passed {
+				lines = append(lines, fmt.Sprintf("- %s: %s", ar.Text, ar.Evidence))
+			}
 		}
 	}
 	// Append turn summary when multi-turn results are present.

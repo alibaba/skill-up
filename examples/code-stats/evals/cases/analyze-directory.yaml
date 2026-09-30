@@ -1,12 +1,12 @@
 id: analyze-directory
-title: Analyze code stats for evals directory
-description: Run code-stats on the current workspace and verify output format
+title: Analyze code stats for the sample project
+description: 核对固定项目文件的统计结果、输出格式和语义审查。
 
 input:
   prompt: |
-    Analyze the current directory using the code-stats requirements.
-    Report the statistics in the full Code Statistics format with Summary,
-    Files by Extension, Top File Extensions, and Largest Files sections.
+    按 code-stats 的完整格式统计当前项目的 main.go、util.go 和 README.md。
+    统计范围只包含这三个文件，排除隐藏目录、工具配置和运行时生成文件。
+    输出 Summary、Files by Extension、Top File Extensions 和 Largest Files。
 
 context:
   repo_fixture: evals/fixtures/repos/sample-project
@@ -18,13 +18,24 @@ constraints:
 expect:
   must_contain:
     - "Files by Extension"
-    - "Total Files"
-    - "Total Lines"
+    - "Total Files: 3"
+    - "Total Lines: 20"
   must_not_contain:
     - "error"
     - "Error"
 
-judge:
-  type: script
-  script_path: evals/fixtures/scripts/check-stats.sh
-  timeout_seconds: 30
+judges:
+  # 检查输出格式，退出码决定确定性判分。
+  - id: format
+    type: script
+    script_path: evals/fixtures/scripts/check-stats.sh
+    timeout_seconds: 30
+  # 使用与运行 Agent 相同的已配置 provider 和 endpoint。
+  - id: relevance
+    type: agent_judge
+    model: dashscope/qwen3.8-max
+    timeout_seconds: 180
+    criteria:
+      - "输出回应了统计当前项目代码构成的请求，包含文件数、行数和扩展名分布，而非仅解释如何统计。"
+      - "输出包含完整的统计报告，没有声称无法访问目录，也没有以建议或待办替代实际结果。"
+    pass_threshold: 1.0

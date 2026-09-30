@@ -102,6 +102,12 @@ type EvalResult struct {
 	// Grading is the valid judge evaluation result (nil if judge was skipped or failed).
 	Grading *judge.Result
 
+	// JudgeResults preserves each independent judge result in multi-judge cases.
+	JudgeResults []JudgeOutcome
+
+	// AggregationStrategy identifies the multi-judge policy, including gate failures.
+	AggregationStrategy string
+
 	// JudgeSession is the separate agent session used by agent_judge. It is
 	// preserved even when the judge fails to produce a valid grading result.
 	JudgeSession *agent.SessionResult
@@ -403,6 +409,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	result := EvalResult{
 		CaseID:        caseCfg.ID,
 		CaseName:      caseCfg.Title,
+		Configuration: configName,
 		Prompt:        prompt,
 		SessionResult: &agent.SessionResult{},
 		TurnsTotal:    turnsTotal,
@@ -454,6 +461,19 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	logging.DebugContextf(ctx, "Runner: case %s (%s): %s", caseCfg.ID, configName, caseCfg.Title)
 
 	judgeCfg := judge.MergeJudgeConfig(e.evalCfg.Judge, caseCfg.Judge)
+	judgePlan, planErr := config.ResolveJudgePlan(e.evalCfg, caseCfg)
+	if planErr != nil {
+		result.Status, result.Error = judge.StatusError, planErr
+		return result
+	}
+	if judgePlan.Multi {
+		result.AggregationStrategy = judge.DefaultOutcomeAggregator().Strategy()
+		if _, ok := rt.(runtime.JudgeSnapshotProvider); !ok {
+			result.Status = judge.StatusError
+			result.Error = fmt.Errorf("multi-judge workspace isolation is not supported by %T", rt)
+			return result
+		}
+	}
 
 	// Multi-turn branch: delegate to dedicated engine when the case defines
 	// input.turns AND the agent supports session resumption. Agents that do
@@ -484,7 +504,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 
 	var cleanupArtifacts func()
 	finalizeArtifacts := func(*agent.SessionResult) {}
-	if judgeNeedsWorkspaceDiff(judgeCfg) {
+	if judgePlanNeedsWorkspaceDiff(judgePlan) {
 		cleanupArtifacts, finalizeArtifacts = e.prepareWorkspaceArtifacts(ctx, rt, caseCfg)
 		defer cleanupArtifacts()
 	}
@@ -533,7 +553,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 		defaultExpect := e.evalCfg.Cases.Defaults.Expect
 		effectiveExpect := mergeExpectConfig(&defaultExpect, &caseCfg.Expect)
 		hasExitCodeCheck := effectiveExpect.ExitCode != nil
-		hasJudge := judgeCfg.Type != ""
+		hasJudge := judgeCfg.Type != "" || judgePlan.Multi
 		if !hasExitCodeCheck && !hasJudge {
 			if result.DurationMs == 0 {
 				result.DurationMs = time.Since(startTime).Milliseconds()
@@ -583,8 +603,20 @@ func (e *defaultEvaluator) evaluateCaseSession(
 		SessionResult:  sessionResult,
 		TurnResults:    toJudgeTurnResults(result.TurnResults),
 	}
+	plan, planErr := config.ResolveJudgePlan(e.evalCfg, caseCfg)
+	if planErr != nil {
+		result.Status, result.Error = judge.StatusError, planErr
+		return *result
+	}
 
 	if failed := e.runExpectPreCheck(ctx, caseCfg, configName, judgeInput, turnsTotal, result); failed {
+		if plan.Multi {
+			for _, member := range plan.Judges {
+				result.JudgeResults = append(result.JudgeResults, JudgeOutcome{
+					ID: member.ID, Type: member.Type, Status: judge.StatusSkip, SkipReason: "gate_failed",
+				})
+			}
+		}
 		return *result
 	}
 
@@ -593,8 +625,13 @@ func (e *defaultEvaluator) evaluateCaseSession(
 		expectAssertions = result.ExpectResult.ToAssertionResults()
 	}
 
-	finalResult := e.runJudgePhase(ctx, rt, caseCfg, configName, judgeCfg, turnsTotal, runAgent, judgeInput, result)
-	if len(expectAssertions) > 0 && finalResult.Grading != nil {
+	var finalResult EvalResult
+	if plan.Multi {
+		finalResult = e.runMultipleJudges(ctx, rt, caseCfg, configName, plan, turnsTotal, runAgent, judgeInput, result)
+	} else {
+		finalResult = e.runJudgePhase(ctx, rt, caseCfg, configName, judgeCfg, turnsTotal, runAgent, judgeInput, result, "judge/run", false)
+	}
+	if !plan.Multi && len(expectAssertions) > 0 && finalResult.Grading != nil {
 		finalResult.Grading.AssertionResults = append(expectAssertions, finalResult.Grading.AssertionResults...)
 		finalResult.Grading.Summary.Passed += len(expectAssertions)
 		finalResult.Grading.Summary.Total += len(expectAssertions)
@@ -647,17 +684,19 @@ func (e *defaultEvaluator) runJudgePhase(
 	runAgent agent.Agent,
 	judgeInput judge.Input,
 	result *EvalResult,
+	artifactRoot string,
+	strictTimeout bool,
 ) EvalResult {
 	if observability.LinkedTraceTopologyEnabled() && judgeNeedsWorkspaceDiff(judgeCfg) {
 		ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, nil)
 		ctx, span := observability.StartLinkedRootSpan(ctx, "evaluator.judge")
 		defer span.End()
 		logging.DebugContextf(ctx, "Evaluator: linked judge trace started for case %s (%s)", caseCfg.ID, configName)
-		return e.runJudgePhaseWithSpan(ctx, span, rt, caseCfg, configName, judgeCfg, turnsTotal, runAgent, judgeInput, result)
+		return e.runJudgePhaseWithSpan(ctx, span, rt, caseCfg, configName, judgeCfg, turnsTotal, runAgent, judgeInput, result, artifactRoot, strictTimeout)
 	}
 	ctx, span := observability.Tracer().Start(ctx, "evaluator.judge")
 	defer span.End()
-	return e.runJudgePhaseWithSpan(ctx, span, rt, caseCfg, configName, judgeCfg, turnsTotal, runAgent, judgeInput, result)
+	return e.runJudgePhaseWithSpan(ctx, span, rt, caseCfg, configName, judgeCfg, turnsTotal, runAgent, judgeInput, result, artifactRoot, strictTimeout)
 }
 
 func (e *defaultEvaluator) runJudgePhaseWithSpan(
@@ -671,6 +710,8 @@ func (e *defaultEvaluator) runJudgePhaseWithSpan(
 	runAgent agent.Agent,
 	judgeInput judge.Input,
 	result *EvalResult,
+	artifactRoot string,
+	strictTimeout bool,
 ) EvalResult {
 	span.SetAttributes(
 		attribute.String("skill_up.case.id", caseCfg.ID),
@@ -698,27 +739,20 @@ func (e *defaultEvaluator) runJudgePhaseWithSpan(
 		return *result
 	}
 	if judgeCfg.Type == judgeTypeAgentJudge {
-		judgeInput.ArtifactDir = e.prepareOutputDir(ctx, configName, caseCfg.ID, "judge/run")
+		judgeInput.ArtifactDir = e.prepareOutputDir(ctx, configName, caseCfg.ID, artifactRoot)
+		judgeInput.ContextArtifactDir = filepath.ToSlash(filepath.Join(filepath.Dir(artifactRoot), "context"))
 	}
 
-	// For ScriptJudge, serialize transcript to a temp file so that
-	// EVAL_TRANSCRIPT_PATH is populated for the evaluation script.
-	if sj, ok := j.(*judge.ScriptJudge); ok && len(judgeInput.Transcript) > 0 {
-		transcriptPath, cleanupFn, serErr := serializeTranscript(judgeInput.Transcript)
-		if serErr != nil {
-			logging.WarnContextf(ctx, "Evaluator: failed to serialize transcript for script judge: %v", serErr)
-		} else {
-			defer cleanupFn()
-			sj.TranscriptPath = transcriptPath
-		}
-	}
+	cleanupScript := configureScriptJudge(ctx, j, judgeInput.Transcript, strictTimeout)
+	defer cleanupScript()
 
 	grading, err := j.Evaluate(ctx, judgeInput)
 	if err != nil {
+		result.Grading = grading
 		if judgeSession := judge.SessionResultFromError(err); judgeSession != nil {
 			result.JudgeSession = judgeSession
 			if judgeSession.Artifacts != nil {
-				e.ensureArtifactsInOutputDir(ctx, rt, configName, caseCfg.ID, "judge/run", judgeInput.ArtifactDir, judgeSession)
+				e.ensureArtifactsInOutputDir(ctx, rt, configName, caseCfg.ID, artifactRoot, judgeInput.ArtifactDir, judgeSession)
 			}
 		}
 		result.Status = judge.StatusError
@@ -735,11 +769,29 @@ func (e *defaultEvaluator) runJudgePhaseWithSpan(
 	logging.DebugContextf(ctx, "Judge: case %s: %s (pass_rate: %.1f%%)", caseCfg.ID, grading.Status, grading.Summary.PassRate*100)
 	if grading.JudgeSession != nil {
 		if grading.JudgeSession.Artifacts != nil {
-			e.ensureArtifactsInOutputDir(ctx, rt, configName, caseCfg.ID, "judge/run", judgeInput.ArtifactDir, grading.JudgeSession)
+			e.ensureArtifactsInOutputDir(ctx, rt, configName, caseCfg.ID, artifactRoot, judgeInput.ArtifactDir, grading.JudgeSession)
 		}
 	}
 
 	return *result
+}
+
+func configureScriptJudge(ctx context.Context, j judge.Judge, transcriptData transcript.Transcript, strictTimeout bool) func() {
+	sj, ok := j.(*judge.ScriptJudge)
+	if !ok {
+		return func() {}
+	}
+	sj.TimeoutIsError = strictTimeout
+	if len(transcriptData) == 0 {
+		return func() {}
+	}
+	path, cleanup, err := serializeTranscript(transcriptData)
+	if err != nil {
+		logging.WarnContextf(ctx, "Evaluator: failed to serialize transcript for script judge: %v", err)
+		return func() {}
+	}
+	sj.TranscriptPath = path
+	return cleanup
 }
 
 func (e *defaultEvaluator) newJudgeForCase(

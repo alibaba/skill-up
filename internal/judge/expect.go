@@ -18,25 +18,25 @@ import (
 // ExpectResult is the structured outcome of an expect pre-check.
 type ExpectResult struct {
 	// Passed is true when ALL expect checks succeeded.
-	Passed bool
+	Passed bool `json:"passed"`
 
 	// Failures lists every check that did not pass.
 	// Empty when Passed == true.
-	Failures []ExpectFailure
+	Failures []ExpectFailure `json:"failures"`
 
 	// ConfiguredRules lists the names of all rules that were evaluated
 	// (e.g. "must_contain", "exit_code"). Used by ToAssertionResults to
 	// emit passing assertions for report completeness.
-	ConfiguredRules []string
+	ConfiguredRules []string `json:"configured_rules"`
 }
 
 // ExpectFailure records a single failed expect check.
 type ExpectFailure struct {
 	// Rule identifies the check type (e.g. "must_contain", "files_exist").
-	Rule string
+	Rule string `json:"rule"`
 
 	// Detail provides human-readable evidence of the failure.
-	Detail string
+	Detail string `json:"detail"`
 }
 
 // CheckExpect evaluates all expect rules defined in the case configuration
