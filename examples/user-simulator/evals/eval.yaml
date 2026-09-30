@@ -11,14 +11,14 @@ engine:
   name: opencode
   model:
     provider: dashscope
-    name: qwen3.6-plus
+    name: qwen3.8-max
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 
 # Resolve simulator credentials separately through SIMULATION_API_KEY.
 user_simulator:
   provider: simulation
   protocol: openai
-  model: qwen3.6-plus
+  model: qwen3.8-max
   timeout_seconds: 60
 
 cases:

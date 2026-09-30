@@ -29,3 +29,22 @@ qodercli、Qwen Code 等其他 Agent Engine 仍可用于普通 `skill-up` 评测
 - 需要编写 `eval.yaml` / `case.yaml` 或选择 judge 类型
 - 运行 `skill-up run/validate/list-cases/report/import/init`
 - 从 Anthropic `evals.json` 迁移到 skill-up 格式
+
+## 用户模拟器配置生成回归
+
+`evals/eval-dashscope.yaml` 使用本地 OpenCode 和 DashScope `qwen3.8-max`
+执行 `scaffold-with-user-simulator`，Agent 和 judge 均显式配置该模型。
+该用例检查模拟模型独立配置、固定与模拟轮次混排、自主对话及轮次上限。
+实测 OpenCode 1.14.24 下文件存在检查与五项 judge 标准全部通过，生成的
+YAML 也经过独立的 `skill-up validate` 校验。本次未运行原 Claude 引擎的七用例套件。
+
+通过密钥管理器提供 `DASHSCOPE_API_KEY` 并安装 OpenCode，在仓库根目录运行：
+
+```bash
+make build
+PATH="$PWD/bin:$PATH" ./bin/skill-up run ./skills/skill-upper/evals/eval-dashscope.yaml
+```
+
+`TestSkillUpper_UserSimulator_DashScope` 将该配置纳入手动触发的完整模型 E2E。
+该用例只生成配置并校验，其中 `test-model` 是占位符；真实模拟回复链路由
+[用户模拟器示例](../../examples/user-simulator/README.md)单独覆盖。

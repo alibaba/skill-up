@@ -109,3 +109,44 @@ func TestUserSimulator_DashScope(t *testing.T) {
 		})
 	}
 }
+
+// TestSkillUpper_UserSimulator_DashScope verifies the canonical Skill can scaffold
+// mixed and autonomous evals; the configured agent_judge inspects generated files.
+func TestSkillUpper_UserSimulator_DashScope(t *testing.T) {
+	skipIfNotFullE2E(t)
+	if _, err := exec.LookPath("opencode"); err != nil {
+		t.Skip("opencode not installed locally")
+	}
+	if os.Getenv("DASHSCOPE_API_KEY") == "" {
+		t.Skip("DASHSCOPE_API_KEY not set")
+	}
+	root := getProjectRoot()
+	outputDir := t.TempDir()
+	preserveWorkspaceArtifacts(t, outputDir)
+	result := Run(t, RunConfig{
+		Env: []string{
+			"DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1",
+			"PATH=" + filepath.Dir(binaryPath) + string(os.PathListSeparator) + os.Getenv("PATH"),
+		},
+		Timeout: 12 * time.Minute,
+	}, "run", filepath.Join(root, "skills", "skill-upper", "evals", "eval-dashscope.yaml"),
+		"--output-dir", outputDir)
+	if result.ExitCode != 0 {
+		t.Fatalf("Skill scaffolding failed: exit=%d\nstdout=%s\nstderr=%s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	data, err := os.ReadFile(filepath.Join(outputDir, "iteration-1", "report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rpt report.Input
+	if err := json.Unmarshal(data, &rpt); err != nil {
+		t.Fatal(err)
+	}
+	if len(rpt.CaseResults) != 1 {
+		t.Fatalf("case count = %d, want 1", len(rpt.CaseResults))
+	}
+	c := rpt.CaseResults[0]
+	if c.CaseID != "scaffold-with-user-simulator" || c.Status != "PASS" || c.Grading == nil {
+		t.Fatalf("scaffolding result = %+v", c)
+	}
+}

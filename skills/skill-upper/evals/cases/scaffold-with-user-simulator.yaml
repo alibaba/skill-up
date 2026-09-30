@@ -30,7 +30,8 @@ expect:
 
 judge:
   type: agent_judge
-  model: anthropic/claude-sonnet-4-6
+  context:
+    profile: standard
   criteria:
     - "eval.yaml 独立配置 user_simulator.provider=simulation、protocol=openai、model=test-model，且不包含明文密钥"
     - "mixed-conversation.yaml 有 case 级 user_simulator.scenario，input.turns 同时包含固定 content 和模拟 respond，且固定结尾仍保留"

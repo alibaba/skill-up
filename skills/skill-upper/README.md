@@ -33,3 +33,27 @@ Code, qodercli, Qwen Code, and other Agent Engines remain available for ordinary
 - You need to write `eval.yaml` / `case.yaml` or choose a judge type
 - You're running `skill-up run/validate/list-cases/report/import/init`
 - You're migrating from Anthropic `evals.json`
+
+## User simulator scaffolding regression
+
+`evals/eval-dashscope.yaml` runs only `scaffold-with-user-simulator` with local
+OpenCode and DashScope `qwen3.8-max` as both the tested agent and the configured
+judge. The case checks independent simulator configuration, mixed fixed and
+simulated turns, and an autonomous case with a bounded turn count. It passed
+with OpenCode 1.14.24; all five judge criteria and the file-existence check passed.
+The generated YAML was also independently validated with `skill-up validate`.
+The original Claude-based seven-case suite was not run in this verification.
+
+Supply `DASHSCOPE_API_KEY` through your secret manager and install OpenCode.
+From the repository root:
+
+```bash
+make build
+PATH="$PWD/bin:$PATH" ./bin/skill-up run ./skills/skill-upper/evals/eval-dashscope.yaml
+```
+
+The credential-gated `TestSkillUpper_UserSimulator_DashScope` E2E uses this
+configuration and runs in the manually dispatched full-mode model E2E suite.
+This case generates configuration and runs validation; its `test-model` is a
+placeholder. Actual simulator calls are covered separately by
+[the user simulator example](../../examples/user-simulator/README.md).

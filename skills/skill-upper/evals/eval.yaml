@@ -27,5 +27,9 @@ cases:
     timeout_seconds: 600
     max_turns: 25
 
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+
 report:
   formats: [json, html]

@@ -6,7 +6,7 @@ chooses the later messages and when to stop. In both cases the evaluator
 enforces `max_turns`, and the rule-based judge checks the final answer.
 
 `evals/eval.yaml` runs both cases with local OpenCode and
-DashScope's `qwen3.6-plus` for both the agent and simulated user. Supply
+DashScope's `qwen3.8-max` for both the agent and simulated user. Supply
 `DASHSCOPE_API_KEY` for the agent, and `SIMULATION_API_KEY` plus
 `SIMULATION_BASE_URL` for the simulator through your secret manager. The
 connections resolve independently even when the same authorized key is used.
@@ -24,7 +24,7 @@ export SIMULATION_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 Install OpenCode before using the `none` runtime.
 This example has been live-tested only with the local OpenCode/DashScope setup
 below; other engines, models, and runtimes are not covered by that verification.
-With OpenCode 1.14.24: the mixed conversation completed three turns, and the
+With OpenCode 1.14.24 and `qwen3.8-max`: the mixed conversation completed three turns, and the
 autonomous conversation completed two turns and stopped. All turns within
 each case shared the same session ID. These are live-run observations, not
 fixed expectations for the number of autonomous turns.
@@ -36,10 +36,16 @@ and per-turn `source` / `stop_reason` fields when diagnosing a failure.
 The credential-gated `TestUserSimulator_DashScope` E2E runs this configuration,
 checks final assertions, turn sources, autonomous stop reasons, and session
 continuity from the raw OpenCode event artifacts. The existing manually
-dispatched full-mode model E2E workflow includes this test; quick E2E skips it. To run only this test with
+dispatched full-mode model E2E workflow includes this test; quick E2E skips it.
+To run only this test with
 `DASHSCOPE_API_KEY` supplied:
 
 ```bash
 SKILL_UP_FULL_E2E=1 go test -tags e2e -race -timeout 15m -count=1 \
   -run '^TestUserSimulator_DashScope$' -v ./e2e
 ```
+
+The canonical `skill-upper` simulator scaffolding case was also run with this
+model and OpenCode: the file-existence check and all five judge criteria passed.
+That regression generates and validates YAML with a placeholder simulator model;
+it does not invoke that placeholder. See the [Skill regression entry](../../skills/skill-upper/README.md#user-simulator-scaffolding-regression).
