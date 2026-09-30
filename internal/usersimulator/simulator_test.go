@@ -21,6 +21,11 @@ func TestParseDecision(t *testing.T) {
 		wantError bool
 	}{
 		{"reply", `{"action":"reply","message":"staging"}`, MustReply, false},
+		{"fenced reply", "```json\n{\"action\":\"reply\",\"message\":\"staging\"}\n```", MustReply, false},
+		{"fenced stop", "```\n{\"action\":\"stop\",\"reason\":\"goal reached\"}\n```", MayStop, false},
+		{"fenced unknown field", "```json\n{\"action\":\"reply\",\"message\":\"yes\",\"extra\":true}\n```", MayStop, true},
+		{"fenced trailing text", "```json\n{\"action\":\"reply\",\"message\":\"yes\"}\n``` extra", MayStop, true},
+		{"fenced stop in fixed turn", "```json\n{\"action\":\"stop\",\"reason\":\"goal reached\"}\n```", MustReply, true},
 		{"stop", `{"action":"stop","reason":"goal reached"}`, MayStop, false},
 		{"stop in fixed turn", `{"action":"stop","reason":"goal reached"}`, MustReply, true},
 		{"empty reply", `{"action":"reply","message":" "}`, MayStop, true},

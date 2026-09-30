@@ -108,6 +108,14 @@ func (s *modelSimulator) Next(ctx context.Context, scenario, instruction string,
 
 // ParseDecision validates a model reply before it controls the conversation.
 func ParseDecision(raw string, policy ResponsePolicy) (Decision, error) {
+	raw = strings.TrimSpace(raw)
+	// Some Chat Completions models wrap an otherwise valid JSON object in a fence.
+	for _, prefix := range []string{"```json\n", "```\n"} {
+		if strings.HasPrefix(raw, prefix) && strings.HasSuffix(raw, "\n```") {
+			raw = strings.TrimSuffix(strings.TrimPrefix(raw, prefix), "\n```")
+			break
+		}
+	}
 	var decision Decision
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	decoder.DisallowUnknownFields()
