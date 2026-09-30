@@ -45,10 +45,11 @@ environment:
   type: none
 
 engine:
-  name: claude_code
+  name: opencode
   model:
-    provider: anthropic
-    name: claude-sonnet-4-6
+    provider: dashscope
+    name: qwen3.8-max
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 
 cases:
   files:
@@ -87,12 +88,12 @@ skills:
 
 # ========== 5. Agent Engine ==========
 engine:
-  name: claude_code               # claude_code / codex / opencode / qodercli / qwen_code
-  version: 2.1.0                  # Optional concrete CLI version; see version lifecycle below
+  name: opencode                  # claude_code / codex / opencode / qodercli / qwen_code
+  version: 1.14.24                # Optional concrete CLI version; see version lifecycle below
   model:
-    provider: anthropic
-    name: claude-sonnet-4-6
-    base_url: ""                  # Custom API endpoint (optional)
+    provider: dashscope
+    name: qwen3.8-max
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
   # kwargs: { ... }               # Agent-specific switches — see "Engine kwargs" below
 
 # ========== 6. Cases ==========
@@ -220,8 +221,8 @@ When `engine.name` is not one of the built-ins (`claude_code`, `codex`, `qodercl
 engine:
   name: my-agent
   model:
-    provider: anthropic
-    name: claude-sonnet-4-6
+    provider: dashscope
+    name: qwen3.8-max
   custom:
     transport: local             # local | http
     conversation_mode: batch     # batch (default) | stateful
@@ -807,11 +808,13 @@ judges:
     timeout_seconds: 30
   - id: semantic
     type: agent_judge
-    model: anthropic/claude-sonnet-4-6
+    model: dashscope/qwen3.8-max
     criteria:
       - "The result meets the user's intent"
     pass_threshold: 0.7
 ```
+
+The model example uses the OpenCode/DashScope engine configuration above. An Agent judge inherits the configured engine and endpoint; changing only its model does not select another engine. See the [live code-stats example](../../examples/code-stats/README.md) for a verified configuration.
 
 Each member has its own status, assertions, diagnostics, and artifacts. All members inspect the same agent execution; the evaluated agent does not run again. `expect` remains a gate: if it fails, all judges are skipped. Otherwise every member runs, even if an earlier member fails or errors. The case passes only when every member passes. List order controls execution order but does not pass data between judges.
 
@@ -828,7 +831,7 @@ Let an LLM grade against rubric criteria — useful when semantic understanding 
 ```yaml
 judge:
   type: agent_judge
-  model: anthropic/claude-sonnet-4-6        # Model used by the judge
+  model: dashscope/qwen3.8-max        # Model used by the judge
   skills:                                   # Optional: judge-only Skills
     - source: local_path
       path: evals/fixtures/judge-rubric
@@ -860,7 +863,7 @@ on explicit attachments or script outputs instead of the full conversation:
 ```yaml
 judge:
   type: agent_judge
-  model: anthropic/claude-sonnet-4-6
+  model: dashscope/qwen3.8-max
   context:
     profile: minimal                         # transcript/diff omitted, final_message truncated
     attachments:
@@ -1212,10 +1215,11 @@ schema_version: v1alpha1
 environment:
   type: none
 engine:
-  name: claude_code
+  name: opencode
   model:
-    provider: anthropic
-    name: claude-sonnet-4-6
+    provider: dashscope
+    name: qwen3.8-max
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 cases:
   files:
     - evals/cases/route-to-summary.yaml

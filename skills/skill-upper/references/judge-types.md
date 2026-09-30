@@ -41,7 +41,7 @@ Supported matchers: `output_contains`, `output_matches` (Go regexp with `all`, `
 ```yaml
 judge:
   type: agent_judge
-  model: anthropic/claude-sonnet-4-6
+  model: dashscope/qwen3.8-max
   skills:
     - source: local_path
       path: evals/fixtures/judge-rubric
@@ -54,6 +54,7 @@ judge:
   pass_threshold: 0.7
 ```
 
+- This model example requires the OpenCode/DashScope engine and endpoint configuration in [eval-yaml.md](eval-yaml.md). Agent judges inherit the eval engine and endpoint.
 - This consumes additional tokens and takes longer.
 - Make criteria specific and verifiable. Put deterministic checks in `expect` or `rule_based` where possible.
 - Put long or reusable domain rubrics in `judge.skills`. These Skills install only for the judge agent, never the agent under test. Installation requires native Skill support in the chosen Agent adapter; their contents are not appended to the prompt as a fallback.
@@ -79,7 +80,7 @@ judges:
     script_path: evals/fixtures/scripts/check-quality.sh
   - id: semantic
     type: agent_judge
-    model: anthropic/claude-sonnet-4-6
+    model: dashscope/qwen3.8-max
     criteria:
       - "The result satisfies the user intent"
 ```

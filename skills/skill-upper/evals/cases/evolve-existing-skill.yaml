@@ -26,7 +26,7 @@ expect:
 
 judge:
   type: agent_judge
-  model: anthropic/claude-sonnet-4-6
+  model: dashscope/qwen3.8-max
   criteria:
     - "SKILL.md 明确说明没有待办事项时应告知用户列表为空"
     - "新增 evals/cases/list-empty-todos.yaml，且 id 为 list-empty-todos、judge.type 为 rule_based"

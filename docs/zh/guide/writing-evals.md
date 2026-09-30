@@ -45,10 +45,11 @@ environment:
   type: none
 
 engine:
-  name: claude_code
+  name: opencode
   model:
-    provider: anthropic
-    name: claude-sonnet-4-6
+    provider: dashscope
+    name: qwen3.8-max
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 
 cases:
   files:
@@ -87,14 +88,14 @@ skills:
 
 # ========== 5. Agent Engine ==========
 engine:
-  name: claude_code               # claude_code / codex / opencode / qodercli / qwen_code
-  version: 2.1.0                  # 可选的 CLI 具体版本；语义见下文
+  name: opencode                  # claude_code / codex / opencode / qodercli / qwen_code
+  version: 1.14.24                # 可选的 CLI 具体版本；语义见下文
   # kwargs:
   #   edition: cn                 # qodercli 可选：global（默认）/ cn
   model:
-    provider: anthropic           # 模型供应商
-    name: claude-sonnet-4-6       # 模型名称
-    base_url: ""                  # 自定义 API 端点（可选）
+    provider: dashscope           # 模型供应商
+    name: qwen3.8-max             # 模型名称
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 
 # ========== 6. 用例配置 ==========
 cases:
@@ -186,8 +187,8 @@ configuration，并将 applied version 留空。
 engine:
   name: my-agent
   model:
-    provider: anthropic
-    name: claude-sonnet-4-6
+    provider: dashscope
+    name: qwen3.8-max
   custom:
     transport: local              # local | http
     response_format: session_result  # session_result（默认）| text
@@ -758,13 +759,15 @@ judges:
     timeout_seconds: 30
   - id: semantic
     type: agent_judge
-    model: anthropic/claude-sonnet-4-6
+    model: dashscope/qwen3.8-max
     criteria:
       - "结果满足用户意图"
     pass_threshold: 0.7
 ```
 
 被测 Agent 只执行一次。每个 judge 独立记录状态、断言、诊断和产物。`expect` 仍是前置门控：失败时所有 judge 都跳过；通过后即使前一个 judge 失败或出错，后面的 judge 仍会执行。全部 judge 通过时用例才通过。列表顺序决定执行顺序，不表示 judge 之间有数据依赖。
+
+上面的模型示例配合 OpenCode/DashScope engine 配置使用。Agent judge 继承 engine 和 endpoint；只改 model 不会切换 engine。已实际验证的配置见 [code-stats 示例](../../examples/code-stats/README.md)。
 
 eval 和 case 都可配置 `judges`。case 级列表整体替换 eval 级列表；case 级单数 `judge` 也可覆盖 eval 级列表。同一文档不能同时配置 `judge` 和 `judges`；成员 ID 必须唯一，仅使用小写字母、数字、`_` 和 `-`。
 
@@ -779,7 +782,7 @@ eval 和 case 都可配置 `judges`。case 级列表整体替换 eval 级列表�
 ```yaml
 judge:
   type: agent_judge
-  model: anthropic/claude-sonnet-4-6        # 评审使用的模型
+  model: dashscope/qwen3.8-max        # 评审使用的模型
   skills:                                   # 可选：仅供 judge 使用的 Skills
     - source: local_path
       path: evals/fixtures/judge-rubric
@@ -808,7 +811,7 @@ skill-up 不会把 Skill 文件内容拼接进 judge prompt。
 ```yaml
 judge:
   type: agent_judge
-  model: anthropic/claude-sonnet-4-6
+  model: dashscope/qwen3.8-max
   context:
     profile: minimal                         # 省略 transcript/diff，截断 final_message
     attachments:
@@ -1135,10 +1138,11 @@ schema_version: v1alpha1
 environment:
   type: none
 engine:
-  name: claude_code
+  name: opencode
   model:
-    provider: anthropic
-    name: claude-sonnet-4-6
+    provider: dashscope
+    name: qwen3.8-max
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 cases:
   files:
     - evals/cases/route-to-summary.yaml

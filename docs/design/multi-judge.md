@@ -164,3 +164,76 @@ status precedence and preservation of member weight.
 
 Docker/OpenSandbox multi-judge execution, numerical scoring, weighted policies,
 validator bundles, and durable replay are not validated or claimed by this PR.
+
+### Live Qwen verification
+
+On 2026-09-30, the existing [code-stats example](../../examples/code-stats/README.md)
+was run through OpenCode 1.14.24 with `dashscope/qwen3.8-max`, using DashScope's
+OpenAI-compatible endpoint. These were real model calls, in addition to the
+mocked-agent regression tests above. The model identity is the requested and
+applied client configuration; the provider's serving implementation was not
+independently audited.
+
+The selected `analyze-directory` case reuses the existing `check-stats.sh` without
+modifying it and adds an independent semantic judge. The fixture contains three
+specified files, totaling 20 lines and 350 bytes. Tool configuration and installed
+Skill files are excluded from that scope.
+
+| Run | Expect gates | Format script | Semantic Agent | Aggregate |
+| --- | --- | --- | --- | --- |
+| With Skill | PASS | PASS | PASS | PASS |
+| Without Skill baseline | FAIL | SKIP | SKIP | FAIL |
+| Controlled script failure, with Skill | PASS | FAIL | PASS | FAIL |
+
+The positive run reported the expected file, line and byte counts. The baseline
+failed the exact `Total Files: 3` and `Total Lines: 20` strings; this is a formatting
+gate result, not evidence that the model cannot calculate those values. Gate
+failure correctly skipped both judges.
+
+For the controlled negative run, a temporary copy of the example disabled the
+baseline and changed only the script's final success path to write a
+`.judge-isolation-probe` file and exit 1. An extra semantic criterion required the
+probe to be absent. The Agent judge's recorded directory checks found no probe in
+its workspace; it continued and passed, while the script retained FAIL and
+`all_required` returned FAIL. This verifies workspace mutation isolation and
+failure attribution with a real Agent judge. It does not claim host or network
+isolation.
+
+Both runs preserved `evaluation.json`, compatibility `grading.json`, agent and
+judge transcripts, and the semantic context manifest. Included context paths were
+resolved against the archived outputs and read back successfully. JSON, HTML and
+JUnit reports were generated for the positive run.
+
+To repeat the positive run, inject `DASHSCOPE_API_KEY` securely, then run from the
+repository root:
+
+```bash
+make build
+./bin/skill-up validate examples/code-stats/evals/eval.yaml
+./bin/skill-up run examples/code-stats/evals/eval.yaml \
+  --include-case-name analyze-directory --iteration 1 --parallelism 1 \
+  --output-dir /tmp/code-stats-qwen-positive \
+  --event-log /tmp/code-stats-qwen-positive-events.jsonl \
+  --format json --format html --format junit
+```
+
+To reproduce the negative test, copy `examples/code-stats` to a scratch directory,
+set `benchmark.enabled: false`, replace the final `exit 0` in the copied
+`check-stats.sh` with the following, and add the probe-absence criterion to the
+copied case's semantic judge:
+
+```bash
+printf 'script-only mutation' > .judge-isolation-probe
+echo 'CONTROLLED_FAILURE: functional judge deliberately exits 1'
+exit 1
+```
+
+Run the copied eval with the same case selector and a separate output directory.
+Expect process exit 1, script FAIL, semantic PASS and aggregate FAIL. Inspect the
+semantic transcript for the actual directory check rather than relying only on
+its verdict. Keep this injection out of the normal example.
+
+Only this selected case and the controlled negative variant were run against the
+real model. The other three code-stats cases and the six-case skill-upper suite
+were configuration-validated but were not run against Qwen in this verification.
+The Harbor comparison remains a source comparison, not a live Harbor experiment.
