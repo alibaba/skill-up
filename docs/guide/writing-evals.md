@@ -210,6 +210,8 @@ The matched file's path **relative to the workspace root is preserved**, so `rep
 - **Always collected**, independent of the judge type and of whether the workspace is a git repo. Collection is read-only — it never modifies the workspace.
 - The workspace `.git/` directory is **excluded** (an `agent_judge` run commits a baseline there), so a broad pattern like `**` won't sweep VCS internals into the artifacts.
 
+When the case deadline kills a custom engine before it writes its session result, skill-up synthesizes a minimal `session-result.json` (`exit_code` 124) and archives it directly at `<output-dir>/<case-id>/<configuration>/outputs/agent/run/session-result.json`. It is never written into the workspace, so `collect_artifacts` globs cannot — and should not — match it.
+
 > **Not to be confused with `report.artifacts`** (which selects artifact *types* like `transcript`/`logs`), or with the git workspace diff used by `agent_judge` (a diff *string* fed to the judge, not downloaded files). `collect_artifacts` downloads actual file contents and is orthogonal to both.
 
 ### Custom Engine

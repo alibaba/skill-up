@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"time"
+
+	"github.com/alibaba/skill-up/internal/customengine"
 )
 
 // localTransport runs a custom engine as a command inside the current runtime
@@ -88,6 +90,16 @@ func (t *localTransport) run(ctx context.Context, rt Runtime, opts ExecOptions, 
 	}
 	raw, outputFileProduced := a.readRawResult(readCtx, rt, custom, result, outputFile)
 
+	// A deadline-killed engine never ran its cleanup path, so the output file
+	// may be missing entirely; synthesize a minimal result so the case stays
+	// inspectable. A stdout fallback that carries a usable result is kept
+	// as-is — only runs with nothing gradable get the synthesized payload.
+	// The run still fails via execErr, and the synthesized payload's
+	// exit_code 124 keeps it from being graded a success.
+	if execErr != nil && !outputFileProduced {
+		raw = t.maybeSynthesizeTimeoutOutput(readCtx, custom, outputFile, execErr, prep, opts.ArtifactDir, raw)
+	}
+
 	// The framework-written input file is always recorded; the output file only
 	// when it was produced by this run or cleared before it (the "produced or
 	// cleared" rule the diff collector relies on).
@@ -108,4 +120,21 @@ func (t *localTransport) run(ctx context.Context, rt Runtime, opts ExecOptions, 
 		execErr:        execErr,
 		frameworkFiles: frameworkFiles,
 	}, nil
+}
+
+// maybeSynthesizeTimeoutOutput substitutes a minimal session-result when a
+// deadline kill left neither an output file nor a usable stdout fallback —
+// per-case artifact collection would otherwise find nothing for the run (the
+// agent's early-turn transcript dies with the process). The synthesized file
+// is archived directly into the per-case artifact directory; the runtime
+// workspace is left untouched, so nothing masquerades as engine output there.
+func (t *localTransport) maybeSynthesizeTimeoutOutput(ctx context.Context, custom *customengine.Config, outputFile string, execErr error, prep *customRunPrep, artifactDir, raw string) string {
+	if outputFile == "" ||
+		custom.Local.OutputFile == "" ||
+		customResponseFormat(custom) != customResponseSessionJSON ||
+		!errors.Is(execErr, context.DeadlineExceeded) ||
+		usableSessionResult(raw) {
+		return raw
+	}
+	return t.a.synthesizeTimeoutOutput(ctx, artifactDir, prep)
 }
