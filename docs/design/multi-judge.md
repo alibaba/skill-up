@@ -21,6 +21,10 @@ Agent criteria must not silently increase that judge's weight in the case verdic
 
 ## Configuration and compatibility
 
+The snippet uses the OpenCode/DashScope engine and endpoint configuration from
+the [code-stats example](../../examples/code-stats/README.md). An Agent judge
+inherits that engine and endpoint and requires an explicit model.
+
 ```yaml
 judges:
   - id: functional
@@ -28,6 +32,7 @@ judges:
     script_path: evals/scripts/check.sh
   - id: semantic
     type: agent_judge
+    model: dashscope/qwen3.8-max
     criteria:
       - The change addresses the request without unrelated modifications.
     pass_threshold: 1.0
