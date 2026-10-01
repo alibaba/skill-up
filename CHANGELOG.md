@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `skill-up validate --skill <dir>` lints the content integrity of a single
+  skill as authored on disk: SKILL.md must open with a closed YAML frontmatter
+  block declaring non-empty `name` and `description` fields, every
+  `references/`, `assets/`, `scripts/` path cited in the markdown body must
+  exist on disk, and files under those directories that the body never cites
+  are reported as uncited attachments (dotfiles stay silent; a directory
+  cited as a link destination covers everything beneath it). The body is
+  parsed as CommonMark so prose citations, local link/image destinations, and
+  path-citing inline code spans are checked — with or without a leading `./` —
+  while code blocks, remote URLs, and raw HTML are ignored. Findings print as
+  warnings without changing the exit code; `--strict` promotes them to
+  failures. The check is source-level and independent from eval config
+  validation — it does not see what a run installs after
+  `skills.include`/`skills.exclude` filtering.
 - Add an `opencode` Agent Engine for local and isolated runtimes, including
   CLI installation, JSON event transcripts, multi-turn session resume, and
   runtime-scoped MCP and provider configuration. OpenCode treats slashed model

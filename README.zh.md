@@ -211,6 +211,7 @@ skill-up 会保留这个目录，但 Agent 和用例准备步骤可能修改其�
 | ------------------------------------ | ------------------------------------------ |
 | `skill-up run [path]`                | 运行评测用例并生成报告                     |
 | `skill-up validate [path]`           | 校验 `eval.yaml` 和用例文件                |
+| `skill-up validate --skill <dir>`    | 检查单个 skill 的内容完整性                |
 | `skill-up list-cases [path]`         | 列出配置引用的所有用例                     |
 | `skill-up report <result.json>`      | 从已有结果生成报告                         |
 | `skill-up import <evals.json>`       | 将 Anthropic `evals.json` 导入为 YAML 用例 |

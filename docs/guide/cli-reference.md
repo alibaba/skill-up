@@ -166,6 +166,41 @@ The validator checks that:
 - All required fields are present
 - Field values are within the allowed range
 
+### Skill content check (`--skill`)
+
+```bash
+skill-up validate --skill <path to skill directory>
+```
+
+Lints the content integrity of a single skill as authored on disk. It is a
+source-level check: it does not see what a run actually installs after
+`skills.include`/`skills.exclude` filtering, and it does not run automatically
+before evaluations. Findings print one warning per item:
+
+- SKILL.md opens with a closed YAML frontmatter block (`---` fences)
+- the frontmatter declares non-empty `name` and `description` fields
+- every `references/`, `assets/`, `scripts/` path cited in the markdown body
+  exists on disk. The body is parsed as CommonMark: prose citations, local
+  link/image destinations, and inline code spans that cite a path are checked,
+  while code blocks, remote URLs, and raw HTML are ignored as documentation
+  examples or external resources
+- files under those directories that the body never cites are reported as
+  uncited attachments. Dotfiles (`.DS_Store`, `.gitkeep`, dot directories) are
+  local metadata and stay silent; a directory cited as a link destination
+  (e.g. `[docs](references/)`) covers everything beneath it. Citations may be
+  written with or without a leading `./`
+
+A directory passed via `--skill` that has no SKILL.md is itself a finding.
+Pass `--strict` to promote warnings to failures (exit 1); without it the
+command exits 0 and only prints warnings. `--skill` cannot be combined with
+a positional eval.yaml path.
+
+On success:
+
+```text
+✓ skill content check passed (./skills/my-skill)
+```
+
 ---
 
 ## skill-up list-cases

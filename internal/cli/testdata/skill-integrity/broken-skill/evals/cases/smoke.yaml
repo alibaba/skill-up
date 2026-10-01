@@ -1,0 +1,6 @@
+id: smoke
+title: Smoke case
+description: Minimal case for validate tests
+
+input:
+  prompt: Reply with OK.

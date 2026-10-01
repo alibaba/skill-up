@@ -229,9 +229,11 @@ func FindSkillDir(startDir string) (string, bool) {
 }
 
 // skillFrontmatter holds the fields skill-up reads from a SKILL.md YAML
-// frontmatter block. Only the name is needed today.
+// frontmatter block: the loader reads the name, and CheckSkillIntegrity
+// additionally requires name and description to be non-empty.
 type skillFrontmatter struct {
-	Name string `yaml:"name"`
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
 }
 
 // parseSkillName reads SKILL.md from skillDir and extracts the `name` field of
@@ -267,21 +269,8 @@ func parseSkillName(skillDir string) (string, bool) {
 // frontmatter fence or the closing fence is missing, so the markdown body is
 // never fed to the YAML parser.
 func extractFrontmatter(data []byte) ([]byte, bool) {
-	lines := bytes.Split(data, []byte("\n"))
-
-	// Require the very first line to be a `---` fence (trailing whitespace/CR
-	// tolerated), then return everything up to the next fence.
-	if len(lines) == 0 || !isFence(lines[0]) {
-		return nil, false
-	}
-
-	for i := 1; i < len(lines); i++ {
-		if isFence(lines[i]) {
-			return bytes.Join(lines[1:i], []byte("\n")), true
-		}
-	}
-
-	return nil, false
+	frontmatter, _, ok := splitFrontmatter(bytes.Split(data, []byte("\n")))
+	return frontmatter, ok
 }
 
 // isFence reports whether a line is a `---` frontmatter fence, tolerating a
