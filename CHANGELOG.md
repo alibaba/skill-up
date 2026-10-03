@@ -64,6 +64,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixture uploads.
 
 ### Fixed
+- `skill-up validate` (and the pre-run validation in `skill-up run`) now
+  rejects `rule_based` assertions that set none of the supported matcher
+  fields. Unknown matcher keys are silently dropped by non-strict YAML
+  parsing, so a typo such as `output_not_contains` previously passed
+  validation and then either failed late with `unknown_rule` in success
+  position or silently no-oped in failure position, letting cases pass
+  with zero assertions evaluated.
 - `SessionInput` no longer carries the `custom.kwargs` map. The local transport
   writes that payload into the runtime workspace, so the map was readable by
   the agent under test, bypassing the config-time rule that already rejects
