@@ -234,6 +234,9 @@ func (e *defaultEvaluator) executeConfiguredTurn(ctx context.Context, rt runtime
 }
 
 func resolveTurnMessage(ctx context.Context, state *multiTurnState, turn config.Turn, turnNum int, origin string, simulator usersimulator.Simulator, scenario *config.UserSimulatorScenario) (content string, source string, err error) {
+	if scenario != nil && turnNum > 1 && state.sessionID == "" {
+		return "", "", fmt.Errorf("turn %d: engine returned no session_id; simulator-backed follow-up cannot resume", turnNum)
+	}
 	if origin == "simulated" {
 		// A generated reply is already user text; placeholders in it are literal.
 		return turn.Content, origin, nil
@@ -244,9 +247,6 @@ func resolveTurnMessage(ctx context.Context, state *multiTurnState, turn config.
 	}
 	if turn.Respond == "" {
 		return content, origin, nil
-	}
-	if turnNum > 1 && state.sessionID == "" {
-		return "", "", fmt.Errorf("turn %d: engine returned no session_id; generated follow-up cannot resume", turnNum)
 	}
 	instruction, err := substituteTurnContent(state, config.Turn{Content: turn.Respond}, turnNum)
 	if err != nil {

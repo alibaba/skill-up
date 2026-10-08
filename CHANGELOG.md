@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   model E2Es check both dialogue modes, session continuity, and actual
   `skill-upper` scaffolding with an explicitly configured judge. Simulator decisions accept
   complete JSON code fences while retaining strict field and policy validation.
+  All simulator-backed follow-up turns require Agent session continuity, including
+  fixed messages after generated turns.
 - DSH's opt-in observer now links the next same-session user turn after a
   single completed Skill use as an unclassified follow-up candidate.
   `collect_skill_feedback` gathers recent observations and follow-ups for

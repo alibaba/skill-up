@@ -285,3 +285,47 @@ func TestInitialSimulatedMessageDoesNotRequireSessionID(t *testing.T) {
 		t.Fatalf("results=%+v error=%v", results, err)
 	}
 }
+
+func TestSimulatorCaseFixedFollowUpContinuity(t *testing.T) {
+	tests := []struct {
+		name                               string
+		turns                              []config.Turn
+		scenario                           *config.UserSimulatorScenario
+		sessionID                          string
+		wantError                          bool
+		wantAgentCalls, wantSimulatorCalls int
+	}{
+		{"generated then fixed without session", []config.Turn{{Role: "user", Respond: "Start"}, {Role: "user", Content: "Change to three replicas"}}, &config.UserSimulatorScenario{Scenario: "staging"}, "", true, 1, 1},
+		{"fixed then fixed before generated without session", []config.Turn{{Role: "user", Content: "Create config"}, {Role: "user", Content: "Change to three replicas"}, {Role: "user", Respond: "Answer"}}, &config.UserSimulatorScenario{Scenario: "staging"}, "", true, 1, 0},
+		{"generated then fixed with session", []config.Turn{{Role: "user", Respond: "Start"}, {Role: "user", Content: "Change to three replicas"}}, &config.UserSimulatorScenario{Scenario: "staging"}, "session-1", false, 2, 1},
+		{"legacy fixed without session", []config.Turn{{Role: "user", Content: "Create config"}, {Role: "user", Content: "Change to three replicas"}}, nil, "", false, 2, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			ag := &mockResumerAgent{mockAgent: mockAgent{name: "non-strict"}, runTurnFunc: func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, msg transcript.Message, sessionID string) (*agent.SessionResult, error) {
+				if calls > 0 && sessionID != tt.sessionID {
+					t.Errorf("resume ID=%q, want %q", sessionID, tt.sessionID)
+				}
+				calls++
+				return &agent.SessionResult{
+					SessionID: tt.sessionID, FinalMessage: "Which environment?", InputTokens: 7, OutputTokens: 3, DurationMs: 10,
+					Transcript: transcript.Transcript{{Role: transcript.RoleUser, Content: msg.Content}, {Role: transcript.RoleAssistant, Content: "Which environment?"}},
+				}, nil
+			}}
+			simulator := &scriptedSimulator{decisions: []usersimulator.Decision{{Action: "reply", Message: "Create staging config"}}}
+			e := newTestEvaluator(EvalOptions{Agent: ag, Simulator: simulator, EvalCfg: &config.EvalConfig{}})
+			caseCfg := &config.CaseConfig{ID: tt.name, UserSimulator: tt.scenario, Input: config.Input{Turns: tt.turns}}
+			results, aggregate, err := e.executeMultiTurn(context.Background(), &mockRuntime{workspace: t.TempDir()}, caseCfg, ag, agent.ExecOptions{})
+			if (err != nil) != tt.wantError {
+				t.Fatalf("error=%v, wantError=%t", err, tt.wantError)
+			}
+			if calls != tt.wantAgentCalls || len(simulator.histories) != tt.wantSimulatorCalls {
+				t.Fatalf("agent calls=%d simulator calls=%d", calls, len(simulator.histories))
+			}
+			if tt.wantError && (len(results) != 1 || aggregate == nil || aggregate.InputTokens != 7 || aggregate.OutputTokens != 3 || aggregate.DurationMs != 10 || len(aggregate.Transcript) != 2) {
+				t.Fatalf("completed evidence lost: results=%+v aggregate=%+v", results, aggregate)
+			}
+		})
+	}
+}
