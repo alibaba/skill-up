@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -9,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/alibaba/skill-up/internal/logging"
 )
 
 // noneJudgeSnapshot holds a frozen copy of a none runtime workspace.
@@ -24,8 +27,8 @@ func (r *NoneRuntime) CaptureJudgeSnapshot(ctx context.Context) (JudgeSnapshot, 
 		return nil, err
 	}
 	if err := copyJudgeTree(ctx, r.workspace, dir); err != nil {
-		_ = os.RemoveAll(dir)
-		return nil, fmt.Errorf("capture judge workspace: %w", err)
+		cleanupErr := removeJudgeTree(dir)
+		return nil, fmt.Errorf("capture judge workspace: %w", errors.Join(err, cleanupErr))
 	}
 	cfg := r.cfg
 	cfg.Env = maps.Clone(r.cfg.Env)
@@ -38,7 +41,11 @@ func (s *noneJudgeSnapshot) Fork(ctx context.Context) (Runtime, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	cleanup := func() { _ = os.RemoveAll(dir) }
+	cleanup := func() {
+		if err := removeJudgeTree(dir); err != nil {
+			logging.WarnContextf(ctx, "remove judge workspace: %v", err)
+		}
+	}
 	if err := copyJudgeTree(ctx, s.path, dir); err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("fork judge workspace: %w", err)
@@ -59,7 +66,33 @@ func (s *noneJudgeSnapshot) Fork(ctx context.Context) (Runtime, func(), error) {
 }
 
 // Close removes the frozen copy.
-func (s *noneJudgeSnapshot) Close() error { return os.RemoveAll(s.path) }
+func (s *noneJudgeSnapshot) Close() error { return removeJudgeTree(s.path) }
+
+// removeJudgeTree restores owner access before removing copied directories.
+// WalkDir does not follow symlinks and visits each directory before reading it.
+func removeJudgeTree(path string) error {
+	err := filepath.WalkDir(path, func(dir string, entry os.DirEntry, walkErr error) error {
+		if errors.Is(walkErr, os.ErrNotExist) {
+			return nil
+		}
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			//nolint:gosec // owner execute permission is required to traverse directories during removal
+			return os.Chmod(dir, info.Mode().Perm()|0o700)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return os.RemoveAll(path)
+}
 
 func copyJudgeTree(ctx context.Context, source, target string) error {
 	root, err := os.OpenRoot(target)

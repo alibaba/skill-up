@@ -11,6 +11,7 @@ import (
 	"github.com/alibaba/skill-up/internal/agent"
 	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/judge"
+	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/runtime"
 )
 
@@ -50,7 +51,7 @@ func (e *defaultEvaluator) runMultipleJudges(
 		result.Grading, result.Status = judge.DefaultOutcomeAggregator().Aggregate(result.JudgeResults, result.Turns, turnsTotal)
 		return *result
 	}
-	defer snapshot.Close() //nolint:errcheck
+	defer closeJudgeSnapshot(ctx, snapshot)
 	result.JudgeResults = make([]JudgeOutcome, 0, len(plan.Judges))
 	var causes []error
 	for i, member := range plan.Judges {
@@ -144,4 +145,10 @@ func summarizeJudgeErrors(outcomes []JudgeOutcome) string {
 		}
 	}
 	return "judges failed to complete: " + strings.Join(details, "; ")
+}
+
+func closeJudgeSnapshot(ctx context.Context, snapshot runtime.JudgeSnapshot) {
+	if err := snapshot.Close(); err != nil {
+		logging.WarnContextf(ctx, "close judge snapshot: %v", err)
+	}
 }

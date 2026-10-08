@@ -169,3 +169,51 @@ func TestJudgeSnapshotPreservesModificationTimesAndFreshness(t *testing.T) {
 		cleanup()
 	}
 }
+
+func TestJudgeSnapshotCleansPopulatedReadOnlyDirectories(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	dir := filepath.Join(workspace, "readonly")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "input"), []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	//nolint:gosec // populated read-only directory is the regression fixture
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = removeJudgeTree(workspace) })
+	rt := &NoneRuntime{workspace: workspace, cfg: Config{Type: "none"}}
+	snapshot, err := rt.CaptureJudgeSnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = snapshot.Close() })
+	fork, cleanup, err := snapshot.Fork(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	forkPath := fork.Workspace()
+	cleanup()
+	if _, err := os.Stat(forkPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("fork remains after cleanup: %v", err)
+	}
+	concrete, ok := snapshot.(*noneJudgeSnapshot)
+	if !ok {
+		t.Fatalf("unexpected snapshot type %T", snapshot)
+	}
+	snapshotPath := concrete.path
+	if err := snapshot.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(snapshotPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("snapshot remains after close: %v", err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil || info.Mode().Perm() != 0o555 {
+		t.Fatalf("original directory permissions changed: info=%v error=%v", info, err)
+	}
+	assertOriginalJudgeInput(t, filepath.Join(dir, "input"))
+}

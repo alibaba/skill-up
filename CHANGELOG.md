@@ -76,6 +76,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixture uploads.
 
 ### Fixed
+- Remove judge snapshot and fork copies containing populated read-only directories
+  after evaluation, without changing permissions in the original workspace.
 - `skill-up validate` (and the pre-run validation in `skill-up run`) now
   rejects `rule_based` assertions that set none of the supported matcher
   fields. Unknown matcher keys are silently dropped by non-strict YAML
