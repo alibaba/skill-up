@@ -85,6 +85,81 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			errMsg:  "judge.success[0].output_matches.not[0] is invalid regex",
 		},
 		{
+			name: "empty success rule is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0]: assertion has no recognizable matcher field",
+		},
+		{
+			name: "empty failure rule is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Failure: []Rule{{}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.failure[0]: assertion has no recognizable matcher field",
+		},
+		{
+			name: "rules with supported matchers are accepted",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{OutputContains: &OutputContainsRule{All: []string{"ok"}}},
+						{OutputMatches: &OutputMatchesRule{All: []string{"ok"}}},
+						{ExitCode: intPtr(0)},
+						{ToolCalled: &ToolCalledRule{Name: "read"}},
+						{FilesExist: []string{"out.txt"}},
+						{FilesNotExist: []string{"secret.txt"}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name: "valid config with opensandbox runtime image",
 			cfg: &EvalConfig{
 				SchemaVersion: "v1alpha1",
@@ -904,6 +979,54 @@ func TestValidator_ValidateCaseConfig(t *testing.T) {
 			},
 			wantErr: true,
 			errMsg:  "judge.failure[0].output_matches.any[0] is invalid regex",
+		},
+		{
+			name: "empty success rule is rejected",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0]: assertion has no recognizable matcher field",
+		},
+		{
+			name: "empty failure rule is rejected",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Failure: []Rule{{}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.failure[0]: assertion has no recognizable matcher field",
+		},
+		{
+			name: "turn-level matcher rules with valid turn references are accepted",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+						{Role: "user", Content: "Again"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{TurnResponseContains: &TurnResponseContainsRule{Turn: 1, ContainsAll: []string{"hi"}}},
+						{TurnResponseNotContains: &TurnResponseNotContainsRule{Turn: 2, NotContains: []string{"bye"}}},
+						{ToolCalledInTurn: &ToolCalledInTurnRule{Turn: 1, Name: "read"}},
+						{ToolNotCalledInTurn: &ToolNotCalledInTurnRule{Turn: 2, Name: "bash"}},
+					},
+				},
+			},
+			wantErr: false,
 		},
 		{
 			name: "missing prompt and turns",

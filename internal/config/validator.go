@@ -254,8 +254,47 @@ func validateJudgeTypeAndLocalFields(judge JudgeConfig) []string {
 	}
 	errs = append(errs, validateOutputMatchesRules("judge.success", judge.Success)...)
 	errs = append(errs, validateOutputMatchesRules("judge.failure", judge.Failure)...)
+	errs = append(errs, validateRecognizableRules("judge.success", judge.Success)...)
+	errs = append(errs, validateRecognizableRules("judge.failure", judge.Failure)...)
 
 	return errs
+}
+
+// validateRecognizableRules rejects assertions that set none of the supported
+// matcher fields. Case files are parsed with non-strict YAML unmarshalling, so
+// an unknown matcher key (for example the frequently assumed but unsupported
+// output_not_contains) is silently dropped and the rule decodes to all zero
+// values. Such an empty rule passes validation and then misbehaves at runtime:
+// in success position it fails late with "unknown_rule", and in failure
+// position it no-ops, letting the case pass with zero assertions evaluated.
+func validateRecognizableRules(field string, rules []Rule) []string {
+	var errs []string
+	for i, rule := range rules {
+		if ruleHasRecognizableField(rule) {
+			continue
+		}
+		errs = append(errs, fmt.Sprintf(
+			"%s[%d]: assertion has no recognizable matcher field; supported matchers: output_contains, output_matches, exit_code, tool_called, files_exist, files_not_exist, turn_response_contains, turn_response_not_contains, tool_called_in_turn, tool_not_called_in_turn. Unknown matcher keys are silently dropped during YAML parsing, so this is likely a typo (there is no output_not_contains matcher; use output_contains.not for negation)",
+			field, i))
+	}
+	return errs
+}
+
+// ruleHasRecognizableField reports whether the rule sets at least one matcher
+// field that the runtime dispatcher in internal/judge can evaluate. The empty
+// collections (for example files_exist: []) mirror the runtime dispatch, which
+// treats them the same as absent fields.
+func ruleHasRecognizableField(rule Rule) bool {
+	return rule.OutputContains != nil ||
+		rule.OutputMatches != nil ||
+		rule.ExitCode != nil ||
+		rule.ToolCalled != nil ||
+		len(rule.FilesExist) > 0 ||
+		len(rule.FilesNotExist) > 0 ||
+		rule.TurnResponseContains != nil ||
+		rule.TurnResponseNotContains != nil ||
+		rule.ToolCalledInTurn != nil ||
+		rule.ToolNotCalledInTurn != nil
 }
 
 func validateOutputMatchesRules(field string, rules []Rule) []string {
