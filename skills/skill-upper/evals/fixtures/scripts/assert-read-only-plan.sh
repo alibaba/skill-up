@@ -19,17 +19,26 @@ for message in messages:
     if not command:
         continue
     for _ in range(4):
+        if not re.match(r"^\s*(?:[^\s]*/)?(?:sh|bash|zsh|dash)\s+-(?:c|lc)\s", command):
+            break
         wrapper = shlex.split(command)
         if len(wrapper) == 3 and Path(wrapper[0]).name in {"sh", "bash", "zsh", "dash"} and wrapper[1] in {"-c", "-lc"}:
             command = wrapper[2]
         else:
             break
+    # Preserve quoted/escaped punctuation as argument data through shlex.
+    punctuation = {char: chr(0xE100 + index) for index, char in enumerate(";&|<>()")}
+    protected = []
     quote = None
     escaped = False
-    for character in command:
+    for index, character in enumerate(command):
         if escaped:
+            protected.append(punctuation.get(character, character))
             escaped = False
             continue
+        if character == "$" and command[index + 1:index + 2] == "(" and quote != "'":
+            raise AssertionError("Planning used command substitution")
+        protected.append(punctuation.get(character, character) if quote else character)
         if character == "\\" and quote != "'":
             escaped = True
         elif character == "'" and quote != '"':
@@ -38,6 +47,7 @@ for message in messages:
             quote = None if quote == '"' else '"'
         elif character == "`" and quote != "'":
             raise AssertionError("Planning used command substitution")
+    command = "".join(protected)
     # Discarding stderr or merging it into stdout does not write fixture files.
     command = re.sub(r"(?<!\S)2\s*>\s*(?:/dev/null|&1)(?=\s|[;|&]|$)", "", command)
     lexer = shlex.shlex(command.replace("\n", ";"), posix=True, punctuation_chars=";&|<>()")
@@ -49,6 +59,8 @@ for message in messages:
         if token in {";", "&&", "||", "|", "&"}:
             segments.append([])
         else:
+            for character, marker in punctuation.items():
+                token = token.replace(marker, character)
             segments[-1].append(token)
     for segment in segments:
         if not segment:
@@ -69,7 +81,7 @@ for message in messages:
             forbidden = {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"}
             assert not forbidden.intersection(segment[1:]), "Planning used a mutating find action"
         if executable == "rg":
-            assert not any(arg == "--pre" or arg.startswith("--pre=") for arg in segment[1:]), "Planning ran a search preprocessor"
+            assert not any(arg in {"--pre", "--hostname-bin"} or arg.startswith(("--pre=", "--hostname-bin=")) for arg in segment[1:]), "Planning used a search option that executes a subprocess"
         if executable == "file":
             assert "-C" not in segment[1:] and "--compile" not in segment[1:], "Planning compiled a magic file"
 # Host/runtime metadata is installed before the agent runs, outside the fixture.

@@ -7,13 +7,20 @@ import subprocess
 import os
 import json
 import shlex
-import yaml
 path = os.environ.get("EVAL_TRANSCRIPT_PATH")
 assert path, "Missing authoring transcript"
 for message in json.loads(Path(path).read_text()):
     call = message.get("tool_call") or {}
     arguments = call.get("arguments") or {}
     command = arguments.get("command") or arguments.get("cmd") or ""
+    for _ in range(4):
+        if not re.match(r"^\s*(?:[^\s]*/)?(?:sh|bash|zsh|dash)\s+-(?:c|lc)\s", command):
+            break
+        wrapper = shlex.split(command)
+        if len(wrapper) == 3 and Path(wrapper[0]).name in {"sh", "bash", "zsh", "dash"} and wrapper[1] in {"-c", "-lc"}:
+            command = wrapper[2]
+        else:
+            break
     # Ignore heredoc data written to case files, not executed shell commands.
     executed = []
     delimiter = None
@@ -53,6 +60,7 @@ for file in (Path("evals/cases/list-empty-todos.yaml"), Path("evals/eval.yaml"))
 case_path = Path("evals/cases/list-empty-todos.yaml")
 case_text = case_path.read_text()
 case_lines = case_text.splitlines()
+import yaml
 case_nodes = yaml.compose(case_text)
 for field_path in (("id",), ("title",), ("input", "prompt"), ("expect",), ("judge", "type")):
     node = case_nodes
