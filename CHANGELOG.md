@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- When a custom engine is killed by the case deadline before writing its
+  session result (and stdout carries no usable result), skill-up synthesizes
+  a minimal `session-result.json` with `exit_code` 124 and a stderr marker,
+  and archives it directly into the per-case output directory at
+  `outputs/agent/run/session-result.json`. The runtime workspace is never
+  given a synthesized copy, and the file is not exposed to judges. A stdout
+  fallback that parses as a session result is preserved instead of being
+  replaced (an interrupted run still fails, with its exit code coerced
+  non-zero).
 - Add an `opencode` Agent Engine for local and isolated runtimes, including
   CLI installation, JSON event transcripts, multi-turn session resume, and
   runtime-scoped MCP and provider configuration. OpenCode treats slashed model
@@ -70,6 +79,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Make `skill-upper` credential checks report configuration presence without
   printing secret values, and account for engine-specific authentication and
   saved credentials before treating a missing environment variable as a blocker.
+- `skill-up validate` (and the pre-run validation in `skill-up run`) now
+  rejects `rule_based` assertions that set none of the supported matcher
+  fields. Unknown matcher keys are silently dropped by non-strict YAML
+  parsing, so a typo such as `output_not_contains` previously passed
+  validation and then either failed late with `unknown_rule` in success
+  position or silently no-oped in failure position, letting cases pass
+  with zero assertions evaluated.
 - `SessionInput` no longer carries the `custom.kwargs` map. The local transport
   writes that payload into the runtime workspace, so the map was readable by
   the agent under test, bypassing the config-time rule that already rejects
