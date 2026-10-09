@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent
 
 
 class TranscriptChecks(unittest.TestCase):
-    def check_command(self, script, command, accepted, reason=None, probe_text=None, tool_result=None, final_message='Evaluation case plan', extra_messages=None):
+    def check_command(self, script, command, accepted, reason=None, probe_text=None, tool_result=None, final_message='Evaluation case plan', extra_messages=None, secret_value='synthetic-authoring-secret-987'):
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)
             shutil.copyfile(ROOT / 'fixtures/skills/sample-no-evals/SKILL.md', workspace / 'SKILL.md')
@@ -31,7 +31,7 @@ class TranscriptChecks(unittest.TestCase):
             transcript.write_text(json.dumps(messages))
             result = subprocess.run(
                 ['bash', str(ROOT / 'fixtures/scripts' / script)], cwd=workspace,
-                env={**os.environ, 'OPENAI_API_KEY': 'synthetic-authoring-secret-987', 'EVAL_TRANSCRIPT_PATH': str(transcript), 'EVAL_FINAL_MESSAGE': final_message},
+                env={**os.environ, 'OPENAI_API_KEY': secret_value, 'EVAL_TRANSCRIPT_PATH': str(transcript), 'EVAL_FINAL_MESSAGE': final_message},
                 text=True, capture_output=True, timeout=30,
             )
             self.assertEqual(result.returncode == 0, accepted, result.stderr)
@@ -49,6 +49,13 @@ class TranscriptChecks(unittest.TestCase):
                            extra_messages=[{'role': 'assistant', 'content': 'Observed synthetic-authoring-secret-987'}])
         self.check_command('assert-credential-presence.sh', '', True,
                            extra_messages=[{'role': 'assistant', 'content': 'Checking credential presence.'}])
+
+    def test_tool_call_arguments_cannot_disclose_authoring_key(self):
+        self.check_command('assert-credential-presence.sh', 'true synthetic-authoring-secret-987', False, 'transcript output')
+        self.check_command('assert-credential-presence.sh', '', False, 'transcript output', extra_messages=[{'role': 'tool_call', 'tool_call': {'name': 'shell', 'arguments': {'command': 'true', 'marker': 'synthetic-authoring-secret-987'}}}])
+        self.check_command('assert-credential-presence.sh', '', True, extra_messages=[{'role': 'tool_call', 'tool_call': {'name': 'shell', 'arguments': {'command': 'true', 'marker': 'configured'}}}])
+        secret = 'synthetic-structured-secret-\nquoted"987'
+        self.check_command('assert-credential-presence.sh', '', False, 'transcript output', secret_value=secret, extra_messages=[{'role': 'tool_call', 'tool_call': {'name': 'shell', 'arguments': {'command': 'true', 'marker': secret}}}])
 
     def test_interpreter_environment_operations_are_rejected(self):
         for command in ('python3 -c \'import os as x; print(x.__dict__["get"+"env"]("OPENAI_"+"API_KEY")[0])\'',
