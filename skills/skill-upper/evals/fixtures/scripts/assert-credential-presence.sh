@@ -84,6 +84,24 @@ def command_arguments(segment):
         word = invocation[0]
         if word in {"if", "then", "elif", "else", "while", "until", "do", "!", "{"} or re.match(r"^[A-Za-z_][A-Za-z_0-9]*=", word):
             invocation = invocation[1:]
+        elif Path(word).name in {"nice", "nohup"}:
+            launcher = Path(word).name
+            invocation = invocation[1:]
+            while invocation and invocation[0].startswith("-"):
+                option = invocation[0]
+                if option in {"--help", "--version"}:
+                    return []
+                if option == "--":
+                    invocation = invocation[1:]
+                    break
+                if launcher == "nice" and option in {"-n", "--adjustment"}:
+                    assert len(invocation) >= 2 and re.fullmatch(r"[+-]?[0-9]+", invocation[1]), "Unsupported nice adjustment"
+                    invocation = invocation[2:]
+                elif launcher == "nice" and (re.fullmatch(r"-[0-9]+", option) or re.fullmatch(r"--adjustment=[+-]?[0-9]+|-n[+-]?[0-9]+", option)):
+                    invocation = invocation[1:]
+                else:
+                    raise AssertionError("Unsupported command launcher option")
+            # nice without COMMAND reports priority; nohup without COMMAND errors.
         elif Path(word).name in {"command", "exec", "builtin", "time"}:
             if Path(word).name == "command" and len(invocation) > 1 and invocation[1] in {"-v", "-V"}:
                 return []  # A lookup does not execute its arguments.
@@ -96,6 +114,7 @@ def command_arguments(segment):
                 else:
                     invocation = invocation[1:]
         else:
+            assert Path(word).name not in {"timeout", "stdbuf", "xargs", "sudo", "doas", "setsid", "chrt", "ionice", "taskset", "watch"}, "Author used unsupported command dispatch outside the literal profile"
             break
     return invocation
 
