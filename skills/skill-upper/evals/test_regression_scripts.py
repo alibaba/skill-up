@@ -154,6 +154,24 @@ class TranscriptChecks(unittest.TestCase):
         self.check_command('assert-credential-presence.sh', '', False, 'shell expansion',
                            probe_text='grep -q /root/.codex/* || :\n' + probe)
 
+    def test_credential_path_spellings_are_normalized(self):
+        for command in ('cat ~/.codex/a*.json', r'cat ~/.codex/auth\.json',
+                        'cat ~/.codex/"auth".json', 'cat ~/.claude/.cred*.json', 'cat .e?v',
+                        'cat ~/.codex/[a]uth.json'):
+            with self.subTest(command=command):
+                self.check_command('assert-credential-presence.sh', command, False, 'credential file')
+        for command in ('cat SKILL.md', 'cat ~/.codex/config.toml', 'cat examples/cases/*.yaml',
+                        "echo '*'", "grep '.*' SKILL.md", "rg 'https://.*' SKILL.md"):
+            with self.subTest(command=command):
+                self.check_command('assert-credential-presence.sh', command, True)
+
+    def test_time_prefix_cannot_hide_invocations(self):
+        for prefix in ('time', 'time -p', '/usr/bin/time -f %e', '/usr/bin/time -o /tmp/timing'):
+            with self.subTest(prefix=prefix):
+                self.check_command('assert-credential-presence.sh', prefix + ' printenv OPENAI_API_KEY | cut -c 1', False, 'credential environment', tool_result='s')
+                self.check_command('assert-credential-presence.sh', prefix + ' skill-up run evals/eval.yaml', False, 'executed an evaluation')
+        self.check_command('assert-credential-presence.sh', 'time printenv OPENAI_API_KEY | grep -q .', True)
+
     def test_field_comments_need_english_words(self):
         judge = ROOT / 'fixtures/scripts/assert-english-only-generated-cases.sh'
         eval_text = ('# {comment}\nschema_version: "1.0"\nenvironment:\n  # {comment}\n  type: local\n'
