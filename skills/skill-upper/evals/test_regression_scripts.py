@@ -12,13 +12,13 @@ ROOT = Path(__file__).resolve().parent
 
 
 class TranscriptChecks(unittest.TestCase):
-    def check_command(self, script, command, accepted, reason=None):
+    def check_command(self, script, command, accepted, reason=None, probe_text=None):
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)
             shutil.copyfile(ROOT / 'fixtures/skills/sample-no-evals/SKILL.md', workspace / 'SKILL.md')
             if script == 'assert-credential-presence.sh':
                 (workspace / 'credential-check.sh').write_text(
-                    'if printenv OPENAI_API_KEY | grep -q .; then echo configured; else echo missing; fi\n'
+                    probe_text or 'if printenv OPENAI_API_KEY | grep -q .; then echo configured; else echo missing; fi\n'
                 )
             transcript = workspace / '.codex/transcript.json'
             transcript.parent.mkdir()
@@ -45,9 +45,36 @@ class TranscriptChecks(unittest.TestCase):
             with self.subTest(command=command):
                 self.check_command('assert-credential-presence.sh', command, False, 'executed an evaluation')
 
+    def test_prefixed_evaluation_is_rejected(self):
+        for prefix in ('command', 'command --', 'env', 'exec'):
+            with self.subTest(prefix=prefix):
+                self.check_command('assert-credential-presence.sh', prefix + ' skill-up run evals/eval.yaml',
+                                   False, 'executed an evaluation')
+
+    def test_cli_verbosity_is_not_a_command_lookup(self):
+        self.check_command('assert-credential-presence.sh', 'command skill-up run -v evals/eval.yaml',
+                           False, 'executed an evaluation')
+
+    def test_commented_multiline_evaluation_is_rejected(self):
+        for command in ('# Prepare probe\ncommand skill-up run evals/eval.yaml',
+                        'echo ready # comment\nskill-up run evals/eval.yaml'):
+            with self.subTest(command=command):
+                self.check_command('assert-credential-presence.sh', command, False, 'executed an evaluation')
+
+    def test_probe_cannot_write_credentials(self):
+        self.check_command('assert-credential-presence.sh', '', False, 'filesystem output',
+                           'set +x; printf \'%s\' "$OPENAI_API_KEY" > probe.log; '
+                           'if printenv OPENAI_API_KEY | grep -q .; then echo configured; else echo missing; fi\n')
+
+    def test_concurrent_trace_is_stable(self):
+        for _ in range(16):
+            self.check_command('assert-credential-presence.sh', '', True)
+
     def test_safe_credential_commands(self):
         for command in ('printenv OPENAI_API_KEY | grep -q .',
                         '/bin/zsh -lc ' + shlex.quote('skill-up validate evals/eval.yaml'),
+                        'skill-up validate evals/eval.yaml\necho run', 'echo skill-up run',
+                        'command -v skill-up', 'skill-up validate evals/eval.yaml # comment\necho run',
                         "cat > credential-check.sh <<'EOF'\ngrep token ~/.codex/auth.json\nEOF",
                         "cat > credential-check.sh <<'EOF'\n# Don't expose secrets\nEOF"):
             with self.subTest(command=command):
