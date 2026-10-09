@@ -1,0 +1,30 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+
+skills:
+  - source: local_path
+    path: .
+
+engine:
+  name: opencode
+  model:
+    provider: dashscope
+    name: qwen3.8-max
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+cases:
+  files:
+    - evals/cases/scaffold-with-user-simulator.yaml
+  defaults:
+    timeout_seconds: 600
+    max_turns: 25
+  parallelism: 1
+
+judge:
+  type: agent_judge
+  model: dashscope/qwen3.8-max
+
+report:
+  formats: [json, html]

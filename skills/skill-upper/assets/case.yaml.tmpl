@@ -27,6 +27,23 @@ input:
 #     - role: user
 #       content: "Follow-up using {{var_name}}"
 
+# For a model-generated reply between fixed turns, configure the eval-level
+# user_simulator model and replace the single-turn input block with:
+# user_simulator:
+#   scenario: "The user knows the staging environment and wants two replicas."
+# input:
+#   turns:
+#     - role: user
+#       content: "Help me configure the deployment."
+#     - role: user
+#       respond: "Answer the agent's current question using only the scenario."
+#     - role: user
+#       content: "Do not deploy it yet."
+
+# To let the simulator choose every later reply and when to stop, keep a fixed
+# input.prompt and add user_simulator.scenario instead of input.turns. Set a
+# bounded constraints.max_turns; the opening prompt counts as turn one.
+
 # Optional workspace setup copied or created before the Agent runs.
 # context:
 #   repo_fixture: fixtures/repos/sample-project

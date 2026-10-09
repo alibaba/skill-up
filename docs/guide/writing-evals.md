@@ -593,6 +593,75 @@ input:
         on_fail: fail
 ```
 
+### Simulated user replies
+
+Configure a separate model for the simulated user in `eval.yaml`:
+
+The model ID below is a placeholder, not a runnable configuration. For a
+live-tested local OpenCode/DashScope configuration, see
+[the user simulator example](https://github.com/alibaba/skill-up/tree/main/examples/user-simulator).
+
+```yaml
+user_simulator:
+  provider: simulation
+  protocol: openai
+  model: your-model-id
+  timeout_seconds: 30
+```
+
+Set `protocol: openai` for OpenAI Chat Completions, or `protocol: anthropic`
+for Anthropic Messages. Set `SIMULATION_API_KEY` and
+`SIMULATION_BASE_URL`, or configure the same provider in
+`~/.skill-up/credentials.yaml`. For `provider: openai`, the standard OpenAI
+endpoint is used when no base URL is configured. The simulator runs outside the
+agent workspace and uses its own model connection. For `provider: anthropic`
+with `protocol: anthropic`, `ANTHROPIC_API_KEY` and optional
+`ANTHROPIC_BASE_URL` configure the connection; the official endpoint is the fallback.
+Custom providers require an explicit base URL for their selected protocol.
+Anthropic replies are bounded to 1024 output tokens with thinking disabled;
+truncated responses and tool calls are rejected.
+
+In a case, `user_simulator.scenario` describes the user's goal and known
+information. A `respond` turn generates one user message from the scenario,
+the turn instruction, and the preceding conversation. Fixed `content` turns
+can appear before or after it:
+
+```yaml
+user_simulator:
+  scenario: |
+    Generate a staging configuration with two replicas.
+    Do not approve deployment. Do not invent missing information.
+input:
+  turns:
+    - role: user
+      content: "Create a deployment configuration."
+    - role: user
+      respond: "Answer the agent's current configuration question."
+    - role: user
+      content: "Change the replica count to three."
+```
+
+For a conversation whose later turns are fully determined by the simulator,
+provide a fixed opening prompt and omit `turns`:
+
+```yaml
+user_simulator:
+  scenario: |
+    Generate a staging configuration with two replicas.
+    Answer follow-up questions, reject deployment, and end when the
+    configuration and verification steps have been explained.
+input:
+  prompt: "Create a deployment configuration."
+constraints:
+  max_turns: 8
+```
+
+The initial prompt counts as turn one. The evaluator enforces `max_turns` and
+records a limit error when the simulator asks to continue beyond it. A
+simulator stop ends the dialogue and is recorded in the turn results; the
+configured judge still determines PASS or FAIL. Simulated cases require an
+engine that supports session resumption.
+
 ### `post_condition` — inter-turn gate
 
 `post_condition` checks the agent's response after each turn. It is a **gate**,

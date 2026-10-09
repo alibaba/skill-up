@@ -462,6 +462,7 @@
           var statusCls = "ts-" + (tr.status || "completed");
           html += '<div class="turn-card">';
           html += '<div class="turn-header"><span class="turn-badge">Turn ' + tr.turn_number + '</span>';
+          if (tr.source) html += '<span class="turn-source">' + esc(tr.source) + ' user</span>';
           html += '<span class="turn-status ' + statusCls + '">' + esc(tr.status || "completed") + '</span></div>';
           html += '<div class="turn-prompt"><div class="turn-prompt-label">Prompt</div>';
           html += '<div class="turn-prompt-content">' + esc(tr.content || "") + '</div></div>';
@@ -471,6 +472,7 @@
             html += '<div class="turn-response"><div class="turn-response-label">Response</div>';
             html += '<div class="turn-response-content">' + esc(tr.response) + '</div></div>';
           }
+          if (tr.stop_reason) html += '<div class="turn-skipped-msg">Simulator stopped: ' + esc(tr.stop_reason) + '</div>';
           html += '</div>';
         }
         html += '</div>';
