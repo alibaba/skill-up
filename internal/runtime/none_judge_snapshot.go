@@ -95,6 +95,11 @@ func removeJudgeTree(path string) error {
 }
 
 func copyJudgeTree(ctx context.Context, source, target string) error {
+	resolved, err := filepath.EvalSymlinks(source)
+	if err != nil {
+		return fmt.Errorf("resolve judge workspace root: %w", err)
+	}
+	source = resolved
 	root, err := os.OpenRoot(target)
 	if err != nil {
 		return err
@@ -168,7 +173,10 @@ func copyJudgeSymlink(root *os.Root, source, path, rel string) error {
 	if err != nil {
 		return err
 	}
-	resolved := filepath.Clean(filepath.Join(filepath.Dir(path), link))
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return fmt.Errorf("judge snapshot cannot resolve symlink %s: %w", path, err)
+	}
 	if filepath.IsAbs(link) || resolved != source && !strings.HasPrefix(resolved, source+string(filepath.Separator)) {
 		return fmt.Errorf("judge snapshot rejects symlink outside workspace: %s", path)
 	}

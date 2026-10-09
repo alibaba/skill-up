@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -252,4 +253,69 @@ func TestJudgeSnapshotRejectsGitMetadataPointers(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestJudgeSnapshotTraversesSymlinkedWorkspaceRoot(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("symlink fixture requires host privileges")
+	}
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "result.txt"), []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "workspace")
+	if err := os.Symlink(workspace, alias); err != nil {
+		t.Fatal(err)
+	}
+	rt, err := NewRuntime(Config{Type: "none", WorkspaceDir: alias})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	noneRT, ok := rt.(*NoneRuntime)
+	if !ok {
+		t.Fatalf("runtime type = %T", rt)
+	}
+	snapshot, err := noneRT.CaptureJudgeSnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer snapshot.Close() //nolint:errcheck
+	fork, cleanup, err := snapshot.Fork(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	assertOriginalJudgeInput(t, filepath.Join(fork.Workspace(), "result.txt"))
+	if err := os.WriteFile(filepath.Join(fork.Workspace(), "result.txt"), []byte("changed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	assertOriginalJudgeInput(t, filepath.Join(alias, "result.txt"))
+}
+
+func TestJudgeSnapshotRejectsChainedSymlinkEscape(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("symlink fixture requires host privileges")
+	}
+	parent := t.TempDir()
+	workspace := filepath.Join(parent, "workspace")
+	if err := os.MkdirAll(filepath.Join(workspace, "dir"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(parent, "shared.txt")
+	if err := os.WriteFile(external, []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("..", filepath.Join(workspace, "dir", "up")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("dir/up/../shared.txt", filepath.Join(workspace, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyJudgeTree(context.Background(), workspace, t.TempDir()); err == nil {
+		t.Fatal("chained external symlink accepted")
+	}
+	assertOriginalJudgeInput(t, external)
 }

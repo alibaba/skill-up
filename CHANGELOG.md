@@ -86,6 +86,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixture uploads.
 
 ### Fixed
+- Traverse symlinked workspace roots and reject escaping symlink chains when
+  capturing independent judge snapshots.
 - Reject Git metadata pointer files in judge snapshots, preventing linked
   worktrees and submodules from sharing the original Git index across forks.
 - Map absolute workspace attachment and generated-file paths into each isolated
