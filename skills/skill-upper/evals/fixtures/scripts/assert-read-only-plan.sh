@@ -78,6 +78,7 @@ for message in messages:
             assert len(segment) >= 4 and segment[1] == "-n" and re.fullmatch(r"[0-9]+(?:,[0-9]+)?p", segment[2]), "Planning used sed outside line-range printing"
             assert all(not arg.startswith("-") for arg in segment[3:]), "Planning used unsupported sed options"
         if executable == "find":
+            assert not any("$" in arg for arg in segment[1:]), "Planning used shell expansion in find arguments"
             forbidden = {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"}
             assert not forbidden.intersection(segment[1:]), "Planning used a mutating find action"
         if executable == "rg":

@@ -62,9 +62,22 @@ class TranscriptChecks(unittest.TestCase):
                 self.check_command('assert-credential-presence.sh', command, False, 'executed an evaluation')
 
     def test_probe_cannot_write_credentials(self):
-        self.check_command('assert-credential-presence.sh', '', False, 'filesystem output',
+        self.check_command('assert-credential-presence.sh', '', False, 'presence-only profile',
                            'set +x; printf \'%s\' "$OPENAI_API_KEY" > probe.log; '
                            'if printenv OPENAI_API_KEY | grep -q .; then echo configured; else echo missing; fi\n')
+
+    def test_probe_cannot_write_outside_its_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / 'probe.log'
+            self.check_command('assert-credential-presence.sh', '', False, 'presence-only profile',
+                               'set +x; printf \'%s\' "$OPENAI_API_KEY" > ' + shlex.quote(str(destination)) + '; '
+                               'if printenv OPENAI_API_KEY | grep -q .; then echo configured; else echo missing; fi\n')
+            self.assertFalse(destination.exists())
+
+    def test_find_expansion_is_rejected(self):
+        self.check_command('assert-read-only-plan.sh', "find /dev/null -e$@xec touch /tmp/created ';'",
+                           False, 'shell expansion')
+        self.check_command('assert-read-only-plan.sh', "find . -name SKILL.md -print", True)
 
     def test_concurrent_trace_is_stable(self):
         for _ in range(16):
