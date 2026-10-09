@@ -29,6 +29,7 @@ import (
 	"github.com/alibaba/skill-up/internal/observability"
 	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
+	"github.com/alibaba/skill-up/internal/usersimulator"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
 
@@ -67,6 +68,7 @@ type EvalOptions struct {
 	Resolver        *credential.Resolver
 	Agent           agent.Agent
 	RunnerConfig    credential.ResolvedAgentConfig
+	Simulator       usersimulator.Simulator
 
 	EvalCfg      *config.EvalConfig
 	Observer     ProgressObserver
@@ -150,6 +152,7 @@ type defaultEvaluator struct {
 	resolver        *credential.Resolver
 	ag              agent.Agent
 	runnerConfig    credential.ResolvedAgentConfig
+	simulator       usersimulator.Simulator
 	fixtures        *fixtureRegistry
 	deleteWorkspace bool
 	observer        ProgressObserver
@@ -184,6 +187,7 @@ func NewEvaluator(opts EvalOptions) Evaluator {
 		resolver:        opts.Resolver,
 		ag:              opts.Agent,
 		runnerConfig:    opts.RunnerConfig,
+		simulator:       opts.Simulator,
 		fixtures:        newFixtureRegistry(),
 		deleteWorkspace: opts.DeleteWorkspace,
 		observer:        opts.Observer,
@@ -459,7 +463,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	// input.turns AND the agent supports session resumption. Agents that do
 	// not implement SessionResumer fall through to the existing single-shot
 	// path (all messages in one Run call), with an explicit warning.
-	if len(caseCfg.Input.Turns) > 0 {
+	if len(caseCfg.Input.Turns) > 0 || caseCfg.UserSimulator != nil {
 		if _, ok := runAgent.(agent.SessionResumer); ok {
 			agentExecOpts := agent.ExecOptions{
 				ArtifactDir: e.prepareOutputDir(ctx, configName, caseCfg.ID, "agent/run"),
@@ -473,6 +477,12 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 			multiTurnResult := e.executeMultiTurnCase(ctx, rt, caseCfg, configName, runAgent, agentExecOpts, startTime, judgeCfg, &result)
 			multiTurnResult.Version = observation.Version
 			return multiTurnResult
+		}
+		if caseCfg.UserSimulator != nil {
+			result.Status = judge.StatusError
+			result.Error = fmt.Errorf("agent %s does not support session resumption required by user simulation", runAgent.Name())
+			result.Configuration = configName
+			return result
 		}
 		logging.WarnContextf(
 			ctx,

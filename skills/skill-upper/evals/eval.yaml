@@ -16,6 +16,7 @@ cases:
     - evals/cases/add-case-to-existing.yaml
     - evals/cases/scaffold-with-qodercli-engine.yaml
     - evals/cases/scaffold-with-script-judge.yaml
+    - evals/cases/scaffold-with-user-simulator.yaml
     - evals/cases/english-context-generates-english-only-cases.yaml
     - evals/cases/evolve-existing-skill.yaml
     - evals/cases/plan-without-mutation.yaml
@@ -29,6 +30,10 @@ cases:
     # so raising it does not slow the fast engines.
     timeout_seconds: 600
     max_turns: 25
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
 
 report:
   formats: [json, html]
