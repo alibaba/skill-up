@@ -480,3 +480,39 @@ func assertSimulatedJudgeStatuses(t *testing.T, result EvalResult, members []con
 		}
 	}
 }
+
+func TestJudgeInputForWorkspaceMapsGeneratedFilesWithoutChangingSource(t *testing.T) {
+	source, fork := t.TempDir(), t.TempDir()
+	workspacePath := filepath.Join(source, "result.txt")
+	archivePath := filepath.Join(t.TempDir(), "archived.txt")
+	input := judge.Input{WorkspacePath: source, GeneratedFiles: []string{workspacePath, archivePath, "relative.txt"}}
+	mapped := judgeInputForWorkspace(input, fork)
+	want := []string{filepath.Join(fork, "result.txt"), archivePath, "relative.txt"}
+	for i, path := range want {
+		if mapped.GeneratedFiles[i] != path {
+			t.Fatalf("generated file %d = %q, want %q", i, mapped.GeneratedFiles[i], path)
+		}
+	}
+	if mapped.WorkspacePath != fork || input.WorkspacePath != source || input.GeneratedFiles[0] != workspacePath {
+		t.Fatalf("source input changed: %+v, mapped: %+v", input, mapped)
+	}
+}
+
+func TestJudgeWorkspacePathMapsCanonicalSourceAlias(t *testing.T) {
+	if goruntime.GOOS == windowsGOOS {
+		t.Skip("symlink fixture requires host privileges on Windows")
+	}
+	source, fork := t.TempDir(), t.TempDir()
+	alias := filepath.Join(t.TempDir(), "workspace-alias")
+	if err := os.Symlink(source, alias); err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := filepath.EvalSymlinks(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(canonical, "result.txt")
+	if mapped := judgeWorkspacePath(path, alias, fork); mapped != filepath.Join(fork, "result.txt") {
+		t.Fatalf("canonical workspace path mapped to %q", mapped)
+	}
+}

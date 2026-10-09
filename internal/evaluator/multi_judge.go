@@ -77,8 +77,7 @@ func (e *defaultEvaluator) runMultipleJudges(
 			outcome.Status, outcome.Error = judge.StatusError, forkErr.Error()
 			causes = append(causes, forkErr)
 		} else {
-			memberInput := input
-			memberInput.WorkspacePath = memberRT.Workspace()
+			memberInput := judgeInputForWorkspace(input, memberRT.Workspace())
 			memberResult := &EvalResult{SessionResult: result.SessionResult, CaseID: result.CaseID, CaseName: result.CaseName}
 			member = judgeConfigForWorkspace(member, input.WorkspacePath, memberInput.WorkspacePath)
 			graded := e.runJudgePhase(memberCtx, memberRT, caseCfg, configName, member, turnsTotal, runAgent, memberInput, memberResult, outcome.Artifacts, true)
@@ -170,22 +169,47 @@ func judgeConfigForWorkspace(member config.JudgeConfig, source, fork string) con
 	if member.Context == nil || source == "" {
 		return member
 	}
-	sourceRoot, err := filepath.Abs(source)
-	if err != nil {
-		return member
-	}
 	contextCopy := *member.Context
 	contextCopy.Attachments = slices.Clone(member.Context.Attachments)
 	for i, attachment := range contextCopy.Attachments {
-		if !filepath.IsAbs(attachment.Path) {
-			continue
-		}
-		rel, err := filepath.Rel(sourceRoot, attachment.Path)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			continue
-		}
-		contextCopy.Attachments[i].Path = filepath.Join(fork, rel)
+		contextCopy.Attachments[i].Path = judgeWorkspacePath(attachment.Path, source, fork)
 	}
 	member.Context = &contextCopy
 	return member
+}
+
+func judgeInputForWorkspace(input judge.Input, fork string) judge.Input {
+	memberInput := input
+	memberInput.WorkspacePath = fork
+	memberInput.GeneratedFiles = slices.Clone(input.GeneratedFiles)
+	for i, path := range memberInput.GeneratedFiles {
+		memberInput.GeneratedFiles[i] = judgeWorkspacePath(path, input.WorkspacePath, fork)
+	}
+	return memberInput
+}
+
+func judgeWorkspacePath(path, source, fork string) string {
+	if source == "" || !filepath.IsAbs(path) {
+		return path
+	}
+	sourceRoot, err := filepath.Abs(source)
+	if err != nil {
+		return path
+	}
+	rel, err := filepath.Rel(sourceRoot, path)
+	if !judgeWorkspaceRelativePath(rel, err) {
+		canonicalRoot, resolveErr := filepath.EvalSymlinks(sourceRoot)
+		if resolveErr != nil {
+			return path
+		}
+		rel, err = filepath.Rel(canonicalRoot, path)
+	}
+	if !judgeWorkspaceRelativePath(rel, err) {
+		return path
+	}
+	return filepath.Join(fork, rel)
+}
+
+func judgeWorkspaceRelativePath(rel string, err error) bool {
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

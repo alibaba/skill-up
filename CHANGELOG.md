@@ -86,8 +86,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixture uploads.
 
 ### Fixed
-- Map absolute workspace attachment paths into each isolated judge copy while
-  preserving the original configuration and skill-relative attachment paths.
+- Map absolute workspace attachment and generated-file paths into each isolated
+  judge copy while preserving original inputs and references to archived artifacts.
 - Preserve skipped judge outcomes and grouped evaluation artifacts when a case
   exits before judging, including failed multi-turn post-conditions and execution errors.
 - Remove judge snapshot and fork copies containing populated read-only directories
