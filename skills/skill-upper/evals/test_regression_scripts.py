@@ -421,6 +421,24 @@ class TranscriptChecks(unittest.TestCase):
             with self.subTest(args=args):
                 self.check_command('assert-read-only-plan.sh', 'file ' + args, True)
 
+    def test_authoring_command_profile_rejects_environment_dispatch(self):
+        for command in ("printf '$OPENAI_API_KEY' | envsubst | cut -c 1", 'busybox printenv OPENAI_API_KEY', "php -r 'echo getenv(\"OPENAI_API_KEY\")[0];'"):
+            self.check_command('assert-credential-presence.sh', command, False, 'unsupported command', tool_result='s')
+        for command in ('find examples -exec envsubst {} +', 'find examples -e$@xec envsubst {} +', 'cat "$STORE"', 'cp "$STORE" /tmp/credential-copy', 'sort --compress-program=envsubst SKILL.md', "sed -n 1p -e 'e envsubst' SKILL.md", 'rg --pre envsubst token SKILL.md', "sed 'e envsubst' SKILL.md"):
+            self.check_command('assert-credential-presence.sh', command, False, 'unsupported', tool_result='s')
+        self.check_command('assert-credential-presence.sh', "awk 'BEGIN {system(\"envsubst\")}'", False, 'AWK environment')
+        self.check_command('assert-credential-presence.sh', "awk '{print $1}' -f /tmp/extra.awk SKILL.md", False, 'unsupported AWK')
+        self.check_command('assert-credential-presence.sh', 'skill-up config show', False, 'read-only command profile')
+        self.check_command('assert-credential-presence.sh', 'sed -n 1,5p SKILL.md', True)
+        self.check_command('assert-credential-presence.sh', 'mkdir -p evals/cases', True)
+        for command in ('skill-up help validate', 'skill-up help run', 'skill-up --config /tmp/user.yaml validate evals/eval.yaml', 'skill-up --config=/tmp/user.yaml list-cases evals/eval.yaml'):
+            self.check_command('assert-credential-presence.sh', command, True)
+        self.check_command('assert-credential-presence.sh', 'skill-up --config /tmp/user.yaml run evals/eval.yaml', False, 'executed an evaluation')
+        probe = 'if printenv OPENAI_API_KEY | grep -q .; then echo configured; else echo missing; fi\n'
+        for prefix in ('cat>', '> credential-check.sh cat <<', 'cat 2>/dev/null >'):
+            command = prefix + " credential-check.sh <<'EOF'\n" + probe + 'EOF' if prefix != '> credential-check.sh cat <<' else "> credential-check.sh cat <<'EOF'\n" + probe + 'EOF'
+            self.check_command('assert-credential-presence.sh', command, True, probe_text=probe)
+
     def test_localized_cli_arguments_cannot_expand(self):
         for command in ('skill-up r$@un evals/eval.yaml', 'skill-up r${EMPTY:-}un evals/eval.yaml'):
             self.check_command('assert-localized-regressions.sh', command, False, 'expanded skill-up arguments')

@@ -79,7 +79,16 @@ def active_shell_expansion(command, include_globs=False):
 
 def command_arguments(segment):
     """Find the invoked command after control words and execution prefixes."""
-    invocation = segment[:]
+    invocation = []
+    index = 0
+    while index < len(segment):
+        if segment[index] in {">", ">>", "<", "<>", ">|", "<<", "<<-", "<<<", ">&", "<&"}:
+            if invocation and invocation[-1].isdigit():
+                invocation.pop()  # Optional file descriptor before redirection.
+            index += 2
+        else:
+            invocation.append(segment[index])
+            index += 1
     while invocation:
         word = invocation[0]
         if word in {"if", "then", "elif", "else", "while", "until", "do", "!", "{"} or re.match(r"^[A-Za-z_][A-Za-z_0-9]*=", word):
@@ -277,7 +286,7 @@ for message in messages:
         assert not variable or not re.search(r"(?:API_KEY|ACCESS_TOKEN|AUTH_TOKEN|PERSONAL_ACCESS_TOKEN)$", variable.group(1)), "Author read credentials through shell expansion"
     # Keep real newlines so shell comments end; add an explicit boundary
     # after each newline because shlex otherwise discards it as whitespace.
-    command_lexer = shlex.shlex(command.replace("\n", "\n;"), posix=True, punctuation_chars=";&|()")
+    command_lexer = shlex.shlex(command.replace("\n", "\n;"), posix=True, punctuation_chars=";&|()<>")
     command_lexer.whitespace_split = True
     tokens = list(command_lexer)
     # shlex normalizes quotes/escapes; check resolved spellings and globs that
@@ -387,11 +396,42 @@ for message in messages:
             assert not any(re.search(r"\bENVIRON\b", arg) for arg in invocation[1:]), "Author accessed credentials through AWK environment code"
         if invocation and re.fullmatch(r"python[0-9.]*|node|ruby|perl", Path(invocation[0]).name):
             raise AssertionError("Author used an interpreter outside the literal probe-writing profile")
+        if invocation:
+            executable = Path(invocation[0]).name
+            allowed_commands = {"printenv", "grep", "rg", "echo", "printf", "cat", "tee", "touch", "chmod", "mkdir", "pwd", "ls", "head", "tail", "less", "more", "wc", "stat", "file", "which", "realpath", "readlink", "uname", "find", "sed", "sort", "cp", "mv", "rm", "cd", "skill-up", "set", "export", "declare", "typeset", "readonly", "awk", "gawk", "mawk", "nawk", "true", "false", ":", "test", "[", "fi", "done", "}"}
+            assert executable in allowed_commands, "Author executed an unsupported command outside the literal authoring profile"
+            if executable in {"cat", "head", "tail", "less", "more", "grep", "rg", "find", "sed", "sort", "awk", "gawk", "mawk", "nawk", "cp", "mv", "tee", "ls", "wc", "stat", "file", "realpath", "readlink"}:
+                assert not active_shell_expansion(command), "Author used unsupported reader shell expansion"
+            if executable == "sort":
+                assert all(not arg.startswith("-") or arg == "--" or re.fullmatch(r"-[rnu]+", arg) for arg in invocation[1:]), "Author used unsupported sort command dispatch"
+            if executable == "find":
+                assert not {"-exec", "-execdir", "-ok", "-okdir"}.intersection(invocation[1:]), "Author used unsupported find command dispatch"
+            if executable == "rg":
+                assert not any(arg in {"--pre", "--hostname-bin"} or arg.startswith(("--pre=", "--hostname-bin=")) for arg in invocation[1:]), "Author used unsupported search command dispatch"
+            if executable == "sed":
+                assert len(invocation) >= 4 and invocation[1] == "-n" and re.fullmatch(r"[0-9]+(?:,[0-9]+)?p", invocation[2]), "Author used unsupported sed command dispatch"
+                assert all(not arg.startswith("-") for arg in invocation[3:]), "Author used unsupported sed script options"
+            if executable in {"awk", "gawk", "mawk", "nawk"}:
+                assert len(invocation) >= 3 and re.fullmatch(r"\{\s*print\s+\$[0-9]+\s*\}", invocation[1]), "Author used AWK environment or code outside field printing"
+                assert all(not arg.startswith("-") for arg in invocation[2:]), "Author used unsupported AWK script options"
         # Standard execution prefixes still invoke the selected CLI. Do not
         # mistake echo/grep arguments or later commands for an invocation.
         if invocation and Path(invocation[0]).name == "skill-up":
             assert not active_shell_expansion(command), "Author used active shell expansion in a skill-up command"
-            assert "run" not in invocation[1:], "Author executed an evaluation"
+            cli_args = invocation[1:]
+            while cli_args:
+                if cli_args[0] == "--config":
+                    assert len(cli_args) >= 2, "Missing skill-up config argument"
+                    cli_args = cli_args[2:]
+                elif cli_args[0].startswith("--config="):
+                    cli_args = cli_args[1:]
+                elif cli_args[0] == "--":
+                    cli_args = cli_args[1:]
+                    break
+                else:
+                    break
+            assert not cli_args or cli_args[0] != "run", "Author executed an evaluation"
+            assert cli_args and cli_args[0] in {"validate", "list-cases", "help", "--help", "-h", "--version"}, "Author used skill-up outside the read-only command profile"
     # Protect credential paths regardless of which shell reader accesses them.
     # Heredoc contents have already been removed, so stored examples are data.
     assert not re.search(r"(?:^|[/\s\"'])(?:\.?credentials\.(?:yaml|yml|json)|auth\.json|oauth_creds\.json|\.env)(?=$|[\s\"';|&<>()])", command), "Author accessed a credential file"
