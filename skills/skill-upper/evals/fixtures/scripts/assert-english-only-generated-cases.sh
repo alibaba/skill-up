@@ -48,7 +48,7 @@ def is_explanatory_comment(line):
     if not stripped.startswith("#"):
         return False
     content = stripped[1:].strip()
-    if not content:
+    if not ascii_word_pattern.search(content):
         return False
     if content.startswith("-"):
         return False

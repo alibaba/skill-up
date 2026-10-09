@@ -93,6 +93,28 @@ class TranscriptChecks(unittest.TestCase):
             with self.subTest(command=command):
                 self.check_command('assert-credential-presence.sh', command, True)
 
+    def test_field_comments_need_english_words(self):
+        judge = ROOT / 'fixtures/scripts/assert-english-only-generated-cases.sh'
+        eval_text = ('# {comment}\nschema_version: "1.0"\nenvironment:\n  # {comment}\n  type: local\n'
+                     'engine:\n  # {comment}\n  name: codex\ncases:\n  # {comment}\n  files: [cases/example.yaml]\n'
+                     'report:\n  # {comment}\n  formats: [json]\n')
+        case_text = ('# {comment}\nid: example\n# {comment}\ntitle: Example case\ninput:\n'
+                     '  # {comment}\n  prompt: Explain this example\njudge:\n  # {comment}\n  type: agent\n')
+        for comment, accepted in (('123', False), ('?!...', False), ('', False),
+                                  ('type: script', False), ('- example.yaml', False),
+                                  ('Explain the behavior checked by this field.', True)):
+            with self.subTest(comment=comment), tempfile.TemporaryDirectory() as directory:
+                workspace = Path(directory)
+                (workspace / 'evals/cases').mkdir(parents=True)
+                (workspace / 'evals/eval.yaml').write_text(eval_text.format(comment=comment))
+                (workspace / 'evals/cases/example.yaml').write_text(case_text.format(comment=comment))
+                result = subprocess.run(['bash', str(judge)], cwd=workspace,
+                                        env={**os.environ, 'EVAL_FINAL_MESSAGE': 'Created evaluation cases with explanatory English comments.'},
+                                        text=True, capture_output=True, timeout=30)
+                self.assertEqual(result.returncode == 0, accepted, result.stdout + result.stderr)
+                if not accepted:
+                    self.assertIn('field-leading comment', result.stdout)
+
     def test_credential_paths_independent_of_reader(self):
         for command in ('grep token ~/.codex/auth.json', 'rg token ~/.claude/.credentials.json',
                         'awk \'{print}\' ~/.skill-up/credentials.yaml', 'grep key .env', 'cat ~/.codex/auth.json>/tmp/auth-copy', 'grep token<~/.codex/auth.json'):
