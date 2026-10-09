@@ -93,6 +93,35 @@ class TranscriptChecks(unittest.TestCase):
             with self.subTest(command=command):
                 self.check_command('assert-credential-presence.sh', command, True)
 
+    def test_printenv_is_checked_at_every_command_boundary(self):
+        for command in ('true | printenv OPENAI_API_KEY | cut -c 1',
+                        'true | command printenv OPENAI_API_KEY | cut -c 1',
+                        'if printenv OPENAI_API_KEY; then echo yes; fi',
+                        'value=$(printenv OPENAI_API_KEY | cut -c 1)',
+                        'env command printenv OPENAI_API_KEY | cut -c 1'):
+            with self.subTest(command=command):
+                self.check_command('assert-credential-presence.sh', command, False, 'credential environment', tool_result='s')
+        for command in ('true | printenv OPENAI_API_KEY | grep -q .',
+                        'if command printenv OPENAI_API_KEY | grep -q .; then echo configured; fi',
+                        'env command printenv OPENAI_API_KEY | grep -q .'):
+            with self.subTest(command=command):
+                self.check_command('assert-credential-presence.sh', command, True)
+
+    def test_control_constructs_cannot_run_evaluations(self):
+        for command in ('if skill-up run evals/eval.yaml; then echo yes; fi',
+                        'while command skill-up run evals/eval.yaml; do echo yes; done',
+                        'true; then env command skill-up run evals/eval.yaml',
+                        'exec -a evaluator skill-up run evals/eval.yaml',
+                        'exec -ca evaluator skill-up run evals/eval.yaml',
+                        '! FLAG=value skill-up run evals/eval.yaml'):
+            with self.subTest(command=command):
+                self.check_command('assert-credential-presence.sh', command, False, 'executed an evaluation')
+        for command in ('if command -v skill-up; then echo ready; fi',
+                        'if skill-up --help; then echo ready; fi',
+                        'echo "if skill-up run evals/eval.yaml"'):
+            with self.subTest(command=command):
+                self.check_command('assert-credential-presence.sh', command, True)
+
     def test_field_comments_need_english_words(self):
         judge = ROOT / 'fixtures/scripts/assert-english-only-generated-cases.sh'
         eval_text = ('# {comment}\nschema_version: "1.0"\nenvironment:\n  # {comment}\n  type: local\n'
