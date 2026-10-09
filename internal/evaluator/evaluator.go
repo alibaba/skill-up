@@ -473,6 +473,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	if judgePlan.Multi {
 		result.AggregationStrategy = judge.DefaultOutcomeAggregator().Strategy()
 		if _, ok := rt.(runtime.JudgeSnapshotProvider); !ok {
+			recordSkippedJudges(&result, judgePlan, "unsupported_runtime")
 			result.Status = judge.StatusError
 			result.Error = fmt.Errorf("multi-judge workspace isolation is not supported by %T", rt)
 			return result
@@ -499,6 +500,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 			return multiTurnResult
 		}
 		if caseCfg.UserSimulator != nil {
+			recordSkippedJudges(&result, judgePlan, "session_resumption_unsupported")
 			result.Status = judge.StatusError
 			result.Error = fmt.Errorf("agent %s does not support session resumption required by user simulation", runAgent.Name())
 			result.Configuration = configName

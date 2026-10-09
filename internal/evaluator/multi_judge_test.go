@@ -144,9 +144,10 @@ func TestMultiJudgeUnsupportedRuntimeStopsBeforeAgentRun(t *testing.T) {
 	e := newTestEvaluator(EvalOptions{Agent: ag, EvalCfg: &config.EvalConfig{Judges: &members}})
 	caseCfg := &config.CaseConfig{ID: "case", Input: config.Input{Prompt: "hello"}}
 	result := e.executeCase(context.Background(), caseCfg, ConfigurationWithoutSkill, &mockRuntime{workspace: t.TempDir()}, nil)
-	if result.Status != judge.StatusError || result.Error == nil || ag.runCall.Load() != 0 || result.Configuration != ConfigurationWithoutSkill {
+	if result.Status != judge.StatusError || result.Error == nil || ag.runCall.Load() != 0 || result.Configuration != ConfigurationWithoutSkill || len(result.JudgeResults) != len(members) {
 		t.Fatalf("status=%s config=%q error=%v runs=%d", result.Status, result.Configuration, result.Error, ag.runCall.Load())
 	}
+	assertSkippedJudgeOutcomes(t, result.JudgeResults, members, "unsupported_runtime")
 }
 
 func TestMultiJudgeSnapshotFailureKeepsConfiguration(t *testing.T) {
@@ -515,4 +516,23 @@ func TestJudgeWorkspacePathMapsCanonicalSourceAlias(t *testing.T) {
 	if mapped := judgeWorkspacePath(path, alias, fork); mapped != filepath.Join(fork, "result.txt") {
 		t.Fatalf("canonical workspace path mapped to %q", mapped)
 	}
+}
+
+func TestMultiJudgeUnsupportedSessionResumerPreservesSkippedOutcomes(t *testing.T) {
+	rt, err := runtime.NewRuntime(runtime.Config{Type: "none", WorkspaceDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ag := &mockAgent{name: "test"}
+	members := []config.JudgeConfig{{ID: "check", Type: "rule_based"}}
+	e := newTestEvaluator(EvalOptions{Agent: ag, EvalCfg: &config.EvalConfig{Judges: &members}})
+	c := &config.CaseConfig{ID: "simulated", Input: config.Input{Prompt: "start"}, UserSimulator: &config.UserSimulatorScenario{Scenario: "follow up"}}
+	result := e.executeCase(context.Background(), c, ConfigurationWithSkill, rt, nil)
+	if result.Status != judge.StatusError || len(result.JudgeResults) != len(members) || ag.runCall.Load() != 0 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	assertSkippedJudgeOutcomes(t, result.JudgeResults, members, "session_resumption_unsupported")
 }

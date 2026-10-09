@@ -36,6 +36,7 @@ func (e *defaultEvaluator) runMultipleJudges(
 ) EvalResult {
 	snapshotProvider, ok := rt.(runtime.JudgeSnapshotProvider)
 	if !ok {
+		recordSkippedJudges(result, plan, "unsupported_runtime")
 		result.Status = judge.StatusError
 		result.Error = fmt.Errorf("multi-judge workspace isolation is not supported by %T", rt)
 		return *result
