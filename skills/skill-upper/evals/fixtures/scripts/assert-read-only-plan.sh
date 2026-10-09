@@ -73,20 +73,19 @@ for message in messages:
             assert len(segment) >= 2 and segment[1] in {"--help", "--version", "validate", "list-cases"}, "Planning executed a mutating CLI operation"
         else:
             assert executable in read_commands, "Planning executed a command outside the requested read-only profile"
+        if executable in {"sort", "sed", "find", "file", "rg"}:
+            assert not any("$" in arg for arg in segment[1:]), f"Planning used shell expansion in {executable} arguments"
         if executable == "sort":
-            assert not any("$" in arg for arg in segment[1:]), "Planning used shell expansion in sort arguments"
             assert all(not arg.startswith("-") or arg == "--" or re.fullmatch(r"-[rnu]+", arg) for arg in segment[1:]), "Planning used sort outside the read-only argument profile"
         if executable == "sed":
             assert len(segment) >= 4 and segment[1] == "-n" and re.fullmatch(r"[0-9]+(?:,[0-9]+)?p", segment[2]), "Planning used sed outside line-range printing"
             assert all(not arg.startswith("-") for arg in segment[3:]), "Planning used unsupported sed options"
         if executable == "find":
-            assert not any("$" in arg for arg in segment[1:]), "Planning used shell expansion in find arguments"
             forbidden = {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"}
             assert not forbidden.intersection(segment[1:]), "Planning used a mutating find action"
         if executable == "rg":
             assert not any(arg in {"--pre", "--hostname-bin"} or arg.startswith(("--pre=", "--hostname-bin=")) for arg in segment[1:]), "Planning used a search option that executes a subprocess"
         if executable == "file":
-            assert not any("$" in arg for arg in segment[1:]), "Planning used shell expansion in file arguments"
             # Full safe option spellings only: GNU getopt_long also accepts
             # abbreviations such as --comp for the writing --compile mode.
             safe_options = {"--brief", "--mime", "--mime-type", "--mime-encoding", "--dereference", "--no-dereference", "--help", "--version"}

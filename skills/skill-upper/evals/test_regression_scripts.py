@@ -172,6 +172,15 @@ class TranscriptChecks(unittest.TestCase):
                 self.check_command('assert-credential-presence.sh', prefix + ' skill-up run evals/eval.yaml', False, 'executed an evaluation')
         self.check_command('assert-credential-presence.sh', 'time printenv OPENAI_API_KEY | grep -q .', True)
 
+    def test_search_and_sed_options_cannot_expand(self):
+        for command in ('rg ${O:=--hostname-bin=mktemp} --hyperlink-format=default --color=always x SKILL.md',
+                        'rg $OPTIONS x SKILL.md', 'sed -n 1p ${O:=-i} SKILL.md'):
+            with self.subTest(command=command):
+                self.check_command('assert-read-only-plan.sh', command, False, 'shell expansion')
+        for command in ('rg pattern SKILL.md', "rg '\\$HOME' SKILL.md", 'sed -n 1p SKILL.md'):
+            with self.subTest(command=command):
+                self.check_command('assert-read-only-plan.sh', command, True)
+
     def test_field_comments_need_english_words(self):
         judge = ROOT / 'fixtures/scripts/assert-english-only-generated-cases.sh'
         eval_text = ('# {comment}\nschema_version: "1.0"\nenvironment:\n  # {comment}\n  type: local\n'

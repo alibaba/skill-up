@@ -13,8 +13,9 @@ input:
     with literal arguments (no shell expansions) and only -b/-i/-L/-h/-v (combinations allowed), --brief,
     --mime/--mime-type/--mime-encoding, --dereference/--no-dereference,
     --help/--version, or -- followed by filenames.
-    Do not use other commands, options, or mutating tools. Stderr redirection
-    to /dev/null or stdout is allowed. Explain the proposed cases and what they would verify.
+    Do not use other commands, options, or mutating tools.
+    All arguments to rg, sed, sort, find, and file must be literal, without shell expansions.
+    Stderr redirection to /dev/null or stdout is allowed. Explain the proposed cases and what they would verify.
 judge:
   type: script
   script_path: evals/fixtures/scripts/assert-read-only-plan.sh
