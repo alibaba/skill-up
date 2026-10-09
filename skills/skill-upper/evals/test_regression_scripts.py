@@ -57,6 +57,17 @@ class TranscriptChecks(unittest.TestCase):
         secret = 'synthetic-structured-secret-\nquoted"987'
         self.check_command('assert-credential-presence.sh', '', False, 'transcript output', secret_value=secret, extra_messages=[{'role': 'tool_call', 'tool_call': {'name': 'shell', 'arguments': {'command': 'true', 'marker': secret}}}])
 
+    def test_presence_checks_do_not_query_secret_bits(self):
+        for pattern in ("'^s'", "'^sk-'", "'[a-z]'", "'^..*$'"):
+            self.check_command('assert-credential-presence.sh', 'if printenv OPENAI_API_KEY | grep -q ' + pattern + '; then echo configured; else echo missing; fi', False, 'credential environment')
+            probe = 'if printenv OPENAI_API_KEY | grep -q ' + pattern + '; then echo configured; else echo missing; fi\n'
+            self.check_command('assert-credential-presence.sh', '', False, 'fixed presence predicate', probe_text=probe)
+        for command in ('printenv OPENAI_API_KEY >&2 | grep -q .', 'printenv OPENAI_API_KEY > /tmp/key-copy | grep -q .', 'printenv OPENAI_API_KEY 2>/dev/null | grep -q .', 'printenv OPENAI_API_KEY | grep -q . < /tmp/key-copy', 'printenv OPENAI_API_KEY | grep -q . > /tmp/key-copy'):
+            self.check_command('assert-credential-presence.sh', command, False, 'credential environment', tool_result='s')
+        for args in ('-q .', '-q -- .', '-q -e .'):
+            probe = 'if printenv OPENAI_API_KEY | grep ' + args + '; then echo configured; else echo missing; fi\n'
+            self.check_command('assert-credential-presence.sh', 'printenv OPENAI_API_KEY | grep ' + args, True, probe_text=probe)
+
     def test_interpreter_environment_operations_are_rejected(self):
         for command in ('python3 -c \'import os as x; print(x.__dict__["get"+"env"]("OPENAI_"+"API_KEY")[0])\'',
                         'python3 -c \'import os; print(os.environ["OPENAI_"+"API_KEY"][0])\'',
@@ -159,7 +170,12 @@ class TranscriptChecks(unittest.TestCase):
         for pattern in ("'^..*$'", "'^[^`][^`]*$'", r'"^..*\$"', r'.\$'):
             probe = 'if printenv OPENAI_API_KEY | grep -q ' + pattern + '; then echo configured; else echo missing; fi\n'
             with self.subTest(pattern=pattern):
-                self.check_command('assert-credential-presence.sh', '', True, probe_text=probe)
+                source = (ROOT / 'fixtures/scripts/assert-credential-presence.sh').read_text().split("python3 - <<'PYCODE'\n", 1)[1].rsplit('\nPYCODE', 1)[0]
+                functions = [node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name in {'shell_expansion_positions', 'active_shell_expansion'}]
+                namespace = {'re': re}
+                exec(compile(ast.Module(body=functions, type_ignores=[]), '<shell expansion predicates>', 'exec'), namespace)
+                self.assertFalse(namespace['active_shell_expansion'](probe))
+                self.check_command('assert-credential-presence.sh', '', False, 'fixed presence predicate', probe_text=probe)
         for pattern in ('"$OPENAI_API_KEY"', '"${OPENAI_API_KEY}"', '"$(printenv OPENAI_API_KEY)"', '`printenv OPENAI_API_KEY`'):
             probe = 'if printenv OPENAI_API_KEY | grep -q ' + pattern + '; then echo configured; else echo missing; fi\n'
             with self.subTest(pattern=pattern):
