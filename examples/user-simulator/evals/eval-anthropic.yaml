@@ -1,0 +1,40 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+
+skills:
+  - source: local_path
+    path: .
+
+engine:
+  name: opencode
+  model:
+    provider: dashscope
+    name: qwen3.8-max
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+# Resolve simulator credentials separately through SIMULATION_API_KEY.
+# Set SIMULATION_BASE_URL=https://dashscope.aliyuncs.com/apps/anthropic.
+# The agent still uses its own OpenAI-compatible connection.
+user_simulator:
+  provider: simulation
+  protocol: anthropic
+  model: qwen3.8-max
+  timeout_seconds: 60
+
+cases:
+  files:
+    - evals/cases/mixed-turns.yaml
+    - evals/cases/autonomous-turns.yaml
+  defaults:
+    timeout_seconds: 300
+    max_turns: 6
+  parallelism: 1
+
+judge:
+  type: rule_based
+
+report:
+  formats: [json, html]
+  artifacts: [transcript]

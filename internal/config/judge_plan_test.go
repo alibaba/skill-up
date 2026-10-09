@@ -96,3 +96,17 @@ func TestResolveJudgePlanRejectsAmbiguousOrUnsafeLists(t *testing.T) {
 		t.Fatalf("ambiguous plan error = %v", err)
 	}
 }
+
+func TestMultiJudgeValidatesSimulatorBeforeJudgeBranch(t *testing.T) {
+	members := []JudgeConfig{{ID: "check", Type: "rule_based"}}
+	eval := &EvalConfig{Judges: &members}
+	c := &CaseConfig{ID: "simulated", Input: Input{Prompt: "start"}, UserSimulator: &UserSimulatorScenario{Scenario: "follow up"}}
+	v := NewValidator()
+	if err := v.ValidateCasesWithEvalDefaults(eval, []*CaseConfig{c}); err == nil || !strings.Contains(err.Error(), "eval-level provider") {
+		t.Fatalf("missing simulator model error: %v", err)
+	}
+	eval.UserSimulator = UserSimulatorModel{Provider: "simulation", Protocol: "openai", Model: "test"}
+	if err := v.ValidateCasesWithEvalDefaults(eval, []*CaseConfig{c}); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -826,9 +826,11 @@ func evalTurnResultsToReport(turns []evaluator.TurnResult) []report.CaseTurnResu
 		out[i] = report.CaseTurnResult{
 			TurnNumber: tr.TurnNumber,
 			Content:    tr.Content,
+			Source:     tr.Source,
 			Response:   tr.Response,
 			Status:     string(tr.Status),
 			Reason:     tr.Reason,
+			StopReason: tr.StopReason,
 		}
 	}
 	return out

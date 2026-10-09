@@ -99,6 +99,17 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	errs = append(errs, validateExpect("cases.defaults.expect", cfg.Cases.Defaults.Expect)...)
 	errs = append(errs, validateSkillRefs("skills", cfg.Skills)...)
 	errs = append(errs, validateConfiguredJudges(judgeFields{single: cfg.Judge, singleSet: cfg.JudgeSet, members: cfg.Judges, membersSet: cfg.JudgesSet})...)
+	if cfg.UserSimulator != (UserSimulatorModel{}) {
+		if strings.TrimSpace(cfg.UserSimulator.Provider) == "" || strings.TrimSpace(cfg.UserSimulator.Model) == "" {
+			errs = append(errs, "user_simulator.provider and user_simulator.model are required")
+		}
+		if !validUserSimulatorProtocol(cfg.UserSimulator.Protocol) {
+			errs = append(errs, "user_simulator.protocol must be openai or anthropic")
+		}
+		if cfg.UserSimulator.TimeoutSeconds < 0 {
+			errs = append(errs, "user_simulator.timeout_seconds must be non-negative")
+		}
+	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("validation errors:\n  - %s", strings.Join(errs, "\n  - "))
@@ -121,20 +132,13 @@ func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 	if cfg.Input.Prompt != "" && len(cfg.Input.Turns) > 0 {
 		errs = append(errs, "input.prompt and input.turns are mutually exclusive")
 	}
+	if cfg.UserSimulator != nil && strings.TrimSpace(cfg.UserSimulator.Scenario) == "" {
+		errs = append(errs, "user_simulator.scenario is required")
+	}
 
 	// if turns is specified, each turn must have role=user and content
 	for i, turn := range cfg.Input.Turns {
-		if turn.Role == "" {
-			errs = append(errs, fmt.Sprintf("input.turns[%d].role is required", i))
-		} else if turn.Role != "user" {
-			errs = append(errs, fmt.Sprintf("input.turns[%d].role must be \"user\", got %q", i, turn.Role))
-		}
-		if turn.Content == "" {
-			errs = append(errs, fmt.Sprintf("input.turns[%d].content is required", i))
-		}
-		if turn.TimeoutSeconds < 0 {
-			errs = append(errs, fmt.Sprintf("input.turns[%d].timeout_seconds must be non-negative", i))
-		}
+		errs = append(errs, validateTurnFields(i, turn, cfg.UserSimulator)...)
 		if turn.PostCondition != nil {
 			errs = append(errs, validatePostCondition(i, turn.PostCondition)...)
 		}
@@ -164,6 +168,28 @@ func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 	}
 
 	return nil
+}
+
+func validateTurnFields(i int, turn Turn, scenario *UserSimulatorScenario) []string {
+	var errs []string
+	if turn.Role == "" {
+		errs = append(errs, fmt.Sprintf("input.turns[%d].role is required", i))
+	} else if turn.Role != "user" {
+		errs = append(errs, fmt.Sprintf("input.turns[%d].role must be \"user\", got %q", i, turn.Role))
+	}
+	if turn.Content == "" && turn.Respond == "" {
+		errs = append(errs, fmt.Sprintf("input.turns[%d].content is required unless respond is set", i))
+	}
+	if turn.Content != "" && turn.Respond != "" {
+		errs = append(errs, fmt.Sprintf("input.turns[%d].content and respond are mutually exclusive", i))
+	}
+	if turn.Respond != "" && scenario == nil {
+		errs = append(errs, fmt.Sprintf("input.turns[%d].respond requires user_simulator.scenario", i))
+	}
+	if turn.TimeoutSeconds < 0 {
+		errs = append(errs, fmt.Sprintf("input.turns[%d].timeout_seconds must be non-negative", i))
+	}
+	return errs
 }
 
 func validateExpect(prefix string, expect Expect) []string {
@@ -511,6 +537,9 @@ func (v *Validator) ValidateCasesWithEvalDefaults(eval *EvalConfig, cases []*Cas
 		return err
 	}
 	for _, c := range cases {
+		if c.UserSimulator != nil && (eval.UserSimulator.Provider == "" || eval.UserSimulator.Model == "" || !validUserSimulatorProtocol(eval.UserSimulator.Protocol)) {
+			return fmt.Errorf("case %s: user_simulator requires eval-level provider, protocol: openai or anthropic, and model", c.ID)
+		}
 		plan, err := ResolveJudgePlan(eval, c)
 		if err != nil {
 			return fmt.Errorf("case %s: %w", c.ID, err)
@@ -972,4 +1001,8 @@ func validateNetworkPolicy(env Environment) []string {
 		}
 	}
 	return errs
+}
+
+func validUserSimulatorProtocol(protocol string) bool {
+	return protocol == "openai" || protocol == "anthropic"
 }

@@ -129,6 +129,42 @@ Docker CLI and daemon are required. `network_policy: deny_all` creates a contain
 - CLI model IDs combine `provider` and `name`, such as `dashscope/qwen3.8-max` or `openai/gpt-4`.
 - `qodercli` usually needs no `model` configuration.
 
+### Independent user simulator model
+
+Add this block only when a case has `user_simulator.scenario`. It selects a
+separate model for simulated user messages; neither `engine.model` nor
+`judge.model` supplies its configuration.
+
+The model ID below is a placeholder, not a runnable configuration. For a
+live-tested local OpenCode/DashScope configuration, see
+[the user simulator example](https://github.com/alibaba/skill-up/tree/main/examples/user-simulator).
+
+```yaml
+user_simulator:
+  provider: simulation
+  protocol: openai
+  model: your-chat-completions-model
+  timeout_seconds: 30
+```
+
+The simulator supports `protocol: openai` (Chat Completions) and
+`protocol: anthropic` (Messages). With the separate
+`simulation` provider, configure `SIMULATION_API_KEY` and
+`SIMULATION_BASE_URL`, or the `simulation` entry in
+`~/.skill-up/credentials.yaml`. Alternatively, `provider: openai` uses
+`OPENAI_API_KEY`, optional `OPENAI_BASE_URL`, and the standard OpenAI endpoint
+when no base URL is set. The agent's `--api-key` override does not configure
+the simulator. With `provider: anthropic` and `protocol: anthropic`, use
+`ANTHROPIC_API_KEY` and optional `ANTHROPIC_BASE_URL` (official endpoint fallback).
+Custom providers require an explicit base URL matching the selected protocol.
+Anthropic replies use 1024 output tokens with thinking disabled; truncation and
+tool calls are rejected. Do not write secret values in `eval.yaml`.
+
+Set `cases.defaults.max_turns` as the suite default, and override it with
+`constraints.max_turns` for a particular case. The evaluator, rather than the
+simulator model, enforces this ceiling. A simulated case needs an engine with
+session resumption; validate the configuration before running it.
+
 ### `engine.kwargs`: engine-specific switches
 
 `engine.kwargs` is a map of string keys and values. Each agent reads only keys it recognizes; unknown keys are ignored and reported at DEBUG level with `-v` (useful for typos such as `bypas_sandbox`). The repeatable CLI equivalent is `--engine-kwarg key=value` or `--ek key=value`. Priority: CLI option > `engine.kwargs` > default.

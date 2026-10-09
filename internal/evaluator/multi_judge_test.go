@@ -14,6 +14,7 @@ import (
 	"github.com/alibaba/skill-up/internal/judge"
 	"github.com/alibaba/skill-up/internal/report"
 	"github.com/alibaba/skill-up/internal/runtime"
+	"github.com/alibaba/skill-up/internal/usersimulator"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
 
@@ -386,6 +387,9 @@ func TestMultiJudgeSingleTurnExecutionErrorPreservesSkippedOutcomes(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
+			if err := rt.Create(context.Background()); err != nil {
+				t.Fatal(err)
+			}
 			ag := &mockAgent{name: "test", runFunc: func(context.Context, runtime.Runtime, agent.ExecOptions, []transcript.Message) (*agent.SessionResult, error) {
 				return nil, execErr
 			}}
@@ -428,5 +432,51 @@ func TestJudgeConfigForWorkspacePreservesOriginalAndExternalAttachments(t *testi
 	}
 	if mapped.Context.Profile != member.Context.Profile || mapped.Context.Attachments[0].Label != "output" || member.Context.Attachments[0].Path != workspacePath {
 		t.Fatalf("configuration changed: original=%+v mapped=%+v", member.Context, mapped.Context)
+	}
+}
+
+func TestMultiJudgeUserSimulatorGroupedOutcomes(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		simulator usersimulator.Simulator
+		status    judge.Status
+		turns     int
+	}{
+		{"completed", &scriptedSimulator{decisions: []usersimulator.Decision{{Action: "reply", Message: "follow up"}, {Action: "stop"}}}, judge.StatusPass, 2},
+		{"simulator_error", failingSimulator{}, judge.StatusError, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, err := runtime.NewRuntime(runtime.Config{Type: "none", WorkspaceDir: t.TempDir()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := rt.Create(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			ag := &mockResumerAgent{mockAgent: mockAgent{name: "test"}}
+			members := []config.JudgeConfig{{ID: "first", Type: "rule_based"}, {ID: "second", Type: "rule_based"}}
+			e := newTestEvaluator(EvalOptions{Agent: ag, Simulator: tc.simulator, EvalCfg: &config.EvalConfig{
+				Judges: &members, Cases: config.CasesConfig{Defaults: config.CaseDefaults{MaxTurns: 3}},
+			}})
+			c := &config.CaseConfig{ID: "simulated", Input: config.Input{Prompt: "start"}, UserSimulator: &config.UserSimulatorScenario{Scenario: "follow up"}}
+			result := e.executeCase(context.Background(), c, ConfigurationWithSkill, rt, nil)
+			if result.Status != tc.status || result.TurnsTotal != tc.turns || len(result.JudgeResults) != len(members) || ag.turnCall != tc.turns {
+				t.Fatalf("unexpected grouped result: %+v", result)
+			}
+			assertSimulatedJudgeStatuses(t, result, members)
+		})
+	}
+}
+
+func assertSimulatedJudgeStatuses(t *testing.T, result EvalResult, members []config.JudgeConfig) {
+	t.Helper()
+	if result.Status == judge.StatusError {
+		assertSkippedJudgeOutcomes(t, result.JudgeResults, members, "agent_execution_failed")
+		return
+	}
+	for _, outcome := range result.JudgeResults {
+		if outcome.Status != judge.StatusPass || outcome.Result.TurnsTotal != result.TurnsTotal {
+			t.Fatalf("unexpected completed outcome: %+v", outcome)
+		}
 	}
 }

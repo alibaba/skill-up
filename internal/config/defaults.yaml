@@ -14,6 +14,9 @@ engine:
   name: claude_code
   model: {}
 
+# Optional. Set provider, protocol (openai or anthropic), and model to simulate user replies.
+user_simulator: {}
+
 cases:
   files: []
   defaults:

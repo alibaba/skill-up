@@ -118,9 +118,11 @@ type embeddedCase struct {
 type embeddedTurn struct {
 	TurnNumber int    `json:"turn_number"`
 	Content    string `json:"content"`
+	Source     string `json:"source,omitempty"`
 	Response   string `json:"response"`
 	Status     string `json:"status"`
 	Reason     string `json:"reason,omitempty"`
+	StopReason string `json:"stop_reason,omitempty"`
 }
 
 type embeddedGrading struct {
