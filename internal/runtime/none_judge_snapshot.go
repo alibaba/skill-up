@@ -131,6 +131,9 @@ func copyJudgeTree(ctx context.Context, source, target string) error {
 		case entry.Type()&os.ModeSymlink != 0:
 			return copyJudgeSymlink(root, source, path, rel)
 		case entry.Type().IsRegular():
+			if entry.Name() == ".git" {
+				return fmt.Errorf("judge snapshot rejects Git metadata pointer file: %s; use a standalone checkout with a .git directory", path)
+			}
 			return copyJudgeFile(ctx, path, out, info.Mode().Perm(), info.ModTime())
 		default:
 			return fmt.Errorf("judge snapshot cannot copy special file: %s", path)

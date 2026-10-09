@@ -86,6 +86,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixture uploads.
 
 ### Fixed
+- Reject Git metadata pointer files in judge snapshots, preventing linked
+  worktrees and submodules from sharing the original Git index across forks.
 - Map absolute workspace attachment and generated-file paths into each isolated
   judge copy while preserving original inputs and references to archived artifacts.
 - Preserve skipped judge outcomes and grouped evaluation artifacts when a case

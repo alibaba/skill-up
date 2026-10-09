@@ -71,8 +71,9 @@ Only `NoneRuntime` implements it today. It copies the full workspace to temporar
 storage and creates a new copy for each member. Internal relative symlinks are
 preserved, as are regular-file/directory modification times and permission bits
 (the workspace root stays private with mode 0700). Absolute or escaping links
-and special files are rejected. Copying
-observes cancellation. This isolates workspace file changes, not host processes,
+and special files are rejected. Git metadata pointer files (`.git` files in linked
+worktrees or submodules) are rejected; use a standalone checkout with a `.git`
+directory. Copying observes cancellation. This isolates workspace file changes, not host processes,
 network access, credentials, or effects on external services. Snapshot failure
 produces ERROR with skipped members. Temporary snapshots are deleted after use;
 this is not a durable replay or regrading feature.

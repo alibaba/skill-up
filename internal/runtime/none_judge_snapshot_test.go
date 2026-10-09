@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -216,4 +217,39 @@ func TestJudgeSnapshotCleansPopulatedReadOnlyDirectories(t *testing.T) {
 		t.Fatalf("original directory permissions changed: info=%v error=%v", info, err)
 	}
 	assertOriginalJudgeInput(t, filepath.Join(dir, "input"))
+}
+
+func TestJudgeSnapshotRejectsGitMetadataPointers(t *testing.T) {
+	for _, relative := range []string{".git", "submodule/.git"} {
+		t.Run(relative, func(t *testing.T) {
+			workspace, metadata := t.TempDir(), t.TempDir()
+			pointer := filepath.Join(workspace, filepath.FromSlash(relative))
+			if err := os.MkdirAll(filepath.Dir(pointer), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			content := []byte("gitdir: " + metadata + "\n")
+			if err := os.WriteFile(pointer, content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			rt, err := NewRuntime(Config{Type: "none", WorkspaceDir: workspace})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := rt.Create(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			noneRT, ok := rt.(*NoneRuntime)
+			if !ok {
+				t.Fatalf("runtime type = %T", rt)
+			}
+			snapshot, err := noneRT.CaptureJudgeSnapshot(context.Background())
+			if err == nil || snapshot != nil || !strings.Contains(err.Error(), "Git metadata pointer file") {
+				t.Fatalf("metadata pointer accepted: snapshot=%v error=%v", snapshot, err)
+			}
+			data, err := os.ReadFile(pointer)
+			if err != nil || !bytes.Equal(data, content) {
+				t.Fatalf("original metadata pointer changed: %q, %v", data, err)
+			}
+		})
+	}
 }
