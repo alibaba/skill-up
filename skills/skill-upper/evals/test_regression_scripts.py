@@ -1,5 +1,7 @@
 """Deterministic transcript regressions for the self-eval script judges."""
 import json
+import ast
+import re
 import os
 from pathlib import Path
 import shlex
@@ -58,6 +60,19 @@ class TranscriptChecks(unittest.TestCase):
             with self.subTest(command=command):
                 self.check_command('assert-credential-presence.sh', command, False, 'interpreter', tool_result='s')
         self.check_command('assert-credential-presence.sh', 'python3 -c \'print("ready")\'', True)
+
+    def test_localized_field_comments_need_english_words(self):
+        # Exercise the real standalone judge predicate without invoking its
+        # unrelated YAML/CLI validation dependencies.
+        source = (ROOT / 'fixtures/scripts/assert-localized-regressions.sh').read_text().split("python3 - <<'PYCODE'\n", 1)[1].rsplit('\nPYCODE', 1)[0]
+        predicate = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == 'is_explanatory_comment')
+        namespace = {'re': re}
+        exec(compile(ast.Module(body=[predicate], type_ignores=[]), '<localized comment predicate>', 'exec'), namespace)
+        for comment, accepted in (('123', False), ('?!...', False), ('', False),
+                                  ('type: rule_based', False), ('- example.yaml', False),
+                                  ('Require the exact Chinese literal in the output.', True)):
+            with self.subTest(comment=comment):
+                self.assertEqual(bool(namespace['is_explanatory_comment'](comment)), accepted)
 
     def test_literal_python_probe_writer_forms(self):
         probe = 'if printenv OPENAI_API_KEY | grep -q .; then echo configured; else echo missing; fi\n'

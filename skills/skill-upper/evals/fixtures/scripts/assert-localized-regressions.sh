@@ -62,6 +62,9 @@ case_text = case_path.read_text()
 case_lines = case_text.splitlines()
 import yaml
 case_nodes = yaml.compose(case_text)
+def is_explanatory_comment(comment):
+    return bool(re.search(r"[A-Za-z]{3,}", comment)) and not comment.startswith("-") and not re.match(r"^[A-Za-z0-9_.-]+:\s*", comment)
+
 for field_path in (("id",), ("title",), ("input", "prompt"), ("expect",), ("judge", "type")):
     node = case_nodes
     field = None
@@ -81,7 +84,7 @@ for field_path in (("id",), ("title",), ("input", "prompt"), ("expect",), ("judg
     while index >= 0 and case_lines[index].lstrip().startswith("#"):
         comments.append(case_lines[index].lstrip()[1:].strip())
         index -= 1
-    assert any(comment and not re.match(r"^[A-Za-z0-9_.-]+:\s*", comment) for comment in comments), "New case missing field-leading comment: " + ".".join(field_path)
+    assert any(is_explanatory_comment(comment) for comment in comments), "New case missing field-leading comment: " + ".".join(field_path)
 case = yaml.safe_load(case_text)
 config = yaml.safe_load(Path("evals/eval.yaml").read_text())
 assert case.get("id") == "list-empty-todos", "Incorrect new case ID"
