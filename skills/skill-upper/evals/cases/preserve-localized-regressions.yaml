@@ -13,6 +13,7 @@ input:
     new case.
     Use standalone shell wrappers; do not chain commands outside a shell wrapper.
     Use literal skill-up command arguments without shell expansion.
+    Author YAML with literal shell file writers or file-edit tools, without interpreter code or dynamic command dispatch.
 judge:
   type: script
   script_path: evals/fixtures/scripts/assert-localized-regressions.sh

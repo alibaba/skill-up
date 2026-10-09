@@ -448,6 +448,13 @@ class TranscriptChecks(unittest.TestCase):
         for field in ('cwd', 'workdir', 'working_directory'):
             self.check_command('assert-credential-presence.sh', '', False, 'process environment', extra_messages=[{'tool_call': {'name': 'shell', 'arguments': {'command': 'cat self/environ', field: '/proc'}}}])
 
+    def test_localized_interpreter_dispatch_is_rejected(self):
+        for command in ("python3 -c 'import subprocess; subprocess.run([\"skill-up\",\"run\",\"evals/eval.yaml\"])'", "node -e 'require(\"child_process\").execSync(\"skill-up run evals/eval.yaml\")'", "env python3 -c 'print(1)'", "eval 'skill-up run evals/eval.yaml'"):
+            reason = 'interpreter dispatch' if command.startswith(('python', 'node')) else 'unsupported command dispatch'
+            self.check_command('assert-localized-regressions.sh', command, False, reason)
+        for command in ("echo python3", "cat SKILL.md", "skill-up help run", "command -v skill-up", "bash -lc 'cd . && cat SKILL.md'", "tee file.yaml <<'EOF'\nid: example\ninput: skill-up run\nEOF"):
+            self.check_command('assert-localized-regressions.sh', command, False, 'Authoring modified the target Skill')
+
     def test_localized_cli_arguments_cannot_expand(self):
         for command in ('skill-up r$@un evals/eval.yaml', 'skill-up r${EMPTY:-}un evals/eval.yaml'):
             self.check_command('assert-localized-regressions.sh', command, False, 'expanded skill-up arguments')

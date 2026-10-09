@@ -7,6 +7,71 @@ import subprocess
 import os
 import json
 import shlex
+def shell_expansion_positions(command, include_globs=False):
+    """Inspect shell quoting before shlex discards literal/escaped markers."""
+    quote = None
+    escaped = False
+    comment = False
+    word_start = True
+    substitutions = []
+    skip_parenthesis = False
+    for index, character in enumerate(command):
+        if skip_parenthesis:
+            skip_parenthesis = False
+            continue
+        if comment:
+            if character == "\n":
+                comment = False
+                word_start = True
+            continue
+        if escaped:
+            escaped = False
+            if character != "\n":
+                word_start = False
+            continue
+        if character == "#" and quote is None and word_start:
+            comment = True
+            continue
+        if quote != "'" and character == "$":
+            yield index
+            if command[index + 1:index + 2] == "(":
+                substitutions.append([quote, 1, ")"])
+                quote = None
+                word_start = True
+                skip_parenthesis = True
+                continue
+        elif quote != "'" and character == "`":
+            yield index
+            if substitutions and substitutions[-1][2] == "`":
+                quote = substitutions.pop()[0]
+                word_start = False
+            else:
+                substitutions.append([quote, 0, "`"])
+                quote = None
+                word_start = True
+            continue
+        elif include_globs and quote is None and character in "*?[":
+            yield index
+        if quote is None and substitutions and substitutions[-1][2] == ")":
+            if character == "(":
+                substitutions[-1][1] += 1
+            elif character == ")":
+                substitutions[-1][1] -= 1
+                if substitutions[-1][1] == 0:
+                    quote = substitutions.pop()[0]
+                    word_start = False
+                    continue
+        if character == "\\" and quote != "'":
+            escaped = True
+        elif character == "'" and quote != '"':
+            quote = None if quote == "'" else "'"
+        elif character == '"' and quote != "'":
+            quote = None if quote == '"' else '"'
+        word_start = quote is None and (character.isspace() or character in ";&|<>()")
+
+def active_shell_expansion(command, include_globs=False):
+    return next(shell_expansion_positions(command, include_globs), None) is not None
+
 def standalone_shell_wrapper(command):
     """Keep compound commands from becoming discarded wrapper operands."""
     quote = None
@@ -51,19 +116,55 @@ for message in json.loads(Path(path).read_text()):
                 delimiter = None
             continue
         match = re.search(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z_0-9]*)['\"]?", line)
-        if match and re.match(r"\s*(?:/[^\s]+/)?cat\b", line):
+        if match and re.match(r"\s*(?:/[^\s]+/)?(?:cat|tee|printf)\b", line):
             delimiter = match.group(1)
             line = line[:match.start()]
         executed.append(line)
     command = "\n".join(executed)
-    # Match command tokens, not quoted documentation or YAML written to files.
-    tokens = list(shlex.shlex(command, posix=True, punctuation_chars=";&|()"))
-    for index, token in enumerate(tokens):
-        if Path(token).name == "skill-up":
-            tail = tokens[index + 1:]
-            boundary = next((i for i, value in enumerate(tail) if value in {";", "&&", "||", "|", ")"}), len(tail))
-            assert not any("$" in value or "`" in value for value in tail[:boundary]), "Authoring used expanded skill-up arguments"
-            assert "run" not in tail[:boundary], "Authoring launched an evaluation"
+    assert not active_shell_expansion(command), "Authoring used expanded skill-up arguments or dynamic shell dispatch"
+    lexer = shlex.shlex(command.replace("\n", "\n;"), posix=True, punctuation_chars=";&|()<>")
+    lexer.whitespace_split = True
+    segments = [[]]
+    for token in lexer:
+        if token in {";", "&&", "||", "|", "&", "(", ")"}:
+            segments.append([])
+        else:
+            segments[-1].append(token)
+    for segment in segments:
+        invocation = []
+        index = 0
+        while index < len(segment):
+            if segment[index] in {">", ">>", "<", "<<", "<<-", ">&", "<&"}:
+                if invocation and invocation[-1].isdigit():
+                    invocation.pop()
+                index += 2
+            else:
+                invocation.append(segment[index])
+                index += 1
+        while invocation and (invocation[0] in {"if", "then", "elif", "else", "while", "until", "do", "!", "{"} or re.match(r"^[A-Za-z_][A-Za-z_0-9]*=", invocation[0])):
+            invocation = invocation[1:]
+        if not invocation:
+            continue
+        executable = Path(invocation[0]).name
+        if executable == "command" and len(invocation) >= 3 and invocation[1] in {"-v", "-V"}:
+            continue
+        assert not re.fullmatch(r"python[0-9.]*|node|ruby|perl|awk|gawk|mawk|nawk", executable), "Authoring used unsupported interpreter dispatch"
+        allowed = {"cat", "tee", "printf", "echo", "mkdir", "touch", "cp", "mv", "rm", "chmod", "cd", "pwd", "ls", "head", "tail", "rg", "grep", "wc", "stat", "find", "sed", "sort", "skill-up", "true", "false", ":", "test", "[", "fi", "done", "}"}
+        assert executable in allowed, "Authoring used unsupported command dispatch"
+        if executable == "find":
+            assert not {"-exec", "-execdir", "-ok", "-okdir"}.intersection(invocation[1:]), "Authoring used unsupported find dispatch"
+        if executable == "rg":
+            assert not any(arg in {"--pre", "--hostname-bin"} or arg.startswith(("--pre=", "--hostname-bin=")) for arg in invocation[1:]), "Authoring used unsupported search dispatch"
+        if executable == "sed":
+            assert len(invocation) >= 4 and invocation[1] == "-n" and re.fullmatch(r"[0-9]+(?:,[0-9]+)?p", invocation[2]) and all(not arg.startswith("-") for arg in invocation[3:]), "Authoring used unsupported sed dispatch"
+        if executable == "sort":
+            assert all(not arg.startswith("-") or arg == "--" or re.fullmatch(r"-[rnu]+", arg) for arg in invocation[1:]), "Authoring used unsupported sort dispatch"
+        if executable == "skill-up":
+            args = invocation[1:]
+            while args and (args[0] == "--config" or args[0].startswith("--config=")):
+                args = args[2:] if args[0] == "--config" else args[1:]
+            assert not args or args[0] != "run", "Authoring launched an evaluation"
+            assert args and args[0] in {"validate", "list-cases", "help", "--help", "-h", "--version"}, "Authoring used unsupported CLI dispatch"
 assert __import__("hashlib").sha256(Path("SKILL.md").read_bytes()).hexdigest() == "73c5089b7c08bcc3b78573d7a6027ccb62338b4f017764f86e512f75ab3b8582", "Authoring modified the target Skill"
 literal = "暂无待办事项"
 reply = os.environ.get("EVAL_FINAL_MESSAGE", "")
