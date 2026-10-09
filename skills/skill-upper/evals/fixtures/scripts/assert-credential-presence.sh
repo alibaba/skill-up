@@ -267,6 +267,7 @@ for message in messages:
     protected_roots = {".codex", ".claude", ".skill-up", ".qwen", ".qoder", ".opencode", "opencode", "codex"}
     for token in tokens:
         basename = token.rsplit("/", 1)[-1]
+        assert not (token.startswith("/proc/") and fnmatch.fnmatchcase("environ", basename)), "Author read process environment credentials"
         protected_parent = any(fnmatch.fnmatchcase(root, component) for component in token.split("/")[:-1] for root in protected_roots)
         assert basename not in protected_names and not (protected_parent and any(fnmatch.fnmatchcase(name, basename) for name in protected_names)), "Author accessed a credential file through shell path syntax"
     segments = [[]]

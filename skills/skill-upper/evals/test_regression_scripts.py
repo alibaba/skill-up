@@ -97,6 +97,12 @@ class TranscriptChecks(unittest.TestCase):
                 self.check_command(script, command, False, 'compound shell wrapper')
         self.check_command('assert-credential-presence.sh', "bash -c 'printenv OPENAI_API_KEY | grep -q .' 'ignored;label'", True)
 
+    def test_process_environment_paths_are_rejected(self):
+        for path in ('/proc/self/environ', '/proc/123/environ', '/proc/*/environ', '/proc/self/envir*', '/proc/self/"environ"'):
+            with self.subTest(path=path):
+                self.check_command('assert-credential-presence.sh', 'cat ' + path + ' | cut -c 1', False, 'process environment', tool_result='s')
+        self.check_command('assert-credential-presence.sh', 'cat /proc/self/status', True)
+
     def test_literal_python_probe_writer_forms(self):
         probe = 'if printenv OPENAI_API_KEY | grep -q .; then echo configured; else echo missing; fi\n'
         sources = ('open("credential-check.sh", "w").write(' + repr(probe) + ')',
