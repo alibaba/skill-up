@@ -76,6 +76,23 @@ class TranscriptChecks(unittest.TestCase):
                 self.check_command('assert-credential-presence.sh', '', False, 'shell expansion', probe_text=source)
                 self.assertFalse(target.exists())
 
+    def test_shell_aliases_cannot_read_credentials(self):
+        for command in ('value=$OPENAI_API_KEY; printf \'%s\\n\' "${value%${value#?}}"',
+                        'value=${OPENAI_API_KEY}; echo "$value"',
+                        'value=${OPENAI_API_KEY:0:1}; echo "$value"',
+                        'key=OPENAI_API_KEY; value=${!key}; echo "$value"',
+                        'value="$OPENAI_API_KEY"\nprintf \'%s\' "$value"',
+                        'echo "$(printf "%s" "don\'t $OPENAI_API_KEY\'" | cut -c 7)"',
+                        'echo "$(echo "$(printf "%s" "$OPENAI_API_KEY" | cut -c 1)")"',
+                        'echo "`printf "%s" "$OPENAI_API_KEY" | cut -c 1`"'):
+            with self.subTest(command=command):
+                self.check_command('assert-credential-presence.sh', command, False, 'shell', tool_result='s')
+        for command in ("echo '$OPENAI_API_KEY'", r'echo \$OPENAI_API_KEY',
+                        '# Do not read $OPENAI_API_KEY\nprintenv OPENAI_API_KEY | grep -q .',
+                        'echo "$HOME"'):
+            with self.subTest(command=command):
+                self.check_command('assert-credential-presence.sh', command, True)
+
     def test_credential_paths_independent_of_reader(self):
         for command in ('grep token ~/.codex/auth.json', 'rg token ~/.claude/.credentials.json',
                         'awk \'{print}\' ~/.skill-up/credentials.yaml', 'grep key .env', 'cat ~/.codex/auth.json>/tmp/auth-copy', 'grep token<~/.codex/auth.json'):
@@ -143,7 +160,7 @@ class TranscriptChecks(unittest.TestCase):
                         "env env | cut -c 1", 'env -i OPENAI_API_KEY="$OPENAI_API_KEY" | cut -c 1'):
             with self.subTest(command=command):
                 self.check_command('assert-credential-presence.sh', command, False,
-                                   'dumped credential environment', tool_result='s')
+                                   'credential', tool_result='s')
 
     def test_env_with_a_command_remains_valid(self):
         self.check_command('assert-credential-presence.sh',
