@@ -92,6 +92,82 @@ def standalone_shell_wrapper(command):
             return False
     return True
 
+def shell_line_continues(line, quote=None):
+    escaped = False
+    for index, character in enumerate(line):
+        if escaped:
+            escaped = False
+        elif character == "\\" and quote != "'":
+            escaped = True
+        elif character in "'\"":
+            if quote is None:
+                quote = character
+            elif quote == character:
+                quote = None
+        elif quote is None and character == "#" and (index == 0 or line[index - 1].isspace() or line[index - 1] in ";&|()<>"):
+            return False
+    return escaped
+
+def heredoc_marker(line, quote=None):
+    escaped = False
+    index = 0
+    while index < len(line):
+        character = line[index]
+        if escaped:
+            escaped = False
+        elif character == "\\" and quote != "'":
+            escaped = True
+        elif character in "'\"":
+            if quote is None:
+                quote = character
+            elif quote == character:
+                quote = None
+        elif quote is None:
+            if character == "#" and (index == 0 or line[index - 1].isspace() or line[index - 1] in ";&|()<>"):
+                break
+            if line.startswith("<<<", index):
+                index += 3
+                continue
+            if line.startswith("<<", index):
+                cursor = index + (3 if line.startswith("<<-", index) else 2)
+                while cursor < len(line) and line[cursor].isspace():
+                    cursor += 1
+                start = cursor
+                marker_quote = None
+                quoted = False
+                decoded = []
+                while cursor < len(line):
+                    current = line[cursor]
+                    assert not (marker_quote is None and current == "$" and line[cursor + 1:cursor + 2] in {"\"", "'"}), "Unsupported shell quoting in heredoc delimiter"
+                    if current == "\\" and marker_quote != "'":
+                        quoted = True
+                        assert cursor + 1 < len(line), "Incomplete heredoc delimiter escape"
+                        following = line[cursor + 1]
+                        if marker_quote is None or following in '$`"\\':
+                            decoded.append(following)
+                        else:
+                            decoded.extend((current, following))
+                        cursor += 2
+                        continue
+                    if current in "'\"":
+                        if marker_quote is None:
+                            marker_quote = current
+                            quoted = True
+                        elif marker_quote == current:
+                            marker_quote = None
+                        else:
+                            decoded.append(current)
+                    elif marker_quote is None and (current.isspace() or current in ";&|()<>"):
+                        break
+                    else:
+                        decoded.append(current)
+                    cursor += 1
+                assert cursor > start and marker_quote is None and cursor <= len(line), "Unsupported heredoc delimiter outside the literal authoring profile"
+                marker = "".join(decoded)
+                return (index, cursor, marker, quoted, line.startswith("<<-", index)), quote
+        index += 1
+    return None, quote
+
 path = os.environ.get("EVAL_TRANSCRIPT_PATH")
 assert path, "Missing authoring transcript"
 for message in json.loads(Path(path).read_text()):
@@ -107,18 +183,28 @@ for message in json.loads(Path(path).read_text()):
             command = wrapper[2]
         else:
             break
-    # Ignore heredoc data written to case files, not executed shell commands.
+    # Only quoted heredocs are inert data; require quoting before skipping bodies.
     executed = []
     delimiter = None
-    for line in command.splitlines():
-        if delimiter:
-            if line.strip() == delimiter:
+    quote_state = None
+    lines = iter(command.splitlines())
+    for line in lines:
+        if delimiter is not None:
+            if (line.lstrip("\t") if strip_tabs else line) == delimiter:
                 delimiter = None
             continue
-        match = re.search(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z_0-9]*)['\"]?", line)
+        while shell_line_continues(line, quote_state):
+            continuation = next(lines, None)
+            assert continuation is not None, "Incomplete shell line continuation"
+            line = line[:-1] + continuation
+        match, next_quote_state = heredoc_marker(line, quote_state)
         if match and re.match(r"\s*(?:/[^\s]+/)?(?:cat|tee|printf)\b", line):
-            delimiter = match.group(1)
-            line = line[:match.start()]
+            start, end, delimiter, quoted, strip_tabs = match
+            assert quoted, "Author used an unquoted heredoc outside the literal authoring profile"
+            line = line[:start] + line[end:]
+            other, next_quote_state = heredoc_marker(line, quote_state)
+            assert other is None, "Multiple heredocs outside the literal authoring profile"
+        quote_state = next_quote_state
         executed.append(line)
     command = "\n".join(executed)
     assert not active_shell_expansion(command), "Authoring used expanded skill-up arguments or dynamic shell dispatch"

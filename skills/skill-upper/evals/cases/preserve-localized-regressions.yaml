@@ -14,6 +14,7 @@ input:
     Use standalone shell wrappers; do not chain commands outside a shell wrapper.
     Use literal skill-up command arguments without shell expansion.
     Author YAML with literal shell file writers or file-edit tools, without interpreter code or dynamic command dispatch.
+    Use at most one heredoc per command line and quote its delimiter (for example <<'EOF') when writing files; use POSIX single/double quotes or backslash quoting, without Bash dollar-quoted delimiters. Unquoted heredocs are outside the literal authoring profile.
 judge:
   type: script
   script_path: evals/fixtures/scripts/assert-localized-regressions.sh
