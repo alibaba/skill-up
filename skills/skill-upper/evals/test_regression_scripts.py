@@ -122,6 +122,15 @@ class TranscriptChecks(unittest.TestCase):
             with self.subTest(command=command):
                 self.check_command('assert-credential-presence.sh', command, True)
 
+    def test_sort_cannot_expand_writing_options(self):
+        for command in ('sort ${OPTION:=--output=/tmp/created} /dev/null', 'sort $OPTIONS SKILL.md'):
+            with self.subTest(command=command):
+                self.check_command('assert-read-only-plan.sh', command, False, 'shell expansion')
+        self.check_command('assert-read-only-plan.sh', 'sort -rnu SKILL.md', True)
+        for command in ("sort '$HOME'", r'sort \$HOME'):
+            with self.subTest(command=command):
+                self.check_command('assert-read-only-plan.sh', command, True)
+
     def test_field_comments_need_english_words(self):
         judge = ROOT / 'fixtures/scripts/assert-english-only-generated-cases.sh'
         eval_text = ('# {comment}\nschema_version: "1.0"\nenvironment:\n  # {comment}\n  type: local\n'
