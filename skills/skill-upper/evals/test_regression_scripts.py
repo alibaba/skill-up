@@ -57,7 +57,7 @@ class TranscriptChecks(unittest.TestCase):
                 self.check_command('assert-credential-presence.sh', 'python3 -c ' + shlex.quote(source), False, 'interpreter')
 
     def test_probe_literal_regex_markers_are_not_expansion(self):
-        for pattern in ("'^..*$'", "'^[^`][^`]*$'", r'"^..*\$"', r'^..*\$'):
+        for pattern in ("'^..*$'", "'^[^`][^`]*$'", r'"^..*\$"', r'.\$'):
             probe = 'if printenv OPENAI_API_KEY | grep -q ' + pattern + '; then echo configured; else echo missing; fi\n'
             with self.subTest(pattern=pattern):
                 self.check_command('assert-credential-presence.sh', '', True, probe_text=probe)
@@ -140,6 +140,19 @@ class TranscriptChecks(unittest.TestCase):
         for command in ('set -eu', 'set --', 'set -o', 'export OTHER=value', 'declare OTHER=value'):
             with self.subTest(command=command):
                 self.check_command('assert-credential-presence.sh', command, True)
+
+    def test_probe_grep_cannot_read_host_files(self):
+        probe = 'if printenv OPENAI_API_KEY | grep -q .; then echo configured; else echo missing; fi\n'
+        for source in ('grep -q token /root/.codex/auth.json || :\n',
+                       'grep -q -f/root/.codex/auth.json || :\n',
+                       'grep -q --file=/root/.codex/auth.json || :\n',
+                       'grep -q -f /root/.codex/auth.json || :\n'):
+            with self.subTest(source=source):
+                self.check_command('assert-credential-presence.sh', '', False, 'stdin-only', probe_text=source + probe)
+        for args in ('-q -- .', '-q -e .'):
+            self.check_command('assert-credential-presence.sh', '', True, probe_text=probe.replace('-q .', args))
+        self.check_command('assert-credential-presence.sh', '', False, 'shell expansion',
+                           probe_text='grep -q /root/.codex/* || :\n' + probe)
 
     def test_field_comments_need_english_words(self):
         judge = ROOT / 'fixtures/scripts/assert-english-only-generated-cases.sh'
