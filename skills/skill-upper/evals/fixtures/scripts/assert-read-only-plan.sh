@@ -6,6 +6,26 @@ import os
 import json
 import shlex
 import re
+def standalone_shell_wrapper(command):
+    """Keep compound commands from becoming discarded wrapper operands."""
+    quote = None
+    escaped = False
+    for character in command:
+        if escaped:
+            escaped = False
+            continue
+        if character == "\\" and quote != "'":
+            escaped = True
+        elif character == "'" and quote != '"':
+            quote = None if quote == "'" else "'"
+        elif character == '"' and quote != "'":
+            quote = None if quote == '"' else '"'
+        elif character in "$`" and quote != "'":
+            return False
+        elif quote is None and character in ";&|()<>\n":
+            return False
+    return True
+
 path = os.environ.get("EVAL_TRANSCRIPT_PATH")
 assert path, "Missing authoring transcript"
 messages = json.loads(Path(path).read_text())
@@ -21,8 +41,9 @@ for message in messages:
     for _ in range(4):
         if not re.match(r"^\s*(?:[^\s]*/)?(?:sh|bash|zsh|dash)\s+-(?:c|lc)\s", command):
             break
+        assert standalone_shell_wrapper(command), "Unsupported compound shell wrapper"
         wrapper = shlex.split(command)
-        if len(wrapper) == 3 and Path(wrapper[0]).name in {"sh", "bash", "zsh", "dash"} and wrapper[1] in {"-c", "-lc"}:
+        if len(wrapper) >= 3 and Path(wrapper[0]).name in {"sh", "bash", "zsh", "dash"} and wrapper[1] in {"-c", "-lc"}:
             command = wrapper[2]
         else:
             break

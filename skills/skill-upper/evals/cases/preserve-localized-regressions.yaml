@@ -11,6 +11,7 @@ input:
     SKILL.md. Reply in English and add short field-leading English comments
     for id, title, input.prompt, expect, and judge.type when present in the
     new case.
+    Use standalone shell wrappers; do not chain commands outside a shell wrapper.
 judge:
   type: script
   script_path: evals/fixtures/scripts/assert-localized-regressions.sh

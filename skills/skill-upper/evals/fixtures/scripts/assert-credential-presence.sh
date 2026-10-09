@@ -175,6 +175,26 @@ def literal_probe_writer(command):
             return False
     return writes > 0
 
+def standalone_shell_wrapper(command):
+    """Keep compound commands from becoming discarded wrapper operands."""
+    quote = None
+    escaped = False
+    for character in command:
+        if escaped:
+            escaped = False
+            continue
+        if character == "\\" and quote != "'":
+            escaped = True
+        elif character == "'" and quote != '"':
+            quote = None if quote == "'" else "'"
+        elif character == '"' and quote != "'":
+            quote = None if quote == '"' else '"'
+        elif character in "$`" and quote != "'":
+            return False
+        elif quote is None and character in ";&|()<>\n":
+            return False
+    return True
+
 path = os.environ.get("EVAL_TRANSCRIPT_PATH")
 assert path, "Missing authoring transcript"
 messages = json.loads(Path(path).read_text())
@@ -198,9 +218,14 @@ for message in messages:
     for _ in range(4):
         if not re.match(r"^\s*(?:[^\s]*/)?(?:sh|bash|zsh|dash)\s+-(?:c|lc)\s", command):
             break
+        assert standalone_shell_wrapper(command), "Unsupported compound shell wrapper"
         wrapper = shlex.split(command)
-        if len(wrapper) == 3 and Path(wrapper[0]).name in {"sh", "bash", "zsh", "dash"} and wrapper[1] in {"-c", "-lc"}:
+        if len(wrapper) >= 3 and Path(wrapper[0]).name in {"sh", "bash", "zsh", "dash"} and wrapper[1] in {"-c", "-lc"}:
             command = wrapper[2]
+            # Extra operands are $0/positional data, not commands. Keep their
+            # presence from making the command string opaque, but require
+            # literal dispatch rather than attempting shell data-flow analysis.
+            assert not any(command[index] == "$" and re.match(r"(?:[0-9@*]|\{[0-9@*])", command[index + 1:]) for index in shell_expansion_positions(command)), "Author used positional shell dispatch outside the literal command profile"
         else:
             break
     if literal_probe_writer(command):

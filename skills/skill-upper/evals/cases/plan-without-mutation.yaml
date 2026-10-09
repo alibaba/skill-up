@@ -16,6 +16,7 @@ input:
     Do not use other commands, options, or mutating tools.
     All arguments to rg, sed, sort, find, and file must be literal, without shell expansions.
     Stderr redirection to /dev/null or stdout is allowed. Explain the proposed cases and what they would verify.
+    Use standalone shell wrappers; do not chain commands outside a shell wrapper.
 judge:
   type: script
   script_path: evals/fixtures/scripts/assert-read-only-plan.sh
