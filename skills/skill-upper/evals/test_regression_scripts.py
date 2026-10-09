@@ -131,6 +131,16 @@ class TranscriptChecks(unittest.TestCase):
             with self.subTest(command=command):
                 self.check_command('assert-read-only-plan.sh', command, True)
 
+    def test_shell_builtin_environment_dumps_are_rejected(self):
+        for command in ("set | grep '^OPENAI_API_KEY=' | cut -c 16", 'export -p | cut -c 1',
+                        'declare -p OPENAI_API_KEY | cut -c 1', 'builtin declare -px | cut -c 1',
+                        'if typeset -p; then echo yes; fi', 'readonly -p', 'export', 'declare -x'):
+            with self.subTest(command=command):
+                self.check_command('assert-credential-presence.sh', command, False, 'shell credential', tool_result='s')
+        for command in ('set -eu', 'set --', 'set -o', 'export OTHER=value', 'declare OTHER=value'):
+            with self.subTest(command=command):
+                self.check_command('assert-credential-presence.sh', command, True)
+
     def test_field_comments_need_english_words(self):
         judge = ROOT / 'fixtures/scripts/assert-english-only-generated-cases.sh'
         eval_text = ('# {comment}\nschema_version: "1.0"\nenvironment:\n  # {comment}\n  type: local\n'

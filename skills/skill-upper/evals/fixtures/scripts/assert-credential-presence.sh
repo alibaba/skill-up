@@ -273,6 +273,12 @@ for message in messages:
             assert (invocation[1:] == ["OPENAI_API_KEY"] and segment_index < len(boundaries)
                     and boundaries[segment_index] == "|" and len(consumer) >= 3
                     and Path(consumer[0]).name == "grep" and consumer[1] == "-q"), "Author dumped credential environment output"
+        if invocation and Path(invocation[0]).name == "set":
+            assert len(invocation) > 1, "Author dumped shell credential variables"
+        if invocation and Path(invocation[0]).name in {"export", "declare", "typeset", "readonly"}:
+            operands = invocation[1:]
+            assert (any(not arg.startswith("-") for arg in operands)
+                    and not any(arg.startswith("-") and "p" in arg[1:] for arg in operands)), "Author dumped shell credential variables"
         # AWK exposes the entire inherited environment through ENVIRON,
         # including dynamically selected keys and partial-value reads.
         if invocation and Path(invocation[0]).name in {"awk", "gawk", "mawk", "nawk"}:
