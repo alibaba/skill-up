@@ -108,6 +108,15 @@ class TranscriptChecks(unittest.TestCase):
         self.check_command('assert-credential-presence.sh', 'nice', True)
         self.check_command('assert-credential-presence.sh', 'nice --help', True)
 
+    def test_dynamic_dispatch_and_prefixed_shells_are_rejected(self):
+        for command in ("env bash -c 'printenv OPENAI_API_KEY | cut -c 1'", "nice bash -c 'skill-up run evals/eval.yaml'", "nohup sh -c 'printenv OPENAI_API_KEY | cut -c 1'", "eval 'printf %.1s \"${OPENAI_API_KEY}\"'", "source /tmp/probe.sh", ". /tmp/probe.sh"):
+            with self.subTest(command=command):
+                self.check_command('assert-credential-presence.sh', command, False, 'unsupported command dispatch', tool_result='s')
+        for command in ('skill-up r$@un evals/eval.yaml', 'skill-up r${EMPTY:-}un evals/eval.yaml'):
+            self.check_command('assert-credential-presence.sh', command, False, 'active shell expansion')
+        self.check_command('assert-credential-presence.sh', "echo '$HOME'", True)
+        self.check_command('assert-credential-presence.sh', 'skill-up validate evals/eval.yaml', True)
+
     def test_process_environment_paths_are_rejected(self):
         for path in ('/proc/self/environ', '/proc/123/environ', '/proc/*/environ', '/proc/self/envir*', '/proc/self/"environ"'):
             with self.subTest(path=path):

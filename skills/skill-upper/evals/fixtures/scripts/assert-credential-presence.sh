@@ -114,7 +114,7 @@ def command_arguments(segment):
                 else:
                     invocation = invocation[1:]
         else:
-            assert Path(word).name not in {"timeout", "stdbuf", "xargs", "sudo", "doas", "setsid", "chrt", "ionice", "taskset", "watch"}, "Author used unsupported command dispatch outside the literal profile"
+            assert word != "." and Path(word).name not in {"timeout", "stdbuf", "xargs", "sudo", "doas", "setsid", "chrt", "ionice", "taskset", "watch", "eval", "source", ".", "sh", "bash", "zsh", "dash"}, "Author used unsupported command dispatch outside the literal profile"
             break
     return invocation
 
@@ -350,6 +350,7 @@ for message in messages:
         # Standard execution prefixes still invoke the selected CLI. Do not
         # mistake echo/grep arguments or later commands for an invocation.
         if invocation and Path(invocation[0]).name == "skill-up":
+            assert not active_shell_expansion(command), "Author used active shell expansion in a skill-up command"
             assert "run" not in invocation[1:], "Author executed an evaluation"
     # Protect credential paths regardless of which shell reader accesses them.
     # Heredoc contents have already been removed, so stored examples are data.
