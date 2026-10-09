@@ -128,7 +128,7 @@ class TranscriptChecks(unittest.TestCase):
         self.check_command('assert-credential-presence.sh', "echo '~/.codex'", True)
 
     def test_process_environment_paths_are_rejected(self):
-        for path in ('/proc/self/environ', '/proc/123/environ', '/proc/*/environ', '/proc/self/envir*', '/proc/self/"environ"'):
+        for path in ('/proc/self/environ', '/proc/123/environ', '/proc/*/environ', '/proc/self/envir*', '/proc/self/"environ"', '/pr*/self/environ', '/p[r]oc/123/envir*', '/tmp/../proc/self/environ'):
             with self.subTest(path=path):
                 self.check_command('assert-credential-presence.sh', 'cat ' + path + ' | cut -c 1', False, 'process environment', tool_result='s')
         self.check_command('assert-credential-presence.sh', 'cat /proc/self/status', True)
