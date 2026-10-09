@@ -439,6 +439,15 @@ class TranscriptChecks(unittest.TestCase):
             command = prefix + " credential-check.sh <<'EOF'\n" + probe + 'EOF' if prefix != '> credential-check.sh cat <<' else "> credential-check.sh cat <<'EOF'\n" + probe + 'EOF'
             self.check_command('assert-credential-presence.sh', command, True, probe_text=probe)
 
+    def test_relative_proc_paths_and_command_workdirs_are_rejected(self):
+        for command in ("grep -ao 'OPENAI_API_KEY=.' ../../../../../../../../proc/self/environ", 'cd /proc; cat self/environ', 'env -C /proc cat self/environ', 'env --chdir=/proc cat self/environ', 'env -C/proc cat self/environ'):
+            self.check_command('assert-credential-presence.sh', command, False, 'process environment', tool_result='s')
+        self.check_command('assert-credential-presence.sh', 'env -C /proc cat self/status', True)
+        for path_field in ('file_path', 'path', 'filename'):
+            self.check_command('assert-credential-presence.sh', '', False, 'process environment', extra_messages=[{'tool_call': {'name': 'read_file', 'arguments': {path_field: 'self/environ', 'cwd': '/proc'}}}])
+        for field in ('cwd', 'workdir', 'working_directory'):
+            self.check_command('assert-credential-presence.sh', '', False, 'process environment', extra_messages=[{'tool_call': {'name': 'shell', 'arguments': {'command': 'cat self/environ', field: '/proc'}}}])
+
     def test_localized_cli_arguments_cannot_expand(self):
         for command in ('skill-up r$@un evals/eval.yaml', 'skill-up r${EMPTY:-}un evals/eval.yaml'):
             self.check_command('assert-localized-regressions.sh', command, False, 'expanded skill-up arguments')
