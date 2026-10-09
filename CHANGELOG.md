@@ -76,6 +76,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixture uploads.
 
 ### Fixed
+- Preserve skipped judge outcomes and grouped evaluation artifacts when a case
+  exits before judging, including failed multi-turn post-conditions and execution errors.
 - Remove judge snapshot and fork copies containing populated read-only directories
   after evaluation, without changing permissions in the original workspace.
 - `skill-up validate` (and the pre-run validation in `skill-up run`) now

@@ -327,3 +327,73 @@ func assertPersistedJudgeContext(t *testing.T, outputs string, outcome judge.Out
 		}
 	}
 }
+
+func TestMultiJudgeMultiTurnEarlyExitPreservesSkippedOutcomes(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		runErr     error
+		wantStatus judge.Status
+		wantReason string
+	}{
+		{name: "post_condition", wantStatus: judge.StatusFail, wantReason: "post_condition_failed"},
+		{name: "agent_error", runErr: errors.New("execution failed"), wantStatus: judge.StatusError, wantReason: "agent_execution_failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, err := runtime.NewRuntime(runtime.Config{Type: "none", WorkspaceDir: t.TempDir()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := rt.Create(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			ag := &mockResumerAgent{mockAgent: mockAgent{name: "test"}, runTurnFunc: func(context.Context, runtime.Runtime, agent.ExecOptions, transcript.Message, string) (*agent.SessionResult, error) {
+				return &agent.SessionResult{FinalMessage: "placeholder", SessionID: "session", Turns: 1}, tc.runErr
+			}}
+			members := []config.JudgeConfig{{ID: "first", Type: "agent_judge", Model: "test"}, {ID: "second", Type: "agent_judge", Model: "test"}}
+			e := newTestEvaluator(EvalOptions{Agent: ag, EvalCfg: &config.EvalConfig{Judges: &members}})
+			c := &config.CaseConfig{ID: "early-exit", Input: config.Input{Turns: []config.Turn{
+				{Role: "user", Content: "first", PostCondition: &config.PostCondition{MustContainAll: []string{"required"}, OnFail: "fail"}},
+				{Role: "user", Content: "second"},
+			}}}
+			result := e.executeCase(context.Background(), c, ConfigurationWithSkill, rt, nil)
+			if result.Status != tc.wantStatus || result.Configuration != ConfigurationWithSkill || result.AggregationStrategy != "all_required" || len(result.JudgeResults) != len(members) {
+				t.Fatalf("unexpected result: %+v", result)
+			}
+			if ag.turnCall != 1 || ag.runCall.Load() != 0 {
+				t.Fatalf("unexpected agent or judge calls: turns=%d runs=%d", ag.turnCall, ag.runCall.Load())
+			}
+			assertSkippedJudgeOutcomes(t, result.JudgeResults, members, tc.wantReason)
+		})
+	}
+}
+
+func assertSkippedJudgeOutcomes(t *testing.T, outcomes []JudgeOutcome, members []config.JudgeConfig, reason string) {
+	t.Helper()
+	for i, outcome := range outcomes {
+		if outcome.ID != members[i].ID || outcome.Type != members[i].Type || outcome.Status != judge.StatusSkip || outcome.SkipReason != reason || outcome.Result != nil {
+			t.Fatalf("unexpected outcome: %+v", outcome)
+		}
+	}
+}
+
+func TestMultiJudgeSingleTurnExecutionErrorPreservesSkippedOutcomes(t *testing.T) {
+	for _, execErr := range []error{errors.New("execution failed"), context.DeadlineExceeded} {
+		t.Run(execErr.Error(), func(t *testing.T) {
+			rt, err := runtime.NewRuntime(runtime.Config{Type: "none", WorkspaceDir: t.TempDir()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ag := &mockAgent{name: "test", runFunc: func(context.Context, runtime.Runtime, agent.ExecOptions, []transcript.Message) (*agent.SessionResult, error) {
+				return nil, execErr
+			}}
+			members := []config.JudgeConfig{{ID: "first", Type: "agent_judge", Model: "test"}, {ID: "second", Type: "agent_judge", Model: "test"}}
+			e := newTestEvaluator(EvalOptions{Agent: ag, EvalCfg: &config.EvalConfig{Judges: &members}})
+			c := &config.CaseConfig{ID: "execution-error", Input: config.Input{Prompt: "first"}}
+			result := e.executeCase(context.Background(), c, ConfigurationWithSkill, rt, nil)
+			if result.Status != judge.StatusError || result.AggregationStrategy != "all_required" || len(result.JudgeResults) != len(members) || ag.runCall.Load() != 1 {
+				t.Fatalf("unexpected result: %+v", result)
+			}
+			assertSkippedJudgeOutcomes(t, result.JudgeResults, members, "agent_execution_failed")
+		})
+	}
+}

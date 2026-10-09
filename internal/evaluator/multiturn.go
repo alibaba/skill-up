@@ -978,6 +978,7 @@ func (e *defaultEvaluator) executeMultiTurnCase(
 		}
 		result.Status = judge.StatusError
 		result.Error = fmt.Errorf("agent execution failed: %w", execErr)
+		recordSkippedJudges(result, plan, "agent_execution_failed")
 		result.Configuration = configName
 		return *result
 	}
@@ -986,11 +987,13 @@ func (e *defaultEvaluator) executeMultiTurnCase(
 	status := multiTurnStatus(turnResults)
 	switch status {
 	case judge.StatusError:
+		recordSkippedJudges(result, plan, "turn_error")
 		result.Status = judge.StatusError
 		result.Configuration = configName
 		return *result
 	case judge.StatusFail:
 		// Post-condition failure — mark FAIL, skip judge.
+		recordSkippedJudges(result, plan, "post_condition_failed")
 		if result.DurationMs == 0 {
 			result.DurationMs = time.Since(startTime).Milliseconds()
 		}
@@ -998,6 +1001,7 @@ func (e *defaultEvaluator) executeMultiTurnCase(
 		result.Configuration = configName
 		return *result
 	case judge.StatusSkip:
+		recordSkippedJudges(result, plan, "turns_skipped")
 		result.Status = judge.StatusSkip
 		result.Configuration = configName
 		return *result

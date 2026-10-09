@@ -152,3 +152,14 @@ func closeJudgeSnapshot(ctx context.Context, snapshot runtime.JudgeSnapshot) {
 		logging.WarnContextf(ctx, "close judge snapshot: %v", err)
 	}
 }
+
+func recordSkippedJudges(result *EvalResult, plan config.JudgePlan, reason string) {
+	if !plan.Multi {
+		return
+	}
+	for _, member := range plan.Judges {
+		result.JudgeResults = append(result.JudgeResults, JudgeOutcome{
+			ID: member.ID, Type: member.Type, Status: judge.StatusSkip, SkipReason: reason,
+		})
+	}
+}

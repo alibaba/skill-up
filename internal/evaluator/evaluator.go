@@ -542,6 +542,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	// they are captured even when the agent failed or timed out.
 	e.collectGlobArtifacts(ctx, rt, configName, caseCfg)
 	if shouldReturn := e.handleExecutionResult(ctx, caseCfg, configName, startTime, &result, execErr); shouldReturn {
+		recordSkippedJudges(&result, judgePlan, "agent_execution_failed")
 		return result
 	}
 	// A genuine non-zero exit may still be handled by expect.exit_code or a
@@ -610,13 +611,7 @@ func (e *defaultEvaluator) evaluateCaseSession(
 	}
 
 	if failed := e.runExpectPreCheck(ctx, caseCfg, configName, judgeInput, turnsTotal, result); failed {
-		if plan.Multi {
-			for _, member := range plan.Judges {
-				result.JudgeResults = append(result.JudgeResults, JudgeOutcome{
-					ID: member.ID, Type: member.Type, Status: judge.StatusSkip, SkipReason: "gate_failed",
-				})
-			}
-		}
+		recordSkippedJudges(result, plan, "gate_failed")
 		return *result
 	}
 
