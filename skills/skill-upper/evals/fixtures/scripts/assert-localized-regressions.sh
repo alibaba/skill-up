@@ -62,6 +62,7 @@ for message in json.loads(Path(path).read_text()):
         if Path(token).name == "skill-up":
             tail = tokens[index + 1:]
             boundary = next((i for i, value in enumerate(tail) if value in {";", "&&", "||", "|", ")"}), len(tail))
+            assert not any("$" in value or "`" in value for value in tail[:boundary]), "Authoring used expanded skill-up arguments"
             assert "run" not in tail[:boundary], "Authoring launched an evaluation"
 assert __import__("hashlib").sha256(Path("SKILL.md").read_bytes()).hexdigest() == "73c5089b7c08bcc3b78573d7a6027ccb62338b4f017764f86e512f75ab3b8582", "Authoring modified the target Skill"
 literal = "暂无待办事项"

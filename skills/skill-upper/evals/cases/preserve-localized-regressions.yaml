@@ -12,6 +12,7 @@ input:
     for id, title, input.prompt, expect, and judge.type when present in the
     new case.
     Use standalone shell wrappers; do not chain commands outside a shell wrapper.
+    Use literal skill-up command arguments without shell expansion.
 judge:
   type: script
   script_path: evals/fixtures/scripts/assert-localized-regressions.sh

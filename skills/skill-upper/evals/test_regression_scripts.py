@@ -421,6 +421,10 @@ class TranscriptChecks(unittest.TestCase):
             with self.subTest(args=args):
                 self.check_command('assert-read-only-plan.sh', 'file ' + args, True)
 
+    def test_localized_cli_arguments_cannot_expand(self):
+        for command in ('skill-up r$@un evals/eval.yaml', 'skill-up r${EMPTY:-}un evals/eval.yaml'):
+            self.check_command('assert-localized-regressions.sh', command, False, 'expanded skill-up arguments')
+
     def test_wrapped_localized_evaluation_is_rejected(self):
         self.check_command('assert-localized-regressions.sh',
                            '/bin/zsh -lc ' + shlex.quote('skill-up run evals/eval.yaml'),
