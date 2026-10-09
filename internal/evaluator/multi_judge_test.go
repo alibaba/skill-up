@@ -35,7 +35,9 @@ func TestMultiJudgeEvaluatesOneExecutionWithIndependentWorkspaces(t *testing.T) 
 	ag := makeMultiJudgeAgent(t)
 	members := []config.JudgeConfig{
 		{ID: "functional", Type: "script", ScriptPath: script},
-		{ID: "semantic", Type: "agent_judge", Model: "test", Criteria: []string{"quality"}},
+		{ID: "semantic", Type: "agent_judge", Model: "test", Criteria: []string{"quality"}, Context: &config.JudgeContextConfig{
+			Attachments: []config.JudgeContextAttachment{{Path: filepath.Join(workspace, "result.txt")}},
+		}},
 	}
 	e := newTestEvaluator(EvalOptions{
 		Agent: ag, OutputDir: t.TempDir(),
@@ -79,6 +81,7 @@ func makeMultiJudgeAgent(t *testing.T) *mockAgent {
 		if err != nil || string(data) != "original" {
 			t.Fatalf("semantic judge saw %q, %v", data, err)
 		}
+		assertWorkspaceAttachment(t, current.Workspace())
 		return &agent.SessionResult{FinalMessage: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["original input"],"failures":[]}]}`}, nil
 	}
 	return ag
@@ -395,5 +398,35 @@ func TestMultiJudgeSingleTurnExecutionErrorPreservesSkippedOutcomes(t *testing.T
 			}
 			assertSkippedJudgeOutcomes(t, result.JudgeResults, members, "agent_execution_failed")
 		})
+	}
+}
+
+func assertWorkspaceAttachment(t *testing.T, workspace string) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(workspace, ".skill-up", "judge", "context", "attachments", "01-result.txt"))
+	if err != nil || string(data) != "original" {
+		t.Fatalf("judge attachment=%q, %v", data, err)
+	}
+}
+
+func TestJudgeConfigForWorkspacePreservesOriginalAndExternalAttachments(t *testing.T) {
+	source, fork := t.TempDir(), t.TempDir()
+	workspacePath := filepath.Join(source, "nested", "result.txt")
+	externalPath := filepath.Join(t.TempDir(), "reference.txt")
+	relativePath := filepath.Join("fixtures", "reference.txt")
+	member := config.JudgeConfig{Context: &config.JudgeContextConfig{
+		Profile: "standard", Attachments: []config.JudgeContextAttachment{
+			{Path: workspacePath, Label: "output"}, {Path: externalPath}, {Path: relativePath},
+		},
+	}}
+	mapped := judgeConfigForWorkspace(member, source, fork)
+	want := []string{filepath.Join(fork, "nested", "result.txt"), externalPath, relativePath}
+	for i, path := range want {
+		if mapped.Context.Attachments[i].Path != path {
+			t.Fatalf("attachment %d = %q, want %q", i, mapped.Context.Attachments[i].Path, path)
+		}
+	}
+	if mapped.Context.Profile != member.Context.Profile || mapped.Context.Attachments[0].Label != "output" || member.Context.Attachments[0].Path != workspacePath {
+		t.Fatalf("configuration changed: original=%+v mapped=%+v", member.Context, mapped.Context)
 	}
 }

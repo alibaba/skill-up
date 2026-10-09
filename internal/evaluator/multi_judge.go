@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -79,6 +80,7 @@ func (e *defaultEvaluator) runMultipleJudges(
 			memberInput := input
 			memberInput.WorkspacePath = memberRT.Workspace()
 			memberResult := &EvalResult{SessionResult: result.SessionResult, CaseID: result.CaseID, CaseName: result.CaseName}
+			member = judgeConfigForWorkspace(member, input.WorkspacePath, memberInput.WorkspacePath)
 			graded := e.runJudgePhase(memberCtx, memberRT, caseCfg, configName, member, turnsTotal, runAgent, memberInput, memberResult, outcome.Artifacts, true)
 			outcome.Status, outcome.Result = graded.Status, graded.Grading
 			outcome.Session, outcome.Skills = graded.JudgeSession, graded.JudgeSkills
@@ -162,4 +164,28 @@ func recordSkippedJudges(result *EvalResult, plan config.JudgePlan, reason strin
 			ID: member.ID, Type: member.Type, Status: judge.StatusSkip, SkipReason: reason,
 		})
 	}
+}
+
+func judgeConfigForWorkspace(member config.JudgeConfig, source, fork string) config.JudgeConfig {
+	if member.Context == nil || source == "" {
+		return member
+	}
+	sourceRoot, err := filepath.Abs(source)
+	if err != nil {
+		return member
+	}
+	contextCopy := *member.Context
+	contextCopy.Attachments = slices.Clone(member.Context.Attachments)
+	for i, attachment := range contextCopy.Attachments {
+		if !filepath.IsAbs(attachment.Path) {
+			continue
+		}
+		rel, err := filepath.Rel(sourceRoot, attachment.Path)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		contextCopy.Attachments[i].Path = filepath.Join(fork, rel)
+	}
+	member.Context = &contextCopy
+	return member
 }
