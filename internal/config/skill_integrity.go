@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -32,15 +33,31 @@ var skillRefPrefixes = []string{"references/", "assets/", "scripts/"}
 // linkSchemePattern matches the scheme prefix of a URI (https:, mailto:, ...).
 var linkSchemePattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*:`)
 
+// urlTokenPattern matches a complete URL token (scheme://...) so prose
+// scanning can blank it out before collecting citations: a query string or
+// fragment may contain an attachment-looking path (view?file=assets/x.png)
+// that is part of the URL, not a skill citation.
+var urlTokenPattern = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://\S+`)
+
+// relScriptPattern matches ./-prefixed relative path mentions inside script
+// and data files (`source ./lib.sh`). Group 1 is the path relative to the
+// mentioning file's own directory.
+var relScriptPattern = regexp.MustCompile(`(?:^|[^\w./~-])\./([\w](?:[\w./-]*[\w])?)`)
+
 // CheckSkillIntegrity inspects the SKILL.md of the skill rooted at skillDir
 // and returns one human-readable warning per finding: a missing or
 // unterminated YAML frontmatter block, an empty name or description field,
 // references/, assets/, scripts/ paths cited in the markdown body that do not
-// exist on disk, and files under those directories that are never cited in
-// the body. The body is parsed as CommonMark, so only real citations are
-// collected — prose text, local link and image destinations, and inline
-// code spans that cite a path. Code blocks, remote URLs, and raw HTML are
-// never treated as references.
+// exist on disk, and files under those directories that are not reachable
+// from the body. The body is parsed as CommonMark, so only real citations
+// are collected — prose text, local link and image destinations, and inline
+// code spans that cite a path. Code blocks, remote URLs, autolinks, and raw
+// HTML never yield references — they are documentation examples or external
+// resources, not skill attachments.
+//
+// Reachability is transitive: an attachment a cited markdown document links
+// to, or one a cited script mentions, counts as cited — absence of a direct
+// SKILL.md citation is not evidence that such a file is orphaned.
 //
 // It returns nil when skillDir has no SKILL.md (the directory is not a skill
 // root, so there is nothing to check). Every finding is a warning; callers
@@ -71,10 +88,11 @@ func CheckSkillIntegrity(skillDir string) []string {
 		body = rest
 	}
 
-	for _, ref := range missingSkillRefs(skillDir, body) {
+	bodyRefs := extractSkillRefs(body)
+	for _, ref := range missingSkillRefs(skillDir, bodyRefs) {
 		warnings = append(warnings, fmt.Sprintf("SKILL.md: references %q but it does not exist on disk", ref))
 	}
-	for _, file := range uncitedSkillFiles(skillDir, body) {
+	for _, file := range uncitedSkillFiles(skillDir, collectReachableRefs(skillDir, bodyRefs)) {
 		warnings = append(warnings, fmt.Sprintf("SKILL.md: never references %q but the file exists on disk", file))
 	}
 
@@ -114,11 +132,14 @@ func frontmatterFieldWarnings(frontmatter []byte) []string {
 	return warnings
 }
 
-// missingSkillRefs returns the sorted, de-duplicated references/, assets/,
-// scripts/ paths cited in body that do not exist under skillDir.
-func missingSkillRefs(skillDir string, body []byte) []string {
+// missingSkillRefs returns the sorted references/, assets/, scripts/ paths
+// cited from the SKILL.md body that do not exist under skillDir. Only the
+// body feeds this check: it is the document the skill author maintains, so
+// its dangling citations are worth reporting, while attachments' own
+// dependencies only feed the reachability set.
+func missingSkillRefs(skillDir string, refs []string) []string {
 	var missing []string
-	for _, ref := range extractSkillRefs(body) {
+	for _, ref := range refs {
 		if _, err := os.Stat(filepath.Join(skillDir, filepath.FromSlash(ref))); err != nil {
 			missing = append(missing, ref)
 		}
@@ -127,20 +148,195 @@ func missingSkillRefs(skillDir string, body []byte) []string {
 	return missing
 }
 
-// uncitedSkillFiles returns the sorted files that exist under the skill's
-// attachment directories (references/, assets/, scripts/, recursively) but
-// are never cited in body. A citation that names a directory (references/
-// or references/advanced/) covers every file beneath it. Dotfiles and
-// dot-directories (.DS_Store, .gitkeep, .git/) are local metadata and are
-// never reported. The reverse direction matters because truncating the tail
-// of SKILL.md silently turns the attachments it cited into orphans.
-func uncitedSkillFiles(skillDir string, body []byte) []string {
-	cited := extractSkillRefs(body)
-	citedSet := make(map[string]struct{}, len(cited))
-	for _, ref := range cited {
-		citedSet[ref] = struct{}{}
+// collectReachableRefs walks the citation graph seeded by the SKILL.md body
+// references and returns every skill-relative path reachable from the body:
+// the cited paths themselves, every file beneath a cited directory, the
+// local documents a cited markdown file links to, and the paths a cited
+// script mentions. The uncited-attachment check uses this set so a file that
+// is reachable through a cited attachment (SKILL.md → references/guide.md →
+// references/details.md) is not mistaken for an orphan.
+func collectReachableRefs(skillDir string, seeds []string) map[string]struct{} {
+	cited := make(map[string]struct{}, len(seeds))
+	scanned := make(map[string]struct{})
+	var queue []string
+
+	var enqueue func(rel string)
+	enqueue = func(rel string) {
+		abs := filepath.Join(skillDir, filepath.FromSlash(rel))
+		info, err := os.Stat(abs)
+		if err != nil {
+			return // dangling citation: reported by the missing check; nothing to traverse
+		}
+		cited[rel] = struct{}{}
+		if _, ok := scanned[rel]; ok {
+			return
+		}
+		scanned[rel] = struct{}{}
+		if info.IsDir() {
+			root := abs
+			_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+				if err != nil {
+					return nil //nolint:nilerr // unreadable entries are not traversal blockers
+				}
+				if d.IsDir() {
+					if p != root && strings.HasPrefix(d.Name(), ".") {
+						return fs.SkipDir
+					}
+					return nil
+				}
+				if strings.HasPrefix(d.Name(), ".") {
+					return nil
+				}
+				// p is always under skillDir, so Rel cannot fail in practice.
+				fileRel, _ := filepath.Rel(skillDir, p)
+				if fileRel = filepath.ToSlash(fileRel); fileRel != rel {
+					enqueue(fileRel)
+				}
+				return nil
+			})
+			return
+		}
+		queue = append(queue, rel)
 	}
 
+	for _, seed := range seeds {
+		enqueue(seed)
+	}
+	for len(queue) > 0 {
+		rel := queue[0]
+		queue = queue[1:]
+		for _, dep := range extractAttachmentRefs(skillDir, rel) {
+			enqueue(dep)
+		}
+	}
+	return cited
+}
+
+// extractAttachmentRefs returns the dependencies of one reachable file as
+// clean root-relative slash paths. A markdown document contributes its local
+// link and image destinations — root-anchored when they carry an attachment
+// prefix (references/x.md), resolved against the document's own directory
+// otherwise ([details](details.md) inside references/guide.md means
+// references/details.md) — plus root-anchored prose and code-span citations.
+// Any other text file (scripts, data files) contributes root-anchored
+// citations and ./-relative path mentions resolved against its directory.
+// Binary files yield nothing.
+func extractAttachmentRefs(skillDir, rel string) []string {
+	data, ok := readSkillLocalFile(skillDir, filepath.Join(skillDir, filepath.FromSlash(rel)))
+	if !ok {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	var refs []string
+	dir := path.Dir(rel)
+	add := func(dep string) {
+		dep = path.Clean(dep)
+		if dep == "." || dep == ".." || strings.HasPrefix(dep, "../") {
+			return // escapes the skill root: not a skill-local dependency
+		}
+		if _, dup := seen[dep]; !dup {
+			seen[dep] = struct{}{}
+			refs = append(refs, dep)
+		}
+	}
+	addLinkTarget := func(dest []byte) {
+		target, ok := localLinkTarget(dest)
+		if !ok {
+			return
+		}
+		if norm, ok := normalizeSkillRef(target); ok {
+			add(norm) // root-anchored attachment citation
+			return
+		}
+		add(path.Join(dir, target)) // document-relative dependency
+	}
+
+	if isMarkdownRef(rel) {
+		doc := goldmark.New().Parser().Parse(text.NewReader(data))
+		_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+			if !entering {
+				return ast.WalkContinue, nil
+			}
+			switch node := n.(type) {
+			case *ast.Text:
+				collectProseRefs(node.Segment.Value(data), add)
+			case *ast.Link:
+				addLinkTarget(node.Destination)
+			case *ast.Image:
+				addLinkTarget(node.Destination)
+			case *ast.CodeSpan:
+				// Same convention as the SKILL.md body: a code span whose
+				// first token is a path cites that path.
+				if content := codeSpanText(node, data); citesRefPath(content) {
+					for _, m := range skillRefPattern.FindAllStringSubmatch(content, -1) {
+						add(m[1])
+					}
+				}
+				return ast.WalkSkipChildren, nil
+			}
+			return ast.WalkContinue, nil
+		})
+		return refs
+	}
+
+	if isBinaryContent(data) {
+		return nil
+	}
+	collectProseRefs(data, add)
+	for _, m := range relScriptPattern.FindAllSubmatch(data, -1) {
+		add(path.Join(dir, string(m[1])))
+	}
+	return refs
+}
+
+// readSkillLocalFile reads abs only when it resolves inside the skill root,
+// so a symlinked attachment cannot leak the dependency scan into the wider
+// filesystem.
+func readSkillLocalFile(skillDir, abs string) ([]byte, bool) {
+	root, err := filepath.EvalSymlinks(skillDir)
+	if err != nil {
+		return nil, false
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return nil, false
+	}
+	if resolved != root && !strings.HasPrefix(resolved, root+string(filepath.Separator)) {
+		return nil, false
+	}
+	data, err := os.ReadFile(resolved)
+	if err != nil {
+		return nil, false
+	}
+	return data, true
+}
+
+// isMarkdownRef reports whether rel names a markdown document.
+func isMarkdownRef(rel string) bool {
+	ext := strings.ToLower(path.Ext(rel))
+	return ext == ".md" || ext == ".markdown"
+}
+
+// isBinaryContent reports whether data looks like a binary file (a NUL byte
+// in the first 8 KiB); dependency scanning skips binaries.
+func isBinaryContent(data []byte) bool {
+	const sniffLen = 8192
+	if len(data) > sniffLen {
+		data = data[:sniffLen]
+	}
+	return bytes.IndexByte(data, 0) >= 0
+}
+
+// uncitedSkillFiles returns the sorted files that exist under the skill's
+// attachment directories (references/, assets/, scripts/, recursively) but
+// are not in cited — the set of paths reachable from the SKILL.md body.
+// A citation that names a directory (references/ or references/advanced/)
+// covers every file beneath it. Dotfiles and dot-directories (.DS_Store,
+// .gitkeep, .git/) are local metadata and are never reported. The reverse
+// direction matters because truncating the tail of SKILL.md silently turns
+// the attachments it cited into orphans.
+func uncitedSkillFiles(skillDir string, cited map[string]struct{}) []string {
 	var orphans []string
 	for _, dir := range skillRefPrefixes {
 		root := filepath.Join(skillDir, filepath.FromSlash(dir))
@@ -160,7 +356,7 @@ func uncitedSkillFiles(skillDir string, body []byte) []string {
 			// path is always under skillDir-relative root, so Rel cannot
 			// fail in practice.
 			rel, _ := filepath.Rel(skillDir, path)
-			if !isCitedAttachment(filepath.ToSlash(rel), citedSet) {
+			if !isCitedAttachment(filepath.ToSlash(rel), cited) {
 				orphans = append(orphans, filepath.ToSlash(rel))
 			}
 			return nil
@@ -170,14 +366,12 @@ func uncitedSkillFiles(skillDir string, body []byte) []string {
 	return orphans
 }
 
-// isCitedAttachment reports whether rel is cited directly or lives under a
-// cited attachment directory.
+// isCitedAttachment reports whether rel is reachable — cited exactly, or
+// covered by a cited directory entry. Entries are canonical (cleaned, no
+// trailing slash), so a directory entry matches everything beneath itself.
 func isCitedAttachment(rel string, cited map[string]struct{}) bool {
-	if _, ok := cited[rel]; ok {
-		return true
-	}
 	for ref := range cited {
-		if strings.HasPrefix(rel, strings.TrimSuffix(ref, "/")+"/") {
+		if rel == ref || strings.HasPrefix(rel, ref+"/") {
 			return true
 		}
 	}
@@ -185,10 +379,12 @@ func isCitedAttachment(rel string, cited map[string]struct{}) bool {
 }
 
 // extractSkillRefs returns the references/, assets/, scripts/ paths cited in
-// a markdown body, de-duplicated in order of first appearance. The body is
-// parsed as CommonMark and citations are collected from prose text, from
-// local link and image destinations, and from inline code spans that cite a
-// path. Fenced and indented code blocks, remote URLs, autolinks, and raw HTML
+// a markdown body, de-duplicated in order of first appearance and normalized
+// to canonical root-relative form (references/./guide.md and
+// references/guide.md are the same citation). The body is parsed as
+// CommonMark and citations are collected from prose text, from local link
+// and image destinations, and from inline code spans that cite a path.
+// Fenced and indented code blocks, remote URLs, autolinks, and raw HTML
 // never yield references — they are documentation examples or external
 // resources, not skill attachments.
 func extractSkillRefs(body []byte) []string {
@@ -196,9 +392,13 @@ func extractSkillRefs(body []byte) []string {
 	seen := make(map[string]struct{})
 	var refs []string
 	add := func(ref string) {
-		if _, ok := seen[ref]; !ok {
-			seen[ref] = struct{}{}
-			refs = append(refs, ref)
+		norm, ok := normalizeSkillRef(ref)
+		if !ok {
+			return
+		}
+		if _, ok := seen[norm]; !ok {
+			seen[norm] = struct{}{}
+			refs = append(refs, norm)
 		}
 	}
 	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
@@ -207,15 +407,13 @@ func extractSkillRefs(body []byte) []string {
 		}
 		switch node := n.(type) {
 		case *ast.Text:
-			for _, m := range skillRefPattern.FindAllSubmatch(node.Segment.Value(body), -1) {
-				add(string(m[1]))
-			}
+			collectProseRefs(node.Segment.Value(body), add)
 		case *ast.Link:
-			if ref, ok := localSkillRef(node.Destination); ok {
+			if ref, ok := localLinkTarget(node.Destination); ok {
 				add(ref)
 			}
 		case *ast.Image:
-			if ref, ok := localSkillRef(node.Destination); ok {
+			if ref, ok := localLinkTarget(node.Destination); ok {
 				add(ref)
 			}
 		case *ast.CodeSpan:
@@ -234,17 +432,53 @@ func extractSkillRefs(body []byte) []string {
 	return refs
 }
 
-// localSkillRef converts a link or image destination into a skill-local
-// attachment path. ok is false for remote URLs, pure anchors, and
-// destinations outside references/, assets/, scripts/. A leading ./ is
-// normalized away.
-func localSkillRef(dest []byte) (string, bool) {
+// collectProseRefs collects root-anchored attachment citations from a prose
+// text segment. Complete URL tokens are blanked out first so a query string
+// or fragment (view?file=assets/x.png) never yields a phantom citation.
+func collectProseRefs(prose []byte, add func(string)) {
+	scrubbed := urlTokenPattern.ReplaceAll(prose, []byte(" "))
+	for _, m := range skillRefPattern.FindAllSubmatch(scrubbed, -1) {
+		add(string(m[1]))
+	}
+}
+
+// normalizeSkillRef converts a SKILL.md attachment citation into its
+// canonical root-relative form: a leading ./ is dropped and the path is
+// cleaned, so equivalent spellings (references/./guide.md,
+// references//guide.md) compare equal against filesystem-derived paths. ok
+// is false when the citation escapes the attachment directories
+// (references/../x) or does not point into references/, assets/, scripts/ at
+// all. A citation naming a bare directory root (references, references/) is
+// kept as a directory citation.
+func normalizeSkillRef(ref string) (string, bool) {
+	ref = strings.TrimPrefix(ref, "./")
+	if ref == "" {
+		return "", false
+	}
+	cleaned := path.Clean(ref)
+	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", false
+	}
+	if hasRefPrefix(cleaned) {
+		return cleaned, true
+	}
+	for _, prefix := range skillRefPrefixes {
+		if cleaned == strings.TrimSuffix(prefix, "/") {
+			return cleaned, true
+		}
+	}
+	return "", false
+}
+
+// localLinkTarget reduces a link or image destination to a local path
+// candidate: the fragment and query are stripped, and remote URLs, pure
+// anchors, and protocol-relative destinations are rejected.
+func localLinkTarget(dest []byte) (string, bool) {
 	s := string(dest)
 	if i := strings.IndexAny(s, "#?"); i >= 0 {
 		s = s[:i]
 	}
-	s = strings.TrimPrefix(s, "./")
-	if s == "" || strings.HasPrefix(s, "//") || linkSchemePattern.MatchString(s) || !hasRefPrefix(s) {
+	if s == "" || strings.HasPrefix(s, "//") || linkSchemePattern.MatchString(s) {
 		return "", false
 	}
 	return s, true

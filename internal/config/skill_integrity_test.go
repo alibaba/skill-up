@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -190,6 +191,260 @@ The icon lives at ./assets/slashy.png.
 	}
 }
 
+// writeSkillFiles materializes a skill directory from a map of
+// slash-separated relative paths to file contents.
+func writeSkillFiles(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	for rel, content := range files {
+		abs := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(abs, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestCheckSkillIntegrityIndirectReferenceChain(t *testing.T) {
+	t.Parallel()
+
+	// Regression: a file reachable through a cited attachment counts as
+	// cited, even though SKILL.md never names it directly.
+	dir := t.TempDir()
+	writeSkillFiles(t, dir, map[string]string{
+		"SKILL.md": `---
+name: indirect-chain
+description: Skill whose SKILL.md reaches an attachment through another attachment.
+---
+
+Read [the guide](references/guide.md).
+`,
+		"references/guide.md":   "# Guide\n\nRead [details](details.md) when needed.\n",
+		"references/details.md": "# Details\n",
+	})
+
+	if got := CheckSkillIntegrity(dir); len(got) != 0 {
+		t.Fatalf("CheckSkillIntegrity() = %v, want no warnings for a valid indirect reference chain", got)
+	}
+}
+
+func TestCheckSkillIntegrityScriptDependencies(t *testing.T) {
+	t.Parallel()
+
+	// A cited script reaches its helpers: ./-relative mentions resolve
+	// against the script's own directory, root-anchored mentions against the
+	// skill root.
+	dir := t.TempDir()
+	writeSkillFiles(t, dir, map[string]string{
+		"SKILL.md": `---
+name: script-deps
+description: Skill whose entrypoint script sources sibling helpers.
+---
+
+Run ` + "`scripts/run.sh`" + ` to execute.
+`,
+		"scripts/run.sh":    "#!/bin/sh\n. ./lib.sh\nscripts/helper.sh --flag\n",
+		"scripts/lib.sh":    "# lib\n",
+		"scripts/helper.sh": "# helper\n",
+	})
+
+	if got := CheckSkillIntegrity(dir); len(got) != 0 {
+		t.Fatalf("CheckSkillIntegrity() = %v, want no warnings for script dependencies", got)
+	}
+}
+
+func TestCheckSkillIntegrityCitedDirectoryDependencies(t *testing.T) {
+	t.Parallel()
+
+	// A directory citation covers the documents beneath it, and their own
+	// dependencies are reachable too.
+	dir := t.TempDir()
+	writeSkillFiles(t, dir, map[string]string{
+		"SKILL.md": `---
+name: dir-deps
+description: Skill citing a whole documentation directory.
+---
+
+Browse [the docs](references/).
+`,
+		"references/guide.md": "# Guide\n\nSee ![the diagram](../assets/diagram.png).\n",
+		"assets/diagram.png":  "not really a png\n",
+	})
+
+	if got := CheckSkillIntegrity(dir); len(got) != 0 {
+		t.Fatalf("CheckSkillIntegrity() = %v, want no warnings for directory citation dependencies", got)
+	}
+}
+
+func TestCheckSkillIntegrityCyclicReferencesTerminate(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeSkillFiles(t, dir, map[string]string{
+		"SKILL.md": `---
+name: cyclic
+description: Skill whose documents link to each other.
+---
+
+Read [a](references/a.md).
+`,
+		"references/a.md": "# A\n\nContinue to [b](b.md).\n",
+		"references/b.md": "# B\n\nBack to [a](a.md).\n",
+	})
+
+	if got := CheckSkillIntegrity(dir); len(got) != 0 {
+		t.Fatalf("CheckSkillIntegrity() = %v, want no warnings for a cyclic reference chain", got)
+	}
+}
+
+func TestCheckSkillIntegrityUnreachableDocDoesNotRescue(t *testing.T) {
+	t.Parallel()
+
+	// Reachability starts at the SKILL.md body: a document nothing cites
+	// stays an orphan, and so does the file only it links to.
+	dir := t.TempDir()
+	writeSkillFiles(t, dir, map[string]string{
+		"SKILL.md": `---
+name: unreachable
+description: Skill with a documentation island.
+---
+
+This skill cites no attachments at all.
+`,
+		"references/guide.md":   "# Guide\n\nRead [details](details.md).\n",
+		"references/details.md": "# Details\n",
+	})
+
+	got := CheckSkillIntegrity(dir)
+	want := []string{
+		`never references "references/details.md" but the file exists on disk`,
+		`never references "references/guide.md" but the file exists on disk`,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("CheckSkillIntegrity() = %v, want %d warning(s): %v", got, len(want), want)
+	}
+	for i, wantSub := range want {
+		if !strings.Contains(got[i], wantSub) {
+			t.Errorf("warning[%d] = %q, want substring %q", i, got[i], wantSub)
+		}
+	}
+}
+
+func TestCheckSkillIntegrityEquivalentLocalPaths(t *testing.T) {
+	t.Parallel()
+
+	// Regression: equivalent spellings of one path must normalize to the
+	// same citation for both the existence check and the cited comparison.
+	dir := t.TempDir()
+	writeSkillFiles(t, dir, map[string]string{
+		"SKILL.md": `---
+name: equivalent-paths
+description: Skill citing one file through equivalent path spellings.
+---
+
+Read [a](references/./guide.md), [b](references//notes.md), and
+[c](references/sub/../deep.md).
+`,
+		"references/guide.md": "# Guide\n",
+		"references/notes.md": "# Notes\n",
+		"references/deep.md":  "# Deep\n",
+	})
+
+	if got := CheckSkillIntegrity(dir); len(got) != 0 {
+		t.Fatalf("CheckSkillIntegrity() = %v, want no warnings for equivalent local paths", got)
+	}
+}
+
+func TestCheckSkillIntegrityRemoteURLQueryAndFragment(t *testing.T) {
+	t.Parallel()
+
+	// Regression: a path inside a remote URL's query string or fragment is
+	// part of the URL, not a local citation.
+	dir := t.TempDir()
+	writeSkillFiles(t, dir, map[string]string{
+		"SKILL.md": `---
+name: remote-urls
+description: Skill whose prose only mentions remote URLs.
+---
+
+Remote: https://example.com/view?file=assets/missing.png
+Mirror: https://example.com/page#assets/icon.png
+`,
+	})
+
+	if got := CheckSkillIntegrity(dir); len(got) != 0 {
+		t.Fatalf("CheckSkillIntegrity() = %v, want no warnings for remote URL query/fragment text", got)
+	}
+}
+
+func TestCheckSkillIntegrityCitedBinaryIsNotScanned(t *testing.T) {
+	t.Parallel()
+
+	// A cited binary is never scanned for dependencies: the attachment-path
+	// bytes inside it must not rescue an otherwise unreachable file.
+	dir := t.TempDir()
+	writeSkillFiles(t, dir, map[string]string{
+		"SKILL.md": `---
+name: binary-cited
+description: Skill citing a binary asset.
+---
+
+The logo is ![logo](assets/logo.png).
+`,
+		"references/ghost.md": "# Unreachable\n",
+	})
+	binary := append([]byte("\x89PNG\r\n\x1a\n\x00\x00"), []byte("references/ghost.md")...)
+	if err := os.MkdirAll(filepath.Join(dir, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "assets", "logo.png"), binary, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := CheckSkillIntegrity(dir)
+	if len(got) != 1 || !strings.Contains(got[0], `"references/ghost.md"`) {
+		t.Fatalf("CheckSkillIntegrity() = %v, want exactly one orphan warning for references/ghost.md", got)
+	}
+}
+
+func TestCheckSkillIntegritySymlinkedAttachmentStaysContained(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires privileges on Windows")
+	}
+
+	// A symlinked attachment resolving outside the skill root is cited (it
+	// exists) but never scanned: its link text must not rescue files inside
+	// the skill, and the scan must not read outside files.
+	outsideDir := t.TempDir()
+	outside := filepath.Join(outsideDir, "outside.md")
+	if err := os.WriteFile(outside, []byte("See [inside](references/inside.md).\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	writeSkillFiles(t, dir, map[string]string{
+		"SKILL.md": `---
+name: symlinked
+description: Skill citing a symlinked document.
+---
+
+Read [the doc](references/evil.md).
+`,
+		"references/inside.md": "# Uncited\n",
+	})
+	if err := os.Symlink(outside, filepath.Join(dir, "references", "evil.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	got := CheckSkillIntegrity(dir)
+	if len(got) != 1 || !strings.Contains(got[0], `"references/inside.md"`) {
+		t.Fatalf("CheckSkillIntegrity() = %v, want exactly one orphan warning for references/inside.md", got)
+	}
+}
+
 type extractRefsCase struct {
 	name string
 	body string
@@ -253,6 +508,26 @@ func TestExtractSkillRefsProse(t *testing.T) {
 			name: "bare URL in prose is ignored",
 			body: "Mirror at https://example.com/assets/icon.png for reference.",
 			want: nil,
+		},
+		{
+			name: "bare URL with a query string is ignored",
+			body: "Remote: https://example.com/view?file=assets/missing.png",
+			want: nil,
+		},
+		{
+			name: "bare URL with a fragment is ignored",
+			body: "See https://example.com/page#assets/icon.png for details.",
+			want: nil,
+		},
+		{
+			name: "citation after a bare URL is still found",
+			body: "https://example.com/x?f=assets/a.png points at references/real.md",
+			want: []string{"references/real.md"},
+		},
+		{
+			name: "prose path with a dot segment is normalized",
+			body: "See references/a/./b.md for details.",
+			want: []string{"references/a/b.md"},
 		},
 		{
 			name: "home-dir path in prose is ignored",
@@ -332,6 +607,31 @@ func TestExtractSkillRefsLinks(t *testing.T) {
 			name: "local link destination is a reference",
 			body: "[guide](references/guide.md)",
 			want: []string{"references/guide.md"},
+		},
+		{
+			name: "link destination with a dot segment is normalized",
+			body: "[guide](references/./guide.md)",
+			want: []string{"references/guide.md"},
+		},
+		{
+			name: "link destination with a double slash is normalized",
+			body: "[guide](references//guide.md)",
+			want: []string{"references/guide.md"},
+		},
+		{
+			name: "link destination with a dot-dot segment is normalized",
+			body: "[guide](references/sub/../guide.md)",
+			want: []string{"references/guide.md"},
+		},
+		{
+			name: "link destination escaping the attachment directories is ignored",
+			body: "[secret](references/../secret.md)",
+			want: nil,
+		},
+		{
+			name: "bare directory link destination is a directory citation",
+			body: "[docs](references/)",
+			want: []string{"references"},
 		},
 		{
 			name: "dot-slash prefixed link destination is a reference",

@@ -12,9 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   skill as authored on disk: SKILL.md must open with a closed YAML frontmatter
   block declaring non-empty `name` and `description` fields, every
   `references/`, `assets/`, `scripts/` path cited in the markdown body must
-  exist on disk, and files under those directories that the body never cites
-  are reported as uncited attachments (dotfiles stay silent; a directory
-  cited as a link destination covers everything beneath it). The body is
+  exist on disk, and files under those directories that are not reachable
+  from the body are reported as uncited attachments — reachability is
+  transitive through the links of cited documents and the path mentions of
+  cited scripts, and equivalent path spellings are normalized before
+  comparison (dotfiles stay silent; a directory cited as a link destination
+  covers everything beneath it). The body is
   parsed as CommonMark so prose citations, local link/image destinations, and
   path-citing inline code spans are checked — with or without a leading `./` —
   while code blocks, remote URLs, and raw HTML are ignored. Findings print as

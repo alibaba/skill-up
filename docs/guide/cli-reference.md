@@ -184,11 +184,15 @@ before evaluations. Findings print one warning per item:
   link/image destinations, and inline code spans that cite a path are checked,
   while code blocks, remote URLs, and raw HTML are ignored as documentation
   examples or external resources
-- files under those directories that the body never cites are reported as
-  uncited attachments. Dotfiles (`.DS_Store`, `.gitkeep`, dot directories) are
-  local metadata and stay silent; a directory cited as a link destination
-  (e.g. `[docs](references/)`) covers everything beneath it. Citations may be
-  written with or without a leading `./`
+- files under those directories that are not reachable from the body are
+  reported as uncited attachments. Reachability is transitive: a file a cited
+  markdown document links to, or one a cited script mentions, counts as cited
+  even when SKILL.md never names it directly. Dotfiles (`.DS_Store`,
+  `.gitkeep`, dot directories) are local metadata and stay silent; a directory
+  cited as a link destination (e.g. `[docs](references/)`) covers everything
+  beneath it. Citations may be written with or without a leading `./`, and
+  equivalent spellings of one path (`references/./guide.md`) are normalized
+  before comparison
 
 A directory passed via `--skill` that has no SKILL.md is itself a finding.
 Pass `--strict` to promote warnings to failures (exit 1); without it the
