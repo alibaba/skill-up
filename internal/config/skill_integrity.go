@@ -162,6 +162,10 @@ func collectReachableRefs(skillDir string, seeds []string) map[string]struct{} {
 
 	var enqueue func(rel string)
 	enqueue = func(rel string) {
+		// The citation alone keeps rel out of the orphan report — even when
+		// it dangles (a broken symlink still shows up in the attachment walk,
+		// and the missing check already covers the dangling side).
+		cited[rel] = struct{}{}
 		abs := filepath.Join(skillDir, filepath.FromSlash(rel))
 		// #nosec G703 -- callers confine rel to the skill root (normalizeSkillRef
 		// rejects ../ escapes); reads during traversal are additionally
@@ -170,7 +174,6 @@ func collectReachableRefs(skillDir string, seeds []string) map[string]struct{} {
 		if err != nil {
 			return // dangling citation: reported by the missing check; nothing to traverse
 		}
-		cited[rel] = struct{}{}
 		if _, ok := scanned[rel]; ok {
 			return
 		}

@@ -331,6 +331,39 @@ This skill cites no attachments at all.
 	}
 }
 
+func TestCheckSkillIntegrityBrokenSymlinkCitation(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires privileges on Windows")
+	}
+
+	// A citation whose target is a broken symlink is reported once — as a
+	// missing reference — and must not additionally surface as an uncited
+	// attachment (the symlink entry itself still appears in the walk).
+	dir := t.TempDir()
+	writeSkillFiles(t, dir, map[string]string{
+		"SKILL.md": `---
+name: broken-symlink
+description: Skill citing a dangling symlink.
+---
+
+Read [the doc](references/gone.md).
+`,
+	})
+	if err := os.MkdirAll(filepath.Join(dir, "references"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/nonexistent/target", filepath.Join(dir, "references", "gone.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	got := CheckSkillIntegrity(dir)
+	if len(got) != 1 || !strings.Contains(got[0], `references "references/gone.md" but it does not exist on disk`) {
+		t.Fatalf("CheckSkillIntegrity() = %v, want exactly one missing-reference warning for references/gone.md", got)
+	}
+}
+
 func TestCheckSkillIntegrityEquivalentLocalPaths(t *testing.T) {
 	t.Parallel()
 
