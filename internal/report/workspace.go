@@ -190,6 +190,15 @@ func (w *IterationWorkspace) WriteGrading(caseID, config string, grading *Anthro
 	return WriteGradingJSON(path, grading)
 }
 
+// WriteEvaluation writes the grouped multi-judge result for one case.
+func (w *IterationWorkspace) WriteEvaluation(caseID, config string, evaluation *GroupedEvaluation) error {
+	if err := validateCaseID(caseID); err != nil {
+		return err
+	}
+	path := filepath.Join(w.ConfigDir(caseID, config), "evaluation.json")
+	return writeJSONFile(path, evaluation, "grouped evaluation")
+}
+
 // WriteEvalMeta writes eval_metadata.json to the case directory.
 func (w *IterationWorkspace) WriteEvalMeta(caseID string, meta *EvalMetadata) error {
 	if err := validateCaseID(caseID); err != nil {

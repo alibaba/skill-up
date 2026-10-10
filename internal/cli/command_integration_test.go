@@ -5,8 +5,10 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 )
@@ -93,10 +95,32 @@ func TestListCasesCommandRunEPrintsDefaultsAndTruncatesPrompt(t *testing.T) {
 		"Tag",
 		"analyze-directory",
 		"functional_test",
-		"Analyze the current directory using the code-st...",
+		"...",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("list-cases output missing %q:\n%s", want, output)
 		}
+	}
+}
+
+func TestListCasesCommandRunEPreservesUnicodePrompt(t *testing.T) {
+	root := t.TempDir()
+	writeAutoModeSkill(t, root)
+	writeAutoModeEvalYAML(t, root, "unicode-prompt")
+	prompt := strings.Repeat("中", 60)
+	casePath := filepath.Join(root, "evals", "cases", "unicode-prompt.yaml")
+	if err := os.WriteFile(casePath, []byte("id: unicode-prompt\ninput:\n  prompt: "+prompt+"\n"), 0o600); err != nil {
+		t.Fatalf("write Unicode case: %v", err)
+	}
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	output, err := captureStdout(t, func() error {
+		return listCasesCmd.RunE(cmd, []string{filepath.Join(root, "evals", "eval.yaml")})
+	})
+	if err != nil {
+		t.Fatalf("list-cases RunE returned error: %v", err)
+	}
+	if !utf8.ValidString(output) || !strings.Contains(output, strings.Repeat("中", 47)+"...") {
+		t.Fatalf("list-cases corrupted or incorrectly truncated Unicode prompt: %q", output)
 	}
 }

@@ -4100,7 +4100,7 @@ func TestGitInitUploader_InitWithRemotes(t *testing.T) {
 // the host OS. On Windows that requires a drive letter; `\tmp\secret.txt`
 // alone is considered relative.
 func absoluteSecretPath() string {
-	if goruntime.GOOS == "windows" {
+	if goruntime.GOOS == windowsGOOS {
 		return `C:\tmp\secret.txt`
 	}
 	return "/tmp/secret.txt"

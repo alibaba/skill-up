@@ -3,6 +3,8 @@ package config
 import (
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/alibaba/skill-up/internal/customengine"
 	"github.com/alibaba/skill-up/internal/runtime"
 )
@@ -16,9 +18,24 @@ type EvalConfig struct {
 	Engine        EngineConfig       `yaml:"engine"`
 	Cases         CasesConfig        `yaml:"cases"`
 	Judge         JudgeConfig        `yaml:"judge"`
-	UserSimulator UserSimulatorModel `yaml:"user_simulator,omitempty"`
+	Judges        *[]JudgeConfig     `yaml:"judges,omitempty"`
+	JudgeSet      bool               `yaml:"-" json:"-"`
+	JudgesSet     bool               `yaml:"-" json:"-"`
 	Benchmark     BenchmarkConfig    `yaml:"benchmark"`
 	Report        ReportConfig       `yaml:"report"`
+	UserSimulator UserSimulatorModel `yaml:"user_simulator,omitempty"`
+}
+
+// UnmarshalYAML records judge field presence so empty or null blocks cannot be ignored.
+func (e *EvalConfig) UnmarshalYAML(node *yaml.Node) error {
+	type plain EvalConfig
+	var decoded plain
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*e = EvalConfig(decoded)
+	e.JudgeSet, e.JudgesSet = judgeFieldPresence(node)
+	return nil
 }
 
 // Environment defines the runtime environment for evaluation.
@@ -162,6 +179,7 @@ type RetryPolicy struct {
 
 // JudgeConfig describes the evaluation strategy.
 type JudgeConfig struct {
+	ID         string              `json:"id,omitempty" yaml:"id,omitempty"`
 	Type       string              `json:"type"                     yaml:"type"` // rule_based, script, agent_judge
 	ScriptPath string              `json:"script_path,omitempty"    yaml:"script_path,omitempty"`
 	Model      string              `json:"model,omitempty"          yaml:"model,omitempty"`
@@ -288,6 +306,9 @@ type CaseConfig struct {
 	Constraints   Constraints            `yaml:"constraints"`
 	Expect        Expect                 `yaml:"expect"`
 	Judge         JudgeConfig            `yaml:"judge,omitempty"`
+	Judges        *[]JudgeConfig         `yaml:"judges,omitempty"`
+	JudgeSet      bool                   `yaml:"-" json:"-"`
+	JudgesSet     bool                   `yaml:"-" json:"-"`
 	UserSimulator *UserSimulatorScenario `yaml:"user_simulator,omitempty"`
 	// MCP declares case-level MCP server overrides. Servers are merged with
 	// eval-level mcp.servers by name: a same-name entry replaces the whole
@@ -307,6 +328,30 @@ type CaseConfig struct {
 	// validation keys off it so the check is correct for any case subset (e.g.
 	// the filtered set `skill-up run` executes), not only the full suite.
 	SourceFile string `json:"-" yaml:"-"`
+}
+
+// UnmarshalYAML records judge field presence for case-level overrides.
+func (c *CaseConfig) UnmarshalYAML(node *yaml.Node) error {
+	type plain CaseConfig
+	var decoded plain
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*c = CaseConfig(decoded)
+	c.JudgeSet, c.JudgesSet = judgeFieldPresence(node)
+	return nil
+}
+
+func judgeFieldPresence(node *yaml.Node) (singular, plural bool) {
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		switch node.Content[i].Value {
+		case "judge":
+			singular = true
+		case "judges":
+			plural = true
+		}
+	}
+	return singular, plural
 }
 
 // Input describes the agent input (prompt or turns).

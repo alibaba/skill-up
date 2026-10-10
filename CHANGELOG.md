@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Support independent `judges` on one case in the `none` runtime, combining
+  reusable script checks and semantic Agent review of one execution. Results
+  retain separate gate, judge, and overall decisions in reports.
+
+### Fixed
+- Traverse symlinked workspace roots and reject escaping symlink chains when
+  capturing independent judge snapshots.
+- Reject Git metadata pointer files in judge snapshots, preventing linked
+  worktrees and submodules from sharing the original Git index across forks.
+- Map absolute workspace attachment and generated-file paths into each isolated
+  judge copy while preserving original inputs and references to archived artifacts.
+- Preserve skipped judge outcomes and grouped evaluation artifacts when a case
+  exits before judging, including failed multi-turn post-conditions and execution errors.
+- Remove judge snapshot and fork copies containing populated read-only directories
+  after evaluation, without changing permissions in the original workspace.
+
 ## [0.13.0] - 2026-10-09
 
 ### Added

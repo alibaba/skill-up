@@ -24,11 +24,11 @@ skills:
     exclude: [".qoder/repowiki/**"]                     # Optional; exclude takes priority
 
 engine:
-  name: claude_code               # claude_code | codex | opencode | qodercli (qoder-cli also accepted) | qwen_code
+  name: opencode                  # claude_code | codex | opencode | qodercli (qoder-cli also accepted) | qwen_code
   model:
-    provider: anthropic
-    name: claude-sonnet-4-6
-    base_url: ""
+    provider: dashscope
+    name: qwen3.8-max
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 
 cases:
   files:
@@ -51,7 +51,7 @@ cases:
 
 judge:
   type: agent_judge
-  model: anthropic/claude-sonnet-4-6
+  model: dashscope/qwen3.8-max
   skills:                         # Optional: rubric Skills installed only for the judge
     - source: local_path
       path: evals/fixtures/judge-rubric
@@ -126,7 +126,7 @@ Docker CLI and daemon are required. `network_policy: deny_all` creates a contain
 ## Engine and model
 
 - `engine.model` is optional; if omitted, the engine chooses its local default model.
-- CLI model IDs combine `provider` and `name`, such as `anthropic/claude-sonnet-4-6` or `openai/gpt-4`.
+- CLI model IDs combine `provider` and `name`, such as `dashscope/qwen3.8-max` or `openai/gpt-4`.
 - `qodercli` usually needs no `model` configuration.
 
 ### Independent user simulator model

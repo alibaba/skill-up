@@ -507,7 +507,7 @@
       var content = document.getElementById("grades-content");
 
       // Check if we have grading data or can synthesize from turn failures.
-      var hasGrading = c.grading || (c.baseline && c.baseline.grading);
+      var hasGrading = c.grading || (c.judge_results && c.judge_results.length) || (c.baseline && (c.baseline.grading || (c.baseline.judge_results && c.baseline.judge_results.length)));
       var hasTurnFailures = !hasGrading && c.turn_results && c.turn_results.some(function(tr) { return tr.status === "failed" || tr.status === "error"; });
 
       if (!hasGrading && !hasTurnFailures) { section.style.display = "none"; return; }
@@ -519,11 +519,11 @@
       if (hasGrading) {
         if (c.baseline) {
           html += '<div class="comparison">';
-          html += '<div class="config-col"><h3>With Skill</h3>' + renderGradingBlock(c.grading) + '</div>';
-          html += '<div class="config-col"><h3>Without Skill</h3>' + renderGradingBlock(c.baseline.grading) + '</div>';
+          html += '<div class="config-col"><h3>With Skill</h3>' + renderCaseGrading(c) + '</div>';
+          html += '<div class="config-col"><h3>Without Skill</h3>' + renderCaseGrading(c.baseline) + '</div>';
           html += '</div>';
         } else {
-          html += renderGradingBlock(c.grading);
+          html += renderCaseGrading(c);
         }
       } else {
         // Synthesize grading display from turn post-condition failures.
@@ -531,6 +531,24 @@
       }
       html += '</div>';
       content.innerHTML = html;
+    }
+
+    function renderCaseGrading(c) {
+      if (!c.judge_results || !c.judge_results.length) return renderGradingBlock(c.grading);
+      var html = '';
+      if (c.gates) {
+        html += '<h4>Gates: ' + (c.gates.passed ? 'PASS' : 'FAIL') + '</h4>';
+        if (c.gates.failures) c.gates.failures.forEach(function(f) {
+          html += '<div class="assertion-evidence">' + esc(f.rule) + ': ' + esc(f.detail) + '</div>';
+        });
+      }
+      c.judge_results.forEach(function(j) {
+        html += '<h4>' + esc(j.id) + ' (' + esc(j.type) + '): ' + esc(j.status) + '</h4>';
+        if (j.result) html += renderGradingBlock({summary: j.result.summary, expectations: j.result.assertion_results});
+        if (j.error) html += '<div class="assertion-evidence">' + esc(j.error) + '</div>';
+        if (j.skip_reason) html += '<div class="assertion-evidence">' + esc(j.skip_reason) + '</div>';
+      });
+      return html;
     }
 
     function renderTurnFailuresAsGrades(turns) {

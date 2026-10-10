@@ -98,7 +98,7 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	errs = append(errs, validateCollectArtifacts("cases.defaults.collect_artifacts", cfg.Cases.Defaults.CollectArtifacts)...)
 	errs = append(errs, validateExpect("cases.defaults.expect", cfg.Cases.Defaults.Expect)...)
 	errs = append(errs, validateSkillRefs("skills", cfg.Skills)...)
-	errs = append(errs, validateJudgeTypeAndLocalFields(cfg.Judge)...)
+	errs = append(errs, validateConfiguredJudges(judgeFields{single: cfg.Judge, singleSet: cfg.JudgeSet, members: cfg.Judges, membersSet: cfg.JudgesSet})...)
 	if cfg.UserSimulator != (UserSimulatorModel{}) {
 		if strings.TrimSpace(cfg.UserSimulator.Provider) == "" || strings.TrimSpace(cfg.UserSimulator.Model) == "" {
 			errs = append(errs, "user_simulator.provider and user_simulator.model are required")
@@ -149,13 +149,14 @@ func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 
 	// validate per-turn judge rules reference valid turn numbers
 	turnsTotal := len(cfg.Input.Turns)
-	if judgeNeedsLocalValidation(cfg.Judge) {
-		errs = append(errs, validateJudgeTypeAndLocalFields(cfg.Judge)...)
-	}
+	errs = append(errs, validateConfiguredJudges(judgeFields{single: cfg.Judge, singleSet: cfg.JudgeSet, members: cfg.Judges, membersSet: cfg.JudgesSet})...)
 	var allRules []Rule
 	allRules = append(allRules, cfg.Judge.Success...)
 	allRules = append(allRules, cfg.Judge.Failure...)
 	errs = append(errs, validatePerTurnRules(allRules, turnsTotal)...)
+	if cfg.Judges != nil {
+		errs = append(errs, validateJudgeTurnRules(*cfg.Judges, turnsTotal)...)
+	}
 
 	errs = append(errs, validateCollectArtifacts("collect_artifacts", cfg.CollectArtifacts)...)
 	errs = append(errs, validateExpect("expect", cfg.Expect)...)
@@ -257,10 +258,6 @@ func validateCaseMCP(mcpCfg MCPConfig) []string {
 		}
 	}
 	return errs
-}
-
-func judgeNeedsLocalValidation(judge JudgeConfig) bool {
-	return judge.Type != "" || len(judge.Skills) > 0 || judge.Context != nil || len(judge.Success) > 0 || len(judge.Failure) > 0
 }
 
 // validateJudgeTypeAndLocalFields validates judge fields that do not depend on inheritance.
@@ -543,12 +540,89 @@ func (v *Validator) ValidateCasesWithEvalDefaults(eval *EvalConfig, cases []*Cas
 		if c.UserSimulator != nil && (eval.UserSimulator.Provider == "" || eval.UserSimulator.Model == "" || !validUserSimulatorProtocol(eval.UserSimulator.Protocol)) {
 			return fmt.Errorf("case %s: user_simulator requires eval-level provider, protocol: openai or anthropic, and model", c.ID)
 		}
+		plan, err := ResolveJudgePlan(eval, c)
+		if err != nil {
+			return fmt.Errorf("case %s: %w", c.ID, err)
+		}
+		if plan.Multi {
+			for i, member := range plan.Judges {
+				if errs := validateJudgeTypeAndRequiredFields(member); len(errs) > 0 {
+					return fmt.Errorf("case %s judges[%d]: %s", c.ID, i, strings.Join(errs, "; "))
+				}
+			}
+			if errs := validateJudgeTurnRules(plan.Judges, len(c.Input.Turns)); len(errs) > 0 {
+				return fmt.Errorf("case %s: validation errors:\n  - %s", c.ID, strings.Join(errs, "\n  - "))
+			}
+			continue
+		}
 		effectiveJudge := mergeJudgeConfigForValidation(eval.Judge, c.Judge)
 		if errs := validateJudgeTypeAndRequiredFields(effectiveJudge); len(errs) > 0 {
 			return fmt.Errorf("case %s: validation errors:\n  - %s", c.ID, strings.Join(errs, "\n  - "))
 		}
+		rules := append(append([]Rule(nil), effectiveJudge.Success...), effectiveJudge.Failure...)
+		if errs := validatePerTurnRules(rules, len(c.Input.Turns)); len(errs) > 0 {
+			return fmt.Errorf("case %s: validation errors:\n  - %s", c.ID, strings.Join(errs, "\n  - "))
+		}
 	}
 	return nil
+}
+
+func validateJudgeTurnRules(members []JudgeConfig, turnsTotal int) []string {
+	var errs []string
+	for i, member := range members {
+		rules := append(append([]Rule(nil), member.Success...), member.Failure...)
+		for _, detail := range validatePerTurnRules(rules, turnsTotal) {
+			errs = append(errs, fmt.Sprintf("judges[%d]: %s", i, detail))
+		}
+	}
+	return errs
+}
+
+func validateJudgeList(members *[]JudgeConfig) []string {
+	if members == nil {
+		return nil
+	}
+	if len(*members) == 0 {
+		return []string{"judges must contain at least one member"}
+	}
+	var errs []string
+	seen := make(map[string]bool, len(*members))
+	for i, member := range *members {
+		if member.Type == "" {
+			errs = append(errs, fmt.Sprintf("judges[%d].type is required", i))
+		}
+		if !judgeIDPattern.MatchString(member.ID) {
+			errs = append(errs, fmt.Sprintf("judges[%d].id must be a safe lowercase identifier", i))
+		}
+		if seen[member.ID] {
+			errs = append(errs, fmt.Sprintf("judges[%d].id %q is duplicated", i, member.ID))
+		}
+		seen[member.ID] = true
+		for _, detail := range validateJudgeTypeAndRequiredFields(member) {
+			errs = append(errs, fmt.Sprintf("judges[%d]: %s", i, detail))
+		}
+	}
+	return errs
+}
+
+type judgeFields struct {
+	single     JudgeConfig
+	singleSet  bool
+	members    *[]JudgeConfig
+	membersSet bool
+}
+
+func validateConfiguredJudges(fields judgeFields) []string {
+	var errs []string
+	errs = append(errs, validateJudgeTypeAndLocalFields(fields.single)...)
+	errs = append(errs, validateJudgeList(fields.members)...)
+	if (fields.membersSet || fields.members != nil) && (fields.singleSet || fields.single.Type != "") {
+		errs = append(errs, "judge and judges cannot be configured together")
+	}
+	if fields.membersSet && fields.members == nil {
+		errs = append(errs, "judges must contain at least one member")
+	}
+	return errs
 }
 
 func mergeJudgeConfigForValidation(global, caseLevel JudgeConfig) JudgeConfig {

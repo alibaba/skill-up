@@ -2,11 +2,13 @@ package judge
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alibaba/skill-up/internal/platform"
 	evalruntime "github.com/alibaba/skill-up/internal/runtime"
@@ -249,6 +251,7 @@ exit 0
 type scriptJudgeRuntime struct {
 	workspace string
 	result    evalruntime.ExecResult
+	execErr   error
 	uploads   []string
 	cwd       string
 	env       map[string]string
@@ -281,5 +284,16 @@ func (r *scriptJudgeRuntime) Exec(_ context.Context, _ string, opts evalruntime.
 	if opts.Env != nil {
 		r.env = opts.Env
 	}
-	return r.result, nil
+	return r.result, r.execErr
+}
+
+func TestScriptJudgeStrictTimeoutPreservesDeadlineError(t *testing.T) {
+	rt := &scriptJudgeRuntime{workspace: t.TempDir(), execErr: context.DeadlineExceeded}
+	j := &ScriptJudge{ScriptPath: "check.sh", Runtime: rt, TimeoutIsError: true}
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	result, err := j.Evaluate(ctx, Input{WorkspacePath: rt.workspace})
+	if result == nil || result.Status != StatusError || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
 }

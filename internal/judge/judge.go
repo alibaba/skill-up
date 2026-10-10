@@ -83,6 +83,10 @@ type Input struct {
 	// should write or download its own run artifacts.
 	ArtifactDir string
 
+	// ContextArtifactDir is the context archive path relative to case outputs.
+	// Empty preserves the legacy judge/context layout for standalone callers.
+	ContextArtifactDir string
+
 	// SessionResult is the full engine output, available for advanced judges.
 	SessionResult *agent.SessionResult
 
@@ -139,6 +143,20 @@ type Result struct {
 	// JudgeContext records how agent_judge materialized and delivered review
 	// materials. It is omitted for deterministic judges and older results.
 	JudgeContext *ContextMetadata `json:"judge_context,omitempty"`
+}
+
+// Outcome preserves one independent judge's result and diagnostic session.
+type Outcome struct {
+	ID         string               `json:"id"`
+	Type       string               `json:"type"`
+	Status     Status               `json:"status"`
+	Result     *Result              `json:"result,omitempty"`
+	Error      string               `json:"error,omitempty"`
+	SkipReason string               `json:"skip_reason,omitempty"`
+	Artifacts  string               `json:"artifacts_dir,omitempty"`
+	DurationMs int64                `json:"duration_ms"`
+	Session    *agent.SessionResult `json:"-"`
+	Skills     []SkillInfo          `json:"judge_skills,omitempty"`
 }
 
 // ContextMetadata is report-facing metadata for agent_judge context
