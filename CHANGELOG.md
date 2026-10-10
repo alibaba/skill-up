@@ -17,14 +17,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transitive through the links of cited documents and the path mentions of
   cited scripts, and equivalent path spellings are normalized before
   comparison (dotfiles stay silent; a directory cited as a link destination
-  covers everything beneath it). The body is
-  parsed as CommonMark so prose citations, local link/image destinations, and
-  path-citing inline code spans are checked — with or without a leading `./` —
-  while code blocks, remote URLs, and raw HTML are ignored. Findings print as
-  warnings without changing the exit code; `--strict` promotes them to
-  failures. The check is source-level and independent from eval config
-  validation — it does not see what a run installs after
-  `skills.include`/`skills.exclude` filtering.
+  covers everything beneath it). The body is parsed as CommonMark so prose
+  citations, local link/image destinations, and path-citing inline code spans
+  are checked — with or without a leading `./` — while code blocks, remote
+  URLs, and raw HTML are ignored. Findings print as warnings without changing
+  the exit code; `--strict` promotes them to failures. The check is
+  source-level and independent from eval config validation — it does not see
+  what a run installs after `skills.include`/`skills.exclude` filtering.
+
+## [0.13.0] - 2026-10-09
+
+### Added
+- When a custom engine is killed by the case deadline before writing its
+  session result (and stdout carries no usable result), skill-up synthesizes
+  a minimal `session-result.json` with `exit_code` 124 and a stderr marker,
+  and archives it directly into the per-case output directory at
+  `outputs/agent/run/session-result.json`. The runtime workspace is never
+  given a synthesized copy, and the file is not exposed to judges. A stdout
+  fallback that parses as a session result is preserved instead of being
+  replaced (an interrupted run still fails, with its exit code coerced
+  non-zero).
 - Add an `opencode` Agent Engine for local and isolated runtimes, including
   CLI installation, JSON event transcripts, multi-turn session resume, and
   runtime-scoped MCP and provider configuration. OpenCode treats slashed model
@@ -34,6 +46,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   image, with live none-runtime and OpenSandbox model E2E coverage. The
   published Action image needs a compatible skill-up release before OpenCode
   is available to Action callers.
+- Add scenario-driven simulated user replies for mixed fixed/model-generated
+  turns and autonomous multi-turn evaluations, with an independent OpenAI Chat
+  Completions or Anthropic Messages model connection and bounded execution. The canonical `skill-upper` guidance,
+  templates, and regression case now cover both modes. The default example uses the
+  live-tested local OpenCode/DashScope `qwen3.8-max` configuration; credential-gated
+  model E2Es check both dialogue modes, session continuity, and actual
+  `skill-upper` scaffolding with an explicitly configured judge. Simulator decisions accept
+  complete JSON code fences while retaining strict field and policy validation.
+  All simulator-backed follow-up turns require Agent session continuity, including
+  fixed messages after generated turns.
 - DSH's opt-in observer now links the next same-session user turn after a
   single completed Skill use as an unclassified follow-up candidate.
   `collect_skill_feedback` gathers recent observations and follow-ups for
@@ -64,9 +86,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before/after snapshot. Selected cases, retries, and iterations intentionally
   share the directory sequentially, so setup and agent changes carry forward.
   Report directories that overlap the external workspace are rejected before
-   cleanup, event logs must remain outside it, nested skill installation avoids
-   recursively copying its own target, and snapshot paths are handled literally
-   on POSIX shells.
+  cleanup, event logs must remain outside it, nested skill installation avoids
+  recursively copying its own target, and snapshot paths are handled literally
+  on POSIX shells.
 
 ### Changed
 - Upgrade the GitHub Action runner image and live model E2E to QoderCLI 1.1.41,
@@ -81,6 +103,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixture uploads.
 
 ### Fixed
+- Compare structured tool arguments by JSON value in `tool_called` and
+  `tool_called_in_turn`, preventing different arrays, objects, or scalar types
+  with identical display text from being scored as matching arguments.
+- `skill-up validate` (and the pre-run validation in `skill-up run`) now
+  rejects `rule_based` assertions that set none of the supported matcher
+  fields. Unknown matcher keys are silently dropped by non-strict YAML
+  parsing, so a typo such as `output_not_contains` previously passed
+  validation and then either failed late with `unknown_rule` in success
+  position or silently no-oped in failure position, letting cases pass
+  with zero assertions evaluated.
 - `SessionInput` no longer carries the `custom.kwargs` map. The local transport
   writes that payload into the runtime workspace, so the map was readable by
   the agent under test, bypassing the config-time rule that already rejects
@@ -96,6 +128,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   historical five tiers. Model availability is validated by Qoder; failures
   retain model context without falling back to the default. Global/CN
   authentication and provider isolation are unchanged.
+
+### Upgrade notes
+- **Codex plugin rename:** disable or uninstall the earlier `skill-up-observer`
+  plugin before installing `codex-skill-up` to avoid duplicate hooks. Install
+  the self-contained `codex-skill-up_0.13.0.tar.gz` release bundle using your
+  Codex host's plugin installation flow. Observations remain in
+  `$CODEX_HOME/plugin-data/skill-up-observer`; no data move is needed. See the
+  [Codex plugin guide](plugins/codex-skill-up/README.md).
+- **Custom engine kwargs:** engines that read `SessionInput.kwargs` must instead
+  receive their parameters explicitly. Use `${kwargs.<key>}` in
+  `custom.local.args`, `custom.env`, or `custom.http.headers`; HTTP request
+  bodies can also inject the whole map with `${kwargs}`. Keep credentials in
+  the credential/environment configuration. See the
+  [custom engine guide](docs/design/custom-engine.md#custom-parameters-kwargs).
+- **Experimental DSH plugin:** the release archive version follows the CLI
+  version; `0.13.0` does not change the plugin's experimental status. Plugin
+  tests pin the DSH host peer set to `0.1.5-rc.2`; compatibility with newer
+  hosts must be verified separately. See the
+  [DSH plugin guide](plugins/dsh-skill-up/README.md).
+- **GitHub Action availability:** this CLI release does not update the official
+  Action's pinned runner image, which still bundles skill-up `0.7.0`. New CLI
+  capabilities, including OpenCode and user simulation, require a separate
+  runner-image upgrade. The `skill-up-version` input only provides a fallback
+  for custom images without skill-up; it does not replace the CLI in the
+  official image.
 
 ## [0.12.0] - 2026-09-18
 
@@ -682,6 +739,7 @@ The `v0.5.0` release tag is available at
   project and delivers the end-to-end capability to declare eval environments,
   run cases and emit structured reports as described in [README.md](README.md).
 
+[0.13.0]: https://github.com/alibaba/skill-up/releases/tag/v0.13.0
 [0.12.0]: https://github.com/alibaba/skill-up/releases/tag/v0.12.0
 [0.11.0]: https://github.com/alibaba/skill-up/releases/tag/v0.11.0
 [0.10.0]: https://github.com/alibaba/skill-up/releases/tag/v0.10.0

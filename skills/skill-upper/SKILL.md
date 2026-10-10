@@ -175,6 +175,7 @@ Selection guidelines:
 - `engine.name` + `engine.model`: default `claude_code`; `model` is optional. For `qodercli`, often omit `model`.
 - `judge.type`: `rule_based` (preferred), `script`, `agent_judge` (expensive) — see `references/judge-types.md`.
 - Case ID = filename without `.yaml`; prompts should exercise real Skill value.
+- For interactive cases, preserve fixed `input.turns[].content` where the user message is known. Use `input.turns[].respond` only for a reply that must react to the agent, or `input.prompt` plus case-level `user_simulator.scenario` when the simulator should choose all later replies and when to stop. Set an independent eval-level `user_simulator` model and a bounded `max_turns`; see both YAML references. Do not reuse `engine.model` or `judge.model` as an implicit simulator model.
 
 See `references/eval-yaml.md` and `references/case-yaml.md`.
 
@@ -183,6 +184,7 @@ See `references/eval-yaml.md` and `references/case-yaml.md`.
 - `skill-up list-cases <path>`
 - Review `eval.yaml` and representative cases; avoid `agent_judge` abuse.
 - Add or edit YAML under `cases/` as needed.
+- If adding simulated user turns, check that the selected engine supports session resumption, configure the separate simulator connection, and retain deterministic fixed turns and judge assertions wherever possible.
 
 ### Step 4: Validate the configuration
 
@@ -194,13 +196,17 @@ Expect: `✓ eval.yaml is valid (loaded N case(s))`.
 
 ### Step 5: Prepare credentials
 
-Priority: `--api-key` > env (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `QODER_PERSONAL_ACCESS_TOKEN`) > `~/.skill-up/credentials.yaml`.
+For the agent model, priority is `--api-key` > env (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `QODER_PERSONAL_ACCESS_TOKEN`) > `~/.skill-up/credentials.yaml`.
+
+The user simulator resolves credentials by its own `user_simulator.provider`. For `provider: simulation`, set `SIMULATION_API_KEY` and `SIMULATION_BASE_URL`, or configure the `simulation` provider in `~/.skill-up/credentials.yaml`. For `provider: openai`, use `OPENAI_API_KEY` and optionally `OPENAI_BASE_URL`; its standard endpoint is the fallback. Choose `protocol: openai` for Chat Completions or `protocol: anthropic` for Messages; custom base URLs must match that protocol. For `provider: anthropic` with `protocol: anthropic`, use `ANTHROPIC_API_KEY` and optional `ANTHROPIC_BASE_URL` (official endpoint fallback). `--api-key` for the agent does not supply the simulator connection. Never put a raw key in eval YAML.
 
 ```bash
-printenv | grep -E 'ANTHROPIC_API_KEY|OPENAI_API_KEY|QODER_PERSONAL_ACCESS_TOKEN'
+for name in ANTHROPIC_API_KEY OPENAI_API_KEY QODER_PERSONAL_ACCESS_TOKEN SIMULATION_API_KEY SIMULATION_BASE_URL; do
+  if printenv "$name" | grep -q .; then printf '%s=set\n' "$name"; fi
+done
 ```
 
-If missing, **stop and ask**; do not write secrets into YAML without consent.
+If the selected provider lacks credentials in both the environment and the credential file, ask the user to configure it; do not print secret values or write them into YAML.
 
 For `opensandbox`, also ensure `OPENSANDBOX_API_KEY` (and related env) as needed.
 
@@ -235,6 +241,7 @@ Artifacts under `<skill-root>/<skill-name>-workspace/iteration-N/`:
 - `<case-id>/with_skill/grading.json`, `outputs/`
 
 Summarize: pass rate and timing; for failures, case id, assertion `text`, and `evidence`; benchmark deltas if enabled; offer HTML path or `skill-up report result.json --format html`.
+For simulated cases, inspect each turn's `source` and any `stop_reason` alongside the transcript. Hitting `max_turns` is an execution error; a simulator stop does not itself mean PASS, because the configured judge still grades the result.
 
 ### Step 8: Evolve the Skill when requested
 
@@ -273,6 +280,7 @@ Full flags: `references/cli.md`.
 - Abusing `agent_judge`.
 - Anthropic `evals.json` expectations → default `agent_judge`; use `import` + hand edits for deterministic checks.
 - Paths relative to Skill root (`SKILL.md` directory).
+- A simulator reply is literal user text, including `{{placeholders}}`; captured-variable substitution belongs only in configured fixed turns and `respond` instructions.
 - `--iteration 0` appends one run after the latest existing iteration without
   summarizing history; positive `--iteration N` runs N samples of the selected
   cases and, when N > 1, prints a simple stability/flakiness summary covering

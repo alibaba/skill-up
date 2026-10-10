@@ -41,6 +41,9 @@ func TestDefaultEvalConfig(t *testing.T) { //nolint:cyclop,gocyclo // exhaustive
 	if cfg.Engine.Model.Name != "" {
 		t.Errorf("Engine.Model.Name = %q, want empty", cfg.Engine.Model.Name)
 	}
+	if cfg.UserSimulator != (UserSimulatorModel{}) {
+		t.Errorf("UserSimulator = %+v, want disabled by default", cfg.UserSimulator)
+	}
 
 	// Verify case defaults
 	if cfg.Cases.Defaults.TimeoutSeconds != 300 {

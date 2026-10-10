@@ -25,6 +25,11 @@ Prerequisites:
 - `skill-up` available on `PATH`
 - `pnpm` available on `PATH` for `dsh plugin`
 
+Plugin tests pin the DSH host peer set to `0.1.5-rc.2`. Verify compatibility
+separately when using a newer host. Release archive versions follow the
+skill-up CLI version; this plugin remains experimental regardless of the
+archive version.
+
 From the repository root:
 
 ```bash

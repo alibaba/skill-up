@@ -99,6 +99,17 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	errs = append(errs, validateExpect("cases.defaults.expect", cfg.Cases.Defaults.Expect)...)
 	errs = append(errs, validateSkillRefs("skills", cfg.Skills)...)
 	errs = append(errs, validateJudgeTypeAndLocalFields(cfg.Judge)...)
+	if cfg.UserSimulator != (UserSimulatorModel{}) {
+		if strings.TrimSpace(cfg.UserSimulator.Provider) == "" || strings.TrimSpace(cfg.UserSimulator.Model) == "" {
+			errs = append(errs, "user_simulator.provider and user_simulator.model are required")
+		}
+		if !validUserSimulatorProtocol(cfg.UserSimulator.Protocol) {
+			errs = append(errs, "user_simulator.protocol must be openai or anthropic")
+		}
+		if cfg.UserSimulator.TimeoutSeconds < 0 {
+			errs = append(errs, "user_simulator.timeout_seconds must be non-negative")
+		}
+	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("validation errors:\n  - %s", strings.Join(errs, "\n  - "))
@@ -121,20 +132,13 @@ func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 	if cfg.Input.Prompt != "" && len(cfg.Input.Turns) > 0 {
 		errs = append(errs, "input.prompt and input.turns are mutually exclusive")
 	}
+	if cfg.UserSimulator != nil && strings.TrimSpace(cfg.UserSimulator.Scenario) == "" {
+		errs = append(errs, "user_simulator.scenario is required")
+	}
 
 	// if turns is specified, each turn must have role=user and content
 	for i, turn := range cfg.Input.Turns {
-		if turn.Role == "" {
-			errs = append(errs, fmt.Sprintf("input.turns[%d].role is required", i))
-		} else if turn.Role != "user" {
-			errs = append(errs, fmt.Sprintf("input.turns[%d].role must be \"user\", got %q", i, turn.Role))
-		}
-		if turn.Content == "" {
-			errs = append(errs, fmt.Sprintf("input.turns[%d].content is required", i))
-		}
-		if turn.TimeoutSeconds < 0 {
-			errs = append(errs, fmt.Sprintf("input.turns[%d].timeout_seconds must be non-negative", i))
-		}
+		errs = append(errs, validateTurnFields(i, turn, cfg.UserSimulator)...)
 		if turn.PostCondition != nil {
 			errs = append(errs, validatePostCondition(i, turn.PostCondition)...)
 		}
@@ -163,6 +167,28 @@ func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 	}
 
 	return nil
+}
+
+func validateTurnFields(i int, turn Turn, scenario *UserSimulatorScenario) []string {
+	var errs []string
+	if turn.Role == "" {
+		errs = append(errs, fmt.Sprintf("input.turns[%d].role is required", i))
+	} else if turn.Role != "user" {
+		errs = append(errs, fmt.Sprintf("input.turns[%d].role must be \"user\", got %q", i, turn.Role))
+	}
+	if turn.Content == "" && turn.Respond == "" {
+		errs = append(errs, fmt.Sprintf("input.turns[%d].content is required unless respond is set", i))
+	}
+	if turn.Content != "" && turn.Respond != "" {
+		errs = append(errs, fmt.Sprintf("input.turns[%d].content and respond are mutually exclusive", i))
+	}
+	if turn.Respond != "" && scenario == nil {
+		errs = append(errs, fmt.Sprintf("input.turns[%d].respond requires user_simulator.scenario", i))
+	}
+	if turn.TimeoutSeconds < 0 {
+		errs = append(errs, fmt.Sprintf("input.turns[%d].timeout_seconds must be non-negative", i))
+	}
+	return errs
 }
 
 func validateExpect(prefix string, expect Expect) []string {
@@ -257,8 +283,47 @@ func validateJudgeTypeAndLocalFields(judge JudgeConfig) []string {
 	}
 	errs = append(errs, validateOutputMatchesRules("judge.success", judge.Success)...)
 	errs = append(errs, validateOutputMatchesRules("judge.failure", judge.Failure)...)
+	errs = append(errs, validateRecognizableRules("judge.success", judge.Success)...)
+	errs = append(errs, validateRecognizableRules("judge.failure", judge.Failure)...)
 
 	return errs
+}
+
+// validateRecognizableRules rejects assertions that set none of the supported
+// matcher fields. Case files are parsed with non-strict YAML unmarshalling, so
+// an unknown matcher key (for example the frequently assumed but unsupported
+// output_not_contains) is silently dropped and the rule decodes to all zero
+// values. Such an empty rule passes validation and then misbehaves at runtime:
+// in success position it fails late with "unknown_rule", and in failure
+// position it no-ops, letting the case pass with zero assertions evaluated.
+func validateRecognizableRules(field string, rules []Rule) []string {
+	var errs []string
+	for i, rule := range rules {
+		if ruleHasRecognizableField(rule) {
+			continue
+		}
+		errs = append(errs, fmt.Sprintf(
+			"%s[%d]: assertion has no recognizable matcher field; supported matchers: output_contains, output_matches, exit_code, tool_called, files_exist, files_not_exist, turn_response_contains, turn_response_not_contains, tool_called_in_turn, tool_not_called_in_turn. Unknown matcher keys are silently dropped during YAML parsing, so this is likely a typo (there is no output_not_contains matcher; use output_contains.not for negation)",
+			field, i))
+	}
+	return errs
+}
+
+// ruleHasRecognizableField reports whether the rule sets at least one matcher
+// field that the runtime dispatcher in internal/judge can evaluate. The empty
+// collections (for example files_exist: []) mirror the runtime dispatch, which
+// treats them the same as absent fields.
+func ruleHasRecognizableField(rule Rule) bool {
+	return rule.OutputContains != nil ||
+		rule.OutputMatches != nil ||
+		rule.ExitCode != nil ||
+		rule.ToolCalled != nil ||
+		len(rule.FilesExist) > 0 ||
+		len(rule.FilesNotExist) > 0 ||
+		rule.TurnResponseContains != nil ||
+		rule.TurnResponseNotContains != nil ||
+		rule.ToolCalledInTurn != nil ||
+		rule.ToolNotCalledInTurn != nil
 }
 
 func validateOutputMatchesRules(field string, rules []Rule) []string {
@@ -475,6 +540,9 @@ func (v *Validator) ValidateCasesWithEvalDefaults(eval *EvalConfig, cases []*Cas
 		return err
 	}
 	for _, c := range cases {
+		if c.UserSimulator != nil && (eval.UserSimulator.Provider == "" || eval.UserSimulator.Model == "" || !validUserSimulatorProtocol(eval.UserSimulator.Protocol)) {
+			return fmt.Errorf("case %s: user_simulator requires eval-level provider, protocol: openai or anthropic, and model", c.ID)
+		}
 		effectiveJudge := mergeJudgeConfigForValidation(eval.Judge, c.Judge)
 		if errs := validateJudgeTypeAndRequiredFields(effectiveJudge); len(errs) > 0 {
 			return fmt.Errorf("case %s: validation errors:\n  - %s", c.ID, strings.Join(errs, "\n  - "))
@@ -859,4 +927,8 @@ func validateNetworkPolicy(env Environment) []string {
 		}
 	}
 	return errs
+}
+
+func validUserSimulatorProtocol(protocol string) bool {
+	return protocol == "openai" || protocol == "anthropic"
 }

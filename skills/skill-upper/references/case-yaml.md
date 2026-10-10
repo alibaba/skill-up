@@ -63,6 +63,56 @@ input:
 - No match or an empty value puts the case in ERROR state.
 - Captured values are scoped to this case execution.
 
+### Simulated user replies
+
+Keep `content` for user messages known in advance. Use `respond` when the
+reply must depend on what the agent just said; fixed and generated turns may
+be mixed. The eval-level `user_simulator` model must also be configured (see
+`eval-yaml.md`). At case level, describe the user's goal and known
+information in free-form `user_simulator.scenario`. There is no `facts` schema
+field; put known facts in the scenario prose.
+
+```yaml
+user_simulator:
+  scenario: |
+    The user wants a staging configuration with two replicas.
+    Do not authorize a deployment or invent missing details.
+input:
+  turns:
+    - role: user
+      content: "Help me configure the deployment."
+    - role: user
+      respond: "Answer the agent's current question using only the scenario."
+    - role: user
+      content: "Change the replica count to three; do not deploy."
+constraints:
+  max_turns: 3
+```
+
+For an autonomous conversation, keep a fixed opening `input.prompt` and omit
+`input.turns`. The simulator chooses later replies and when to stop according
+to the scenario and conversation history:
+
+```yaml
+user_simulator:
+  scenario: |
+    The user wants a staging configuration with two replicas.
+    Answer follow-up questions and stop after the configuration is explained.
+input:
+  prompt: "Help me configure the deployment."
+constraints:
+  max_turns: 6
+```
+
+The opening prompt counts as turn one. Exceeding `max_turns` is an execution
+error; a simulator stop merely ends the conversation, and the configured judge
+still decides PASS or FAIL. A generated reply is literal user text, so a
+sequence such as `{{name}}` in it is not a capture-variable reference.
+`{{variable}}` substitution remains available in configured fixed `content`
+and `respond` instructions. Simulated cases require an engine that supports
+session resumption. Inspect report `turn_results[].source` and
+`turn_results[].stop_reason` when diagnosing a run.
+
 ### Per-turn judge assertions
 
 ```yaml

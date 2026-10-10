@@ -1,0 +1,17 @@
+id: autonomous-turns
+title: Simulator decides when to answer and stop
+
+user_simulator:
+  scenario: |
+    You want a staging configuration with two replicas. Answer follow-up
+    questions using only those facts. Do not authorize a deployment. Stop
+    once the agent has summarized the configuration and confirmed no deploy.
+
+input:
+  prompt: "Help me configure a deployment. Ask for missing settings."
+
+constraints:
+  max_turns: 6
+
+expect:
+  must_contain: ["ENV=staging", "REPLICAS=2", "DEPLOY=NO"]

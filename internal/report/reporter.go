@@ -158,9 +158,11 @@ type CaseResult struct {
 type CaseTurnResult struct {
 	TurnNumber int    `json:"turn_number"`
 	Content    string `json:"content"`
+	Source     string `json:"source,omitempty"`
 	Response   string `json:"response"`
 	Status     string `json:"status"`
 	Reason     string `json:"reason,omitempty"`
+	StopReason string `json:"stop_reason,omitempty"`
 }
 
 // BenchmarkResult is the top-level structure for benchmark.json.

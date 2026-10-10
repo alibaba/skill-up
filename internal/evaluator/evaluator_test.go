@@ -3,6 +3,7 @@ package evaluator
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -856,10 +857,85 @@ func TestExecuteCase_AgentTimeoutWithoutRecoveredResultErrors(t *testing.T) {
 	result := e.executeCase(context.Background(), caseCfg, "with_skill", &mockRuntime{workspace: t.TempDir()}, ag)
 
 	if result.Status != judge.StatusError {
-		t.Fatalf("expected ERROR when timed out agent has no recoverable result, got %s", result.Status)
+		t.Fatalf("expected ERROR when timed out agent has no recoverable result, got %s (err=%v)", result.Status, result.Error)
 	}
 	if result.Error == nil || !strings.Contains(result.Error.Error(), "agent execution failed") {
 		t.Fatalf("expected agent execution failed error, got %v", result.Error)
+	}
+}
+
+func TestExecuteCase_TimeoutSynthesizedResultArchivedToCaseOutput(t *testing.T) {
+	// A custom engine that writes one workspace artifact, then hangs past the
+	// case deadline without ever writing its session-result output file. The
+	// synthesized timeout result must land in the per-case output directory
+	// (agent/run/session-result.json), the collect_artifacts control must
+	// still archive the pre-timeout workspace file, and the judge-facing
+	// generated-files list must stay empty.
+	outputDir := t.TempDir()
+	rt := &runtime.NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatalf("create runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	ag := agent.NewCustomAgent(agent.Config{
+		Name: "hanging-engine",
+		Custom: &config.CustomEngineConfig{
+			Transport: "local",
+			Local: &config.CustomLocalConfig{
+				Command:    "sh",
+				Args:       []string{"-c", "mkdir -p outputs && echo partial > outputs/pre-timeout.txt; sleep 30"},
+				OutputFile: "${output_file}",
+			},
+		},
+	})
+
+	e := newTestEvaluator(EvalOptions{
+		Agent:     ag,
+		OutputDir: outputDir,
+	})
+
+	caseCfg := &config.CaseConfig{
+		ID:               "case-timeout-archive",
+		Title:            "Timeout synthesis archives to case output",
+		Input:            config.Input{Prompt: "hello"},
+		CollectArtifacts: []string{"outputs/**"},
+		Constraints:      config.Constraints{TimeoutSeconds: 1},
+	}
+
+	result := e.executeCase(context.Background(), caseCfg, "with_skill", rt, ag)
+
+	if result.Status != judge.StatusError {
+		t.Fatalf("expected ERROR for a timed-out case, got %s (err=%v)", result.Status, result.Error)
+	}
+
+	// The synthesized result is archived next to the other per-case outputs.
+	synthPath := filepath.Join(outputDir, "case-timeout-archive", "with_skill", "outputs", "agent", "run", "session-result.json")
+	data, err := os.ReadFile(synthPath)
+	if err != nil {
+		t.Fatalf("archived synthesized result missing: %v", err)
+	}
+	var parsed struct {
+		ExitCode int `json:"exit_code"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("archived synthesized result is not valid JSON: %v (%s)", err, data)
+	}
+	if parsed.ExitCode != 124 {
+		t.Fatalf("archived synthesized result exit_code = %d, want 124", parsed.ExitCode)
+	}
+
+	// Control: the archival machinery demonstrably works under timeout via
+	// collect_artifacts on the pre-timeout workspace file.
+	controlPath := filepath.Join(outputDir, "case-timeout-archive", "with_skill", "outputs", "workspace", "outputs", "pre-timeout.txt")
+	if _, err := os.Stat(controlPath); err != nil {
+		t.Fatalf("collect_artifacts control missing — archival under timeout is broken: %v", err)
+	}
+
+	// The synthesized result must not feed the judge-facing artifact list.
+	if result.SessionResult != nil && result.Artifacts != nil &&
+		len(result.Artifacts.GeneratedFiles) != 0 {
+		t.Fatalf("generated_files = %v, want the synthesized result kept out of the judge-facing list", result.Artifacts.GeneratedFiles)
 	}
 }
 

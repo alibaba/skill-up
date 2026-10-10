@@ -502,6 +502,60 @@ func (a *CustomAgent) readRawResult(ctx context.Context, rt Runtime, custom *cus
 	return string(data), true
 }
 
+// synthesizeTimeoutOutput builds a minimal session-result JSON for a run
+// killed by the case deadline before the engine wrote any result, and
+// archives it into the per-case artifact directory (agent/run/, prepared by
+// the evaluator before the run) as session-result.json. The payload keeps
+// the documented contract (exit_code always present) with a stderr marker
+// naming it as synthesized; transcripts and usage stay empty because the
+// killed process took them with it. The file is written next to the other
+// per-case outputs instead of the runtime workspace: grading consumes the
+// returned payload, and a workspace copy would show up in workspace diffs
+// and collect_artifacts globs as if the engine had written it. When
+// artifactDir is empty (no output directory configured) or the write fails,
+// the payload is still returned — the result itself is the best description
+// of the run; only the archival copy is skipped.
+func (a *CustomAgent) synthesizeTimeoutOutput(ctx context.Context, artifactDir string, prep *customRunPrep) string {
+	payload := map[string]any{
+		"engine":        a.Name(),
+		"exit_code":     124,
+		"duration_ms":   time.Since(prep.start).Milliseconds(),
+		"final_message": "",
+		"stderr":        "skill-up: case deadline exceeded before the engine wrote its session result (synthesized artifact; the engine's transcript was lost with the killed process)",
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		logging.WarnContextf(ctx, "CustomAgent: cannot encode synthesized timeout output: %v", err)
+		return ""
+	}
+	if artifactDir == "" {
+		return string(data)
+	}
+	if _, err := writeLocalArtifact(artifactDir, "session-result.json", string(data)); err != nil {
+		logging.WarnContextf(ctx, "CustomAgent: cannot archive synthesized timeout result into %s: %v", artifactDir, err)
+	}
+	return string(data)
+}
+
+// usableSessionResult reports whether raw is a payload the run can be graded
+// from. It mirrors the acceptance conditions of parseSessionResult —
+// non-empty, valid JSON, exit_code present — as a side-effect-free probe, so
+// a stdout fallback that carries a real result is never discarded in favor
+// of a synthesized one. It is deliberately a lower bar than full parsing:
+// payloads that pass here but fail deeper validation still take the normal
+// error path, which is the base behavior for a run that did produce output.
+func usableSessionResult(raw string) bool {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return false
+	}
+	var parsed parsedSessionResult
+	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
+		return false
+	}
+	return parsed.ExitCode != nil
+}
+
 // parsedSessionResult mirrors the SessionResult JSON contract but keeps
 // exit_code as a pointer so a missing field can be distinguished from 0.
 type parsedSessionResult struct {

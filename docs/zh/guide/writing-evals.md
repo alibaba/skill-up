@@ -176,6 +176,11 @@ configuration，并将 applied version 留空。
 - **始终采集**，与 judge 类型、workspace 是否为 git 仓库无关；采集过程只读，不会修改 workspace。
 - workspace 下的 `.git/` 目录会被**排除**（`agent_judge` 会在其中提交一份 baseline），因此 `**` 这类宽模式不会把 VCS 内部文件扫进产物。
 
+当用例 deadline 在自定义引擎写出 session result 之前将其杀掉时，skill-up 会合成一份最小的
+`session-result.json`（`exit_code` 124），直接归档到
+`<output-dir>/<case-id>/<configuration>/outputs/agent/run/session-result.json`。该文件不会写入
+workspace，因此 `collect_artifacts` 的 glob 不会（也不应）命中它。
+
 > **请勿与 `report.artifacts` 混淆**（后者选择产物*类型*，如 `transcript`/`logs`），也不同于 `agent_judge` 使用的 git workspace diff（那是喂给 judge 的 diff *字符串*，不落盘成文件）。`collect_artifacts` 下载的是文件实体，与二者正交。
 
 ### 自定义 Engine（Custom Engine）
