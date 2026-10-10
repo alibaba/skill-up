@@ -31,6 +31,7 @@ test: test-plugin
 
 test-plugin: bundle-codex-plugin
 	python3 -m unittest discover -s plugins/codex-skill-up/tests -p 'test*.py'
+	python3 skills/skill-upper/evals/test_regression_scripts.py
 
 bundle-plugins:
 	node scripts/bundle-plugins.mjs all

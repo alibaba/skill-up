@@ -15,7 +15,7 @@ failures = []
 final_message = os.environ.get("EVAL_FINAL_MESSAGE", "")
 if not final_message.strip():
     failures.append("Final response is empty.")
-elif cjk_pattern.search(final_message):
+elif cjk_pattern.search(final_message) or any(character.isalpha() and not character.isascii() for character in final_message):
     failures.append("Final response contains Chinese/CJK characters.")
 elif len(ascii_word_pattern.findall(final_message)) < 5:
     failures.append("Final response does not contain enough English words.")
@@ -35,7 +35,7 @@ generated_yaml_files.extend(case_files)
 
 for path in generated_yaml_files:
     text = path.read_text(encoding="utf-8")
-    match = cjk_pattern.search(text)
+    match = cjk_pattern.search(text) or re.search(r"[^\x00-\x7f]", "".join(character if character.isalpha() else " " for character in text))
     if match:
         line_no = text[: match.start()].count("\n") + 1
         failures.append(f"{path}:{line_no} contains Chinese/CJK characters.")
@@ -48,7 +48,7 @@ def is_explanatory_comment(line):
     if not stripped.startswith("#"):
         return False
     content = stripped[1:].strip()
-    if not content:
+    if not ascii_word_pattern.search(content):
         return False
     if content.startswith("-"):
         return False
