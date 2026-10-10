@@ -42,6 +42,7 @@ func (AllRequiredAggregator) Aggregate(outcomes []Outcome, turnsExecuted, turnsT
 		}
 		assertions = append(assertions, AssertionResult{
 			Text: "judge " + outcome.ID + " (" + outcome.Type + ")", Passed: passed,
+			Skipped:  outcome.Status == StatusSkip,
 			Evidence: string(outcome.Status) + ": " + strings.Join(evidence, "; "),
 		})
 		switch outcome.Status {

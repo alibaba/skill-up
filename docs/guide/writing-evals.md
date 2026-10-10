@@ -758,6 +758,14 @@ Grading happens in two layers: **expect** (gating checks) and **judge** (quality
 ### expect — fast gating
 
 `expect` is a zero-cost local check. If `expect` fails, `judge` is skipped.
+The case is FAIL, and configured judge assertions still count in the assertion
+pass-rate denominator with no credit. Reports mark them `skipped: true` to
+separate unexecuted checks from evaluated failures. For a single judge, scoring
+counts each configured expect rule type plus each judge criterion (each success
+and failure rule for `rule_based`, or one outcome for `script`). Agent-judge
+thresholds still apply only to judge criteria. Internal benchmark pass rates
+count passed cases; Anthropic-compatible benchmark pass rates average each run's
+assertion pass rate.
 
 ```yaml
 expect:

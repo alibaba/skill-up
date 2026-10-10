@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exits before judging, including failed multi-turn post-conditions and execution errors.
 - Remove judge snapshot and fork copies containing populated read-only directories
   after evaluation, without changing permissions in the original workspace.
+- Keep configured single-judge assertions in the scoring denominator when an
+  `expect` gate fails, assigning skipped assertions no credit and marking them
+  with `skipped: true`. Debug judging uses the same expect scoring. Rule-based
+  scoring now includes every configured failure and success rule, with success
+  rules skipped after a failure rule matches. Case verdicts and agent-judge
+  thresholds retain their existing semantics.
 
 ## [0.13.0] - 2026-10-09
 

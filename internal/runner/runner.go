@@ -632,6 +632,7 @@ func resultToBenchmarkRun(res *evaluator.EvalResult, runNumber int) report.Bench
 			expectations = append(expectations, report.AnthropicExpectation{
 				Text:     a.Text,
 				Passed:   a.Passed,
+				Skipped:  a.Skipped,
 				Evidence: a.Evidence,
 			})
 		}

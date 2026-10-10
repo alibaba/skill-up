@@ -210,6 +210,13 @@ end note
 
 ### benchmark.json (`benchmark.go` + `benchmark_anthropic.go`)
 
+Case pass rates and assertion pass rates measure different things. Internal
+`BenchmarkStats.pass_rate` counts PASS case verdicts. Anthropic-compatible
+`BenchmarkRun.result.pass_rate` uses the grading assertion pass rate, and the run
+summary averages those per-run rates. Its delta compares those averages, not case
+verdicts. Skipped configured judge assertions receive no credit and remain in the
+denominator; `expectations[].skipped` preserves their unexecuted status.
+
 Provides two layers of data structures:
 
 **Simplified mode** (internal statistics, `benchmark.go` — `BenchmarkResult`):

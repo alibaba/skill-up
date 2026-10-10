@@ -119,20 +119,22 @@ func TestMultiJudgeGateFailureSkipsEveryMember(t *testing.T) {
 		t.Fatal(err)
 	}
 	ag := &mockAgent{name: "test", output: "missing"}
-	members := []config.JudgeConfig{{ID: "first", Type: "rule_based"}, {ID: "second", Type: "rule_based"}}
+	members := []config.JudgeConfig{{ID: "first", Type: "agent_judge", Criteria: []string{"one"}}, {ID: "second", Type: "agent_judge", Criteria: []string{"one", "two", "three", "four"}}}
 	e := newTestEvaluator(EvalOptions{Agent: ag, OutputDir: t.TempDir(), EvalCfg: &config.EvalConfig{
 		Environment: config.Environment{Type: "none"}, Judges: &members,
 	}})
-	caseCfg := &config.CaseConfig{ID: "gate", Input: config.Input{Prompt: "hello"}, Expect: config.Expect{MustContain: []string{"required"}}}
+	exitCode := 0
+	caseCfg := &config.CaseConfig{ID: "gate", Input: config.Input{Prompt: "hello"}, Expect: config.Expect{MustContain: []string{"required"}, MustNotContain: []string{"forbidden"}, ExitCode: &exitCode}}
 	result := e.executeCase(context.Background(), caseCfg, "with_skill", rt, nil)
 	if result.Status != judge.StatusFail || len(result.JudgeResults) != 2 || ag.runCall.Load() != 1 || result.Grading == nil {
 		t.Fatalf("status=%s outcomes=%+v runs=%d", result.Status, result.JudgeResults, ag.runCall.Load())
 	}
-	if result.Grading.Summary.Total != 1 || result.Grading.Summary.Failed != 1 {
+	wantSummary := judge.ResultSummary{Total: len(members), Failed: len(members)}
+	if result.Grading.Status != judge.StatusFail || result.Grading.Summary != wantSummary {
 		t.Fatalf("gate compatibility grading=%+v", result.Grading.Summary)
 	}
-	for _, outcome := range result.JudgeResults {
-		if outcome.Status != judge.StatusSkip || outcome.SkipReason != "gate_failed" {
+	for i, outcome := range result.JudgeResults {
+		if outcome.Status != judge.StatusSkip || outcome.SkipReason != "gate_failed" || outcome.Result != nil || !result.Grading.AssertionResults[i].Skipped {
 			t.Fatalf("outcome=%+v", outcome)
 		}
 	}

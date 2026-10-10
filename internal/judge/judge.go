@@ -211,6 +211,9 @@ type AssertionResult struct {
 	// Passed indicates whether this assertion was satisfied.
 	Passed bool `json:"passed"`
 
+	// Skipped indicates that the assertion was not evaluated and received no credit.
+	Skipped bool `json:"skipped,omitempty"`
+
 	// Evidence provides the concrete reason for the pass/fail determination.
 	Evidence string `json:"evidence"`
 }

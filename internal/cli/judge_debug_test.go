@@ -503,3 +503,42 @@ func TestRunJudgeDebug_StderrSummary(t *testing.T) {
 		t.Error("expected non-empty stderr summary")
 	}
 }
+
+func TestRunJudgeDebug_ExpectConfiguredDenominator(t *testing.T) {
+	t.Parallel()
+	for _, gatePass := range []bool{false, true} {
+		t.Run(fmt.Sprintf("gatePass=%t", gatePass), func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			output := filepath.Join(dir, "grading.json")
+			message := "missing"
+			if gatePass {
+				message = "required"
+			}
+			input := judgeDebugInput{FinalMessage: message, Expect: &config.Expect{MustContain: []string{"required"}}, Judge: config.JudgeConfig{Type: "agent_judge", Criteria: []string{"one", "two"}}, MockResults: []judge.CriterionResult{debugCriterionResult(0, true, "ok"), debugCriterionResult(1, false, "bad")}}
+			cmd := newJudgeDebugCmd(output)
+			cmd.SetErr(&bytes.Buffer{})
+			if err := runJudgeDebug(cmd, []string{writeJudgeDebugInput(t, dir, input)}); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(output)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result judge.Result
+			if err := json.Unmarshal(data, &result); err != nil {
+				t.Fatal(err)
+			}
+			wantPassed := 0
+			if gatePass {
+				wantPassed = 2
+			}
+			if result.Summary.Total != 3 || result.Summary.Passed != wantPassed || result.Summary.PassRate != float64(wantPassed)/3 {
+				t.Fatalf("summary=%+v", result.Summary)
+			}
+			if result.Status != judge.StatusFail || result.AssertionResults[1].Skipped == gatePass {
+				t.Fatalf("result=%+v", result)
+			}
+		})
+	}
+}

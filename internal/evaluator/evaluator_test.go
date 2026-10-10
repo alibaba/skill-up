@@ -28,6 +28,7 @@ import (
 	"github.com/alibaba/skill-up/internal/judge"
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/platform"
+	"github.com/alibaba/skill-up/internal/report"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
@@ -4104,4 +4105,58 @@ func absoluteSecretPath() string {
 		return `C:\tmp\secret.txt`
 	}
 	return "/tmp/secret.txt"
+}
+
+func TestExecuteCase_ExpectScoringBenchmark(t *testing.T) {
+	exitCode := 0
+	threshold := 0.5
+	cfg := config.JudgeConfig{Type: "agent_judge", PassThreshold: &threshold, Criteria: []string{"one", "two", "three", "four"}}
+	var runs []report.BenchmarkRun
+	for _, gatePass := range []bool{false, true} {
+		output := "missing keyword"
+		calls := int32(1)
+		if gatePass {
+			output = "required keyword"
+			calls = 2
+		}
+		ag := &mockAgent{name: "test"}
+		ag.runFunc = func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ []transcript.Message) (*agent.SessionResult, error) {
+			if ag.runCall.Load() == 1 {
+				return &agent.SessionResult{FinalMessage: output}, nil
+			}
+			return &agent.SessionResult{FinalMessage: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["ok"],"failures":[]},{"criterion_id":"criterion-2","passed":false,"evidence":["bad"],"failures":["bad"]},{"criterion_id":"criterion-3","passed":false,"evidence":["bad"],"failures":["bad"]},{"criterion_id":"criterion-4","passed":false,"evidence":["bad"],"failures":["bad"]}]}`}, nil
+		}
+		e := newTestEvaluator(EvalOptions{Agent: ag, EvalCfg: &config.EvalConfig{Judge: cfg}})
+		caseCfg := &config.CaseConfig{ID: "scoring", Input: config.Input{Prompt: "hello"}, Expect: config.Expect{MustContain: []string{"required"}, MustNotContain: []string{"forbidden"}, ExitCode: &exitCode}}
+		result := e.executeCase(context.Background(), caseCfg, "with_skill", &mockRuntime{workspace: t.TempDir()}, nil)
+		if result.Status != judge.StatusFail || result.Grading == nil {
+			t.Fatalf("gatePass=%t: result=%+v", gatePass, result)
+		}
+		if ag.runCall.Load() != calls {
+			t.Fatalf("gatePass=%t: agent calls=%d, want %d", gatePass, ag.runCall.Load(), calls)
+		}
+		wantPassed := 2
+		if gatePass {
+			wantPassed = 4
+		}
+		summary := result.Grading.Summary
+		wantSummary := judge.ResultSummary{Total: 7, Passed: wantPassed, Failed: 7 - wantPassed, PassRate: float64(wantPassed) / 7}
+		if summary != wantSummary {
+			t.Fatalf("gatePass=%t: summary=%+v", gatePass, summary)
+		}
+		for _, assertion := range result.Grading.AssertionResults[3:] {
+			if assertion.Skipped == gatePass {
+				t.Fatalf("gatePass=%t: assertion=%+v", gatePass, assertion)
+			}
+		}
+		grading := report.ConvertToAnthropicGrading(result.Grading)
+		if grading.Expectations[3].Skipped == gatePass {
+			t.Fatalf("lost skipped metadata: %+v", grading)
+		}
+		runs = append(runs, report.BenchmarkRun{Result: report.BenchmarkRunResult{PassRate: grading.Summary.PassRate}, Expectations: grading.Expectations})
+	}
+	benchmark := report.ComputeAnthropicBenchmark("test", "", runs[:1], runs[1:])
+	if benchmark.RunSummary.Delta.PassRate != "-0.29" {
+		t.Fatalf("delta=%s, want -0.29", benchmark.RunSummary.Delta.PassRate)
+	}
 }
