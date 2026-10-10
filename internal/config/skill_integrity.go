@@ -163,6 +163,9 @@ func collectReachableRefs(skillDir string, seeds []string) map[string]struct{} {
 	var enqueue func(rel string)
 	enqueue = func(rel string) {
 		abs := filepath.Join(skillDir, filepath.FromSlash(rel))
+		// #nosec G703 -- callers confine rel to the skill root (normalizeSkillRef
+		// rejects ../ escapes); reads during traversal are additionally
+		// symlink-contained by readSkillLocalFile.
 		info, err := os.Stat(abs)
 		if err != nil {
 			return // dangling citation: reported by the missing check; nothing to traverse
@@ -173,27 +176,7 @@ func collectReachableRefs(skillDir string, seeds []string) map[string]struct{} {
 		}
 		scanned[rel] = struct{}{}
 		if info.IsDir() {
-			root := abs
-			_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-				if err != nil {
-					return nil //nolint:nilerr // unreadable entries are not traversal blockers
-				}
-				if d.IsDir() {
-					if p != root && strings.HasPrefix(d.Name(), ".") {
-						return fs.SkipDir
-					}
-					return nil
-				}
-				if strings.HasPrefix(d.Name(), ".") {
-					return nil
-				}
-				// p is always under skillDir, so Rel cannot fail in practice.
-				fileRel, _ := filepath.Rel(skillDir, p)
-				if fileRel = filepath.ToSlash(fileRel); fileRel != rel {
-					enqueue(fileRel)
-				}
-				return nil
-			})
+			enqueueDirContents(skillDir, abs, rel, enqueue)
 			return
 		}
 		queue = append(queue, rel)
@@ -210,6 +193,32 @@ func collectReachableRefs(skillDir string, seeds []string) map[string]struct{} {
 		}
 	}
 	return cited
+}
+
+// enqueueDirContents enqueues every non-dotfile beneath a cited directory,
+// so documents under a directory citation get their own dependencies walked.
+func enqueueDirContents(skillDir, root, rel string, enqueue func(string)) {
+	// #nosec G703 -- root is a cited directory under skillDir; the walk only
+	// enqueues paths still inside the skill root.
+	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil //nolint:nilerr // unreadable entries are not traversal blockers
+		}
+		if d.IsDir() {
+			if p != root && strings.HasPrefix(d.Name(), ".") {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			return nil
+		}
+		// p is always under skillDir, so Rel cannot fail in practice.
+		if fileRel, _ := filepath.Rel(skillDir, p); filepath.ToSlash(fileRel) != rel {
+			enqueue(filepath.ToSlash(fileRel))
+		}
+		return nil
+	})
 }
 
 // extractAttachmentRefs returns the dependencies of one reachable file as
@@ -240,6 +249,29 @@ func extractAttachmentRefs(skillDir, rel string) []string {
 			refs = append(refs, dep)
 		}
 	}
+	if isMarkdownRef(rel) {
+		walkMarkdownAttachmentRefs(rel, data, add)
+		return refs
+	}
+
+	if isBinaryContent(data) {
+		return nil
+	}
+	collectProseRefs(data, add)
+	for _, m := range relScriptPattern.FindAllSubmatch(data, -1) {
+		add(path.Join(dir, string(m[1])))
+	}
+	return refs
+}
+
+// walkMarkdownAttachmentRefs collects the dependencies of a markdown
+// attachment: local link and image destinations — root-anchored when they
+// carry an attachment prefix (references/x.md), resolved against the
+// document's own directory otherwise ([details](details.md) inside
+// references/guide.md means references/details.md) — plus root-anchored
+// prose and code-span citations, matching the SKILL.md body conventions.
+func walkMarkdownAttachmentRefs(rel string, data []byte, add func(string)) {
+	dir := path.Dir(rel)
 	addLinkTarget := func(dest []byte) {
 		target, ok := localLinkTarget(dest)
 		if !ok {
@@ -252,42 +284,30 @@ func extractAttachmentRefs(skillDir, rel string) []string {
 		add(path.Join(dir, target)) // document-relative dependency
 	}
 
-	if isMarkdownRef(rel) {
-		doc := goldmark.New().Parser().Parse(text.NewReader(data))
-		_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
-			if !entering {
-				return ast.WalkContinue, nil
-			}
-			switch node := n.(type) {
-			case *ast.Text:
-				collectProseRefs(node.Segment.Value(data), add)
-			case *ast.Link:
-				addLinkTarget(node.Destination)
-			case *ast.Image:
-				addLinkTarget(node.Destination)
-			case *ast.CodeSpan:
-				// Same convention as the SKILL.md body: a code span whose
-				// first token is a path cites that path.
-				if content := codeSpanText(node, data); citesRefPath(content) {
-					for _, m := range skillRefPattern.FindAllStringSubmatch(content, -1) {
-						add(m[1])
-					}
-				}
-				return ast.WalkSkipChildren, nil
-			}
+	doc := goldmark.New().Parser().Parse(text.NewReader(data))
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
 			return ast.WalkContinue, nil
-		})
-		return refs
-	}
-
-	if isBinaryContent(data) {
-		return nil
-	}
-	collectProseRefs(data, add)
-	for _, m := range relScriptPattern.FindAllSubmatch(data, -1) {
-		add(path.Join(dir, string(m[1])))
-	}
-	return refs
+		}
+		switch node := n.(type) {
+		case *ast.Text:
+			collectProseRefs(node.Segment.Value(data), add)
+		case *ast.Link:
+			addLinkTarget(node.Destination)
+		case *ast.Image:
+			addLinkTarget(node.Destination)
+		case *ast.CodeSpan:
+			// Same convention as the SKILL.md body: a code span whose first
+			// token is a path cites that path.
+			if content := codeSpanText(node, data); citesRefPath(content) {
+				for _, m := range skillRefPattern.FindAllStringSubmatch(content, -1) {
+					add(m[1])
+				}
+			}
+			return ast.WalkSkipChildren, nil
+		}
+		return ast.WalkContinue, nil
+	})
 }
 
 // readSkillLocalFile reads abs only when it resolves inside the skill root,

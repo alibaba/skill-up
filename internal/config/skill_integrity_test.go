@@ -525,11 +525,6 @@ func TestExtractSkillRefsProse(t *testing.T) {
 			want: []string{"references/real.md"},
 		},
 		{
-			name: "prose path with a dot segment is normalized",
-			body: "See references/a/./b.md for details.",
-			want: []string{"references/a/b.md"},
-		},
-		{
 			name: "home-dir path in prose is ignored",
 			body: "Also available at ~/scripts/run.sh locally.",
 			want: nil,
@@ -609,31 +604,6 @@ func TestExtractSkillRefsLinks(t *testing.T) {
 			want: []string{"references/guide.md"},
 		},
 		{
-			name: "link destination with a dot segment is normalized",
-			body: "[guide](references/./guide.md)",
-			want: []string{"references/guide.md"},
-		},
-		{
-			name: "link destination with a double slash is normalized",
-			body: "[guide](references//guide.md)",
-			want: []string{"references/guide.md"},
-		},
-		{
-			name: "link destination with a dot-dot segment is normalized",
-			body: "[guide](references/sub/../guide.md)",
-			want: []string{"references/guide.md"},
-		},
-		{
-			name: "link destination escaping the attachment directories is ignored",
-			body: "[secret](references/../secret.md)",
-			want: nil,
-		},
-		{
-			name: "bare directory link destination is a directory citation",
-			body: "[docs](references/)",
-			want: []string{"references"},
-		},
-		{
 			name: "dot-slash prefixed link destination is a reference",
 			body: "[icon](./assets/icon.png)",
 			want: []string{"assets/icon.png"},
@@ -672,6 +642,48 @@ func TestExtractSkillRefsLinks(t *testing.T) {
 			name: "mailto link is ignored",
 			body: "[mail](mailto:someone@example.com)",
 			want: nil,
+		},
+	})
+}
+
+func TestExtractSkillRefsNormalization(t *testing.T) {
+	t.Parallel()
+
+	runExtractRefsCases(t, []extractRefsCase{
+		{
+			name: "prose path with a dot segment is normalized",
+			body: "See references/a/./b.md for details.",
+			want: []string{"references/a/b.md"},
+		},
+		{
+			name: "link destination with a dot segment is normalized",
+			body: "[guide](references/./guide.md)",
+			want: []string{"references/guide.md"},
+		},
+		{
+			name: "link destination with a double slash is normalized",
+			body: "[guide](references//guide.md)",
+			want: []string{"references/guide.md"},
+		},
+		{
+			name: "link destination with a dot-dot segment is normalized",
+			body: "[guide](references/sub/../guide.md)",
+			want: []string{"references/guide.md"},
+		},
+		{
+			name: "link destination escaping the attachment directories is ignored",
+			body: "[secret](references/../secret.md)",
+			want: nil,
+		},
+		{
+			name: "bare directory link destination is a directory citation",
+			body: "[docs](references/)",
+			want: []string{"references"},
+		},
+		{
+			name: "equivalent spellings collapse to one citation",
+			body: "[a](references/./guide.md) and [b](references/guide.md)",
+			want: []string{"references/guide.md"},
 		},
 	})
 }
