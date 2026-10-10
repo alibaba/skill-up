@@ -478,3 +478,42 @@ func TestExpectResult_ToAssertionResults_MultipleFailuresSameRule(t *testing.T) 
 		t.Errorf("evidence missing second keyword detail: %q", results[0].Evidence)
 	}
 }
+
+const (
+	scriptType    = "script"
+	ruleBasedType = "rule_based"
+)
+
+func TestNewExpectFailureResult_ConfiguredDenominator(t *testing.T) {
+	t.Parallel()
+	expect := &ExpectResult{ConfiguredRules: []string{"must_contain", "exit_code"}, Failures: []ExpectFailure{{Rule: "must_contain", Detail: "missing"}}}
+	tests := []struct {
+		name    string
+		cfg     config.JudgeConfig
+		skipped int
+	}{
+		{"none", config.JudgeConfig{}, 0},
+		{"empty agent criteria", config.JudgeConfig{Type: "agent_judge"}, 0},
+		{"agent", config.JudgeConfig{Type: "agent_judge", Criteria: []string{"one", "two"}}, 2},
+		{scriptType, config.JudgeConfig{Type: scriptType, ScriptPath: "never-run.sh"}, 1},
+		{"rules", config.JudgeConfig{Type: ruleBasedType, Success: []config.Rule{{}, {}}, Failure: []config.Rule{{}}}, 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := NewExpectFailureResult(expect, tt.cfg, Input{TurnsExecuted: 2, TurnsTotal: 3})
+			total := 2 + tt.skipped
+			if result.Status != StatusFail || result.Summary.Total != total || result.Summary.Passed != 1 || result.Summary.Failed != total-1 || result.Summary.PassRate != 1/float64(total) {
+				t.Fatalf("result=%+v", result)
+			}
+			if result.TurnsExecuted != 2 || result.TurnsTotal != 3 || result.JudgeSession != nil {
+				t.Fatalf("unexpected judge execution metadata: %+v", result)
+			}
+			for _, assertion := range result.AssertionResults[2:] {
+				if !assertion.Skipped || assertion.Passed || !strings.Contains(assertion.Evidence, "not evaluated") {
+					t.Fatalf("assertion=%+v", assertion)
+				}
+			}
+		})
+	}
+}

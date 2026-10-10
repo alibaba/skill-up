@@ -21,7 +21,7 @@ func TestPlanScript_POSIXTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if plan.uploadName != "script" {
+	if plan.uploadName != scriptType {
 		t.Fatalf("uploadName = %q, want \"script\"", plan.uploadName)
 	}
 	got := plan.command("/tmp/d/script")
@@ -140,7 +140,7 @@ func TestPlanScript_POSIXTarget_IgnoresExtension(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if plan.uploadName != "script" {
+	if plan.uploadName != scriptType {
 		t.Fatalf("uploadName = %q, want \"script\"", plan.uploadName)
 	}
 }
@@ -295,7 +295,7 @@ func TestShebangExtension(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			p := filepath.Join(dir, "script")
+			p := filepath.Join(dir, scriptType)
 			if err := os.WriteFile(p, []byte(tt.content), 0o600); err != nil {
 				t.Fatalf("write: %v", err)
 			}

@@ -320,12 +320,12 @@ func TestE2E_RealisticCodeReview_MultiRule(t *testing.T) {
 	assertNoError(t, err)
 	assertStatus(t, result, StatusPass)
 
-	// Verify all 3 success rules pass.
-	if result.Summary.Total != 3 {
-		t.Fatalf("expected 3 assertions, got %d", result.Summary.Total)
+	// Verify all 3 success rules and the unmatched failure rule pass.
+	if result.Summary.Total != 4 {
+		t.Fatalf("expected 4 assertions, got %d", result.Summary.Total)
 	}
-	if result.Summary.Passed != 3 {
-		t.Fatalf("expected all 3 passed, got %d passed %d failed",
+	if result.Summary.Passed != 4 {
+		t.Fatalf("expected all 4 passed, got %d passed %d failed",
 			result.Summary.Passed, result.Summary.Failed)
 	}
 	if result.Summary.PassRate != 1.0 {

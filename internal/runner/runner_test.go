@@ -741,3 +741,16 @@ func TestRunner_WriteResults_NoWorkspace(t *testing.T) {
 		t.Error("expected error when workspace not initialized")
 	}
 }
+
+func TestResultToBenchmarkRun_PreservesSkippedAssertions(t *testing.T) {
+	t.Parallel()
+	expect := &judge.ExpectResult{ConfiguredRules: []string{"must_contain"}, Failures: []judge.ExpectFailure{{Rule: "must_contain", Detail: "missing"}}}
+	grading := judge.NewExpectFailureResult(expect, config.JudgeConfig{Type: "agent_judge", Criteria: []string{"one", "two"}}, judge.Input{})
+	run := resultToBenchmarkRun(&evaluator.EvalResult{SessionResult: &agent.SessionResult{}, Grading: grading, Status: judge.StatusFail}, 1)
+	if run.Result.Total != 3 || run.Result.PassRate != 0 || len(run.Expectations) != 3 {
+		t.Fatalf("run=%+v", run)
+	}
+	if run.Expectations[0].Skipped || !run.Expectations[1].Skipped || !run.Expectations[2].Skipped {
+		t.Fatalf("expectations=%+v", run.Expectations)
+	}
+}

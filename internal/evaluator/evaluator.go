@@ -622,8 +622,12 @@ func (e *defaultEvaluator) evaluateCaseSession(
 		return *result
 	}
 
-	if failed := e.runExpectPreCheck(ctx, caseCfg, configName, judgeInput, turnsTotal, result); failed {
+	if failed := e.runExpectPreCheck(ctx, caseCfg, configName, judgeCfg, judgeInput, result); failed {
 		recordSkippedJudges(result, plan, "gate_failed")
+		if plan.Multi {
+			result.Grading, _ = judge.DefaultOutcomeAggregator().Aggregate(result.JudgeResults, result.Turns, turnsTotal)
+			result.Grading.Status = judge.StatusFail
+		}
 		return *result
 	}
 
@@ -654,8 +658,8 @@ func (e *defaultEvaluator) runExpectPreCheck(
 	ctx context.Context,
 	caseCfg *config.CaseConfig,
 	configName string,
+	judgeCfg config.JudgeConfig,
 	judgeInput judge.Input,
-	turnsTotal int,
 	result *EvalResult,
 ) bool {
 	// Merge default expect with case-level expect
@@ -673,8 +677,7 @@ func (e *defaultEvaluator) runExpectPreCheck(
 		return false
 	}
 
-	assertions := expectResult.ToAssertionResults()
-	result.Grading = judge.NewResult(assertions, result.Turns, turnsTotal)
+	result.Grading = judge.NewExpectFailureResult(expectResult, judgeCfg, judgeInput)
 	result.Status = judge.StatusFail
 	result.Configuration = configName
 	logging.DebugContextf(ctx, "Judge: case %s expect pre-check FAILED", caseCfg.ID)

@@ -120,6 +120,33 @@ func (r *ExpectResult) ToAssertionResults() []AssertionResult {
 	return results
 }
 
+// NewExpectFailureResult preserves configured judge assertions in the scoring
+// denominator when the expect gate prevents the judge from running.
+func NewExpectFailureResult(expect *ExpectResult, cfg config.JudgeConfig, in Input) *Result {
+	assertions := expect.ToAssertionResults()
+	addSkipped := func(text string) {
+		assertions = append(assertions, AssertionResult{
+			Text: text, Skipped: true, Evidence: "not evaluated: expect gate failed",
+		})
+	}
+	switch cfg.Type {
+	case "agent_judge":
+		for _, criterion := range cfg.Criteria {
+			addSkipped(criterion)
+		}
+	case "script":
+		addSkipped("script: " + cfg.ScriptPath)
+	case "rule_based":
+		for i := range cfg.Failure {
+			addSkipped(fmt.Sprintf("failure rule %d", i+1))
+		}
+		for i := range cfg.Success {
+			addSkipped(fmt.Sprintf("success rule %d", i+1))
+		}
+	}
+	return NewResult(assertions, in.TurnsExecuted, in.TurnsTotal)
+}
+
 // ---------------------------------------------------------------------------
 // Individual check implementations
 // ---------------------------------------------------------------------------

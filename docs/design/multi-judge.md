@@ -86,7 +86,8 @@ this is not a durable replay or regrading feature.
 the policy and `Aggregate` combines leaf outcomes into compatibility grading.
 `DefaultOutcomeAggregator` selects `AllRequiredAggregator`; the evaluator records
 that strategy and the report uses it rather than inventing its own policy name.
-A gate failure retains its own case status instead of aggregating skipped members.
+A gate failure retains its own case status; skipped member slots still determine
+the compatibility scoring denominator.
 
 The current policy is `all_required`:
 
@@ -94,8 +95,19 @@ The current policy is `all_required`:
 - FAIL: at least one member fails and no member has ERROR or SKIP.
 - ERROR: at least one member errors or is skipped after judging begins.
 
-Each member contributes one assertion to compatibility grading. Leaf criteria
-remain in that member's result, including permitted failed criteria when an Agent
+Case pass rates count PASS verdicts across cases. Anthropic-compatible benchmark
+pass rates average per-run compatibility assertion pass rates; these metrics are
+not interchangeable. In the legacy single-judge path, the configured denominator
+includes expect rule types plus judge assertions. A failed expect gate preserves
+skipped judge assertions with no credit and `skipped: true`, rather than shrinking
+the denominator or inventing a judge failure. Agent-judge thresholds still use
+judge criteria alone.
+
+Each member contributes one assertion to compatibility grading, including when
+an expect gate skips all members. Skipped members receive no credit and remain
+SKIP in `judge_results`; the failed gate sets the overall case to FAIL. Expect
+checks and leaf criteria do not add weight to multi-judge compatibility grading. Leaf
+criteria remain in that member's result, including permitted failed criteria when an Agent
 judge meets its `pass_threshold`. Script exit 0 means PASS; nonzero means FAIL;
 execution failures and strict multi-judge timeouts mean ERROR.
 

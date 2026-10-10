@@ -153,6 +153,27 @@ Runner entry point
 
 ## Notes per Judge Type
 
+### Single-judge scoring
+
+The scoring denominator is configured before the expect gate: one assertion per
+configured expect rule type, plus each agent-judge criterion, each rule-based
+success/failure rule, or the script judge's single outcome. No judge adds zero
+assertions. A failed expect gate returns a FAIL case and skips judge execution;
+the skipped judge assertions remain in `summary.total` with `passed: false`,
+`skipped: true`, and evidence explaining that they were not evaluated. For format
+compatibility, `summary.failed` counts all assertions receiving no credit,
+including skipped assertions. The `skipped` field distinguishes those assertions
+from checks that actually failed, without inventing a judge session or verdict.
+
+Rule-based failure guards receive credit when they do not match. A matching guard
+still overrides all success rules; success rules remain in the denominator as
+skipped assertions. Agent-judge PASS/FAIL continues to use only its criteria and
+`pass_threshold`, before expect assertions are added to the report. The combined
+assertion pass rate is therefore not a case verdict.
+
+These rules apply to the legacy single-judge path. Multi-judge aggregation
+operates on member verdicts and does not weight judges by criterion count.
+
 ### Expect Pre-check (`expect.go`)
 
 7 check rules:
