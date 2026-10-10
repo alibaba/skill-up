@@ -1,7 +1,9 @@
 package judge
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -413,8 +415,14 @@ func argsMatch(expected, actual map[string]any) bool {
 		if !ok {
 			return false
 		}
-		// Compare as strings for flexibility (YAML values may deserialize differently).
-		if fmt.Sprintf("%v", ev) != fmt.Sprintf("%v", av) {
+		// JSON preserves argument structure while normalizing YAML integers and
+		// JSON floats (for example, int(1) and float64(1) both encode as 1).
+		expectedJSON, err := json.Marshal(ev)
+		if err != nil {
+			return false
+		}
+		actualJSON, err := json.Marshal(av)
+		if err != nil || !bytes.Equal(expectedJSON, actualJSON) {
 			return false
 		}
 	}

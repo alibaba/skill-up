@@ -11,6 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support independent `judges` on one case in the `none` runtime, combining
   reusable script checks and semantic Agent review of one execution. Results
   retain separate gate, judge, and overall decisions in reports.
+
+### Fixed
+- Traverse symlinked workspace roots and reject escaping symlink chains when
+  capturing independent judge snapshots.
+- Reject Git metadata pointer files in judge snapshots, preventing linked
+  worktrees and submodules from sharing the original Git index across forks.
+- Map absolute workspace attachment and generated-file paths into each isolated
+  judge copy while preserving original inputs and references to archived artifacts.
+- Preserve skipped judge outcomes and grouped evaluation artifacts when a case
+  exits before judging, including failed multi-turn post-conditions and execution errors.
+- Remove judge snapshot and fork copies containing populated read-only directories
+  after evaluation, without changing permissions in the original workspace.
+
+## [0.13.0] - 2026-10-09
+
+### Added
 - When a custom engine is killed by the case deadline before writing its
   session result (and stdout carries no usable result), skill-up synthesizes
   a minimal `session-result.json` with `exit_code` 124 and a stderr marker,
@@ -69,9 +85,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before/after snapshot. Selected cases, retries, and iterations intentionally
   share the directory sequentially, so setup and agent changes carry forward.
   Report directories that overlap the external workspace are rejected before
-   cleanup, event logs must remain outside it, nested skill installation avoids
-   recursively copying its own target, and snapshot paths are handled literally
-   on POSIX shells.
+  cleanup, event logs must remain outside it, nested skill installation avoids
+  recursively copying its own target, and snapshot paths are handled literally
+  on POSIX shells.
 
 ### Changed
 - Upgrade the GitHub Action runner image and live model E2E to QoderCLI 1.1.41,
@@ -86,16 +102,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixture uploads.
 
 ### Fixed
-- Traverse symlinked workspace roots and reject escaping symlink chains when
-  capturing independent judge snapshots.
-- Reject Git metadata pointer files in judge snapshots, preventing linked
-  worktrees and submodules from sharing the original Git index across forks.
-- Map absolute workspace attachment and generated-file paths into each isolated
-  judge copy while preserving original inputs and references to archived artifacts.
-- Preserve skipped judge outcomes and grouped evaluation artifacts when a case
-  exits before judging, including failed multi-turn post-conditions and execution errors.
-- Remove judge snapshot and fork copies containing populated read-only directories
-  after evaluation, without changing permissions in the original workspace.
+- Compare structured tool arguments by JSON value in `tool_called` and
+  `tool_called_in_turn`, preventing different arrays, objects, or scalar types
+  with identical display text from being scored as matching arguments.
 - `skill-up validate` (and the pre-run validation in `skill-up run`) now
   rejects `rule_based` assertions that set none of the supported matcher
   fields. Unknown matcher keys are silently dropped by non-strict YAML
@@ -118,6 +127,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   historical five tiers. Model availability is validated by Qoder; failures
   retain model context without falling back to the default. Global/CN
   authentication and provider isolation are unchanged.
+
+### Upgrade notes
+- **Codex plugin rename:** disable or uninstall the earlier `skill-up-observer`
+  plugin before installing `codex-skill-up` to avoid duplicate hooks. Install
+  the self-contained `codex-skill-up_0.13.0.tar.gz` release bundle using your
+  Codex host's plugin installation flow. Observations remain in
+  `$CODEX_HOME/plugin-data/skill-up-observer`; no data move is needed. See the
+  [Codex plugin guide](plugins/codex-skill-up/README.md).
+- **Custom engine kwargs:** engines that read `SessionInput.kwargs` must instead
+  receive their parameters explicitly. Use `${kwargs.<key>}` in
+  `custom.local.args`, `custom.env`, or `custom.http.headers`; HTTP request
+  bodies can also inject the whole map with `${kwargs}`. Keep credentials in
+  the credential/environment configuration. See the
+  [custom engine guide](docs/design/custom-engine.md#custom-parameters-kwargs).
+- **Experimental DSH plugin:** the release archive version follows the CLI
+  version; `0.13.0` does not change the plugin's experimental status. Plugin
+  tests pin the DSH host peer set to `0.1.5-rc.2`; compatibility with newer
+  hosts must be verified separately. See the
+  [DSH plugin guide](plugins/dsh-skill-up/README.md).
+- **GitHub Action availability:** this CLI release does not update the official
+  Action's pinned runner image, which still bundles skill-up `0.7.0`. New CLI
+  capabilities, including OpenCode and user simulation, require a separate
+  runner-image upgrade. The `skill-up-version` input only provides a fallback
+  for custom images without skill-up; it does not replace the CLI in the
+  official image.
 
 ## [0.12.0] - 2026-09-18
 
@@ -704,6 +738,7 @@ The `v0.5.0` release tag is available at
   project and delivers the end-to-end capability to declare eval environments,
   run cases and emit structured reports as described in [README.md](README.md).
 
+[0.13.0]: https://github.com/alibaba/skill-up/releases/tag/v0.13.0
 [0.12.0]: https://github.com/alibaba/skill-up/releases/tag/v0.12.0
 [0.11.0]: https://github.com/alibaba/skill-up/releases/tag/v0.11.0
 [0.10.0]: https://github.com/alibaba/skill-up/releases/tag/v0.10.0
