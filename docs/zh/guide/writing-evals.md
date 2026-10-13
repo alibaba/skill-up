@@ -776,7 +776,9 @@ judges:
 
 eval 和 case 都可配置 `judges`。case 级列表整体替换 eval 级列表；case 级单数 `judge` 也可覆盖 eval 级列表。同一文档不能同时配置 `judge` 和 `judges`；成员 ID 必须唯一，仅使用小写字母、数字、`_` 和 `-`。
 
-首版多 judge 仅支持 `none` runtime，给每个成员提供独立的工作区副本。其他 runtime 会在被测 Agent 启动前报隔离能力不支持。`none` runtime 仍运行在宿主机上，外部服务、网络状态及工作区外的写入不受隔离。工作区内的相对符号链接会保留；指向外部或使用绝对路径的符号链接会导致快照失败。
+多个 judge 在一次被测 Agent 执行后，按配置顺序复用同一个 case runtime（`none`、Docker 或 OpenSandbox）。每个 Agent judge 新开自己的会话，不 resume 被测 Agent 或前一个 judge。已安装依赖、后台服务、挂载、环境变量和网络策略继续可用，不需要文件系统 Snapshot 或恢复接口。
+
+文件系统由所有 judge 共享：前一个 judge 的修改会被后面的 judge 看到。需要评审原始输出时，请使用只读检查。各 judge 的判定、超时、上下文材料和会话产物仍按 ID 单独记录；这不代表文件系统或外部服务隔离。所有 judge 结束后再按配置清理 case runtime。
 
 报告分别展示门控、各 judge 和总体结果。`evaluation.json` 保存完整分组结果；`grading.json` 为兼容格式，每个 judge 对应一个顶层断言。增加 Agent 评审标准不会改变脚本 judge 的权重。多个 case 现在即可引用同一个 `script_path`；连同辅助文件一起打包脚本属于后续功能。
 
@@ -831,7 +833,8 @@ OpenAI/Anthropic 协议冲突，以及 adapter 会忽略的评分模型，会在
 Judge 继续使用 case 的 runtime，不新增 `judge.environment`。独立 judge 的 CLI
 在 Docker/OpenSandbox 的评分阶段安装和检查，发生在被测 agent 完成之后。
 `none` 环境需要预先安装所需 CLI，skill-up 只检查可用性；版本选择遵循现有 adapter
-规则。单 judge 保留原有共享 runtime 行为，多 judge 隔离当前仍仅支持 `none`。
+规则。单 judge 保留原有共享 runtime 行为；多 judge 同样按顺序复用 case runtime，
+各自新开会话，文件系统状态共享。
 
 `judge.skills` 仅支持 `agent_judge`。这些 Skills 会安装到 judge agent，
 不会安装到主运行 agent；顶层 `skills` 也不会自动安装到 judge。开启

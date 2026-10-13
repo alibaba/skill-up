@@ -899,7 +899,9 @@ Each member has its own status, assertions, diagnostics, and artifacts. All memb
 
 `judges` can be defined at eval or case level. A case-level list replaces the full eval-level list. A case-level singular `judge` also replaces an eval-level list. A document cannot contain both `judge` and `judges`, and member IDs must be unique lowercase identifiers containing letters, digits, `_`, or `-`.
 
-This first release supports multi-judge execution with the `none` runtime. Each member receives a separate copy of the workspace. Other runtimes report an unsupported-isolation error before the agent starts. A `none` runtime runs on the host, so external services, network state, and writes outside its workspace are not isolated. Relative symlinks within the workspace are preserved; external or absolute symlinks cause snapshot creation to fail.
+Judges run sequentially in the same case runtime (`none`, Docker, or OpenSandbox), after one evaluated-Agent execution. Each Agent judge starts a fresh session rather than resuming the Agent or a previous judge. Installed dependencies, background services, mounted volumes, environment variables and network policy stay available because the runtime is reused. No filesystem snapshot or restore capability is required.
+
+The runtime filesystem is shared: a judge's changes are visible to later judges. Use read-only checks when every judge must observe unchanged output. Verdicts, timeouts, context materials and session artifacts are recorded separately under each judge's ID; this does not provide filesystem or external-service isolation. The case runtime is cleaned up after all judges finish, using the configured lifecycle policy.
 
 Reports show gates, member results, and the overall decision separately. `evaluation.json` stores the complete grouped result; `grading.json` contains one top-level expectation per judge for compatibility. Adding Agent criteria does not change a script judge's weight. Multiple cases can reference the same `script_path` today; packaging helper files with a script is a separate feature.
 
@@ -962,7 +964,8 @@ An independent judge's CLI is installed and checked in Docker/OpenSandbox during
 the judge phase, after the evaluated agent completes. In `none`, install all
 required CLIs beforehand; skill-up only checks them. Version selection follows
 the existing adapter rules. Single judges retain the existing shared-runtime
-behavior, and multi-judge isolation remains supported only by `none`.
+behavior. Multiple judges also reuse the same case runtime sequentially, each
+starting a fresh session; their filesystem state is shared.
 
 `judge.skills` is supported only for `agent_judge`. These Skills are installed
 into the judge agent, not the run agent, and top-level `skills` are not

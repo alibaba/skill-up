@@ -1,8 +1,8 @@
 # Independent multi-judge evaluation
 
-Status: implemented in PR #290 for the `none` runtime, with internal extension
-interfaces. Numerical scores, configurable policies, validator bundles, and
-additional runtime adapters are future work.
+Status: sequential shared-runtime execution. The evaluated Agent runs once;
+judges reuse its runtime with fresh Agent sessions and separate verdicts/artifacts.
+Numerical scores, configurable policies and validator bundles remain future work.
 
 Related issue: [#246](https://github.com/alibaba/skill-up/issues/246).
 Usage: [Writing evals](../guide/writing-evals.md#multiple-independent-judges).
@@ -44,41 +44,31 @@ list. A document cannot contain both `judge` and `judges`. Legacy singular confi
 retain their execution and reporting behavior. `expect` is a separate hard gate.
 No public aggregation-policy configuration is introduced by this implementation.
 
-## Execution and isolation
+## Execution and shared state
 
-1. Resolve and validate the judge plan; reject runtimes lacking snapshot capability
-   before invoking the evaluated agent.
-2. Execute the evaluated agent and run `expect` gates. A failed gate skips all
+1. Resolve and validate the judge plan.
+2. Execute the evaluated Agent and run `expect` gates. A failed gate skips all
    members and produces a failed case with gate evidence.
-3. Capture the completed workspace once.
-4. Run each member sequentially in its own fork of that snapshot, using the same
-   agent transcript and execution metadata. A completed member's FAIL or ERROR
-   does not prevent later members from running. Case cancellation skips pending
-   members; member deadlines are bounded by the case deadline.
-5. Preserve member outcomes, aggregate the case, and clean up forks and snapshot.
+3. Run each member sequentially in the same case runtime. Each Agent judge starts
+   a fresh session using the original transcript and execution metadata rather
+   than resuming the evaluated Agent or a sibling judge.
+4. Preserve each member's outcome and artifacts before the next member starts.
+   A completed member's FAIL or ERROR does not prevent later members from running.
+   Case cancellation skips pending members; member deadlines stay bounded by the
+   case deadline.
+5. Aggregate the case and clean up its runtime according to the configured policy.
 
-List order is execution order, not a dependency graph. Member output is not passed
-to another member. Judges can execute additional review-agent sessions; the
-original evaluated-agent execution is not repeated.
+This follows Harbor's shared verifier environment model. Dependencies, volumes,
+background services, environment variables and network policy remain available.
+No snapshot, sandbox restore or filesystem-copy capability is required. The
+filesystem is shared: a judge's writes, installed Skills and external side effects
+can affect later members. Use read-only checks when judges must see unchanged
+output; separate verdicts and sessions do not imply filesystem isolation.
 
-`runtime.JudgeSnapshotProvider` is an optional capability alongside `Runtime`.
-It captures a `runtime.JudgeSnapshot`, which provides `Fork` and `Close`. A fork
-must be ready to use, isolated from sibling forks, the snapshot, and the original
-workspace; the caller owns its cleanup. A future runtime implements this contract
-without requiring concrete-type dispatch in the evaluator.
-
-Only `NoneRuntime` implements it today. It copies the full workspace to temporary
-storage and creates a new copy for each member. A symlinked workspace root is
-resolved before copying; internal relative symlinks are
-preserved, as are regular-file/directory modification times and permission bits
-(the workspace root stays private with mode 0700). Absolute or escaping links
-and special files are rejected. Symlink chains are resolved before copying;
-unresolvable links and chains escaping the workspace are rejected. Git metadata pointer files (`.git` files in linked
-worktrees or submodules) are rejected; use a standalone checkout with a `.git`
-directory. Copying observes cancellation. This isolates workspace file changes, not host processes,
-network access, credentials, or effects on external services. Snapshot failure
-produces ERROR with skipped members. Temporary snapshots are deleted after use;
-this is not a durable replay or regrading feature.
+List order is execution order. One member's verdict or conversation is not passed
+to another member; filesystem changes remain visible. The original Agent is not
+rerun. Context and session artifacts are archived under each judge's ID before
+later calls can overwrite runtime-backed files.
 
 ## Verdict and result contracts
 
@@ -131,7 +121,7 @@ This comparison is based on source inspection, not runtime experiments.
 | Attribution | Reward map itself contains numerical values | Each judge has execution status and artifacts |
 | Aggregation | Metrics across trial rewards; separate multi-step policy | `all_required` within one case |
 | Custom implementation | Imported verifier class | Built-in judge factory; scripts as external validators |
-| Environment | Abstract environment; shared or separate verifier | Optional snapshot capability; `none` adapter |
+| Environment | Abstract environment; shared or separate verifier | One shared case runtime; fresh Agent judge sessions |
 | Supporting files | Tests directory upload or image-owned tests | Script entry-path reuse; no validator bundle contract |
 
 Harbor's [default verifier](https://github.com/harbor-framework/harbor/blob/58789aad577f432a4590209a8fd901f8c894f382/src/harbor/verifier/verifier.py)
@@ -164,10 +154,9 @@ The following are proposals, not supported YAML or result fields:
 3. **Benchmark metrics.** Aggregate numerical dimensions across cases and repeated
    runs separately from case acceptance. Define missing-value and failure policies
    explicitly rather than copying Harbor's zero substitution implicitly.
-4. **Runtime adapters and declared inputs.** Implement snapshot/fork for another
-   runtime only with evidence that sibling judges cannot alter each other's inputs.
-   Artifact-only verification can be a separate input contract. Durable regrading
-   additionally needs retained inputs, configuration and validator identities.
+4. **Declared inputs.** Artifact-only verification can be a separate input
+   contract. Durable regrading additionally needs retained inputs, configuration
+   and validator identities; shared runtime execution is not durable replay.
 5. **Reusable validator bundles.** Extend script-path reuse with supporting modules,
    data, explicit parameters, dependency/environment requirements, and versioned
    JSON input/output. Retain exit-code compatibility. Directory packaging and
@@ -178,14 +167,16 @@ The following are proposals, not supported YAML or result fields:
 
 ## Validation boundaries
 
-Tests cover independent workspace forks, one evaluated-agent execution, gate
-short-circuiting, timeout/error handling, unsupported runtimes, grouped reports,
-and compatibility grading. A runtime wrapper exercising the snapshot capability
-proves dispatch does not require a concrete `NoneRuntime`. Aggregation tests cover
-status precedence and preservation of member weight.
+Tests cover shared filesystem state, fresh judge sessions without cross-member
+resumption, one evaluated-Agent execution, gate short-circuiting, cancellation,
+timeout/error handling, grouped reports and compatibility grading. Runtime reuse
+has no snapshot capability gate. The gated Docker integration test covers two
+Agent judges plus a script, outside-workspace dependencies, runtime identity and
+material readback, including script FAIL / Agent judges PASS / aggregate FAIL.
+OpenSandbox deployment validation is tracked in the stacked runtime integration PR.
 
-Docker/OpenSandbox multi-judge execution, numerical scoring, weighted policies,
-validator bundles, and durable replay are not validated or claimed by this PR.
+The historical validation below predates shared-runtime execution and records
+what was verified for PR #290; it does not describe current filesystem isolation.
 
 ### Live Qwen verification
 

@@ -470,7 +470,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 		result.Status, result.Error = judge.StatusError, planErr
 		return result
 	}
-	if err := e.validateJudgePlanRuntime(rt, judgePlan, &result); err != nil {
+	if err := e.validateJudgePlan(judgePlan, &result); err != nil {
 		result.Status, result.Error = judge.StatusError, err
 		return result
 	}
@@ -995,13 +995,9 @@ func (e *defaultEvaluator) resolveJudgeAgentConfig(judgeCfg config.JudgeConfig) 
 	return resolved, agent.ValidateJudgeAdapterConfig(resolved, e.resolver)
 }
 
-func (e *defaultEvaluator) validateJudgePlanRuntime(rt runtime.Runtime, plan config.JudgePlan, result *EvalResult) error {
+func (e *defaultEvaluator) validateJudgePlan(plan config.JudgePlan, result *EvalResult) error {
 	if plan.Multi {
 		result.AggregationStrategy = judge.DefaultOutcomeAggregator().Strategy()
-		if _, ok := rt.(runtime.JudgeSnapshotProvider); !ok {
-			recordSkippedJudges(result, plan, "unsupported_runtime")
-			return fmt.Errorf("multi-judge workspace isolation is not supported by %T", rt)
-		}
 	}
 	if err := e.validateJudgeAgents(plan); err != nil {
 		recordSkippedJudges(result, plan, "invalid_judge_config")

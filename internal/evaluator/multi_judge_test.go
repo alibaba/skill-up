@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -20,7 +21,7 @@ import (
 
 const windowsGOOS = "windows"
 
-func TestMultiJudgeEvaluatesOneExecutionWithIndependentWorkspaces(t *testing.T) {
+func TestMultiJudgeEvaluatesOneExecutionWithSharedWorkspace(t *testing.T) {
 	if goruntime.GOOS == windowsGOOS {
 		t.Skip("POSIX script fixture")
 	}
@@ -45,11 +46,7 @@ func TestMultiJudgeEvaluatesOneExecutionWithIndependentWorkspaces(t *testing.T) 
 		EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none"}, Judges: &members},
 	})
 	caseCfg := &config.CaseConfig{ID: "case", Input: config.Input{Prompt: "create file"}}
-	provider, ok := rt.(runtime.JudgeSnapshotProvider)
-	if !ok {
-		t.Fatal("none runtime lacks snapshot capability")
-	}
-	result := e.executeCase(context.Background(), caseCfg, "with_skill", &snapshotCapableRuntime{Runtime: rt, provider: provider}, nil)
+	result := e.executeCase(context.Background(), caseCfg, "with_skill", rt, nil)
 	if result.AggregationStrategy != "all_required" {
 		t.Fatalf("aggregation strategy=%q", result.AggregationStrategy)
 	}
@@ -63,7 +60,7 @@ func TestMultiJudgeEvaluatesOneExecutionWithIndependentWorkspaces(t *testing.T) 
 		t.Fatalf("agent runs=%d", ag.runCall.Load())
 	}
 	data, err := os.ReadFile(filepath.Join(workspace, "result.txt"))
-	if err != nil || string(data) != "original" {
+	if err != nil || string(data) != "changed" {
 		t.Fatalf("source workspace=%q, %v", data, err)
 	}
 }
@@ -79,11 +76,11 @@ func makeMultiJudgeAgent(t *testing.T) *mockAgent {
 			return &agent.SessionResult{FinalMessage: "done"}, nil
 		}
 		data, err := os.ReadFile(filepath.Join(current.Workspace(), "result.txt"))
-		if err != nil || string(data) != "original" {
+		if err != nil || string(data) != "changed" {
 			t.Fatalf("semantic judge saw %q, %v", data, err)
 		}
 		assertWorkspaceAttachment(t, current.Workspace())
-		return &agent.SessionResult{FinalMessage: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["original input"],"failures":[]}]}`}, nil
+		return &agent.SessionResult{FinalMessage: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["shared output"],"failures":[]}]}`}, nil
 	}
 	return ag
 }
@@ -140,44 +137,37 @@ func TestMultiJudgeGateFailureSkipsEveryMember(t *testing.T) {
 	}
 }
 
-func TestMultiJudgeUnsupportedRuntimeStopsBeforeAgentRun(t *testing.T) {
+func TestMultiJudgeReusesRuntimeWithoutSnapshotCapability(t *testing.T) {
 	ag := &mockAgent{name: "test", output: "done"}
 	members := []config.JudgeConfig{{ID: "check", Type: "rule_based"}}
 	e := newTestEvaluator(EvalOptions{Agent: ag, EvalCfg: &config.EvalConfig{Judges: &members}})
-	caseCfg := &config.CaseConfig{ID: "case", Input: config.Input{Prompt: "hello"}}
-	result := e.executeCase(context.Background(), caseCfg, ConfigurationWithoutSkill, &mockRuntime{workspace: t.TempDir()}, nil)
-	if result.Status != judge.StatusError || result.Error == nil || ag.runCall.Load() != 0 || result.Configuration != ConfigurationWithoutSkill || len(result.JudgeResults) != len(members) {
-		t.Fatalf("status=%s config=%q error=%v runs=%d", result.Status, result.Configuration, result.Error, ag.runCall.Load())
+	result := e.executeCase(context.Background(), &config.CaseConfig{ID: "case", Input: config.Input{Prompt: "hello"}}, ConfigurationWithoutSkill, &mockRuntime{workspace: t.TempDir()}, nil)
+	if result.Status != judge.StatusPass || result.Error != nil || ag.runCall.Load() != 1 || result.Configuration != ConfigurationWithoutSkill || len(result.JudgeResults) != 1 {
+		t.Fatalf("result=%+v runs=%d", result, ag.runCall.Load())
 	}
-	assertSkippedJudgeOutcomes(t, result.JudgeResults, members, "unsupported_runtime")
 }
 
-func TestMultiJudgeSnapshotFailureKeepsConfiguration(t *testing.T) {
-	if goruntime.GOOS == windowsGOOS {
-		t.Skip("symlink fixture")
+func TestMultiJudgeStartsFreshAgentSessionsInSameRuntime(t *testing.T) {
+	rt := &mockRuntime{workspace: t.TempDir()}
+	ag := &mockResumerAgent{mockAgent: mockAgent{name: "test"}}
+	ag.runFunc = func(_ context.Context, current runtime.Runtime, _ agent.ExecOptions, messages []transcript.Message) (*agent.SessionResult, error) {
+		if current != rt || len(messages) != 1 || messages[0].Role != transcript.RoleUser {
+			t.Fatalf("runtime=%T messages=%+v", current, messages)
+		}
+		output := "completed"
+		if ag.runCall.Load() > 1 {
+			output = `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["checked"],"failures":[]}]}`
+		}
+		return &agent.SessionResult{SessionID: fmt.Sprintf("session-%d", ag.runCall.Load()), FinalMessage: output}, nil
 	}
-	workspace := t.TempDir()
-	if err := os.Symlink(t.TempDir(), filepath.Join(workspace, "outside")); err != nil {
-		t.Fatal(err)
+	members := []config.JudgeConfig{{ID: "first", Type: "agent_judge", Criteria: []string{"quality"}}, {ID: "second", Type: "agent_judge", Criteria: []string{"quality"}}}
+	e := newTestEvaluator(EvalOptions{Agent: ag, OutputDir: t.TempDir(), EvalCfg: &config.EvalConfig{Judges: &members}})
+	result := e.executeCase(context.Background(), &config.CaseConfig{ID: "case", Input: config.Input{Prompt: "task"}}, ConfigurationWithoutSkill, rt, nil)
+	if result.Status != judge.StatusPass || ag.runCall.Load() != 3 || ag.turnCall != 0 {
+		t.Fatalf("result=%+v runs=%d resumes=%d", result, ag.runCall.Load(), ag.turnCall)
 	}
-	rt, err := runtime.NewRuntime(runtime.Config{Type: "none", WorkspaceDir: workspace})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := rt.Create(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	members := []config.JudgeConfig{{ID: "check", Type: "rule_based"}}
-	ag := &mockAgent{name: "test", output: "done"}
-	e := newTestEvaluator(EvalOptions{Agent: ag, OutputDir: t.TempDir(), EvalCfg: &config.EvalConfig{
-		Environment: config.Environment{Type: "none"}, Judges: &members,
-	}})
-	result := e.executeCase(context.Background(), &config.CaseConfig{ID: "case", Input: config.Input{Prompt: "hello"}}, ConfigurationWithoutSkill, rt, nil)
-	if result.Status != judge.StatusError || result.Configuration != ConfigurationWithoutSkill || len(result.JudgeResults) != 1 {
-		t.Fatalf("status=%s config=%q outcomes=%+v", result.Status, result.Configuration, result.JudgeResults)
-	}
-	if result.Grading == nil || result.Grading.Status != judge.StatusError || result.Grading.Summary.Total != len(members) || result.Error == nil {
-		t.Fatalf("snapshot error=%v grading=%+v", result.Error, result.Grading)
+	if result.SessionID != "session-1" || result.JudgeResults[0].Session.SessionID != "session-2" || result.JudgeResults[1].Session.SessionID != "session-3" {
+		t.Fatalf("sessions=%+v", result)
 	}
 }
 
@@ -243,18 +233,6 @@ func TestMultiJudgeCaseDeadlinePreservesTimeoutError(t *testing.T) {
 	if got, ok := retryReasonForResult(result); !ok || got != "timeout" {
 		t.Fatalf("retry reason=%q ok=%t", got, ok)
 	}
-}
-
-// This adapter proves that evaluator dispatch depends on the capability rather
-// than the concrete NoneRuntime type, while exercising real snapshot isolation.
-type snapshotCapableRuntime struct {
-	runtime.Runtime
-
-	provider runtime.JudgeSnapshotProvider
-}
-
-func (r *snapshotCapableRuntime) CaptureJudgeSnapshot(ctx context.Context) (runtime.JudgeSnapshot, error) {
-	return r.provider.CaptureJudgeSnapshot(ctx)
 }
 
 func TestMultiJudgePersistedContextReferencesResolve(t *testing.T) {
@@ -411,30 +389,8 @@ func TestMultiJudgeSingleTurnExecutionErrorPreservesSkippedOutcomes(t *testing.T
 func assertWorkspaceAttachment(t *testing.T, workspace string) {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(workspace, ".skill-up", "judge", "context", "attachments", "01-result.txt"))
-	if err != nil || string(data) != "original" {
+	if err != nil || string(data) != "changed" {
 		t.Fatalf("judge attachment=%q, %v", data, err)
-	}
-}
-
-func TestJudgeConfigForWorkspacePreservesOriginalAndExternalAttachments(t *testing.T) {
-	source, fork := t.TempDir(), t.TempDir()
-	workspacePath := filepath.Join(source, "nested", "result.txt")
-	externalPath := filepath.Join(t.TempDir(), "reference.txt")
-	relativePath := filepath.Join("fixtures", "reference.txt")
-	member := config.JudgeConfig{Context: &config.JudgeContextConfig{
-		Profile: "standard", Attachments: []config.JudgeContextAttachment{
-			{Path: workspacePath, Label: "output"}, {Path: externalPath}, {Path: relativePath},
-		},
-	}}
-	mapped := judgeConfigForWorkspace(member, source, fork)
-	want := []string{filepath.Join(fork, "nested", "result.txt"), externalPath, relativePath}
-	for i, path := range want {
-		if mapped.Context.Attachments[i].Path != path {
-			t.Fatalf("attachment %d = %q, want %q", i, mapped.Context.Attachments[i].Path, path)
-		}
-	}
-	if mapped.Context.Profile != member.Context.Profile || mapped.Context.Attachments[0].Label != "output" || member.Context.Attachments[0].Path != workspacePath {
-		t.Fatalf("configuration changed: original=%+v mapped=%+v", member.Context, mapped.Context)
 	}
 }
 
@@ -481,42 +437,6 @@ func assertSimulatedJudgeStatuses(t *testing.T, result EvalResult, members []con
 		if outcome.Status != judge.StatusPass || outcome.Result.TurnsTotal != result.TurnsTotal {
 			t.Fatalf("unexpected completed outcome: %+v", outcome)
 		}
-	}
-}
-
-func TestJudgeInputForWorkspaceMapsGeneratedFilesWithoutChangingSource(t *testing.T) {
-	source, fork := t.TempDir(), t.TempDir()
-	workspacePath := filepath.Join(source, "result.txt")
-	archivePath := filepath.Join(t.TempDir(), "archived.txt")
-	input := judge.Input{WorkspacePath: source, GeneratedFiles: []string{workspacePath, archivePath, "relative.txt"}}
-	mapped := judgeInputForWorkspace(input, fork)
-	want := []string{filepath.Join(fork, "result.txt"), archivePath, "relative.txt"}
-	for i, path := range want {
-		if mapped.GeneratedFiles[i] != path {
-			t.Fatalf("generated file %d = %q, want %q", i, mapped.GeneratedFiles[i], path)
-		}
-	}
-	if mapped.WorkspacePath != fork || input.WorkspacePath != source || input.GeneratedFiles[0] != workspacePath {
-		t.Fatalf("source input changed: %+v, mapped: %+v", input, mapped)
-	}
-}
-
-func TestJudgeWorkspacePathMapsCanonicalSourceAlias(t *testing.T) {
-	if goruntime.GOOS == windowsGOOS {
-		t.Skip("symlink fixture requires host privileges on Windows")
-	}
-	source, fork := t.TempDir(), t.TempDir()
-	alias := filepath.Join(t.TempDir(), "workspace-alias")
-	if err := os.Symlink(source, alias); err != nil {
-		t.Fatal(err)
-	}
-	canonical, err := filepath.EvalSymlinks(source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(canonical, "result.txt")
-	if mapped := judgeWorkspacePath(path, alias, fork); mapped != filepath.Join(fork, "result.txt") {
-		t.Fatalf("canonical workspace path mapped to %q", mapped)
 	}
 }
 
