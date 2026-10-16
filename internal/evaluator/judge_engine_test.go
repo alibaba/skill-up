@@ -112,7 +112,7 @@ func TestIncompatibleJudgeFailsBeforeRunnerExecution(t *testing.T) {
 	}
 }
 
-func TestIndependentJudgesUseSeparateAgentsAndWorkspaceForks(t *testing.T) {
+func TestIndependentJudgesUseSeparateAgentsAndSharedRuntime(t *testing.T) {
 	workspace := t.TempDir()
 	rt, err := runtime.NewRuntime(runtime.Config{Type: "none", WorkspaceDir: workspace})
 	if err != nil {
@@ -135,7 +135,7 @@ func TestIndependentJudgesUseSeparateAgentsAndWorkspaceForks(t *testing.T) {
 	judges := map[string]*mockAgent{}
 	original := agentDetectWithResolvedConfig
 	agentDetectWithResolvedConfig = func(params credential.ResolvedAgentConfig) (agent.Agent, error) {
-		ag := &mockAgent{name: params.Engine, runFunc: independentJudgeWorkspaceCheck(t, workspace, params.Engine)}
+		ag := &mockAgent{name: params.Engine, runFunc: sharedJudgeWorkspaceCheck(t, workspace, params.Engine)}
 		judges[params.Engine] = ag
 		return ag, nil
 	}
@@ -153,23 +153,27 @@ func TestIndependentJudgesUseSeparateAgentsAndWorkspaceForks(t *testing.T) {
 			t.Fatalf("judge lifecycle incorrect: %s", name)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(workspace, "judge-change")); !os.IsNotExist(err) {
-		t.Fatal("original workspace modified")
+	data, readErr := os.ReadFile(filepath.Join(workspace, "judge-change"))
+	if readErr != nil || string(data) != "codex" {
+		t.Fatalf("shared judge changes=%q, %v", data, readErr)
 	}
 }
 
-func independentJudgeWorkspaceCheck(t *testing.T, workspace, engine string) func(context.Context, runtime.Runtime, agent.ExecOptions, []transcript.Message) (*agent.SessionResult, error) {
+func sharedJudgeWorkspaceCheck(t *testing.T, workspace, engine string) func(context.Context, runtime.Runtime, agent.ExecOptions, []transcript.Message) (*agent.SessionResult, error) {
 	t.Helper()
 	return func(_ context.Context, current runtime.Runtime, _ agent.ExecOptions, _ []transcript.Message) (*agent.SessionResult, error) {
-		if current.Workspace() == workspace {
-			t.Fatal("judge used original workspace")
+		if current.Workspace() != workspace {
+			t.Fatal("judge did not reuse the original workspace")
 		}
 		data, readErr := os.ReadFile(filepath.Join(current.Workspace(), "answer.txt"))
 		if readErr != nil || string(data) != "completed" {
 			t.Fatalf("judge input=%q, %v", data, readErr)
 		}
-		if _, statErr := os.Stat(filepath.Join(current.Workspace(), "judge-change")); !os.IsNotExist(statErr) {
-			t.Fatal("sibling mutation leaked")
+		if engine == "codex" {
+			previous, err := os.ReadFile(filepath.Join(current.Workspace(), "judge-change"))
+			if err != nil || string(previous) != "claude_code" {
+				t.Fatalf("previous judge change=%q, %v", previous, err)
+			}
 		}
 		if err := os.WriteFile(filepath.Join(current.Workspace(), "judge-change"), []byte(engine), 0o600); err != nil {
 			return nil, err

@@ -899,7 +899,65 @@ Each member has its own status, assertions, diagnostics, and artifacts. All memb
 
 `judges` can be defined at eval or case level. A case-level list replaces the full eval-level list. A case-level singular `judge` also replaces an eval-level list. A document cannot contain both `judge` and `judges`, and member IDs must be unique lowercase identifiers containing letters, digits, `_`, or `-`.
 
-This first release supports multi-judge execution with the `none` runtime. Each member receives a separate copy of the workspace. Other runtimes report an unsupported-isolation error before the agent starts. A `none` runtime runs on the host, so external services, network state, and writes outside its workspace are not isolated. Relative symlinks within the workspace are preserved; external or absolute symlinks cause snapshot creation to fail.
+Judges run sequentially in the same case runtime (`none`, Docker, or OpenSandbox), after one evaluated-Agent execution. Each Agent judge starts a fresh session rather than resuming the Agent or a previous judge. Installed dependencies, background services, mounted volumes, environment variables and network policy stay available because the runtime is reused. No filesystem snapshot or restore capability is required.
+
+The runtime filesystem is shared: a judge's changes are visible to later judges. Use read-only checks when every judge must observe unchanged output. Verdicts, timeouts, context materials and session artifacts are recorded separately under each judge's ID; this does not provide filesystem or external-service isolation. The case runtime is cleaned up after all judges finish, using the configured lifecycle policy.
+
+#### OpenSandbox shared-runtime verification
+
+OpenSandbox judges use the running case sandbox directly; they do not call native
+snapshot, restore, pause or resume APIs. Each Agent judge uses a fresh review
+session, while installed tools, filesystem changes and the case's network policy
+remain in the same sandbox. Cleanup follows the normal case lifecycle.
+
+To run the gated live-service test, configure `OPENSANDBOX_API_KEY`,
+`OPENSANDBOX_BASE_URL` and `OPENSANDBOX_IMAGE` in your environment:
+
+```bash
+SKILL_UP_OPENSANDBOX_JUDGE_E2E=1 go test -tags e2e -run TestOpenSandboxSharedJudgeEnvironment -v ./e2e
+```
+
+The test creates temporary sandboxes with a five-minute TTL and test metadata.
+It runs one Agent fixture, a script judge and two fresh Agent-judge fixture
+sessions sequentially. It checks shared file changes, setup and Agent-installed
+dependencies outside the workspace, environment configuration and per-judge
+material readback. It covers PASS/PASS/PASS and script FAIL / both Agent judges
+PASS / aggregate FAIL. The fixture exercises the actual judging pipeline without
+calling a model provider. Actual service egress enforcement requires a separate
+network test; this test does not claim external-service isolation.
+
+To verify the real OpenCode provider path, also inject `JUDGE_LIVE_API_KEY`,
+set `SKILL_UP_OPENCODE_JUDGE_BASE_URL` and `SKILL_UP_OPENCODE_JUDGE_MODEL` for an
+OpenAI-compatible provider, then run:
+
+```bash
+SKILL_UP_OPENCODE_JUDGE_E2E=1 go test -count=1 -tags e2e -run '^TestOpenSandboxOpenCodeJudgeProvider$' -v ./e2e
+```
+
+This separate test starts the real OpenCode CLI and makes live model requests.
+The runner fixture seeds a conflicting provider endpoint and key; two independent
+judges must override them, pass their rubric and return different session IDs.
+It uses a fifteen-minute sandbox TTL and normal case deletion. Optionally pin
+OpenCode with `SKILL_UP_OPENCODE_JUDGE_VERSION` (validated with `1.14.24`).
+
+To exercise an omitted `judge.engine.model.base_url`, set
+`SKILL_UP_OPENCODE_JUDGE_PROVIDER=openai` (or `anthropic`), leave
+`SKILL_UP_OPENCODE_JUDGE_BASE_URL` unset, and supply the native provider's model
+and key through the same variables. The test still seeds a conflicting runner
+provider; the independent judge must use its native default endpoint. Provider
+initialization removes the selected provider's inherited inline settings while
+preserving case MCP configuration, unrelated providers and other OpenCode settings.
+
+A separate configuration-only smoke test installs and preflights the real
+OpenCode CLI in an OpenSandbox, resets a conflicting OpenAI provider, and reads
+back the preserved MCP and unrelated provider settings. It needs the sandbox
+variables above but no model-provider key or native-provider connectivity:
+
+```bash
+SKILL_UP_OPENCODE_CONFIG_E2E=1 go test -count=1 -tags e2e -run '^TestOpenSandboxOpenCodeDefaultRouting$' -v ./e2e
+```
+
+
 
 Reports show gates, member results, and the overall decision separately. `evaluation.json` stores the complete grouped result; `grading.json` contains one top-level expectation per judge for compatibility. Adding Agent criteria does not change a script judge's weight. Multiple cases can reference the same `script_path` today; packaging helper files with a script is a separate feature.
 
@@ -962,7 +1020,8 @@ An independent judge's CLI is installed and checked in Docker/OpenSandbox during
 the judge phase, after the evaluated agent completes. In `none`, install all
 required CLIs beforehand; skill-up only checks them. Version selection follows
 the existing adapter rules. Single judges retain the existing shared-runtime
-behavior, and multi-judge isolation remains supported only by `none`.
+behavior. Multiple judges also reuse the same case runtime sequentially, each
+starting a fresh session; their filesystem state is shared.
 
 `judge.skills` is supported only for `agent_judge`. These Skills are installed
 into the judge agent, not the run agent, and top-level `skills` are not

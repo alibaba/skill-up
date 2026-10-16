@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"github.com/alibaba/skill-up/internal/agent"
 	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/judge"
-	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/runtime"
 )
 
@@ -34,26 +32,6 @@ func (e *defaultEvaluator) runMultipleJudges(
 	input judge.Input,
 	result *EvalResult,
 ) EvalResult {
-	snapshotProvider, ok := rt.(runtime.JudgeSnapshotProvider)
-	if !ok {
-		recordSkippedJudges(result, plan, "unsupported_runtime")
-		result.Status = judge.StatusError
-		result.Error = fmt.Errorf("multi-judge workspace isolation is not supported by %T", rt)
-		return *result
-	}
-	snapshot, err := snapshotProvider.CaptureJudgeSnapshot(ctx)
-	if err != nil {
-		result.Status = judge.StatusError
-		result.Error = err
-		for _, member := range plan.Judges {
-			result.JudgeResults = append(result.JudgeResults, JudgeOutcome{
-				ID: member.ID, Type: member.Type, Status: judge.StatusSkip, SkipReason: "snapshot_failed",
-			})
-		}
-		result.Grading, result.Status = judge.DefaultOutcomeAggregator().Aggregate(result.JudgeResults, result.Turns, turnsTotal)
-		return *result
-	}
-	defer closeJudgeSnapshot(ctx, snapshot)
 	result.JudgeResults = make([]JudgeOutcome, 0, len(plan.Judges))
 	var causes []error
 	for i, member := range plan.Judges {
@@ -73,22 +51,13 @@ func (e *defaultEvaluator) runMultipleJudges(
 		if member.TimeoutSeconds != nil && *member.TimeoutSeconds > 0 {
 			memberCtx, cancel = context.WithTimeout(ctx, time.Duration(*member.TimeoutSeconds)*time.Second)
 		}
-		memberRT, cleanup, forkErr := snapshot.Fork(memberCtx)
-		if forkErr != nil {
-			outcome.Status, outcome.Error = judge.StatusError, forkErr.Error()
-			causes = append(causes, forkErr)
-		} else {
-			memberInput := judgeInputForWorkspace(input, memberRT.Workspace())
-			memberResult := &EvalResult{SessionResult: result.SessionResult, CaseID: result.CaseID, CaseName: result.CaseName}
-			member = judgeConfigForWorkspace(member, input.WorkspacePath, memberInput.WorkspacePath)
-			graded := e.runJudgePhase(memberCtx, memberRT, caseCfg, configName, member, turnsTotal, runAgent, memberInput, memberResult, outcome.Artifacts, true)
-			outcome.Status, outcome.Result = graded.Status, graded.Grading
-			outcome.Session, outcome.Skills = graded.JudgeSession, graded.JudgeSkills
-			outcome.Error = judgeOutcomeError(graded)
-			if graded.Status == judge.StatusError && graded.Error != nil {
-				causes = append(causes, graded.Error)
-			}
-			cleanup()
+		memberResult := &EvalResult{SessionResult: result.SessionResult, CaseID: result.CaseID, CaseName: result.CaseName}
+		graded := e.runJudgePhase(memberCtx, rt, caseCfg, configName, member, turnsTotal, runAgent, input, memberResult, outcome.Artifacts, true)
+		outcome.Status, outcome.Result = graded.Status, graded.Grading
+		outcome.Session, outcome.Skills = graded.JudgeSession, graded.JudgeSkills
+		outcome.Error = judgeOutcomeError(graded)
+		if graded.Status == judge.StatusError && graded.Error != nil {
+			causes = append(causes, graded.Error)
 		}
 		if memberErr := recordMemberContextError(memberCtx, &outcome); memberErr != nil {
 			causes = append(causes, memberErr)
@@ -149,12 +118,6 @@ func summarizeJudgeErrors(outcomes []JudgeOutcome) string {
 	return "judges failed to complete: " + strings.Join(details, "; ")
 }
 
-func closeJudgeSnapshot(ctx context.Context, snapshot runtime.JudgeSnapshot) {
-	if err := snapshot.Close(); err != nil {
-		logging.WarnContextf(ctx, "close judge snapshot: %v", err)
-	}
-}
-
 func recordSkippedJudges(result *EvalResult, plan config.JudgePlan, reason string) {
 	if !plan.Multi {
 		return
@@ -164,53 +127,4 @@ func recordSkippedJudges(result *EvalResult, plan config.JudgePlan, reason strin
 			ID: member.ID, Type: member.Type, Status: judge.StatusSkip, SkipReason: reason,
 		})
 	}
-}
-
-func judgeConfigForWorkspace(member config.JudgeConfig, source, fork string) config.JudgeConfig {
-	if member.Context == nil || source == "" {
-		return member
-	}
-	contextCopy := *member.Context
-	contextCopy.Attachments = slices.Clone(member.Context.Attachments)
-	for i, attachment := range contextCopy.Attachments {
-		contextCopy.Attachments[i].Path = judgeWorkspacePath(attachment.Path, source, fork)
-	}
-	member.Context = &contextCopy
-	return member
-}
-
-func judgeInputForWorkspace(input judge.Input, fork string) judge.Input {
-	memberInput := input
-	memberInput.WorkspacePath = fork
-	memberInput.GeneratedFiles = slices.Clone(input.GeneratedFiles)
-	for i, path := range memberInput.GeneratedFiles {
-		memberInput.GeneratedFiles[i] = judgeWorkspacePath(path, input.WorkspacePath, fork)
-	}
-	return memberInput
-}
-
-func judgeWorkspacePath(path, source, fork string) string {
-	if source == "" || !filepath.IsAbs(path) {
-		return path
-	}
-	sourceRoot, err := filepath.Abs(source)
-	if err != nil {
-		return path
-	}
-	rel, err := filepath.Rel(sourceRoot, path)
-	if !judgeWorkspaceRelativePath(rel, err) {
-		canonicalRoot, resolveErr := filepath.EvalSymlinks(sourceRoot)
-		if resolveErr != nil {
-			return path
-		}
-		rel, err = filepath.Rel(canonicalRoot, path)
-	}
-	if !judgeWorkspaceRelativePath(rel, err) {
-		return path
-	}
-	return filepath.Join(fork, rel)
-}
-
-func judgeWorkspaceRelativePath(rel string, err error) bool {
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

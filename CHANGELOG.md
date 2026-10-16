@@ -17,23 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support explicit `judge.engine` configuration independent of the evaluated agent,
   reusing engine/model connection resolution and provisioning the judge CLI in
   isolated runtimes. Detect known judge protocol mismatches before agent execution.
-- Support independent `judges` on one case in the `none` runtime, combining
-  reusable script checks and semantic Agent review of one execution. Results
-  retain separate gate, judge, and overall decisions in reports.
+- Support sequential `judges` over one Agent execution in the same runtime,
+  including Docker and OpenSandbox. Each Agent judge starts a fresh session;
+  verdicts and artifacts remain separate while filesystem changes are shared.
 
 ### Fixed
 - Initialize independent OpenCode judges with their own provider endpoint and API-key binding,
   clearing runner-derived provider settings when the judge selects the default endpoint.
-- Traverse symlinked workspace roots and reject escaping symlink chains when
-  capturing independent judge snapshots.
-- Reject Git metadata pointer files in judge snapshots, preventing linked
-  worktrees and submodules from sharing the original Git index across forks.
-- Map absolute workspace attachment and generated-file paths into each isolated
-  judge copy while preserving original inputs and references to archived artifacts.
 - Preserve skipped judge outcomes and grouped evaluation artifacts when a case
   exits before judging, including failed multi-turn post-conditions and execution errors.
-- Remove judge snapshot and fork copies containing populated read-only directories
-  after evaluation, without changing permissions in the original workspace.
 - Keep configured single-judge assertions in the scoring denominator when an
   `expect` gate fails, assigning skipped assertions no credit and marking them
   with `skipped: true`. Debug judging uses the same expect scoring. Rule-based
