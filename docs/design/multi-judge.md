@@ -173,7 +173,9 @@ timeout/error handling, grouped reports and compatibility grading. Runtime reuse
 has no snapshot capability gate. The gated Docker integration test covers two
 Agent judges plus a script, outside-workspace dependencies, runtime identity and
 material readback, including script FAIL / Agent judges PASS / aggregate FAIL.
-OpenSandbox deployment validation is tracked in the stacked runtime integration PR.
+Gated OpenSandbox tests cover shared-runtime fixtures, real OpenCode provider
+requests, and configuration-only default-provider readback. These tests require
+explicit flags and service credentials; skipped cases do not prove live behavior.
 
 The historical validation below predates shared-runtime execution and records
 what was verified for PR #290; it does not describe current filesystem isolation.

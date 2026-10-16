@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -75,20 +76,25 @@ func runSharedJudgeEnvironment(t *testing.T, environment config.Environment) {
 			if len(results) != 1 || results[0].Status != want || len(results[0].JudgeResults) != 3 || results[0].JudgeResults[1].Status != judge.StatusPass || results[0].JudgeResults[2].Status != judge.StatusPass {
 				t.Fatalf("results=%+v", results)
 			}
-			if ag.calls != 3 {
-				t.Fatalf("agent calls=%d, want one Agent run plus two new judge sessions", ag.calls)
-			}
-			for i, id := range []string{"semantic", "review"} {
-				outcome := results[0].JudgeResults[i+1]
-				if outcome.Session.SessionID != fmt.Sprintf("session-%d", i+2) {
-					t.Fatalf("judge %s reused a session: %+v", id, outcome.Session)
-				}
-				data, err := os.ReadFile(filepath.Join(out, "shared", "with_skill", "outputs", "judge", id, "context", "final_message.txt"))
-				if err != nil || string(data) != "original" {
-					t.Fatalf("judge %s material readback=%q, %v", id, data, err)
-				}
-			}
+			assertSharedJudgeSessions(t, results[0], ag.calls, out)
 		})
+	}
+}
+
+func assertSharedJudgeSessions(t *testing.T, result evaluator.EvalResult, calls int, out string) {
+	t.Helper()
+	if calls != 3 {
+		t.Fatalf("agent calls=%d, want one Agent run plus two new judge sessions", calls)
+	}
+	for i, id := range []string{"semantic", "review"} {
+		outcome := result.JudgeResults[i+1]
+		if outcome.Session == nil || outcome.Session.SessionID != fmt.Sprintf("session-%d", i+2) {
+			t.Fatalf("judge %s reused a session: %+v", id, outcome.Session)
+		}
+		data, err := os.ReadFile(filepath.Join(out, "shared", "with_skill", "outputs", "judge", id, "context", "final_message.txt"))
+		if err != nil || string(data) != "original" {
+			t.Fatalf("judge %s material readback=%q, %v", id, data, err)
+		}
 	}
 }
 
@@ -98,23 +104,29 @@ type sharedJudgeFixtureAgent struct {
 	checkNetwork bool
 }
 
-func (*sharedJudgeFixtureAgent) Name() string                              { return "shared-fixture" }
+func (*sharedJudgeFixtureAgent) Name() string { return "shared-fixture" }
+
 func (*sharedJudgeFixtureAgent) Install(context.Context, rt.Runtime) error { return nil }
+
 func (*sharedJudgeFixtureAgent) InstallMCP(context.Context, rt.Runtime, rt.MCPConfig) error {
 	return nil
 }
+
 func (*sharedJudgeFixtureAgent) InstallSkill(context.Context, rt.Runtime, rt.SkillConfig) error {
 	return nil
 }
+
 func (*sharedJudgeFixtureAgent) CheckCredentials(context.Context) error { return nil }
+
 func (*sharedJudgeFixtureAgent) Check(ctx context.Context, current rt.Runtime) error {
 	_, err := current.Exec(ctx, "command -v sh", rt.ExecOptions{})
 	return err
 }
+
 func (a *sharedJudgeFixtureAgent) Run(ctx context.Context, current rt.Runtime, _ agent.ExecOptions, messages []transcript.Message) (*agent.SessionResult, error) {
 	a.calls++
 	if a.source != nil && a.source != current {
-		return nil, fmt.Errorf("judge received a different runtime")
+		return nil, errors.New("judge received a different runtime")
 	}
 	if len(messages) != 1 || messages[0].Role != transcript.RoleUser {
 		return nil, fmt.Errorf("expected one fresh-session prompt, got %d messages", len(messages))

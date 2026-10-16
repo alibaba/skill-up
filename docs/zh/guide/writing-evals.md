@@ -780,6 +780,54 @@ eval 和 case 都可配置 `judges`。case 级列表整体替换 eval 级列表�
 
 文件系统由所有 judge 共享：前一个 judge 的修改会被后面的 judge 看到。需要评审原始输出时，请使用只读检查。各 judge 的判定、超时、上下文材料和会话产物仍按 ID 单独记录；这不代表文件系统或外部服务隔离。所有 judge 结束后再按配置清理 case runtime。
 
+#### OpenSandbox 共享环境验证
+
+OpenSandbox judge 直接复用 case 已启动的 sandbox，不调用原生快照、恢复、pause 或
+resume API。各 Agent judge 新开评审会话，工具、文件修改及 case 网络策略留在
+同一个 sandbox；结束后按普通 case 生命周期清理。
+
+通过环境提供 `OPENSANDBOX_API_KEY`、`OPENSANDBOX_BASE_URL` 和 `OPENSANDBOX_IMAGE`：
+
+```bash
+SKILL_UP_OPENSANDBOX_JUDGE_E2E=1 go test -tags e2e -run TestOpenSandboxSharedJudgeEnvironment -v ./e2e
+```
+
+测试创建带测试 metadata 和五分钟 TTL 的临时 sandbox，一次 Agent fixture 执行后，
+顺序执行一个 script judge 和两个新开的 Agent judge fixture 会话。覆盖共享文件修改、
+setup/Agent 安装到工作区外的依赖、环境配置和各 judge 材料读回，以及全通过和
+script FAIL / 两个 Agent judge PASS / 总体 FAIL。测试走真实评分链路但不调用模型服务。
+实际服务的 egress 执行效果需单独网络测试，不声称外部服务隔离。
+
+若要验证真实 OpenCode provider 链路，还需注入 `JUDGE_LIVE_API_KEY`，并设置
+OpenAI 兼容服务的 `SKILL_UP_OPENCODE_JUDGE_BASE_URL` 和
+`SKILL_UP_OPENCODE_JUDGE_MODEL`，然后运行：
+
+```bash
+SKILL_UP_OPENCODE_JUDGE_E2E=1 go test -count=1 -tags e2e -run '^TestOpenSandboxOpenCodeJudgeProvider$' -v ./e2e
+```
+
+该测试启动真实 OpenCode CLI 并请求模型服务。runner fixture 预置冲突的 provider
+端点和 key，两个独立 judge 必须覆盖它们、评分通过并返回不同 session ID。
+临时 sandbox 使用十五分钟 TTL 并正常删除。可用 `SKILL_UP_OPENCODE_JUDGE_VERSION`
+固定 OpenCode 版本（已验证 `1.14.24`）。
+
+若要覆盖省略 `judge.engine.model.base_url` 的场景，设置
+`SKILL_UP_OPENCODE_JUDGE_PROVIDER=openai`（或 `anthropic`），不设置
+`SKILL_UP_OPENCODE_JUDGE_BASE_URL`，并通过相同变量提供原生服务的模型和 key。
+测试仍预置冲突的 runner provider，独立 judge 必须使用原生默认端点。
+初始化只移除所选 provider 的遗留 inline 配置，保留 case MCP、其他 provider
+及 OpenCode 的其他设置。
+
+另有配置读回 smoke test，在真实 OpenSandbox 安装并预检 OpenCode，重置冲突的
+OpenAI provider，再读回 MCP 和其他 provider 的保留状态。只需上述 sandbox 变量，
+不需要模型 key 或原生模型服务的可达性：
+
+```bash
+SKILL_UP_OPENCODE_CONFIG_E2E=1 go test -count=1 -tags e2e -run '^TestOpenSandboxOpenCodeDefaultRouting$' -v ./e2e
+```
+
+
+
 报告分别展示门控、各 judge 和总体结果。`evaluation.json` 保存完整分组结果；`grading.json` 为兼容格式，每个 judge 对应一个顶层断言。增加 Agent 评审标准不会改变脚本 judge 的权重。多个 case 现在即可引用同一个 `script_path`；连同辅助文件一起打包脚本属于后续功能。
 
 ### judge: agent_judge — LLM 评审
