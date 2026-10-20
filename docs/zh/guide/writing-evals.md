@@ -333,6 +333,14 @@ tool_responses:
       status: ONGOING
 ```
 
+基于 `tool_responses` 的 Mock Server 行为如下：
+
+- 仅支持 stdio。`mode: mocked` 时，skill-up 会拒绝 `transport: http`、`endpoint`、`command` 和 `args`。
+- skill-up 使用 `node` 启动 Mock Server。Claude Code、Codex、Qwen Code 和 OpenCode 安装时会准备 Node.js；Qoder CLI 不会，因此使用 `qodercli` 时需确保运行环境的 `PATH` 中有 `node`。
+- 每次调用某个工具都返回该工具的 `default` 响应；若没有 `default` 键，则整个条目即为响应。字符串值可以像示例中的 `name` 字段那样用 `params` 模板引用调用参数，并可用 `| default:'<value>'` 指定缺省值。
+- Agent 看到的每个工具描述均为 `Mocked MCP tool <name>`，输入 schema 接受任意对象，而不是真实 Server 的描述和参数 schema。
+- 调用未在 `tool_responses` 中声明的工具会返回 MCP 错误。
+
 环境变量引用支持 `${VAR}` 和完整值 `$VAR` 两种形式，变量名必须匹配 `[A-Za-z_][A-Za-z0-9_]*`。`required_env` 会把变量注入 Agent 运行环境；`headers` 中完整的环境变量引用会额外记录变量名，供 Agent 安装 MCP 时选择合适的传递方式。
 
 #### 用例级 mocked MCP 覆盖
@@ -719,7 +727,7 @@ judge:
         not: ["(?i)api[_-]?key\\s*="]
     - exit_code: 0                            # 退出码必须为 0
     - tool_called:                            # Agent 必须调用了某个工具
-        name: "github::create_pull_request"
+        name: "mcp__github__create_pull_request"
         args:                                 # 工具参数部分匹配
           title: "Fix null check"
   failure:                                    # 任一条件匹配则立即失败
@@ -730,6 +738,8 @@ judge:
 ```
 
 > **评估逻辑**：`failure` 优先于 `success`。任何一条 `failure` 规则匹配即立即失败；否则所有 `success` 规则必须全部满足才算通过。
+
+> **MCP 工具名**：`tool_called`、`tool_called_in_turn` 和 `tool_not_called_in_turn` 会把 `name` 与 Agent Engine 记录的工具名做精确匹配。Claude Code、Codex 和 Qoder CLI 记录的 MCP 工具名格式为 `mcp__<server>__<tool>`，其中 `<server>` 是 `mcp.servers` 中的 `name`。
 
 `output_contains` 执行字面 substring 检查。需要正则表达式时使用 `output_matches`；pattern 使用 Go `regexp` 语法，非法 pattern 会在配置校验阶段失败。
 
@@ -1289,7 +1299,7 @@ judge:
   type: rule_based
   success:
     - tool_called:
-        name: "project-mgmt::create_publish_plan_simple"
+        name: "mcp__project-mgmt__create_publish_plan_simple"
         args:
           name: "Q1发布"
           planReleaseDate: "2026-04-03"

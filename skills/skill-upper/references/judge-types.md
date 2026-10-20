@@ -24,7 +24,7 @@ judge:
         not: ["(?i)api[_-]?key\\s*="]
     - exit_code: 0
     - tool_called:
-        name: "github::create_pull_request"
+        name: "mcp__github__create_pull_request"
         args:
           title: "Fix null check"
   failure:
@@ -33,6 +33,8 @@ judge:
 ```
 
 `failure` has priority: any matching failure assertion immediately fails the case. Otherwise, every `success` assertion must hold.
+
+`tool_called` matches `name` exactly. Claude Code, Codex, and Qoder CLI record MCP tools as `mcp__<server>__<tool>`, where `<server>` is the server `name` from `mcp.servers`.
 
 Supported matchers: `output_contains`, `output_matches` (Go regexp with `all`, `any`, and `not`), `exit_code`, `tool_called`, `files_exist`, and `files_not_exist`.
 

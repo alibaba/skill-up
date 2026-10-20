@@ -369,6 +369,14 @@ tool_responses:
       status: ONGOING
 ```
 
+A mocked server built from `tool_responses` behaves as follows:
+
+- It uses stdio only. For `mode: mocked`, skill-up rejects `transport: http`, `endpoint`, `command`, and `args`.
+- skill-up starts it with `node`. Claude Code, Codex, Qwen Code, and OpenCode set up Node.js when they are installed; the Qoder CLI does not, so with `qodercli` make sure `node` is on `PATH` in the runtime.
+- Every call to a tool returns that tool's `default` response. If a tool has no `default` key, the whole entry is the response. String values can insert call arguments with the `params` template used in the example's `name` field, with an optional `| default:'<value>'` fallback.
+- The Agent sees each tool with the description `Mocked MCP tool <name>` and an input schema that accepts any object, not the real server's descriptions or parameter schemas.
+- A call to a tool that is not listed under `tool_responses` returns an MCP error.
+
 Environment-variable references support both `${VAR}` and full-value `$VAR` forms; the variable name must match `[A-Za-z_][A-Za-z0-9_]*`. Variables listed in `required_env` are injected into the Agent process; full env-var references inside `headers` are also recorded by name so the Agent can pick the right transport mechanism when installing the MCP server.
 
 #### Per-case mocked MCP overrides
@@ -839,7 +847,7 @@ judge:
         not: ["(?i)api[_-]?key\\s*="]
     - exit_code: 0
     - tool_called:                            # Agent must invoke this tool
-        name: "github::create_pull_request"
+        name: "mcp__github__create_pull_request"
         args:                                 # Partial-match against tool args
           title: "Fix null check"
   failure:                                    # If ANY rule matches → immediate fail
@@ -850,6 +858,8 @@ judge:
 ```
 
 > **Evaluation order:** `failure` outranks `success`. If any `failure` rule matches, the case fails immediately. Otherwise every `success` rule must pass.
+
+> **MCP tool names:** `tool_called`, `tool_called_in_turn`, and `tool_not_called_in_turn` compare `name` exactly with the tool name the Agent Engine recorded. Claude Code, Codex, and Qoder CLI record MCP tools as `mcp__<server>__<tool>`, where `<server>` is the server `name` from `mcp.servers`.
 
 `output_contains` performs literal substring checks. Use `output_matches` when you need regular expressions; patterns use Go `regexp` syntax and invalid patterns fail config validation.
 
@@ -1457,7 +1467,7 @@ judge:
   type: rule_based
   success:
     - tool_called:
-        name: "project-mgmt::create_publish_plan_simple"
+        name: "mcp__project-mgmt__create_publish_plan_simple"
         args:
           name: "Q1 release"
           planReleaseDate: "2026-04-03"
