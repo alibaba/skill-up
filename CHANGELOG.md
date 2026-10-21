@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the requested cases and scoring contract. Accept read-only checksum queries
   in the localized-regression judge while rejecting checksum manifest modes.
   Keep credential-probe verification within the caller's allowed command profile.
+- Add `case_results[].judge_recovery` metadata to reports when an agent judge verdict is recovered after a call error, distinguishing recovered output from a healthy judge call.
 
 ## [0.14.0] - 2026-10-20
 
