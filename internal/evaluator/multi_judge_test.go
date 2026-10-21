@@ -147,6 +147,28 @@ func TestMultiJudgeReusesRuntimeWithoutSnapshotCapability(t *testing.T) {
 	}
 }
 
+func TestMultiJudgeRecordsRecoveredAgentJudgeCall(t *testing.T) {
+	rt := &mockRuntime{workspace: t.TempDir()}
+	output := `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["checked"],"failures":[]}]}`
+	ag := &mockAgent{name: "test"}
+	ag.runFunc = func(_ context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ []transcript.Message) (*agent.SessionResult, error) {
+		if ag.runCall.Load() == 1 {
+			return &agent.SessionResult{FinalMessage: "completed"}, nil
+		}
+		return &agent.SessionResult{FinalMessage: output, ExitCode: 1}, errors.New("agent run failed (exit 1)")
+	}
+	members := []config.JudgeConfig{{ID: "semantic", Type: "agent_judge", Criteria: []string{"quality"}}}
+	e := newTestEvaluator(EvalOptions{Agent: ag, OutputDir: t.TempDir(), EvalCfg: &config.EvalConfig{Judges: &members}})
+	result := e.executeCase(context.Background(), &config.CaseConfig{ID: "case", Input: config.Input{Prompt: "task"}}, ConfigurationWithoutSkill, rt, nil)
+	if result.Status != judge.StatusPass || len(result.JudgeResults) != 1 {
+		t.Fatalf("result=%+v", result)
+	}
+	recovery := result.JudgeResults[0].Recovery
+	if recovery == nil || !recovery.Recovered || recovery.Reason != "agent_call_error" {
+		t.Fatalf("judge recovery = %#v", recovery)
+	}
+}
+
 func TestMultiJudgeStartsFreshAgentSessionsInSameRuntime(t *testing.T) {
 	rt := &mockRuntime{workspace: t.TempDir()}
 	ag := &mockResumerAgent{mockAgent: mockAgent{name: "test"}}

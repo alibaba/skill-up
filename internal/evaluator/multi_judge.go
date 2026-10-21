@@ -55,6 +55,9 @@ func (e *defaultEvaluator) runMultipleJudges(
 		graded := e.runJudgePhase(memberCtx, rt, caseCfg, configName, member, turnsTotal, runAgent, input, memberResult, outcome.Artifacts, true)
 		outcome.Status, outcome.Result = graded.Status, graded.Grading
 		outcome.Session, outcome.Skills = graded.JudgeSession, graded.JudgeSkills
+		if graded.Grading != nil {
+			outcome.Recovery = graded.Grading.Recovery
+		}
 		outcome.Error = judgeOutcomeError(graded)
 		if graded.Status == judge.StatusError && graded.Error != nil {
 			causes = append(causes, graded.Error)

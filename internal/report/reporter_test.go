@@ -173,6 +173,37 @@ func TestJSONReporter_PreservesExecutionMetrics(t *testing.T) {
 	}
 }
 
+func TestJSONReporter_RecordsRecoveredJudgeCall(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "result.json")
+	recovery := &judge.RecoveryMetadata{Recovered: true, Reason: "agent_call_error"}
+	input := Input{CaseResults: []CaseResult{{
+		CaseID:        "recovered-judge",
+		Status:        judge.StatusPass,
+		JudgeRecovery: recovery,
+		Grading:       &judge.Result{Status: judge.StatusPass, Recovery: recovery},
+	}}}
+
+	if err := (&JSONReporter{OutputPath: path}).Write(context.Background(), input); err != nil {
+		t.Fatalf("JSONReporter.Write failed: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read json file: %v", err)
+	}
+	var parsed Input
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if len(parsed.CaseResults) != 1 || parsed.CaseResults[0].JudgeRecovery == nil ||
+		!parsed.CaseResults[0].JudgeRecovery.Recovered || parsed.CaseResults[0].JudgeRecovery.Reason != "agent_call_error" {
+		t.Fatalf("judge_recovery not preserved in JSON: %#v", parsed.CaseResults)
+	}
+	if strings.Contains(string(data), `"recovery":`) {
+		t.Fatalf("grading payload must not gain a recovery field: %s", data)
+	}
+}
+
 func TestJSONReporter_ContainsAssertions(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "result.json")

@@ -143,6 +143,18 @@ type Result struct {
 	// JudgeContext records how agent_judge materialized and delivered review
 	// materials. It is omitted for deterministic judges and older results.
 	JudgeContext *ContextMetadata `json:"judge_context,omitempty"`
+
+	// Recovery records when agent_judge accepted a valid final message after its
+	// agent call returned an error. It is carried into report.json separately so
+	// grading.json remains compatible with the Anthropic grading contract.
+	Recovery *RecoveryMetadata `json:"-"`
+}
+
+// RecoveryMetadata describes a recovered judge result without exposing the
+// underlying agent error, which can contain provider-specific details.
+type RecoveryMetadata struct {
+	Recovered bool   `json:"recovered"`
+	Reason    string `json:"reason"`
 }
 
 // Outcome preserves one independent judge's result and diagnostic session.
@@ -155,6 +167,7 @@ type Outcome struct {
 	SkipReason string               `json:"skip_reason,omitempty"`
 	Artifacts  string               `json:"artifacts_dir,omitempty"`
 	DurationMs int64                `json:"duration_ms"`
+	Recovery   *RecoveryMetadata    `json:"recovery,omitempty"`
 	Session    *agent.SessionResult `json:"-"`
 	Skills     []SkillInfo          `json:"judge_skills,omitempty"`
 }

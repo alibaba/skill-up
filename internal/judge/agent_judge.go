@@ -163,13 +163,14 @@ func (j *AgentJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 	}
 	parentErr := parentCtx.Err()
 	persistAgentJudgeAttemptArtifacts(ctx, j.Runtime, in.ArtifactDir, in.ArtifactDir, agentJudgeRawResponseAttempt1, firstSession)
-	if callErr := j.agentCallError(ctx, runErr, firstSession, parentErr, "agent call"); callErr != nil {
+	recovery, callErr := j.agentCallError(ctx, runErr, firstSession, parentErr, "agent call")
+	if callErr != nil {
 		return nil, &SessionResultError{Err: callErr, Session: firstSession}
 	}
 
 	criterionResults, validationErr := parseAgentJudgeResults(j.Criteria, firstSession.FinalMessage)
 	if validationErr == nil {
-		return j.buildResult(in, firstSession, materialized, prompt, criterionResults), nil
+		return j.buildResult(in, firstSession, materialized, prompt, criterionResults, recovery), nil
 	}
 	if ctx.Err() != nil {
 		return nil, &SessionResultError{
@@ -194,7 +195,8 @@ func (j *AgentJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 	parentErr = parentCtx.Err()
 	persistAgentJudgeAttemptArtifacts(ctx, j.Runtime, retryArtifactDir, in.ArtifactDir, agentJudgeRawResponseAttempt2, retrySession)
 	aggregateSession := aggregateAgentJudgeSessions(firstSession, retrySession, correctionMode)
-	if callErr := j.agentCallError(ctx, retryErr, retrySession, parentErr, "correction call"); callErr != nil {
+	retryRecovery, callErr := j.agentCallError(ctx, retryErr, retrySession, parentErr, "correction call")
+	if callErr != nil {
 		return nil, &SessionResultError{
 			Err: fmt.Errorf(
 				"agent_judge correction retry failed after initial validation error %q: %w",
@@ -217,19 +219,19 @@ func (j *AgentJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 		}
 	}
 	logging.DebugContextf(ctx, "agent_judge correction retry produced a valid response")
-	return j.buildResult(in, aggregateSession, materialized, prompt, criterionResults), nil
+	return j.buildResult(in, aggregateSession, materialized, prompt, criterionResults, retryRecovery), nil
 }
 
-func (j *AgentJudge) agentCallError(ctx context.Context, err error, sessionResult *agent.SessionResult, parentErr error, callLabel string) error {
+func (j *AgentJudge) agentCallError(ctx context.Context, err error, sessionResult *agent.SessionResult, parentErr error, callLabel string) (*RecoveryMetadata, error) {
 	if err == nil {
-		return nil
+		return nil, nil
 	}
 	annotated := err
 	if parentErr == nil {
 		annotated = j.annotateTimeoutError(ctx, err)
 	}
 	if !canRecoverAgentJudgeResult(err, sessionResult) {
-		return fmt.Errorf("agent_judge %s failed: %w", callLabel, annotated)
+		return nil, fmt.Errorf("agent_judge %s failed: %w", callLabel, annotated)
 	}
 	if callLabel == "agent call" {
 		logging.WarnContextf(
@@ -249,7 +251,18 @@ func (j *AgentJudge) agentCallError(ctx context.Context, err error, sessionResul
 			parentErr != nil,
 		)
 	}
-	return nil
+	return &RecoveryMetadata{Recovered: true, Reason: agentJudgeRecoveryReason(callLabel)}, nil
+}
+
+func agentJudgeRecoveryReason(callLabel string) string {
+	switch callLabel {
+	case "agent call":
+		return "agent_call_error"
+	case "correction call":
+		return "correction_call_error"
+	default:
+		return "agent_call_error"
+	}
 }
 
 func (j *AgentJudge) runAgentJudgeCorrection(
@@ -466,7 +479,7 @@ func appendUniqueArtifactFiles(groups ...[]agent.ArtifactFile) []agent.ArtifactF
 	return files
 }
 
-func (j *AgentJudge) buildResult(in Input, sessionResult *agent.SessionResult, materialized *MaterializedContext, prompt string, criterionResults []CriterionResult) *Result {
+func (j *AgentJudge) buildResult(in Input, sessionResult *agent.SessionResult, materialized *MaterializedContext, prompt string, criterionResults []CriterionResult, recovery *RecoveryMetadata) *Result {
 	assertions := make([]AssertionResult, 0, len(criterionResults))
 	for i, cr := range criterionResults {
 		assertions = append(assertions, AssertionResult{
@@ -479,6 +492,7 @@ func (j *AgentJudge) buildResult(in Input, sessionResult *agent.SessionResult, m
 	result := NewResult(assertions, in.TurnsExecuted, in.TurnsTotal)
 	result.JudgeSession = sessionResult
 	result.JudgeContext = buildContextMetadata(sessionResult, materialized, prompt)
+	result.Recovery = recovery
 	if len(assertions) > 0 && result.Summary.PassRate >= j.PassThreshold {
 		result.Status = StatusPass
 	} else if len(assertions) > 0 {

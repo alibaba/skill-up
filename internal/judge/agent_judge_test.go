@@ -188,6 +188,9 @@ func TestAgentJudge_RecoversTimedOutSessionWithValidJSON(t *testing.T) {
 	if r.JudgeSession != session {
 		t.Fatalf("expected recovered judge session, got %#v", r.JudgeSession)
 	}
+	if r.Recovery == nil || !r.Recovery.Recovered || r.Recovery.Reason != "agent_call_error" {
+		t.Fatalf("expected recovered agent-call metadata, got %#v", r.Recovery)
+	}
 }
 
 func TestAgentJudge_RecoveryLogsWarning(t *testing.T) {

@@ -805,6 +805,9 @@ func evalResultToCaseResult(res *evaluator.EvalResult) report.CaseResult {
 		cr.JudgeInputTokens = judgeSession.InputTokens
 		cr.JudgeOutputTokens = judgeSession.OutputTokens
 	}
+	if res.Grading != nil {
+		cr.JudgeRecovery = res.Grading.Recovery
+	}
 	for _, outcome := range res.JudgeResults {
 		cr.JudgeDurationMs += outcome.DurationMs
 		if outcome.Session != nil {
