@@ -14,7 +14,7 @@ func TestGroupedEvaluationReportsKeepJudgeIdentity(t *testing.T) {
 	t.Parallel()
 	outcomes := []judge.Outcome{
 		{ID: "functional", Type: "script", Status: judge.StatusFail, Result: judge.NewResult([]judge.AssertionResult{{Text: "check", Passed: false, Evidence: "exit 1"}}, 1, 1)},
-		{ID: "semantic", Type: "agent_judge", Status: judge.StatusPass, Result: judge.NewResult([]judge.AssertionResult{{Text: "quality", Passed: true, Evidence: "clear"}}, 1, 1), Recovery: &judge.RecoveryMetadata{Recovered: true, Reason: "correction call"}},
+		{ID: "semantic", Type: "agent_judge", Status: judge.StatusPass, Result: judge.NewResult([]judge.AssertionResult{{Text: "quality", Passed: true, Evidence: "clear"}}, 1, 1), Recovery: &judge.RecoveryMetadata{Recovered: true, Reason: "correction_call_error"}},
 	}
 	cr := CaseResult{CaseID: "case", Status: judge.StatusFail, JudgeResults: outcomes, Grading: judge.NewResult([]judge.AssertionResult{{Text: "functional", Passed: false}, {Text: "semantic", Passed: true}}, 1, 1)}
 	in := Input{SkillName: "sample", CaseResults: []CaseResult{cr}}
@@ -42,7 +42,7 @@ func TestGroupedEvaluationReportsKeepJudgeIdentity(t *testing.T) {
 		if err != nil || !strings.Contains(string(data), "functional") || !strings.Contains(string(data), "semantic") {
 			t.Fatalf("%s missing grouped judge identity: %v", name, err)
 		}
-		if name == "json" && (!strings.Contains(string(data), `"recovered": true`) || !strings.Contains(string(data), "correction call")) {
+		if name == "json" && (!strings.Contains(string(data), `"recovered": true`) || !strings.Contains(string(data), "correction_call_error")) {
 			t.Fatalf("json report missing grouped judge recovery metadata: %s", data)
 		}
 	}
