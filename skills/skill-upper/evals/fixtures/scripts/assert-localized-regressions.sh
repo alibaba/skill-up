@@ -235,8 +235,14 @@ for message in json.loads(Path(path).read_text()):
         if executable == "command" and len(invocation) >= 3 and invocation[1] in {"-v", "-V"}:
             continue
         assert not re.fullmatch(r"python[0-9.]*|node|ruby|perl|awk|gawk|mawk|nawk", executable), "Authoring used unsupported interpreter dispatch"
-        allowed = {"cat", "tee", "printf", "echo", "mkdir", "touch", "cp", "mv", "rm", "chmod", "cd", "pwd", "ls", "head", "tail", "rg", "grep", "wc", "stat", "find", "sed", "sort", "skill-up", "true", "false", ":", "test", "[", "fi", "done", "}"}
+        allowed = {"cat", "tee", "printf", "echo", "mkdir", "touch", "cp", "mv", "rm", "chmod", "cd", "pwd", "ls", "head", "tail", "rg", "grep", "wc", "stat", "find", "sed", "sort", "sha256sum", "md5sum", "shasum", "skill-up", "true", "false", ":", "test", "[", "fi", "done", "}"}
         assert executable in allowed, "Authoring used unsupported command dispatch"
+        if executable in {"sha256sum", "md5sum", "shasum"}:
+            paths = invocation[1:]
+            if executable == "shasum":
+                assert paths[:2] == ["-a", "256"], "Authoring used unsupported checksum arguments"
+                paths = paths[2:]
+            assert paths and all(not path.startswith("-") for path in paths), "Authoring used unsupported checksum arguments"
         if executable == "find":
             assert not {"-exec", "-execdir", "-ok", "-okdir"}.intersection(invocation[1:]), "Authoring used unsupported find dispatch"
         if executable == "rg":

@@ -540,6 +540,28 @@ class TranscriptChecks(unittest.TestCase):
         for command in ('skill-up r$@un evals/eval.yaml', 'skill-up r${EMPTY:-}un evals/eval.yaml'):
             self.check_command('assert-localized-regressions.sh', command, False, 'expanded skill-up arguments')
 
+    def test_localized_preservation_checksum_commands(self):
+        for command in ('sha256sum evals/cases/add-todo.yaml',
+                        '/usr/bin/sha256sum evals/cases/add-todo.yaml',
+                        'md5sum evals/cases/add-todo.yaml',
+                        'shasum -a 256 evals/cases/add-todo.yaml'):
+            with self.subTest(command=command):
+                # Reach the independent fixture-integrity gate after command validation.
+                self.check_command('assert-localized-regressions.sh', command, False,
+                                   'Authoring modified the target Skill')
+        for command in ('sha256sum --check manifest', 'md5sum --check manifest',
+                        'shasum -c manifest',
+                        'shasum -a 256 --check manifest', 'sha256sum'):
+            with self.subTest(command=command):
+                self.check_command('assert-localized-regressions.sh', command, False,
+                                   'unsupported checksum arguments')
+        self.check_command('assert-localized-regressions.sh',
+                           'sha256sum evals/cases/add-todo.yaml; skill-up run evals/eval.yaml',
+                           False, 'launched an evaluation')
+        self.check_command('assert-localized-regressions.sh',
+                           'md5sum evals/cases/add-todo.yaml; skill-up run evals/eval.yaml',
+                           False, 'launched an evaluation')
+
     def test_wrapped_localized_evaluation_is_rejected(self):
         self.check_command('assert-localized-regressions.sh',
                            '/bin/zsh -lc ' + shlex.quote('skill-up run evals/eval.yaml'),

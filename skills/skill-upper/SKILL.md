@@ -39,6 +39,20 @@ fields: `schema_version`, `environment.type`, `engine.name`, `cases.files`, and
 `report.formats` in eval.yaml; `id`, `title`, `input.prompt`, and `judge.type` in
 case YAML. For nested fields, place the comment inside the parent mapping
 immediately before the child field, rather than only before the parent.
+For example, comment both `prompt` and `type` at their own indentation:
+
+```yaml
+input:
+  # User request sent to the agent.
+  prompt: Review this code.
+# Cheap prerequisites checked before the judge.
+expect:
+  must_contain: ["suggestion"]
+judge:
+  # Deterministic grading strategy for this case.
+  type: rule_based
+```
+
 Comment `expect` and a top-level `judge` when present; do not add an
 optional field just to satisfy a comment check. Keep field names and enum values
 unchanged. `skill-up import` does not preserve template comments.
@@ -188,6 +202,14 @@ Precedence (low → high): embedded empty defaults < user config < project `.ski
 - Copy `assets/eval.yaml.tmpl` to `<skill-root>/evals/eval.yaml`.
 - Copy `assets/case.yaml.tmpl` to `<skill-root>/evals/cases/<case-id>.yaml`.
 
+Start with the smallest complete scaffold requested by the user. Unless they
+request broader coverage, create one representative case; add more only for
+distinct requirements. For a script judge, implement the required output
+contract in a short script and reuse it across cases with the same contract.
+Do not build a general report parser or an extensive script test matrix as part
+of scaffolding. For a JSON-only contract, use `json.loads` and explicit field
+checks; support prose or Markdown wrappers only when the contract allows them.
+
 Adapt language per "Language Rules for Generated Artifacts". Replace the templates' generic English placeholders with case-specific prose in the requested output language. Preserve short field-leading comments in generated YAML; translate them when the output language differs from English, while keeping field names and enum values in English.
 
 Selection guidelines:
@@ -205,6 +227,9 @@ See `references/eval-yaml.md` and `references/case-yaml.md`.
 - `skill-up list-cases <path>`
 - Review `eval.yaml` and representative cases; avoid `agent_judge` abuse.
 - Add or edit YAML under `cases/` as needed.
+- For byte-for-byte preservation checks, compare `sha256sum <file>` (or
+  `shasum -a 256 <file>`) before and after editing, within the user's allowed
+  command profile.
 - If adding simulated user turns, check that the selected engine supports session resumption, configure the separate simulator connection, and retain deterministic fixed turns and judge assertions wherever possible.
 
 ### Step 4: Validate the configuration
@@ -217,6 +242,19 @@ Expect: `✓ eval.yaml is valid (loaded N case(s))`.
 
 For a case-authoring request, finish here with the config and case paths plus
 validation status. Do not start a background evaluation as part of scaffolding.
+Before replying, reopen the generated YAML and check comments immediately
+before nested `input.prompt`, `judge.type`, and `report.formats` where configured.
+A comment before `input`, `judge`, or `report` does not document its child field.
+Check every generated case separately: read its actual `judge:` block and ensure
+the explanatory comment sits between `judge:` and `type:`, indented like `type:`.
+If the comment is above `judge:`, move it inside the mapping and validate again.
+Do not infer comment coverage from a successful YAML validation or from what you
+intended to write.
+For an `expect` block, put its explanatory comment immediately above `expect:`;
+a comment inside it above `must_contain` does not document the parent gate.
+For a new scoring script, check one passing and one failing sample when feasible,
+then report the checks and finish. Do not expand into unrelated script features
+or a large test matrix unless the user asks for that work.
 
 ### Step 5: Prepare credentials
 
@@ -239,6 +277,13 @@ An absent environment variable does not rule out file-based credentials or an
 existing engine login. If the selected authentication path is unavailable,
 **stop and ask** the user to configure it locally; do not ask them to paste a
 secret into the conversation or write secrets into YAML without consent.
+
+When asked to author a credential probe, respect the user's allowed command
+profile during verification too. Writing a script does not authorize launching
+it with `sh`, `sh -x`, or sourcing it when that profile excludes script execution.
+Inspect the written probe instead and report that execution was not performed;
+do not add an unsupported launcher just to test it. Check shell-tracing behavior
+only in an explicitly permitted isolated test with synthetic credentials.
 
 The user simulator resolves credentials by its own `user_simulator.provider`. For `provider: simulation`, set `SIMULATION_API_KEY` and `SIMULATION_BASE_URL`, or configure the `simulation` provider in `~/.skill-up/credentials.yaml`. For `provider: openai`, use `OPENAI_API_KEY` and optionally `OPENAI_BASE_URL`; its standard endpoint is the fallback. Choose `protocol: openai` for Chat Completions or `protocol: anthropic` for Messages; custom base URLs must match that protocol. For `provider: anthropic` with `protocol: anthropic`, use `ANTHROPIC_API_KEY` and optional `ANTHROPIC_BASE_URL` (official endpoint fallback). `--api-key` for the agent does not supply the simulator connection. Never put a raw key in eval YAML.
 
