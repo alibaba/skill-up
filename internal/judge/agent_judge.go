@@ -181,6 +181,19 @@ func (j *AgentJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 			Session: firstSession,
 		}
 	}
+
+	return j.correctInvalidResponse(ctx, parentCtx, in, materialized, prompt, firstSession, validationErr)
+}
+
+func (j *AgentJudge) correctInvalidResponse(
+	ctx context.Context,
+	parentCtx context.Context,
+	in Input,
+	materialized *MaterializedContext,
+	prompt string,
+	firstSession *agent.SessionResult,
+	validationErr error,
+) (*Result, error) {
 	logging.WarnContextf(ctx, "agent_judge output failed validation; retrying once with correction guidance: %v", validationErr)
 
 	correctionPrompt := buildAgentJudgeCorrectionPrompt(j.Criteria, validationErr)
@@ -192,7 +205,7 @@ func (j *AgentJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 	if retrySession == nil && retryErr == nil {
 		retryErr = errors.New("agent returned no session result")
 	}
-	parentErr = parentCtx.Err()
+	parentErr := parentCtx.Err()
 	persistAgentJudgeAttemptArtifacts(ctx, j.Runtime, retryArtifactDir, in.ArtifactDir, agentJudgeRawResponseAttempt2, retrySession)
 	aggregateSession := aggregateAgentJudgeSessions(firstSession, retrySession, correctionMode)
 	retryRecovery, callErr := j.agentCallError(ctx, retryErr, retrySession, parentErr, "correction call")

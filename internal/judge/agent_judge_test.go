@@ -1204,8 +1204,24 @@ func TestAgentJudge_CorrectionCallErrors(t *testing.T) {
 		result, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
 		assertNoError(t, err)
 		assertStatus(t, result, StatusPass)
+		if result.Recovery == nil || !result.Recovery.Recovered || result.Recovery.Reason != "correction_call_error" {
+			t.Fatalf("expected correction-call recovery metadata, got %#v", result.Recovery)
+		}
 		if ag.runCalls != 2 {
 			t.Fatalf("expected two calls, got %d", ag.runCalls)
+		}
+	})
+
+	t.Run("successful correction has no recovery metadata", func(t *testing.T) {
+		ag := &mockJudgeTestAgent{
+			scriptedResults: []*agent.SessionResult{initialInvalid, {FinalMessage: valid}},
+		}
+		j := NewAgentJudge(ag, &mockJudgeTestRuntime{}, "test-model", []string{"configured"}, nil, 0)
+		result, err := j.Evaluate(context.Background(), Input{FinalMessage: "test"})
+		assertNoError(t, err)
+		assertStatus(t, result, StatusPass)
+		if result.Recovery != nil {
+			t.Fatalf("successful correction should not have recovery metadata, got %#v", result.Recovery)
 		}
 	})
 
