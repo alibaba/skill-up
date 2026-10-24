@@ -126,8 +126,10 @@ func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 	// id is optional - Loader auto-generates from filename if not specified
 	// See loader.go:LoadCaseConfig for the fallback logic
 
-	// input.prompt or input.turns is required, but not both
-	if cfg.Input.Prompt == "" && len(cfg.Input.Turns) == 0 {
+	// input.prompt or input.turns is required, but not both. Presence for
+	// mutual exclusion deliberately stays byte-based so a whitespace-only
+	// prompt alongside turns cannot silently become a turns-only case.
+	if strings.TrimSpace(cfg.Input.Prompt) == "" && len(cfg.Input.Turns) == 0 {
 		errs = append(errs, "input.prompt or input.turns is required")
 	}
 	if cfg.Input.Prompt != "" && len(cfg.Input.Turns) > 0 {
@@ -178,7 +180,7 @@ func validateTurnFields(i int, turn Turn, scenario *UserSimulatorScenario) []str
 	} else if turn.Role != "user" {
 		errs = append(errs, fmt.Sprintf("input.turns[%d].role must be \"user\", got %q", i, turn.Role))
 	}
-	if turn.Content == "" && turn.Respond == "" {
+	if strings.TrimSpace(turn.Content) == "" && turn.Respond == "" {
 		errs = append(errs, fmt.Sprintf("input.turns[%d].content is required unless respond is set", i))
 	}
 	if turn.Content != "" && turn.Respond != "" {

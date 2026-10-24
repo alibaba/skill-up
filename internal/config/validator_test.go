@@ -2251,3 +2251,87 @@ func TestValidator_PerTurnJudgeRules(t *testing.T) {
 		})
 	}
 }
+
+//nolint:funlen // table-driven coverage for blank input and mutual-exclusion semantics.
+func TestValidator_RejectsWhitespaceOnlyInput(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	tests := []struct {
+		name      string
+		input     Input
+		simulator *UserSimulatorScenario
+		wantErr   string
+	}{
+		{
+			name:    "space-only prompt is rejected",
+			input:   Input{Prompt: " "},
+			wantErr: "input.prompt or input.turns is required",
+		},
+		{
+			name:    "tab and newline prompt is rejected",
+			input:   Input{Prompt: "\t\n"},
+			wantErr: "input.prompt or input.turns is required",
+		},
+		{
+			name:    "valid prompt keeps surrounding whitespace",
+			input:   Input{Prompt: "  real task\n"},
+			wantErr: "",
+		},
+		{
+			name: "blank prompt with valid turns remains mutually exclusive",
+			input: Input{
+				Prompt: " ",
+				Turns:  []Turn{{Role: "user", Content: "valid turn"}},
+			},
+			wantErr: "input.prompt and input.turns are mutually exclusive",
+		},
+		{
+			name:    "space-only turn content is rejected",
+			input:   Input{Turns: []Turn{{Role: "user", Content: " "}}},
+			wantErr: "input.turns[0].content is required unless respond is set",
+		},
+		{
+			name:    "tab and newline turn content is rejected",
+			input:   Input{Turns: []Turn{{Role: "user", Content: "\t\n"}}},
+			wantErr: "input.turns[0].content is required unless respond is set",
+		},
+		{
+			name:    "valid turn content keeps surrounding whitespace",
+			input:   Input{Turns: []Turn{{Role: "user", Content: "  real turn\n"}}},
+			wantErr: "",
+		},
+		{
+			name: "blank content with respond remains mutually exclusive",
+			input: Input{
+				Turns: []Turn{{Role: "user", Content: " ", Respond: "generated"}},
+			},
+			simulator: &UserSimulatorScenario{Scenario: "test"},
+			wantErr:   "input.turns[0].content and respond are mutually exclusive",
+		},
+		{
+			name: "empty content with respond is allowed",
+			input: Input{
+				Turns: []Turn{{Role: "user", Respond: "generated"}},
+			},
+			simulator: &UserSimulatorScenario{Scenario: "test"},
+			wantErr:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validator.ValidateCaseConfig(&CaseConfig{ID: "test-case", Input: tt.input, UserSimulator: tt.simulator})
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+			}
+		})
+	}
+}
