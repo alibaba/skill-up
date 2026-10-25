@@ -336,7 +336,7 @@ tool_responses:
 基于 `tool_responses` 的 Mock Server 行为如下：
 
 - 仅支持 stdio。`mode: mocked` 时，skill-up 会拒绝 `transport: http`、`endpoint`、`command` 和 `args`。
-- skill-up 使用 `node` 启动 Mock Server。Claude Code、Codex、Qwen Code 和 OpenCode 安装时会准备 Node.js；Qoder CLI 不会，因此使用 `qodercli` 时需确保运行环境的 `PATH` 中有 `node`。
+- skill-up 使用 `node` 启动 Mock Server，因此运行环境的 `PATH` 中必须有 `node`。只有当 skill-up 自行安装 Claude Code、Codex、Qwen Code 或 OpenCode 时才会准备 Node.js；预先安装的引擎 CLI 或 Qoder CLI 不会附带 Node.js。
 - 每次调用某个工具都返回该工具的 `default` 响应；若没有 `default` 键，则整个条目即为响应。字符串值可以像示例中的 `name` 字段那样用 `params` 模板引用调用参数，并可用 `| default:'<value>'` 指定缺省值。
 - Agent 看到的每个工具描述均为 `Mocked MCP tool <name>`，输入 schema 接受任意对象，而不是真实 Server 的描述和参数 schema。
 - 调用未在 `tool_responses` 中声明的工具会返回 MCP 错误。

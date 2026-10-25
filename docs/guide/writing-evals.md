@@ -372,7 +372,7 @@ tool_responses:
 A mocked server built from `tool_responses` behaves as follows:
 
 - It uses stdio only. For `mode: mocked`, skill-up rejects `transport: http`, `endpoint`, `command`, and `args`.
-- skill-up starts it with `node`. Claude Code, Codex, Qwen Code, and OpenCode set up Node.js when they are installed; the Qoder CLI does not, so with `qodercli` make sure `node` is on `PATH` in the runtime.
+- skill-up starts it with `node`, so `node` must be on `PATH` in the runtime. skill-up sets up Node.js only when it installs Claude Code, Codex, Qwen Code, or OpenCode itself. A preinstalled engine CLI or the Qoder CLI does not bring Node.js with it.
 - Every call to a tool returns that tool's `default` response. If a tool has no `default` key, the whole entry is the response. String values can insert call arguments with the `params` template used in the example's `name` field, with an optional `| default:'<value>'` fallback.
 - The Agent sees each tool with the description `Mocked MCP tool <name>` and an input schema that accepts any object, not the real server's descriptions or parameter schemas.
 - A call to a tool that is not listed under `tool_responses` returns an MCP error.
