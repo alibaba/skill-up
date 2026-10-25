@@ -3,6 +3,8 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/alibaba/skill-up/internal/config"
@@ -45,8 +47,16 @@ func buildMockedRuntimeServerConfig(server config.MCPServer, fileCfg mcpServerFi
 }
 
 func buildMockedServerScript(serverName string, fileCfg mcpServerFile) (string, error) {
+	if err := validateMockedTools(serverName, fileCfg); err != nil {
+		return "", err
+	}
 	if len(fileCfg.ToolResponses) > 0 {
-		fixtures, err := json.Marshal(map[string]any{"toolResponses": fileCfg.ToolResponses})
+		fixture := map[string]any{"toolResponses": fileCfg.ToolResponses}
+		// Omitted when unused so fixtures without tool metadata generate the same script as before.
+		if len(fileCfg.Tools) > 0 {
+			fixture["tools"] = fileCfg.Tools
+		}
+		fixtures, err := json.Marshal(fixture)
 		if err != nil {
 			return "", fmt.Errorf("mcp server %q mock fixture is invalid: %w", serverName, err)
 		}
@@ -56,6 +66,25 @@ func buildMockedServerScript(serverName string, fileCfg mcpServerFile) (string, 
 		return filesystemMockServerScript, nil
 	}
 	return "", fmt.Errorf("mcp server %q mocked mode requires config_ref tool_responses or a built-in mock server name", serverName)
+}
+
+// validateMockedTools checks the optional tools map against tool_responses.
+// MCP requires an object input schema, so only the top-level type is checked;
+// the schema is advertised to the agent, never enforced on tools/call.
+func validateMockedTools(serverName string, fileCfg mcpServerFile) error {
+	for _, name := range slices.Sorted(maps.Keys(fileCfg.Tools)) {
+		if _, ok := fileCfg.ToolResponses[name]; !ok {
+			return fmt.Errorf("mcp server %q mock fixture tool %q is declared under tools but has no tool_responses entry", serverName, name)
+		}
+		schema := fileCfg.Tools[name].InputSchema
+		if schema == nil {
+			continue
+		}
+		if mapping, ok := schema.(map[string]any); !ok || mapping["type"] != "object" {
+			return fmt.Errorf("mcp server %q mock fixture tool %q input_schema must be a mapping with type: object", serverName, name)
+		}
+	}
+	return nil
 }
 
 // mcpProtocolScript is shared by all mock server scripts. It provides the MCP
@@ -120,6 +149,7 @@ function sendError(id, code, message, framed) {
 const genericMockServerScript = `
 const fixtures = ` + fixturesJSONPlaceholder + `;
 const tools = Object.keys(fixtures.toolResponses || {});
+const toolMeta = fixtures.tools || {};
 ` + mcpProtocolScript + `
 function handleMessage(message, framed) {
   if (!message || message.id === undefined) return;
@@ -128,7 +158,7 @@ function handleMessage(message, framed) {
     return;
   }
   if (message.method === "tools/list") {
-    send(message.id, { tools: tools.map(name => ({ name, description: "Mocked MCP tool " + name, inputSchema: { type: "object", additionalProperties: true } })) }, framed);
+    send(message.id, { tools: tools.map(describeTool) }, framed);
     return;
   }
   if (message.method === "tools/call") {
@@ -144,6 +174,14 @@ function handleMessage(message, framed) {
     return;
   }
   send(message.id, {}, framed);
+}
+function describeTool(name) {
+  const meta = Object.prototype.hasOwnProperty.call(toolMeta, name) ? toolMeta[name] : {};
+  return {
+    name,
+    description: meta.description || ("Mocked MCP tool " + name),
+    inputSchema: meta.inputSchema || { type: "object", additionalProperties: true }
+  };
 }
 function selectResponse(fixture) {
   if (fixture && Object.prototype.hasOwnProperty.call(fixture, "default")) return fixture.default;

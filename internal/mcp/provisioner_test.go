@@ -367,6 +367,31 @@ func TestProvisioner_SameNameMockedServersDifferentFixtures(t *testing.T) {
 	}
 }
 
+func TestProvisioner_MockedServerRejectsScalarInputSchema(t *testing.T) {
+	t.Parallel()
+
+	skillDir := t.TempDir()
+	content := `tools:
+  get_project:
+    input_schema: object
+tool_responses:
+  get_project:
+    default:
+      status: OPEN
+`
+	if err := os.WriteFile(filepath.Join(skillDir, "mcp.yaml"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := (Provisioner{SkillDir: skillDir}).Provision(config.MCPConfig{
+		Servers: []config.MCPServer{{Name: "project-mgmt", Mode: "mocked", ConfigRef: "mcp.yaml"}},
+	})
+	want := `mcp server "project-mgmt" mock fixture tool "get_project" input_schema must be a mapping with type: object`
+	if err == nil || err.Error() != want {
+		t.Fatalf("Provision error = %v, want %q", err, want)
+	}
+}
+
 func TestProvisionerValidationAndTransportErrors(t *testing.T) {
 	t.Parallel()
 

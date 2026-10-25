@@ -211,14 +211,23 @@ func (p Provisioner) resolveConfigRef(configRef string) string {
 }
 
 type mcpServerFile struct {
-	Transport     string            `yaml:"transport"`
-	Command       string            `yaml:"command"`
-	Args          []string          `yaml:"args"`
-	Endpoint      string            `yaml:"endpoint"`
-	Env           map[string]string `yaml:"env"`
-	RequiredEnv   []string          `yaml:"required_env"`
-	Headers       map[string]string `yaml:"headers"`
-	ToolResponses map[string]any    `yaml:"tool_responses"`
+	Transport     string                 `yaml:"transport"`
+	Command       string                 `yaml:"command"`
+	Args          []string               `yaml:"args"`
+	Endpoint      string                 `yaml:"endpoint"`
+	Env           map[string]string      `yaml:"env"`
+	RequiredEnv   []string               `yaml:"required_env"`
+	Headers       map[string]string      `yaml:"headers"`
+	Tools         map[string]mcpMockTool `yaml:"tools"`
+	ToolResponses map[string]any         `yaml:"tool_responses"`
+}
+
+// mcpMockTool is the metadata a mocked tool advertises in tools/list. Both
+// fields are optional. InputSchema is untyped so a scalar in the fixture is
+// reported as a named validation error instead of a YAML decode failure.
+type mcpMockTool struct {
+	Description string `yaml:"description" json:"description,omitempty"`
+	InputSchema any    `yaml:"input_schema" json:"inputSchema,omitempty"`
 }
 
 func loadServerFile(path string) (mcpServerFile, error) {
