@@ -122,6 +122,7 @@ Docker CLI and daemon are required. `network_policy: deny_all` creates a contain
 - `mode: real` installs a real MCP server for the agent.
 - HTTP MCP may be configured inline or with `config_ref` pointing to `evals/fixtures/mcp/*.yaml`.
 - Stdio MCP accepts `command` and `args`.
+- A mocked `config_ref` fixture maps tool names to responses under `tool_responses`. An optional `tools` map adds the `description` and `input_schema` (a mapping with `type: object`) each tool advertises in `tools/list`; every name under `tools` must also exist under `tool_responses`, and the schema is advertised only, never enforced on calls.
 - Environment references use `${VAR}` or a whole-value `$VAR`; `required_env` injects variables into the agent environment.
 - Evaluation-level `mcp` provides defaults. A case may declare `mcp.servers` (currently `mode: mocked` only), replacing a same-named server as a whole to swap mocked fixtures under the same server and tool names. `config_ref` remains relative to the Skill root.
 
