@@ -161,6 +161,21 @@ func TestCheckExpect_FilesExist_Fail(t *testing.T) {
 	}
 }
 
+func TestCheckExpect_FilesExist_EmptyAndDot_Fail(t *testing.T) {
+	dir := t.TempDir()
+
+	for _, invalid := range []string{"", "   ", ".", "./"} {
+		expect := &config.Expect{FilesExist: []string{invalid}}
+		r := CheckExpect(expect, Input{WorkspacePath: dir})
+		if r.Passed {
+			t.Fatalf("expected fail for invalid path %q, got pass", invalid)
+		}
+		if r.Failures[0].Rule != "files_exist" {
+			t.Fatalf("expected rule files_exist, got %s", r.Failures[0].Rule)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // files_not_exist
 // ---------------------------------------------------------------------------
@@ -172,6 +187,21 @@ func TestCheckExpect_FilesNotExist_Pass(t *testing.T) {
 	r := CheckExpect(expect, Input{WorkspacePath: dir})
 	if !r.Passed {
 		t.Fatalf("expected pass, got failures: %+v", r.Failures)
+	}
+}
+
+func TestCheckExpect_FilesNotExist_EmptyAndDot_Fail(t *testing.T) {
+	dir := t.TempDir()
+
+	for _, invalid := range []string{"", "   ", "."} {
+		expect := &config.Expect{FilesNotExist: []string{invalid}}
+		r := CheckExpect(expect, Input{WorkspacePath: dir})
+		if r.Passed {
+			t.Fatalf("expected fail for invalid path %q, got pass", invalid)
+		}
+		if r.Failures[0].Rule != "files_not_exist" {
+			t.Fatalf("expected rule files_not_exist, got %s", r.Failures[0].Rule)
+		}
 	}
 }
 

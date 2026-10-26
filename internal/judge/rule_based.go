@@ -322,6 +322,14 @@ func evalExitCode(expected, actual int) AssertionResult {
 
 // evalToolCalled checks that a specific tool was called (with optional partial argument matching).
 func evalToolCalled(rule *config.ToolCalledRule, tr transcript.Transcript) AssertionResult {
+	if strings.TrimSpace(rule.Name) == "" {
+		return AssertionResult{
+			Text:     "tool_called",
+			Passed:   false,
+			Evidence: "tool_called specifies no tool name",
+		}
+	}
+
 	calls := tr.ToolCalls()
 
 	for _, msg := range calls {
@@ -365,6 +373,13 @@ func evalToolCalled(rule *config.ToolCalledRule, tr transcript.Transcript) Asser
 
 // evalFilesExist checks that all listed files exist in the workspace.
 func evalFilesExist(files []string, workspace string) AssertionResult {
+	if len(files) == 0 {
+		return AssertionResult{
+			Text:     "files_exist",
+			Passed:   false,
+			Evidence: "files_exist specifies no files",
+		}
+	}
 	for _, f := range files {
 		exists, err := fileExistsInWorkspace(workspace, f)
 		if err != nil {
@@ -391,6 +406,13 @@ func evalFilesExist(files []string, workspace string) AssertionResult {
 
 // evalFilesNotExist checks that none of the listed files exist in the workspace.
 func evalFilesNotExist(files []string, workspace string) AssertionResult {
+	if len(files) == 0 {
+		return AssertionResult{
+			Text:     "files_not_exist",
+			Passed:   false,
+			Evidence: "files_not_exist specifies no files",
+		}
+	}
 	for _, f := range files {
 		exists, err := fileExistsInWorkspace(workspace, f)
 		if err != nil {

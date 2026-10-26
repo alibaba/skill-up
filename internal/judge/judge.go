@@ -316,6 +316,13 @@ func NewErrorResult(err error, turnsExecuted, turnsTotal int) *Result {
 //   - (false, nil) if the file does not exist
 //   - (false, err) if the path is invalid or a stat error occurs
 func fileExistsInWorkspace(workspace, rel string) (bool, error) {
+	if strings.TrimSpace(rel) == "" {
+		return false, fmt.Errorf("empty file path")
+	}
+	cleanRel := filepath.Clean(rel)
+	if cleanRel == "." || cleanRel == "/" || cleanRel == `\` {
+		return false, fmt.Errorf("invalid file path %q", rel)
+	}
 	abs, err := safePath(workspace, rel)
 	if err != nil {
 		return false, err
