@@ -35,7 +35,7 @@ const (
 	codexDefaultVersion = "0.80.0"
 	codexProcessSandbox = "--sandbox workspace-write"
 	codexBypassSandbox  = "--dangerously-bypass-approvals-and-sandbox"
-	codexCustomWireAPI  = "chat"
+	codexCustomWireAPI  = "responses" // use /v1/responses instead of /v1/chat/completions for custom endpoints	
 	// codexOpenAIOverrideProvider is the provider key emitted when callers
 	// configure provider=openai with a custom BaseURL. The literal "openai"
 	// name can't be reused because codex ships a built-in provider config
