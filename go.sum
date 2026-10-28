@@ -10,8 +10,8 @@ github.com/Azure/azure-sdk-for-go/sdk/internal v1.12.0 h1:fhqpLE3UEXi9lPaBRpQ6Xu
 github.com/Azure/azure-sdk-for-go/sdk/internal v1.12.0/go.mod h1:7dCRMLwisfRH3dBupKeNCioWYUZ4SS09Z14H+7i8ZoY=
 github.com/alibaba/OpenSandbox/sdks/sandbox/go v1.1.1 h1:HnFZPmnUOUDhCn5aUqQcTwsPgIDlhENWoWpD71g4sqs=
 github.com/alibaba/OpenSandbox/sdks/sandbox/go v1.1.1/go.mod h1:c3C+dMDq0EdnZAgui4ot4hiZhQKUb57/tK97TQO5aHk=
-github.com/anthropics/anthropic-sdk-go v1.81.0 h1:3WAxA6xMSSHKExnFN3t/qIwJUC8l6zQFTmwVGl3QWy0=
-github.com/anthropics/anthropic-sdk-go v1.81.0/go.mod h1:GThfYqPJoaQ/6pmibCI98Cr4y5su2FXMUHn3NrSSnIc=
+github.com/anthropics/anthropic-sdk-go v1.82.0 h1:A82J+yHEMbQ3+7ObCagOX4tVm1uyBhELCHd2dDYZYuo=
+github.com/anthropics/anthropic-sdk-go v1.82.0/go.mod h1:GThfYqPJoaQ/6pmibCI98Cr4y5su2FXMUHn3NrSSnIc=
 github.com/aws/aws-sdk-go-v2 v1.47.1 h1:uOIZnp4PK3ZhKI0dNrJrhTEsLxbpXHTAJlwoS1pvAtw=
 github.com/aws/aws-sdk-go-v2 v1.47.1/go.mod h1:bttEH6JqnUL8LepvDVfdrds/fZ5bCIxzpe3abyUrhDU=
 github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.3 h1:tW1/Rkad38LA15X4UQtjXZXNKsCgkshC3EbmcUmghTg=
