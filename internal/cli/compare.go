@@ -16,16 +16,21 @@ import (
 	"github.com/alibaba/skill-up/internal/report"
 )
 
+const jsonFormat = "json"
+
 var compareCmd = &cobra.Command{
-	Use:   "compare <old-result.json> <new-result.json>",
-	Short: "Compare two offline evaluation results",
+	Use:   "compare <baseline-result.json> <candidate-result.json>...",
+	Short: "Compare two or more offline evaluation results",
 	Long: `Compare existing results without running an Agent or Judge.
 
+The first result is the baseline; every later result is compared against it.
+
 Examples:
+  skill-up compare baseline.json skill-a.json skill-b.json --format html --output compare.html
   skill-up compare old.json new.json --format html --output compare.html
   skill-up compare old.json new.json --format markdown --output compare.md
   skill-up compare old.json new.json --format json --fail-on-regression`,
-	Args: cobra.ExactArgs(2),
+	Args: cobra.MinimumNArgs(2),
 	RunE: runCompare,
 }
 
@@ -37,7 +42,7 @@ func configureCompareFlags(cmd *cobra.Command) {
 	cmd.Flags().String("format", "text", "Output format: text, json, html, markdown")
 	cmd.Flags().String("output", "", "Write report to a file instead of stdout")
 	cmd.Flags().String("baseline-label", "Baseline", "Label for the old run")
-	cmd.Flags().String("candidate-label", "Candidate", "Label for the new run")
+	cmd.Flags().StringArray("candidate-label", nil, "Candidate labels in input order; repeat once per candidate, or omit for automatic labels")
 	cmd.Flags().Bool("fail-on-regression", false, "Fail when any case regresses")
 	cmd.Flags().Float64("max-token-increase-percent", 0, "Maximum allowed total token increase percentage")
 }
@@ -48,16 +53,15 @@ func runCompare(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("get format flag: %w", err)
 	}
 	switch format {
-	case "text", "json", "html", "markdown":
+	case "text", jsonFormat, "html", "markdown":
 	default:
 		return fmt.Errorf("unsupported compare format %q; supported formats: text, json, html, markdown", format)
 	}
 
-	oldInput, oldMissing, err := loadCompareInput("old", args[0])
-	if err != nil {
-		return err
+	if len(args) < 2 {
+		return errors.New("compare requires at least two result files")
 	}
-	newInput, newMissing, err := loadCompareInput("new", args[1])
+	runs, err := loadBuildSet(cmd, args)
 	if err != nil {
 		return err
 	}
@@ -66,7 +70,7 @@ func runCompare(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("get fail-on-regression flag: %w", err)
 	}
-	options := comparepkg.Options{FailOnRegression: failOnRegression, OldMissingMetrics: oldMissing, NewMissingMetrics: newMissing}
+	options := comparepkg.Options{FailOnRegression: failOnRegression}
 	maxTokenIncreasePercent, err := maxTokenIncreasePercent(cmd)
 	if err != nil {
 		return err
@@ -75,12 +79,11 @@ func runCompare(cmd *cobra.Command, args []string) error {
 		options.MaxTokenIncreasePercent = maxTokenIncreasePercent
 	}
 
-	result := comparepkg.Compare(oldInput, newInput, options)
-	baselineLabel, _ := cmd.Flags().GetString("baseline-label")
-	candidateLabel, _ := cmd.Flags().GetString("candidate-label")
-	result.Baseline = comparepkg.Source{Label: baselineLabel, Path: args[0]}
-	result.Candidate = comparepkg.Source{Label: candidateLabel, Path: args[1]}
-	data, err := comparepkg.Render(result, format)
+	result, err := comparepkg.BuildSet(runs, options)
+	if err != nil {
+		return err
+	}
+	data, err := comparepkg.RenderSet(result, format)
 	if err != nil {
 		return err
 	}
@@ -93,6 +96,34 @@ func runCompare(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("comparison gates failed: %v", result.Gates.Failures)
 	}
 	return nil
+}
+
+func loadBuildSet(cmd *cobra.Command, args []string) ([]comparepkg.RunInput, error) {
+	baselineLabel, _ := cmd.Flags().GetString("baseline-label")
+	candidateLabels, _ := cmd.Flags().GetStringArray("candidate-label")
+	if len(candidateLabels) != 0 && len(candidateLabels) != len(args)-1 {
+		return nil, fmt.Errorf("--candidate-label must be omitted or supplied once per candidate: got %d labels for %d candidates", len(candidateLabels), len(args)-1)
+	}
+	runs := make([]comparepkg.RunInput, 0, len(args))
+	for i, path := range args {
+		role, label := "old baseline", baselineLabel
+		if i > 0 {
+			role = fmt.Sprintf("new candidate %d", i)
+			label = "Candidate"
+			if len(args) > 2 {
+				label = fmt.Sprintf("Candidate %d", i)
+			}
+			if len(candidateLabels) > 0 {
+				label = candidateLabels[i-1]
+			}
+		}
+		input, missing, err := loadCompareInput(role, path)
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, comparepkg.RunInput{Source: comparepkg.Source{Label: label, Path: path}, Input: input, MissingMetrics: missing})
+	}
+	return runs, nil
 }
 
 func writeComparison(cmd *cobra.Command, inputs []string, output string, data []byte) error {

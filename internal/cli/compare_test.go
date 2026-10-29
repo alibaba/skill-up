@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	comparepkg "github.com/alibaba/skill-up/internal/compare"
 	"github.com/alibaba/skill-up/internal/judge"
 	"github.com/alibaba/skill-up/internal/report"
 )
@@ -84,14 +85,14 @@ func TestRunCompare_JSONFormat(t *testing.T) {
 	}
 
 	var result struct {
-		Run   json.RawMessage `json:"run"`
-		Cases json.RawMessage `json:"cases"`
-		Gates json.RawMessage `json:"gates"`
+		Runs        json.RawMessage   `json:"runs"`
+		Comparisons []json.RawMessage `json:"comparisons"`
+		Gates       json.RawMessage   `json:"gates"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 		t.Fatalf("unmarshal compare output: %v", err)
 	}
-	if result.Run == nil || result.Cases == nil || result.Gates == nil {
+	if result.Runs == nil || len(result.Comparisons) != 1 || result.Gates == nil {
 		t.Fatalf("JSON output missing stable result fields: %s", out.String())
 	}
 }
@@ -378,5 +379,91 @@ func TestRootCommandIncludesCompare(t *testing.T) {
 	}
 	if command != compareCmd {
 		t.Fatal("compare command not registered")
+	}
+}
+
+func TestRunCompareMultipleInputsAndLabels(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	paths := []string{
+		writeCompareResultJSON(t, dir, "baseline.json", makeReportInput(judge.StatusPass)),
+		writeCompareResultJSON(t, dir, "same.json", makeReportInput(judge.StatusPass)),
+		writeCompareResultJSON(t, dir, "regressed.json", makeReportInput(judge.StatusFail)),
+	}
+	for _, format := range []string{"json", "text", "html", "markdown"} {
+		t.Run(format, func(t *testing.T) {
+			t.Parallel()
+			cmd := newCompareCmd()
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			for flag, value := range map[string]string{"format": format, "fail-on-regression": "true"} {
+				if err := cmd.Flags().Set(flag, value); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, label := range []string{"Same Skill", "Revised Skill"} {
+				if err := cmd.Flags().Set("candidate-label", label); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := runCompare(cmd, paths); err == nil || !strings.Contains(err.Error(), "Revised Skill") {
+				t.Fatalf("later candidate gate not enforced: %v", err)
+			}
+			for _, want := range []string{"Same Skill", "Revised Skill", "regressed.json"} {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("%s output lost %q", format, want)
+				}
+			}
+			if format == "json" {
+				assertMultipleCompareJSON(t, out.Bytes())
+			}
+		})
+	}
+}
+
+func TestRunCompareValidatesEveryCandidateBeforeWriting(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	valid := writeCompareResultJSON(t, dir, "valid.json", makeReportInput(judge.StatusPass))
+	missing := filepath.Join(dir, "missing-third.json")
+	cmd := newCompareCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	if err := runCompare(cmd, []string{valid, valid, missing}); err == nil || !strings.Contains(err.Error(), missing) {
+		t.Fatalf("later invalid input ignored: %v", err)
+	}
+	if out.Len() != 0 {
+		t.Fatal("partial report emitted for invalid inputs")
+	}
+	if err := cmd.Flags().Set("candidate-label", "only-one-label"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runCompare(cmd, []string{valid, valid, valid}); err == nil || !strings.Contains(err.Error(), "2 candidates") {
+		t.Fatalf("ambiguous label count accepted: %v", err)
+	}
+}
+
+func TestRunCompareProtectsLaterCandidate(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	base := writeCompareResultJSON(t, dir, "baseline.json", makeReportInput(judge.StatusPass))
+	later := writeCompareResultJSON(t, dir, "later.json", makeReportInput(judge.StatusFail))
+	cmd := newCompareCmd()
+	if err := cmd.Flags().Set("output", later); err != nil {
+		t.Fatal(err)
+	}
+	if err := runCompare(cmd, []string{base, base, later}); err == nil || !strings.Contains(err.Error(), "must not overwrite") {
+		t.Fatalf("later candidate can be overwritten: %v", err)
+	}
+}
+
+func assertMultipleCompareJSON(t *testing.T, data []byte) {
+	t.Helper()
+	var set comparepkg.Set
+	if err := json.Unmarshal(data, &set); err != nil {
+		t.Fatal(err)
+	}
+	if len(set.Runs) != 3 || len(set.Comparisons) != 2 || !set.Comparisons[0].Gates.Passed || set.Comparisons[1].Gates.Passed {
+		t.Fatalf("wrong per-candidate gates: %+v", set)
 	}
 }

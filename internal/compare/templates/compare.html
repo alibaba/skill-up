@@ -4,11 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Evaluation comparison · {{.Result.Baseline.Label}} → {{.Result.Candidate.Label}}</title>
-<style>
-:root{color-scheme:light;--ink:#172738;--muted:#526476;--line:#dbe4ec;--paper:#fff;--accent:#125d68}*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:#f2f5f8;color:var(--ink);font:15px/1.6 system-ui,sans-serif}main{max-width:1200px;margin:auto;padding:48px 24px}header{margin-bottom:32px}.eyebrow{font:600 12px ui-monospace,monospace;letter-spacing:.15em;color:var(--accent)}h1{font-size:clamp(28px,4vw,44px);letter-spacing:-.04em;margin:8px 0}h2{font-size:21px;margin:0 0 16px}h3{font-size:16px}p{margin:10px 0}.muted,small{color:var(--muted)}.sources{overflow-wrap:anywhere}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:24px 0}.card,section{background:var(--paper);border:1px solid var(--line);border-radius:12px}.card{padding:18px}.card strong{display:block;font-size:30px;line-height:1.3}.card span{font-size:13px;color:var(--muted)}section{padding:24px;margin:20px 0}.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px}th,td{padding:11px 14px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;overflow-wrap:anywhere}th{background:#f5f8fa;color:var(--muted);font-weight:600}td:first-child{font-weight:550}tbody tr:last-child td{border-bottom:0}.notice{padding:12px 16px;border-left:3px solid #ba7b21;background:#fff7e8}.passed{color:#176b45}.failed{color:#a32d37}.toolbar{display:flex;flex-wrap:wrap;gap:12px;margin:16px 0}input,select{padding:10px 12px;border:1px solid #aebfca;border-radius:6px;background:white;color:var(--ink);font:inherit}input{min-width:200px;flex:1}label{display:flex;gap:8px;align-items:center}details{margin-top:16px}summary{cursor:pointer;font-weight:600;padding:8px 0}.case-table td:first-child{font-family:ui-monospace,monospace}.case-table th:last-child,.case-table td:last-child{min-width:100px;white-space:nowrap}footer{margin-top:24px;color:var(--muted);font-size:12px}@media print{body{background:#fff}main{padding:0}.toolbar{display:none}section{break-inside:avoid}details{display:block}details::details-content{content-visibility:visible}.scroll{overflow:visible}}
-</style>
+<style>{{template "styles"}}</style>
 </head>
-<body><main>
+<body><main><article class="comparison">{{template "comparison-body" .}}</article></main>
+<script>{{template "scripts"}}</script>
+</body></html>
+{{define "styles"}}
+:root{color-scheme:light;--ink:#172738;--muted:#526476;--line:#dbe4ec;--paper:#fff;--accent:#125d68}*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:#f2f5f8;color:var(--ink);font:15px/1.6 system-ui,sans-serif}main{max-width:1200px;margin:auto;padding:48px 24px}header{margin-bottom:32px}.eyebrow{font:600 12px ui-monospace,monospace;letter-spacing:.15em;color:var(--accent)}h1{font-size:clamp(28px,4vw,44px);letter-spacing:-.04em;margin:8px 0}h2{font-size:21px;margin:0 0 16px}h3{font-size:16px}p{margin:10px 0}.muted,small{color:var(--muted)}.sources{overflow-wrap:anywhere}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:24px 0}.card,section{background:var(--paper);border:1px solid var(--line);border-radius:12px}.card{padding:18px}.card strong{display:block;font-size:30px;line-height:1.3}.card span{font-size:13px;color:var(--muted)}section{padding:24px;margin:20px 0}.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px}th,td{padding:11px 14px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;overflow-wrap:anywhere}th{background:#f5f8fa;color:var(--muted);font-weight:600}td:first-child{font-weight:550}tbody tr:last-child td{border-bottom:0}.notice{padding:12px 16px;border-left:3px solid #ba7b21;background:#fff7e8}.passed{color:#176b45}.failed{color:#a32d37}.toolbar{display:flex;flex-wrap:wrap;gap:12px;margin:16px 0}input,select{padding:10px 12px;border:1px solid #aebfca;border-radius:6px;background:white;color:var(--ink);font:inherit}input{min-width:200px;flex:1}label{display:flex;gap:8px;align-items:center}details{margin-top:16px}summary{cursor:pointer;font-weight:600;padding:8px 0}.case-table td:first-child{font-family:ui-monospace,monospace}.case-table th:last-child,.case-table td:last-child{min-width:100px;white-space:nowrap}footer{margin-top:24px;color:var(--muted);font-size:12px}@media print{body{background:#fff}main{padding:0}.toolbar{display:none}section{break-inside:avoid}details{display:block}details::details-content{content-visibility:visible}.scroll{overflow:visible}}
+.overview th{min-width:150px}.overview th small{display:block;font-weight:400;overflow-wrap:anywhere}.comparison{margin-top:40px;padding-top:24px;border-top:2px solid var(--line)}nav{display:flex;flex-wrap:wrap;gap:12px}nav a{color:var(--accent)}
+{{end}}
+{{define "comparison-body"}}
 <header><div class="eyebrow">SKILL-UP / OFFLINE COMPARISON</div>
 <h1>{{.Result.Baseline.Label}} → {{.Result.Candidate.Label}}</h1>
 <p class="muted">Evaluation changes, case by case. Existing results only; no Agent or Judge calls.</p>
@@ -34,8 +39,8 @@
 <p class="muted">Missing provenance is unknown. Matching case IDs do not prove identical prompts, suites, Skill revisions, or judge/rubric definitions. Scores are not regraded.</p>
 </section>
 <section><h2>Case transitions</h2>
-<div class="toolbar" id="filters" hidden><label>Search cases <input id="case-search" type="search" placeholder="Case ID or title"></label><label>Transition <select id="case-group"><option value="">All transitions</option>{{range .Groups}}<option>{{.Name}}</option>{{end}}</select></label></div>
-<p id="match-count" class="muted" aria-live="polite"></p>
+<div class="toolbar filters" hidden><label>Search cases <input class="case-search" type="search" placeholder="Case ID or title"></label><label>Transition <select class="case-filter"><option value="">All transitions</option>{{range .Groups}}<option>{{.Name}}</option>{{end}}</select></label></div>
+<p class="match-count muted" aria-live="polite"></p>
 {{range .Groups}}<details class="case-group" data-group="{{.Name}}" open><summary>{{.Name}} ({{len .Cases}})</summary>
 {{if .Cases}}<div class="scroll"><table class="case-table"><thead><tr><th>Case ID</th><th>Baseline title</th><th>Candidate title</th><th>Baseline status</th><th>Candidate status</th><th>Baseline configuration</th><th>Candidate configuration</th><th>Prompt</th></tr></thead>
 <tbody>{{range .Cases}}<tr><td>{{.CaseID}}</td><td>{{if .OldTitle}}{{.OldTitle}}{{else}}—{{end}}</td><td>{{if .NewTitle}}{{.NewTitle}}{{else}}—{{end}}</td><td>{{if .OldStatus}}{{.OldStatus}}{{else}}—{{end}}</td><td>{{if .NewStatus}}{{.NewStatus}}{{else}}—{{end}}</td><td>{{if .OldConfiguration}}{{.OldConfiguration}}{{else}}—{{end}}</td><td>{{if .NewConfiguration}}{{.NewConfiguration}}{{else}}—{{end}}</td><td>{{promptChange .PromptChanged}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="muted">None.</p>{{end}}</details>{{end}}
@@ -43,29 +48,30 @@
 <section><h2>Gates: {{if .Result.Gates.Passed}}<span class="passed">passed</span>{{else}}<span class="failed">failed</span>{{end}}</h2>
 {{if .Result.Gates.Passed}}<p>Configured checks passed. No checks are enforced unless requested.</p>{{else}}<ul>{{range .Result.Gates.Failures}}<li>{{.}}</li>{{end}}</ul>{{end}}</section>
 <footer>Generated by skill-up compare. Self-contained report · no external assets · source artifacts preserved.</footer>
-</main>
-<script>
-const filters = document.getElementById('filters');
-filters.hidden = false;
-const search = document.getElementById('case-search');
-const group = document.getElementById('case-group');
-function filterCases() {
-  let count = 0;
-  const query = search.value.trim().toLowerCase();
-  document.querySelectorAll('.case-group').forEach(section => {
-    let visible = 0;
-    const selected = !group.value || section.dataset.group === group.value;
-    section.querySelectorAll('tbody tr').forEach(row => {
-      row.hidden = !selected || !row.textContent.toLowerCase().includes(query);
-      if (!row.hidden) visible++;
+{{end}}
+{{define "scripts"}}
+document.querySelectorAll('.comparison').forEach(report => {
+  const filters = report.querySelector('.filters');
+  filters.hidden = false;
+  const search = report.querySelector('.case-search');
+  const group = report.querySelector('.case-filter');
+  function filterCases() {
+    let count = 0;
+    const query = search.value.trim().toLowerCase();
+    report.querySelectorAll('.case-group').forEach(section => {
+      let visible = 0;
+      const selected = !group.value || section.dataset.group === group.value;
+      section.querySelectorAll('tbody tr').forEach(row => {
+        row.hidden = !selected || !row.textContent.toLowerCase().includes(query);
+        if (!row.hidden) visible++;
+      });
+      section.hidden = !selected || (!!query && !visible);
+      count += visible;
     });
-    section.hidden = !selected || (!!query && !visible);
-    count += visible;
-  });
-  document.getElementById('match-count').textContent = count + ' matching cases';
-}
-search.addEventListener('input', filterCases);
-group.addEventListener('change', filterCases);
-filterCases();
-</script>
-</body></html>
+    report.querySelector('.match-count').textContent = count + ' matching cases';
+  }
+  search.addEventListener('input', filterCases);
+  group.addEventListener('change', filterCases);
+  filterCases();
+});
+{{end}}

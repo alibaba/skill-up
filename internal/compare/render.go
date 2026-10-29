@@ -13,12 +13,18 @@ import (
 	"time"
 )
 
-const unknownValue = "unknown"
+const (
+	unknownValue = "unknown"
+	jsonFormat   = "json"
+)
 
 //go:embed templates/compare.html
 var htmlSource string
 
-var comparisonTemplate = template.Must(template.New("comparison").Funcs(template.FuncMap{"promptChange": promptChange}).Parse(htmlSource))
+//go:embed templates/set.html
+var setHTMLSource string
+
+var comparisonTemplate = template.Must(template.New("comparison").Funcs(template.FuncMap{"promptChange": promptChange}).Parse(htmlSource + setHTMLSource))
 
 type (
 	comparisonRow struct{ Name, Old, New, Delta string }
@@ -40,7 +46,7 @@ func Render(result Result, format string) ([]byte, error) {
 	switch format {
 	case "text":
 		return []byte(RenderText(result)), nil
-	case "json":
+	case jsonFormat:
 		data, err := json.MarshalIndent(result, "", "  ")
 		if err != nil {
 			return nil, fmt.Errorf("encode comparison: %w", err)

@@ -8,10 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Add `skill-up compare <old-result.json> <new-result.json>` for offline
+- Add `skill-up compare <baseline-result.json> <candidate-result.json>...` for offline
   comparison with self-contained HTML, shareable Markdown, text, and JSON
-  reports, case coverage and transitions, explicit baseline/candidate labels,
-  and optional regression and token-growth gates.
+  reports, an overview and case matrix across all runs, per-candidate baseline
+  comparisons, explicit labels, and optional regression and token-growth gates.
 
 ### Changed
 - Strengthen `skill-upper` evolution with original/candidate comparisons,

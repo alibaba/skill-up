@@ -408,7 +408,7 @@ skill-up import ./evals/evals.json --output ./evals
 | `skill-up run [path]`                | Run evaluation cases and produce reports    |
 | `skill-up validate [path]`           | Validate `eval.yaml` and case files         |
 | `skill-up list-cases [path]`         | List all cases referenced by the config     |
-| `skill-up compare <old> <new>` | Compare finished runs; export HTML, Markdown, JSON or text |
+| `skill-up compare <baseline> <candidate>...` | Compare multiple finished runs; export HTML, Markdown, JSON or text |
 | `skill-up report <result.json>`      | Generate reports from a previous run        |
 | `skill-up import <evals.json>`       | Import Anthropic `evals.json` to YAML cases |
 | `skill-up debug judge <input.json>`  | Debug judge module with a JSON input        |

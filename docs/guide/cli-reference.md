@@ -240,12 +240,16 @@ For single-run reports, `markdown` is limited to `skill-up report` as an offline
 
 ## skill-up compare
 
-Compare two existing canonical `result.json` (or equivalent `report.json`)
+Compare two or more existing canonical `result.json` (or equivalent `report.json`)
 files without running evaluations or calling any Agent or Judge.
 
 ```bash
-skill-up compare <old-result.json> <new-result.json> [flags]
+skill-up compare <baseline-result.json> <candidate-result.json>... [flags]
 ```
+
+The first file is the baseline. Every remaining file is compared independently
+against it, preserving argument order. Gates apply to every candidate; any failed
+comparison makes the command fail. Inputs are never compared as a sequential chain.
 
 ### Flags
 
@@ -253,20 +257,28 @@ skill-up compare <old-result.json> <new-result.json> [flags]
 |---|---|---|
 | `--format` | `text` | `text`, `json`, `html`, or `markdown` |
 | `--output` | stdout | Write the comparison to this file; its parent directory must exist |
-| `--baseline-label` | `Baseline` | Display name for the old run |
-| `--candidate-label` | `Candidate` | Display name for the new run |
+| `--baseline-label` | `Baseline` | Display name for the first, baseline run |
+| `--candidate-label` | automatic | Repeat once per candidate to label candidates in input order; supply all labels or omit the flag |
 | `--fail-on-regression` | `false` | Return a non-zero exit code for any shared case moving from PASS to another status |
 | `--max-token-increase-percent` | disabled | Maximum permitted increase in run-level total tokens (finite, non-negative percentage) |
 
 ### Examples
 
 ```bash
-# Self-contained HTML, with searchable cases and transition filters
-skill-up compare old/result.json new/result.json --format html --output comparison.html
+# Compare several finished runs in one self-contained HTML report
+skill-up compare baseline/result.json skill-a/result.json skill-b/result.json \
+  --format html --output comparison.html
+
+# Two-run comparisons use the same command and report structure
+skill-up compare old/result.json new/result.json --format html --output pair.html
 
 # Markdown tables for PR reviews and CI artifacts
 skill-up compare old/result.json new/result.json --format markdown --output comparison.md \
   --baseline-label "Released Skill" --candidate-label "Proposed Skill"
+
+# Explicit labels for multiple candidates (repeatable, commas remain literal)
+skill-up compare baseline.json a.json b.json --format markdown --output variants.md \
+  --candidate-label "Skill A" --candidate-label "Skill B"
 
 # Produce a report even if the regression gate fails
 skill-up compare old/result.json new/result.json --format html --output comparison.html \
@@ -277,8 +289,17 @@ skill-up compare old/result.json new/result.json --format json
 ```
 
 All formats use the same comparison and gates. Reports include run metrics,
-metadata, original source paths, and fixed, regressed, changed, unchanged,
-added, and removed cases. HTML embeds its styles and filtering script, with
+metadata, original source paths, a side-by-side overview of all runs, a case
+status matrix across the union of case IDs, and detailed fixed, regressed, changed,
+unchanged, added, and removed cases for each candidate against the baseline.
+The case matrix marks cases absent from a run explicitly; JSON uses null matrix
+cells. Matrix outcomes follow input order, and baseline-only cases are retained.
+JSON always uses the same top-level `baseline`, `runs`, `case_matrix`,
+`comparisons`, and `gates` structure, including for exactly two input files.
+`comparisons` contains one baseline comparison per candidate, with individual
+gate results; top-level `gates` aggregates failures and identifies the candidate.
+Default labels are `Candidate` for one candidate, or `Candidate 1`, `Candidate 2`,
+and so on for multiple candidates. HTML embeds its styles and filtering script, with
 no external assets or network requests; all cases remain readable without
 JavaScript. Markdown includes tables suitable for GitHub PR descriptions.
 Source result artifacts are preserved; output may not overwrite either input.
