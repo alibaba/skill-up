@@ -303,16 +303,12 @@ All runs have a one-based numeric ID (`runs[].source.id`) assigned in input
 order, including the reference. These IDs are also retained in each comparison's
 source identity; display labels do not change them.
 
-Default display labels use the immediate parent-directory names if those names
-are nonempty and unique across **all** inputs. Relative paths are resolved from
-the current working directory. If any names collide or cannot identify a
-directory, **all** labels fall back to the IDs `1`, `2`, `3`, and so on. For example:
+Default display labels are the input paths exactly as supplied. Relative paths
+remain relative (including a leading `./` or `..`); absolute paths remain absolute.
+Directory names are not shortened, and numeric IDs are not used as display labels.
+The source path is shown once, rather than repeated below the label.
 
-- `alpha/result.json beta/result.json gamma/result.json` → `alpha`, `beta`, `gamma`.
-- `old.json new.json other.json` in one directory → `1`, `2`, `3`.
-- `a/run/result.json b/run/result.json` → `1`, `2` (same directory basename).
-
-Explicit label flags override automatic display labels. The first run is never
+Explicit label flags override path-based display labels. The first run is never
 automatically named `Baseline`, nor are later runs automatically named `Candidate`.
 The JSON keys `baseline` and `candidate` describe comparison roles only.
 

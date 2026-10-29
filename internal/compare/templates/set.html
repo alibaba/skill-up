@@ -1,17 +1,13 @@
-{{define "set"}}<header><div class="eyebrow">SKILL-UP / OFFLINE COMPARISON</div>
-<h1>Evaluation comparison · {{len .Set.Runs}} runs</h1>
-<p>Reference for changes: <strong>{{.Set.Baseline.Label}}</strong>. Every other run is compared independently against this reference.</p>
-<p class="meta">Existing results only; no Agent or Judge calls. Case outcomes align by stable case ID; absent cases are not paired samples.</p>
-<nav aria-label="Run comparisons">{{range $index, $view := .Comparisons}}<a href="#comparison-{{$index}}">{{$view.Result.Candidate.Label}}</a>{{end}}</nav>
-</header>
+{{define "set"}}<div class="benchmark-view">
+<section class="section"><div class="section-header">Comparison · {{len .Set.Runs}} runs</div><div class="section-body"><p>Reference for changes: <span class="comparison-path">{{.Set.Baseline.Label}}</span></p><p class="comparison-note">Every other run is compared independently against this reference.</p><nav class="comparison-toolbar" aria-label="Run comparisons">{{range $index, $view := .Comparisons}}<a class="nav-btn comparison-path" href="#comparison-{{$index}}">{{$view.Result.Candidate.Label}}</a>{{end}}</nav></div></section>
 <section class="section"><h2 class="section-header">Run overview</h2><div class="section-body" style="overflow:auto;"><table class="benchmark-table">
-<thead><tr><th>Metric</th>{{range .Set.Runs}}<th data-run-id="{{.Source.ID}}">{{.Source.Label}}<small>{{.Source.Path}}</small></th>{{end}}</tr></thead>
+<thead><tr><th>Metric</th>{{range .Set.Runs}}<th class="comparison-path" title="{{.Source.Path}}" data-run-id="{{.Source.ID}}">{{.Source.Label}}</th>{{end}}</tr></thead>
 <tbody>{{range .Metrics}}<tr><td>{{.Name}}</td>{{range .Values}}<td>{{.}}</td>{{end}}</tr>{{end}}</tbody>
 </table></div></section>
-<section class="section"><h2 class="section-header">Case matrix</h2><p class="meta">Absent means that the case was not present in that run. Hover over an outcome to see its source title.</p>
-<div class="section-body" style="overflow:auto;"><table class="benchmark-table case-matrix"><thead><tr><th>Case ID</th>{{range .Set.Runs}}<th data-run-id="{{.Source.ID}}">{{.Source.Label}}</th>{{end}}</tr></thead>
+<section class="section"><h2 class="section-header">Case matrix</h2><div class="section-body"><p class="comparison-note">Absent means that the case was not present in that run. Hover over an outcome to see its source title.</p></div>
+<div class="section-body" style="overflow:auto;"><table class="benchmark-table case-matrix"><thead><tr><th>Case ID</th>{{range .Set.Runs}}<th class="comparison-path" title="{{.Source.Path}}" data-run-id="{{.Source.ID}}">{{.Source.Label}}</th>{{end}}</tr></thead>
 <tbody>{{range .Set.CaseMatrix}}<tr><td>{{.CaseID}}</td>{{range .Outcomes}}<td>{{if .}}<span title="{{.Title}}">{{.Status}}</span>{{if .Configuration}}<br><small>{{.Configuration}}</small>{{end}}{{else}}<span class="meta">absent</span>{{end}}</td>{{end}}</tr>{{end}}</tbody></table></div></section>
 <section class="section"><h2 class="section-header">Overall gates: {{if .Set.Gates.Passed}}<span class="passed">passed</span>{{else}}<span class="failed">failed</span>{{end}}</h2>
-{{if .Set.Gates.Passed}}<p>Configured checks passed for every compared run. No checks are enforced unless requested.</p>{{else}}<ul>{{range .Set.Gates.Failures}}<li>{{.}}</li>{{end}}</ul>{{end}}</section>
+<div class="section-body">{{if .Set.Gates.Passed}}<p>Configured checks passed for every compared run. No checks are enforced unless requested.</p>{{else}}<ul>{{range .Set.Gates.Failures}}<li>{{.}}</li>{{end}}</ul>{{end}}</div></section>
 {{range $index, $view := .Comparisons}}<article class="comparison-detail" id="comparison-{{$index}}" data-run-id="{{$view.Result.Candidate.ID}}">{{template "comparison-body" $view}}</article>{{end}}
-{{end}}
+</div>{{end}}

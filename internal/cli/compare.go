@@ -7,7 +7,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -25,7 +24,7 @@ var compareCmd = &cobra.Command{
 	Long: `Compare existing results without running an Agent or Judge.
 
 The first input is the reference for changes and gates. Display labels use
-unique parent-directory names, or numeric IDs when those names are ambiguous.
+the input paths exactly as supplied, unless explicitly overridden.
 
 Examples:
   skill-up compare run-a/result.json run-b/result.json run-c/result.json --format html --output compare.html
@@ -101,7 +100,7 @@ func runCompare(cmd *cobra.Command, args []string) error {
 }
 
 func loadBuildSet(cmd *cobra.Command, args []string) ([]comparepkg.RunInput, error) {
-	labels := automaticCompareLabels(args)
+	labels := append([]string(nil), args...)
 	baselineLabel, _ := cmd.Flags().GetString("baseline-label")
 	if baselineLabel != "" {
 		labels[0] = baselineLabel
@@ -126,31 +125,6 @@ func loadBuildSet(cmd *cobra.Command, args []string) ([]comparepkg.RunInput, err
 		runs = append(runs, comparepkg.RunInput{Source: comparepkg.Source{Label: labels[i], Path: path}, Input: input, MissingMetrics: missing})
 	}
 	return runs, nil
-}
-
-func automaticCompareLabels(paths []string) []string {
-	labels := make([]string, len(paths))
-	seen := make(map[string]bool, len(paths))
-	unique := true
-	for i, path := range paths {
-		absolute, err := filepath.Abs(path)
-		if err != nil {
-			unique = false
-			continue
-		}
-		name := filepath.Base(filepath.Dir(absolute))
-		if name == "." || name == string(filepath.Separator) || strings.TrimSpace(name) == "" || seen[name] {
-			unique = false
-		}
-		seen[name] = true
-		labels[i] = name
-	}
-	if !unique {
-		for i := range labels {
-			labels[i] = strconv.Itoa(i + 1)
-		}
-	}
-	return labels
 }
 
 func writeComparison(cmd *cobra.Command, inputs []string, output string, data []byte) error {

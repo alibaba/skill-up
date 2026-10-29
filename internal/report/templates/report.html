@@ -167,6 +167,19 @@
 
     .toast { position: fixed; bottom: 5rem; left: 50%; transform: translateX(-50%); background: var(--header-bg); color: var(--header-text); padding: 0.625rem 1.25rem; border-radius: var(--radius); font-size: 0.875rem; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 200; }
     .toast.visible { opacity: 1; }
+    {{if .ComparisonRuns}}
+    #panel-comparison .section { margin-bottom: 1.25rem; }
+    #panel-comparison .section-header { margin: 0; font-size: .75rem; }
+    #panel-comparison .section-body { font-size: .8125rem; line-height: 1.6; }
+    #panel-comparison .comparison-path { text-transform: none; letter-spacing: normal; overflow-wrap: anywhere; min-width: 0; }
+    #panel-comparison th.comparison-path { max-width: 22rem; }
+    #panel-comparison .comparison-note { color: var(--text-muted); font-size: .75rem; }
+    #panel-comparison .comparison-toolbar { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; margin-top: .75rem; }
+    #panel-comparison .comparison-toolbar a { text-decoration: none; }
+    #panel-comparison .summary-bar { margin-bottom: 1.25rem; }
+    #comparison-run { min-width: 0; max-width: 100%; flex: 1; text-transform: none; }
+    .comparison-run-control { display: flex; align-items: center; gap: .75rem; font-size: .8125rem; }
+    {{end}}
   </style>
 </head>
 <body>
@@ -182,7 +195,7 @@
       <div class="progress" id="progress"></div>
     </div>
 
-    {{if .ComparisonRuns}}<div class="section-body"><label>Run details <select id="comparison-run" onchange="selectComparisonRun(this.value)"></select></label></div>{{end}}
+    {{if .ComparisonRuns}}<div class="section-body"><label class="comparison-run-control">Run details <select class="nav-btn" id="comparison-run" onchange="selectComparisonRun(this.value)"></select></label></div>{{end}}
     <div class="summary-bar" id="summary-bar"></div>
 
     <div class="view-tabs" id="view-tabs" style="display:none;">
@@ -191,7 +204,7 @@
       <button class="view-tab" data-view="benchmark" onclick="switchView('benchmark')">Benchmark</button>
     </div>
 
-    {{if .ComparisonRuns}}<div class="view-panel active" id="panel-comparison" style="overflow:auto;padding:1rem;">{{.ComparisonSection}}</div>{{end}}
+    {{if .ComparisonRuns}}<div class="view-panel active" id="panel-comparison" style="overflow:auto;">{{.ComparisonSection}}</div>{{end}}
     <div class="view-panel{{if not .ComparisonRuns}} active{{end}}" id="panel-cases">
       <div class="cases-layout">
         <aside class="case-sidebar" id="case-sidebar">

@@ -6,7 +6,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -469,32 +468,6 @@ func assertMultipleCompareJSON(t *testing.T, data []byte) {
 	}
 }
 
-func TestAutomaticCompareLabels(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	path := func(parts ...string) string { return filepath.Join(append([]string{root}, parts...)...) }
-	tests := []struct {
-		name  string
-		paths []string
-		want  []string
-	}{
-		{"distinct directories", []string{path("alpha", "result.json"), path("beta", "result.json"), path("gamma", "result.json")}, []string{"alpha", "beta", "gamma"}},
-		{"same directory", []string{path("alpha", "a.json"), path("alpha", "b.json")}, []string{"1", "2"}},
-		{"one duplicate switches all labels", []string{path("alpha", "result.json"), path("beta", "a.json"), path("beta", "b.json")}, []string{"1", "2", "3"}},
-		{"same directory basename", []string{path("a", "run", "result.json"), path("b", "run", "result.json")}, []string{"1", "2"}},
-		{"bare filenames", []string{"old.json", "new.json", "other.json"}, []string{"1", "2", "3"}},
-		{"clean relative paths", []string{filepath.Join("alpha", "nested", "..", "result.json"), filepath.Join("beta", "result.json")}, []string{"alpha", "beta"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if got := automaticCompareLabels(tc.paths); !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("labels = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestAutomaticLabelsPropagateToReportsAndRunIdentity(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -506,6 +479,15 @@ func TestAutomaticLabelsPropagateToReportsAndRunIdentity(t *testing.T) {
 		}
 		paths = append(paths, writeCompareResultJSON(t, dir, "result.json", makeReportInput(judge.StatusPass)))
 	}
+	current, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relative, err := filepath.Rel(current, paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths[0] = "." + string(filepath.Separator) + relative
 	for _, format := range []string{"json", "html", "markdown", "text"} {
 		cmd := newCompareCmd()
 		var out bytes.Buffer
@@ -520,19 +502,19 @@ func TestAutomaticLabelsPropagateToReportsAndRunIdentity(t *testing.T) {
 			t.Errorf("%s still uses role-based display labels", format)
 		}
 		if format == jsonFormat {
-			assertDirectoryRunIdentity(t, out.Bytes())
+			assertPathRunIdentity(t, out.Bytes(), paths)
 		}
 	}
 }
 
-func assertDirectoryRunIdentity(t *testing.T, data []byte) {
+func assertPathRunIdentity(t *testing.T, data []byte, paths []string) {
 	t.Helper()
 	var set comparepkg.Set
 	if err := json.Unmarshal(data, &set); err != nil {
 		t.Fatal(err)
 	}
-	for i, name := range []string{"alpha", "beta", "gamma"} {
-		if source := set.Runs[i].Source; source.ID != i+1 || source.Label != name {
+	for i, path := range paths {
+		if source := set.Runs[i].Source; source.ID != i+1 || source.Label != path || source.Path != path {
 			t.Fatalf("wrong run identity: %+v", source)
 		}
 	}
