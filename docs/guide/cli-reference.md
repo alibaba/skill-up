@@ -313,7 +313,17 @@ automatically named `Baseline`, nor are later runs automatically named `Candidat
 The JSON keys `baseline` and `candidate` describe comparison roles only.
 
 HTML extends the existing evaluation report with a Comparison tab and a run
-selector. Selecting a run reuses the original Cases and Benchmark views, including
+selector. In Comparison, the Reference and Compared selectors can choose any two
+inputs, in either direction. The selected pair shows metrics, metadata, coverage,
+and case transitions calculated with the same Go comparison logic. These controls
+do not change the first-input reference used by CLI/CI gates or text/JSON/Markdown.
+The case-response button opens the reused case viewer inside Comparison, showing
+both selected files' primary case results side by side: prompts, full responses
+(including recorded turns), grades and evidence. Case IDs absent on either side
+are explicitly marked absent. Cross-file comparison is read-only; normal Run
+details preserve each file's own with/without-Skill pairing and feedback.
+Pair summaries are pre-rendered for every ordered pair, so HTML size grows with
+the number of run pairs. No Agent or Judge is called when switching pairs. Selecting a run reuses the original Cases and Benchmark views, including
 prompts, responses, formal grades, and evidence. The existing single-run and
 with/without-Skill report presentation is unchanged. Comparison-mode feedback is
 isolated per run and exported locally, without using the single-run feedback API.

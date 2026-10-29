@@ -37,10 +37,11 @@ type (
 )
 
 type comparisonView struct {
-	Result   Result
-	Metrics  []comparisonRow
-	Metadata []comparisonRow
-	Groups   []caseGroup
+	Interactive bool
+	Result      Result
+	Metrics     []comparisonRow
+	Metadata    []comparisonRow
+	Groups      []caseGroup
 }
 
 // Render emits the same comparison in text, JSON, HTML, or Markdown form.

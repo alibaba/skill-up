@@ -101,7 +101,13 @@ type overviewRow struct {
 	Values []string
 }
 
+type pairView struct {
+	Left, Right int
+	View        comparisonView
+}
+
 type setView struct {
+	Pairs       []pairView
 	Set         Set
 	Metrics     []overviewRow
 	Matrix      []overviewRow
@@ -135,6 +141,24 @@ func newSetView(set Set) setView {
 	return view
 }
 
+func newHTMLSetView(set Set) setView {
+	view := newSetView(set)
+	for left := range set.inputs {
+		for right := range set.inputs {
+			if left == right {
+				continue
+			}
+			options := Options{OldMissingMetrics: set.Runs[left].Metrics.Missing, NewMissingMetrics: set.Runs[right].Metrics.Missing}
+			result := Compare(set.inputs[left], set.inputs[right], options)
+			result.Baseline, result.Candidate = set.Runs[left].Source, set.Runs[right].Source
+			pair := newComparisonView(result)
+			pair.Interactive = true
+			view.Pairs = append(view.Pairs, pairView{Left: left, Right: right, View: pair})
+		}
+	}
+	return view
+}
+
 // RenderSet emits one report containing all runs and baseline comparisons.
 func RenderSet(set Set, format string) ([]byte, error) {
 	switch format {
@@ -146,7 +170,7 @@ func RenderSet(set Set, format string) ([]byte, error) {
 		return append(data, '\n'), nil
 	case "html":
 		var b bytes.Buffer
-		if err := comparisonTemplate.ExecuteTemplate(&b, "set", newSetView(set)); err != nil {
+		if err := comparisonTemplate.ExecuteTemplate(&b, "set", newHTMLSetView(set)); err != nil {
 			return nil, fmt.Errorf("render HTML comparisons: %w", err)
 		}
 		runs := make([]report.ComparisonRun, len(set.Runs))

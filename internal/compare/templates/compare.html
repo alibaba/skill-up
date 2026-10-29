@@ -26,7 +26,7 @@
 {{if .Cases}}<div class="section-body" style="overflow:auto;"><table class="benchmark-table"><thead><tr><th>Case ID</th><th>Reference title</th><th>Compared title</th><th>Reference status</th><th>Compared status</th><th>Reference configuration</th><th>Compared configuration</th><th>Prompt</th></tr></thead>
 <tbody>{{range .Cases}}<tr><td>{{.CaseID}}</td><td>{{if .OldTitle}}{{.OldTitle}}{{else}}—{{end}}</td><td>{{if .NewTitle}}{{.NewTitle}}{{else}}—{{end}}</td><td>{{if .OldStatus}}{{.OldStatus}}{{else}}—{{end}}</td><td>{{if .NewStatus}}{{.NewStatus}}{{else}}—{{end}}</td><td>{{if .OldConfiguration}}{{.OldConfiguration}}{{else}}—{{end}}</td><td>{{if .NewConfiguration}}{{.NewConfiguration}}{{else}}—{{end}}</td><td>{{promptChange .PromptChanged}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="comparison-note section-body">None.</p>{{end}}</details>{{end}}
 </section>
-<section class="section"><h2 class="section-header">Gates: {{if .Result.Gates.Passed}}<span class="passed">passed</span>{{else}}<span class="failed">failed</span>{{end}}</h2>
-<div class="section-body">{{if .Result.Gates.Passed}}<p>Configured checks passed. No checks are enforced unless requested.</p>{{else}}<ul>{{range .Result.Gates.Failures}}<li>{{.}}</li>{{end}}</ul>{{end}}</div></section>
+{{if not .Interactive}}<section class="section"><h2 class="section-header">Gates: {{if .Result.Gates.Passed}}<span class="passed">passed</span>{{else}}<span class="failed">failed</span>{{end}}</h2>
+<div class="section-body">{{if .Result.Gates.Passed}}<p>Configured checks passed. No checks are enforced unless requested.</p>{{else}}<ul>{{range .Result.Gates.Failures}}<li>{{.}}</li>{{end}}</ul>{{end}}</div></section>{{end}}
 
 {{end}}

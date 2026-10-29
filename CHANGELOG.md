@@ -14,7 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comparisons, input paths as default labels, explicit label
   overrides, and optional regression and token-growth gates. HTML extends the
   existing report with a comparison tab and run selector, retaining the original
-  case details and leaving existing report output unchanged.
+  case details and leaving existing report output unchanged. Comparison supports
+  selecting any two input files and reviewing aligned prompts, responses, and
+  grades side by side without changing CI gate references.
 
 ### Changed
 - Strengthen `skill-upper` evolution with original/candidate comparisons,

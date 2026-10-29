@@ -168,6 +168,9 @@
     .toast { position: fixed; bottom: 5rem; left: 50%; transform: translateX(-50%); background: var(--header-bg); color: var(--header-text); padding: 0.625rem 1.25rem; border-radius: var(--radius); font-size: 0.875rem; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 200; }
     .toast.visible { opacity: 1; }
     {{if .ComparisonRuns}}
+    #pair-case-details .config-col h3 { text-transform: none; overflow-wrap: anywhere; }
+    #pair-case-details .cases-layout { height: 850px; min-height: 500px; }
+    #panel-comparison [hidden] { display: none !important; }
     #panel-comparison .section { margin-bottom: 1.25rem; }
     #panel-comparison .section-header { margin: 0; font-size: .75rem; }
     #panel-comparison .section-body { font-size: .8125rem; line-height: 1.6; }
@@ -282,9 +285,80 @@
     {{if .ComparisonRuns}}
     var comparisonRuns = {{.ComparisonRuns}};
     var comparisonFeedback = {};
+    var pairLabels = null, pairOpen = false;
+    function selectComparisonPair(changed) {
+      var left = document.getElementById('pair-reference'), right = document.getElementById('pair-target');
+      if (left.value === right.value) {
+        var other = changed === 'target' ? left : right;
+        other.value = String((Number(other.value) + 1) % comparisonRuns.length);
+      }
+      document.querySelectorAll('.comparison-detail').forEach(function(article) {
+        article.hidden = article.dataset.reference !== left.value || article.dataset.target !== right.value;
+      });
+      if (pairOpen) openPairDetails();
+    }
+    function openPairDetails() {
+      var leftIndex = Number(document.getElementById('pair-reference').value);
+      var rightIndex = Number(document.getElementById('pair-target').value);
+      var left = comparisonRuns[leftIndex], right = comparisonRuns[rightIndex];
+      if (!pairOpen) {
+        saveCurrentFeedback();
+        comparisonFeedback[document.getElementById('comparison-run').dataset.selected || '0'] = feedbackMap;
+      }
+      document.getElementById('comparison-run').value = String(rightIndex);
+      document.getElementById('comparison-run').dataset.selected = String(rightIndex);
+      pairLabels = [left.label, right.label]; pairOpen = true;
+      DATA = JSON.parse(JSON.stringify(right.data));
+      var leftCases = new Map(left.data.cases.map(function(c) { return [c.id, c]; }));
+      var rightCases = new Map(right.data.cases.map(function(c) { return [c.id, c]; }));
+      var ids = Array.from(new Set(left.data.cases.concat(right.data.cases).map(function(c) { return c.id; })));
+      DATA.cases = ids.map(function(id) {
+        var a = leftCases.get(id), b = rightCases.get(id), c = Object.assign({}, b || a);
+        c.baseline = null; c.turn_results = null; c.pairLeft = a; c.pairRight = b; return c;
+      });
+      feedbackMap = {}; currentIndex = 0; visitedCases = {};
+      var container = document.getElementById('pair-case-details'); container.hidden = false;
+      container.appendChild(document.querySelector('.cases-layout'));
+      init(); switchView('comparison');
+      container.scrollIntoView({block: 'start'});
+    }
+    function renderPairDetails(c) {
+      var response = document.getElementById('response-body'), responseSection = document.getElementById('response-section');
+      var sides = [c.pairLeft, c.pairRight], responses = [];
+      sides.forEach(function(side) {
+        if (!side) { responses.push('<p>Case absent from this run.</p>'); return; }
+        renderResponse(Object.assign({}, side, {baseline: null}));
+        responses.push(responseSection.style.display === 'none' ? '<p>No recorded response.</p>' : response.innerHTML);
+      });
+      function columns(contents) {
+        return '<div class="comparison">' + contents.map(function(content, i) {
+          return '<div class="config-col"><h3>' + esc(pairLabels[i]) + '</h3>' + content + '</div>';
+        }).join('') + '</div>';
+      }
+      response.innerHTML = columns(responses); responseSection.style.display = 'block';
+      document.getElementById('grades-section').style.display = 'block';
+      document.getElementById('grades-content').innerHTML = columns(sides.map(function(side) { return side ? renderCaseGrading(side) : '<p>Case absent from this run.</p>'; }));
+      document.getElementById('prompt-section').style.display = 'block';
+      document.getElementById('prompt-text').innerHTML = columns(sides.map(function(side) { return '<div class="response-box">' + esc(side ? (side.prompt || 'Prompt unknown') : 'Case absent from this run.') + '</div>'; }));
+      var errorSection = document.getElementById('error-section');
+      errorSection.style.display = sides.some(function(side) { return side && side.error; }) ? 'block' : 'none';
+      document.getElementById('error-text').innerHTML = columns(sides.map(function(side) { return esc(side ? (side.error || 'No recorded error') : 'Case absent from this run.'); }));
+      var badge = document.getElementById('case-badge'); badge.className = 'status-badge';
+      badge.textContent = sides.map(function(side) { return side ? side.status : 'absent'; }).join(' → ');
+      document.getElementById('case-header-metrics').textContent = 'Cross-run comparison of primary results';
+    }
+
     function selectComparisonRun(index) {
-      comparisonFeedback[document.getElementById('comparison-run').dataset.selected || '0'] = feedbackMap;
-      saveCurrentFeedback();
+      var wasPair = pairOpen;
+      if (pairOpen) {
+        document.getElementById('panel-cases').appendChild(document.querySelector('.cases-layout'));
+        document.getElementById('pair-case-details').hidden = true;
+        pairOpen = false; pairLabels = null; feedbackMap = {};
+      }
+      if (!wasPair) {
+        saveCurrentFeedback();
+        comparisonFeedback[document.getElementById('comparison-run').dataset.selected || '0'] = feedbackMap;
+      }
       DATA = comparisonRuns[index].data;
       feedbackMap = comparisonFeedback[index] || {};
       currentIndex = 0; visitedCases = {};
@@ -430,6 +504,9 @@
 
       renderResponse(c);
       renderGrades(c);
+      {{if .ComparisonRuns}}if (pairLabels) renderPairDetails(c);
+      document.getElementById("feedback").closest(".section").hidden = !!pairLabels;
+      document.getElementById("done-btn").hidden = !!pairLabels;{{end}}
 
       document.getElementById("feedback").value = feedbackMap[c.id] || "";
       document.getElementById("feedback-status").textContent = "";
@@ -645,6 +722,7 @@
 
     function saveCurrentFeedback() {
       {{if .ComparisonRuns}}
+      if (pairOpen) return;
       var c = DATA.cases[currentIndex];
       if (c) feedbackMap[c.id] = document.getElementById('feedback').value;
       document.getElementById('feedback-status').textContent = 'Saved locally for this run';
@@ -699,6 +777,7 @@
     }
 
     function switchView(view) {
+      {{if .ComparisonRuns}}if (view === "cases" && pairOpen) { selectComparisonRun(document.getElementById("comparison-run").value); return; }{{end}}
       var tabs = document.querySelectorAll(".view-tab");
       var panels = document.querySelectorAll(".view-panel");
       for (var i = 0; i < tabs.length; i++) tabs[i].classList.remove("active");

@@ -129,3 +129,41 @@ func TestSetPreservesUnknownUsage(t *testing.T) {
 		t.Fatal("unknown measurements lost")
 	}
 }
+
+func TestHTMLPairsUseSelectedReferenceAndKeepCIGates(t *testing.T) {
+	t.Parallel()
+	set, err := BuildSet(multipleRunFixture(), Options{FailOnRegression: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := newHTMLSetView(set)
+	if len(view.Pairs) != 12 {
+		t.Fatalf("got %d ordered pairs for 4 runs", len(view.Pairs))
+	}
+	found := false
+	for _, pair := range view.Pairs {
+		if pair.Left == pair.Right {
+			t.Fatal("self comparison generated")
+		}
+		if pair.Left != 1 || pair.Right != 2 {
+			continue
+		}
+		found = true
+		result := pair.View.Result
+		if result.Baseline.ID != 2 || result.Candidate.ID != 3 || result.Run.Delta.TotalTokens != 50 {
+			t.Fatalf("selected reference was ignored: %+v", result.Run)
+		}
+		if len(result.Cases.Regressed) != 2 {
+			t.Fatalf("expected two regressions against the improved run: %+v", result.Cases)
+		}
+		if !pair.View.Interactive {
+			t.Fatal("pair not marked as interactive")
+		}
+	}
+	if !found {
+		t.Fatal("selected B to C pair missing")
+	}
+	if len(set.Comparisons[1].Cases.Regressed) != 1 || set.Gates.Passed {
+		t.Fatal("interactive pairs changed CI reference semantics")
+	}
+}
