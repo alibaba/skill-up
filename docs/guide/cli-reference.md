@@ -338,7 +338,11 @@ only when no other result for that case is available. In the usual with/without
 benchmark, cross-file comparison therefore compares **each revision's with_skill
 result**, not all variants against one another. This same selection rule drives
 metrics, the case matrix, transitions, and the interactive side-by-side viewer.
-Each file's internal with/without binding remains in Run details. The selected
+Each file's internal with/without binding remains in Run details. The page keeps
+this rule in a collapsed explanation; the full selection semantics are documented
+here. Benchmark is the original single-run statistics view (including with/without
+deltas when recorded), and is shown in comparison mode only when the selected
+run actually contains benchmark data. The selected
 configuration is exposed in the matrix and transition tables.
 
 For more than three inputs, overview/matrix columns retain readable widths and

@@ -199,6 +199,19 @@
       #panel-comparison .comparison-matrix th:first-child, #panel-comparison .comparison-matrix td:first-child { width: 9rem; min-width: 9rem; max-width: 9rem; }
       #panel-comparison .comparison-toolbar > label { flex-basis: 100%; }
     }
+    #panel-comparison .comparison-help { font-size: .75rem; color: var(--text-muted); }
+    #panel-comparison .comparison-help summary { cursor: pointer; }
+    #panel-comparison .comparison-help p { margin: .5rem 0 0; }
+    #panel-comparison .comparison-pair-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; margin-top: 0; }
+    #panel-comparison .comparison-pair-controls select, #panel-comparison .comparison-pair-controls button { height: 2.75rem; box-sizing: border-box; line-height: 1.5; }
+    #panel-comparison .comparison-pair-controls button { align-self: end; }
+    @media (max-width: 900px) {
+      #panel-comparison .comparison-pair-controls { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+      #panel-comparison .comparison-pair-controls button { grid-column: 1 / -1; width: 100%; }
+    }
+    @media (max-width: 600px) {
+      #panel-comparison .comparison-pair-controls { grid-template-columns: minmax(0, 1fr); }
+    }
     #comparison-run { min-width: 0; max-width: 100%; flex: 1; text-transform: none; }
     .comparison-run-control { display: flex; align-items: center; gap: .75rem; font-size: .8125rem; }
     {{end}}
@@ -429,7 +442,10 @@
         renderBenchmark();
       }
 
-      {{if .ComparisonRuns}}document.getElementById('view-tabs').style.display = 'flex';{{end}}
+      {{if .ComparisonRuns}}document.getElementById('view-tabs').style.display = 'flex';
+      var benchmarkTab = document.querySelector('[data-view="benchmark"]');
+      benchmarkTab.hidden = !DATA.benchmark;
+      benchmarkTab.title = 'Statistics for this run, including with/without Skill when recorded';{{end}}
       renderCaseList();
 
       {{if .ComparisonRuns}}showCase(0);{{else}}

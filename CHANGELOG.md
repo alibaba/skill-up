@@ -20,7 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case statuses, and metric changes, with cost/time direction handled separately.
   Document primary-result selection for cross-file comparisons; use canonical
   primary cases in the interactive viewer, and keep dropdowns and multi-run
-  tables readable with padding, wrapping, and horizontal scrolling.
+  tables readable with padding, wrapping, and horizontal scrolling. Align the
+  Compare controls, collapse secondary explanations, and omit empty Benchmark
+  tabs in comparison mode.
 
 ### Changed
 - Strengthen `skill-upper` evolution with original/candidate comparisons,

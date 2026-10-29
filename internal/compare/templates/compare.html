@@ -1,5 +1,5 @@
 {{define "comparison-body"}}
-<section class="section"><div class="section-header"><span class="comparison-path" title="{{.Result.Baseline.Path}}">{{.Result.Baseline.Label}}</span> → <span class="comparison-path" title="{{.Result.Candidate.Path}}">{{.Result.Candidate.Label}}</span></div></section>
+
 <div class="summary-bar">
 <div class="summary-card"><div class="label">Shared cases</div><div class="value">{{.Result.Coverage.Shared}}</div></div>
 <div class="summary-card"><div class="label">Regressed</div><div class="value comparison-negative">{{len .Result.Cases.Regressed}}</div></div>
@@ -10,14 +10,14 @@
 <p class="comparison-note section-body">Comparison coverage: {{.Result.Coverage.Shared}} / {{.Result.Run.Old.CaseCount}} reference cases; {{.Result.Coverage.Shared}} / {{.Result.Run.New.CaseCount}} compared cases.</p>
 {{if or .Result.Coverage.Added .Result.Coverage.Removed}}<p class="comparison-note section-body">Different case sets: run-level deltas include unpaired cases. Only shared case IDs are classified as fixed or regressed.</p>{{end}}
 <section class="section"><h2 class="section-header">Run summary</h2><div class="section-body" style="overflow:auto;"><table class="benchmark-table">
-<thead><tr><th>Metric</th><th class="comparison-path">{{.Result.Baseline.Label}}</th><th class="comparison-path">{{.Result.Candidate.Label}}</th><th>Change</th></tr></thead>
+<thead><tr><th>Metric</th><th class="comparison-path" title="{{.Result.Baseline.Path}}">{{.Result.Baseline.Label}}</th><th class="comparison-path" title="{{.Result.Candidate.Path}}">{{.Result.Candidate.Label}}</th><th>Change</th></tr></thead>
 <tbody>{{range .Metrics}}<tr><td>{{.Name}}</td><td class="{{metricClass .Name .Old}}">{{.Old}}</td><td class="{{metricClass .Name .New}}">{{.New}}</td><td class="{{deltaClass .Name .Delta}}">{{.Delta}}</td></tr>{{end}}</tbody></table></div>
-<div class="section-body comparison-note">Pass rates use one primary result per case ID. Total tokens cover all configurations; input/output tokens cover primary cases. Pass-rate changes are percentage points (pp). Missing measurements are unknown.</div>
+<details class="section-body comparison-help"><summary>Metric definitions</summary><p class="comparison-note">Pass rates use one primary result per case ID. Total tokens cover all configurations; input/output tokens cover primary cases. Pass-rate changes are percentage points (pp). Missing measurements are unknown.</p></details>
 </section>
 <section class="section"><h2 class="section-header">Metadata differences</h2><div class="section-body" style="overflow:auto;"><table class="benchmark-table">
-<thead><tr><th>Field</th><th class="comparison-path">{{.Result.Baseline.Label}}</th><th class="comparison-path">{{.Result.Candidate.Label}}</th><th>Change</th></tr></thead>
+<thead><tr><th>Field</th><th class="comparison-path" title="{{.Result.Baseline.Path}}">{{.Result.Baseline.Label}}</th><th class="comparison-path" title="{{.Result.Candidate.Path}}">{{.Result.Candidate.Label}}</th><th>Change</th></tr></thead>
 <tbody>{{range .Metadata}}<tr><td>{{.Name}}</td><td>{{.Old}}</td><td>{{.New}}</td><td class="{{changeClass .Delta}}">{{.Delta}}</td></tr>{{end}}</tbody></table></div>
-<p class="comparison-note section-body">Missing provenance is unknown. Matching case IDs do not prove identical prompts, suites, Skill revisions, or judge/rubric definitions. Scores are not regraded.</p>
+<details class="comparison-help section-body"><summary>Provenance and grading</summary><p class="comparison-note">Missing provenance is unknown. Matching case IDs do not prove identical prompts, suites, Skill revisions, or judge/rubric definitions. Scores are not regraded.</p></details>
 </section>
 <section class="section"><h2 class="section-header">Case transitions</h2>
 
