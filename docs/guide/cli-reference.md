@@ -234,7 +234,77 @@ skill-up report result.json --format html --output-dir ./reports
 | `html`  | `report.html`  | Human-readable visualization; open in a browser                    |
 | `markdown` | `report.md` | Concise Markdown summary for CI logs and GitHub PR comments        |
 
-`markdown` is intentionally limited to `skill-up report` as an offline conversion format for an existing `result.json`. It is not currently accepted by `skill-up run --format`, `skill-up debug report --format`, `skill-up debug judge --report`, or `eval.yaml report.formats`.
+For single-run reports, `markdown` is limited to `skill-up report` as an offline conversion format for an existing `result.json`. It is not currently accepted by `skill-up run --format`, `skill-up debug report --format`, `skill-up debug judge --report`, or `eval.yaml report.formats`.
+
+---
+
+## skill-up compare
+
+Compare two existing canonical `result.json` (or equivalent `report.json`)
+files without running evaluations or calling any Agent or Judge.
+
+```bash
+skill-up compare <old-result.json> <new-result.json> [flags]
+```
+
+### Flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--format` | `text` | `text`, `json`, `html`, or `markdown` |
+| `--output` | stdout | Write the comparison to this file; its parent directory must exist |
+| `--baseline-label` | `Baseline` | Display name for the old run |
+| `--candidate-label` | `Candidate` | Display name for the new run |
+| `--fail-on-regression` | `false` | Return a non-zero exit code for any shared case moving from PASS to another status |
+| `--max-token-increase-percent` | disabled | Maximum permitted increase in run-level total tokens (finite, non-negative percentage) |
+
+### Examples
+
+```bash
+# Self-contained HTML, with searchable cases and transition filters
+skill-up compare old/result.json new/result.json --format html --output comparison.html
+
+# Markdown tables for PR reviews and CI artifacts
+skill-up compare old/result.json new/result.json --format markdown --output comparison.md \
+  --baseline-label "Released Skill" --candidate-label "Proposed Skill"
+
+# Produce a report even if the regression gate fails
+skill-up compare old/result.json new/result.json --format html --output comparison.html \
+  --fail-on-regression --max-token-increase-percent 20
+
+# Stable machine-readable output
+skill-up compare old/result.json new/result.json --format json
+```
+
+All formats use the same comparison and gates. Reports include run metrics,
+metadata, original source paths, and fixed, regressed, changed, unchanged,
+added, and removed cases. HTML embeds its styles and filtering script, with
+no external assets or network requests; all cases remain readable without
+JavaScript. Markdown includes tables suitable for GitHub PR descriptions.
+Source result artifacts are preserved; output may not overwrite either input.
+
+Cases align by case ID using the existing primary-result rule: prefer
+`with_skill`, then a non-baseline configuration, falling back to `without_skill`.
+Benchmark reference entries do not double-count case counts or pass rates.
+Configuration identity is retained in case tables. Shared cases flag prompt changes
+when both prompts were recorded; otherwise the prompt comparison is unknown.
+Requested, applied, and observed agent configurations are compared when recorded. Total tokens are the recorded
+run-level total across all configurations; input/output tokens sum primary cases.
+Duration is run wall time, and pass-rate changes are percentage points.
+
+Added and removed cases are shown separately, with shared-case coverage. Aggregate
+changes include each run's full primary case set, so different case sets are not
+paired samples. A change between two non-PASS statuses is classified as changed,
+not fixed or regressed. Recorded zero tokens remain zero; missing token metrics
+are `unknown` in human-readable reports and `null` in JSON, including deltas.
+The token gate fails when the total-token measurement is unknown, or when a zero
+baseline increases to a positive value.
+
+Reports compare recorded outcomes only and do not regrade scores. Missing
+provenance is unknown; matching case IDs do not establish identical prompts,
+suites, Skill revisions, or judge/rubric definitions. Review those conditions
+before interpreting a change as an improvement. Gates are opt-in, apply equally
+to every output format, and write the report before returning a gate failure.
 
 ---
 
