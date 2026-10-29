@@ -316,6 +316,11 @@ Explicit label flags override automatic display labels. The first run is never
 automatically named `Baseline`, nor are later runs automatically named `Candidate`.
 The JSON keys `baseline` and `candidate` describe comparison roles only.
 
+HTML extends the existing evaluation report with a Comparison tab and a run
+selector. Selecting a run reuses the original Cases and Benchmark views, including
+prompts, responses, formal grades, and evidence. The existing single-run and
+with/without-Skill report presentation is unchanged. Comparison-mode feedback is
+isolated per run and exported locally, without using the single-run feedback API.
 HTML embeds its styles and filtering script, with
 no external assets or network requests; all cases remain readable without
 JavaScript. Markdown includes tables suitable for GitHub PR descriptions.

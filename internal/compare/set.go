@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html/template"
 	"strings"
 	"text/tabwriter"
 
@@ -41,6 +42,7 @@ type CaseRow struct {
 // Set compares every candidate independently against the first, baseline run.
 // Its schema is identical for two inputs and for larger collections.
 type Set struct {
+	inputs      []report.Input
 	Baseline    Source       `json:"baseline"`
 	Runs        []RunSummary `json:"runs"`
 	CaseMatrix  []CaseRow    `json:"case_matrix"`
@@ -55,6 +57,7 @@ func BuildSet(runs []RunInput, options Options) (Set, error) {
 	}
 	set := Set{Baseline: runs[0].Source, Comparisons: make([]Result, 0, len(runs)-1), Gates: GateResult{Passed: true, Failures: []string{}}}
 	for index, run := range runs {
+		set.inputs = append(set.inputs, run.Input)
 		source := run.Source
 		source.ID = index + 1
 		metrics := collectRunMetrics(run.Input)
@@ -146,7 +149,14 @@ func RenderSet(set Set, format string) ([]byte, error) {
 		if err := comparisonTemplate.ExecuteTemplate(&b, "set", newSetView(set)); err != nil {
 			return nil, fmt.Errorf("render HTML comparisons: %w", err)
 		}
-		return b.Bytes(), nil
+		runs := make([]report.ComparisonRun, len(set.Runs))
+		for i, run := range set.Runs {
+			runs[i].Label = run.Source.Label
+			if i < len(set.inputs) {
+				runs[i].Input = set.inputs[i]
+			}
+		}
+		return report.RenderComparisonHTML(runs, template.HTML(b.String())) //nolint:gosec // html/template escaped all source content.
 	case "markdown":
 		return []byte(renderSetMarkdown(set)), nil
 	case "text":

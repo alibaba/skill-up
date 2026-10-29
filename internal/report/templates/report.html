@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>skill-up Report: {{.SkillName}}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
+  {{if not .ComparisonRuns}}<link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <style>
+  {{end}}<style>
     :root {
       --bg: #f7f8fa; --surface: #ffffff; --border: #e5e7eb;
       --text: #0f172a; --text-muted: #94a3b8;
@@ -182,14 +182,17 @@
       <div class="progress" id="progress"></div>
     </div>
 
+    {{if .ComparisonRuns}}<div class="section-body"><label>Run details <select id="comparison-run" onchange="selectComparisonRun(this.value)"></select></label></div>{{end}}
     <div class="summary-bar" id="summary-bar"></div>
 
     <div class="view-tabs" id="view-tabs" style="display:none;">
-      <button class="view-tab active" data-view="cases" onclick="switchView('cases')">Cases</button>
+      {{if .ComparisonRuns}}<button class="view-tab active" data-view="comparison" onclick="switchView('comparison')">Comparison</button>{{end}}
+      <button class="view-tab{{if not .ComparisonRuns}} active{{end}}" data-view="cases" onclick="switchView('cases')">Cases</button>
       <button class="view-tab" data-view="benchmark" onclick="switchView('benchmark')">Benchmark</button>
     </div>
 
-    <div class="view-panel active" id="panel-cases">
+    {{if .ComparisonRuns}}<div class="view-panel active" id="panel-comparison" style="overflow:auto;padding:1rem;">{{.ComparisonSection}}</div>{{end}}
+    <div class="view-panel{{if not .ComparisonRuns}} active{{end}}" id="panel-cases">
       <div class="cases-layout">
         <aside class="case-sidebar" id="case-sidebar">
           <div class="sidebar-header">
@@ -263,6 +266,23 @@
 
   <script>
     var DATA = {{.EmbeddedDataJSON}};
+    {{if .ComparisonRuns}}
+    var comparisonRuns = {{.ComparisonRuns}};
+    var comparisonFeedback = {};
+    function selectComparisonRun(index) {
+      comparisonFeedback[document.getElementById('comparison-run').dataset.selected || '0'] = feedbackMap;
+      saveCurrentFeedback();
+      DATA = comparisonRuns[index].data;
+      feedbackMap = comparisonFeedback[index] || {};
+      currentIndex = 0; visitedCases = {};
+      document.getElementById('comparison-run').dataset.selected = index;
+      document.getElementById('done-btn').classList.remove('ready');
+      document.getElementById('view-tabs').style.display = 'flex';
+      document.getElementById('benchmark-content').innerHTML = '<div class="benchmark-empty">No benchmark data available.</div>';
+      init();
+      switchView('cases');
+    }
+    {{end}}
     var feedbackMap = {};
     var currentIndex = 0;
     var visitedCases = {};
@@ -296,8 +316,10 @@
         renderBenchmark();
       }
 
+      {{if .ComparisonRuns}}document.getElementById('view-tabs').style.display = 'flex';{{end}}
       renderCaseList();
 
+      {{if .ComparisonRuns}}showCase(0);{{else}}
       try {
         fetch("/api/feedback").then(function(r) { return r.json(); }).then(function(d) {
           if (d.reviews) { for (var i = 0; i < d.reviews.length; i++) feedbackMap[d.reviews[i].run_id] = d.reviews[i].feedback; }
@@ -305,13 +327,14 @@
         }).catch(function() { showCase(0); });
       } catch(e) { showCase(0); }
 
+      {{end}}
       var ta = document.getElementById("feedback");
       var timer = null;
-      ta.addEventListener("input", function() {
+      {{if .ComparisonRuns}}ta.oninput = function() { {{else}}ta.addEventListener("input", function() { {{end}}
         clearTimeout(timer);
         document.getElementById("feedback-status").textContent = "";
         timer = setTimeout(function() { saveCurrentFeedback(); }, 800);
-      });
+      {{if .ComparisonRuns}}};{{else}}});{{end}}
     }
 
     function sumCard(label, value, cls) {
@@ -608,6 +631,12 @@
     }
 
     function saveCurrentFeedback() {
+      {{if .ComparisonRuns}}
+      var c = DATA.cases[currentIndex];
+      if (c) feedbackMap[c.id] = document.getElementById('feedback').value;
+      document.getElementById('feedback-status').textContent = 'Saved locally for this run';
+      return;
+      {{end}}
       var c = DATA.cases[currentIndex];
       var text = document.getElementById("feedback").value;
       if (text.trim() === "") { delete feedbackMap[c.id]; } else { feedbackMap[c.id] = text; }
@@ -630,6 +659,16 @@
         reviews.push({ run_id: DATA.cases[i].id, feedback: feedbackMap[DATA.cases[i].id] || "", timestamp: ts });
       }
       var payload = JSON.stringify({ reviews: reviews, status: "complete" }, null, 2);
+      {{if .ComparisonRuns}}
+      var runIndex = Number(document.getElementById('comparison-run').value);
+      payload = JSON.stringify({source: {id: runIndex + 1, label: comparisonRuns[runIndex].label}, reviews: reviews, status: 'complete'}, null, 2);
+      var blob = new Blob([payload], {type: 'application/json'});
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a'); a.href = url; a.download = 'feedback-' + (runIndex + 1) + '.json'; a.click();
+      URL.revokeObjectURL(url);
+      document.getElementById('done-overlay').classList.add('visible');
+      return;
+      {{end}}
       fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: payload })
         .then(function() { document.getElementById("done-overlay").classList.add("visible"); })
         .catch(function() {
@@ -716,7 +755,31 @@
       else if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); navigate(1); }
     });
 
+    {{if .ComparisonRuns}}
+    document.querySelectorAll('.comparison-detail').forEach(function(report) {
+      var search = report.querySelector('.case-search'), group = report.querySelector('.case-filter');
+      if (!search || !group) return;
+      function filterCases() {
+        var count = 0, query = search.value.trim().toLowerCase();
+        report.querySelectorAll('.case-group').forEach(function(section) {
+          var visible = 0, selected = !group.value || section.dataset.group === group.value;
+          section.querySelectorAll('tbody tr').forEach(function(row) {
+            row.hidden = !selected || !row.textContent.toLowerCase().includes(query);
+            if (!row.hidden) visible++;
+          });
+          section.hidden = !selected || (!!query && !visible); count += visible;
+        });
+        report.querySelector('.match-count').textContent = count + ' matching cases';
+      }
+      search.addEventListener('input', filterCases); group.addEventListener('change', filterCases); filterCases();
+    });
+    var selector = document.getElementById('comparison-run');
+    comparisonRuns.forEach(function(run, index) {
+      var option = document.createElement('option'); option.value = index; option.textContent = run.label; selector.appendChild(option);
+    });
+    {{end}}
     init();
+    {{if .ComparisonRuns}}switchView('comparison');{{end}}
   </script>
 </body>
 </html>

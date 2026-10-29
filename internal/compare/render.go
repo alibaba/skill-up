@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alibaba/skill-up/internal/report"
 )
 
 const (
@@ -56,10 +58,10 @@ func Render(result Result, format string) ([]byte, error) {
 		return []byte(RenderMarkdown(result)), nil
 	case "html":
 		var b bytes.Buffer
-		if err := comparisonTemplate.Execute(&b, newComparisonView(result)); err != nil {
+		if err := comparisonTemplate.ExecuteTemplate(&b, "comparison-body", newComparisonView(result)); err != nil {
 			return nil, fmt.Errorf("render HTML comparison: %w", err)
 		}
-		return b.Bytes(), nil
+		return report.RenderComparisonHTML([]report.ComparisonRun{{Label: result.Baseline.Label}}, template.HTML(b.String())) //nolint:gosec // html/template escaped all source content.
 	default:
 		return nil, fmt.Errorf("unsupported comparison format %q", format)
 	}

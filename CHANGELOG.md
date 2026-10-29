@@ -12,7 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comparison with self-contained HTML, shareable Markdown, text, and JSON
   reports, an overview and case matrix across all runs, per-candidate baseline
   comparisons, directory-based labels with numeric ID fallback, explicit label
-  overrides, and optional regression and token-growth gates.
+  overrides, and optional regression and token-growth gates. HTML extends the
+  existing report with a comparison tab and run selector, retaining the original
+  case details and leaving existing report output unchanged.
 
 ### Changed
 - Strengthen `skill-upper` evolution with original/candidate comparisons,
