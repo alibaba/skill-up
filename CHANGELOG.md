@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Add `skill-up compare <result.json> <result.json>...` for offline
+  comparison with self-contained HTML, shareable Markdown, text, and JSON
+  reports, an overview and case matrix across all runs, per-candidate baseline
+  comparisons, input paths as default labels, explicit label
+  overrides, and optional regression and token-growth gates. HTML extends the
+  existing report with a comparison tab and run selector, retaining the original
+  case details and leaving existing report output unchanged. Comparison supports
+  selecting any two input files and reviewing aligned prompts, responses, and
+  grades side by side without changing CI gate references. Color-code pass rates,
+  case statuses, and metric changes, with cost/time direction handled separately.
+  Document primary-result selection for cross-file comparisons; use canonical
+  primary cases in the interactive viewer, and keep dropdowns and multi-run
+  tables readable with padding, wrapping, and horizontal scrolling. Align the
+  Compare controls, collapse secondary explanations, and omit empty Benchmark
+  tabs in comparison mode.
+
 ### Changed
 - Strengthen `skill-upper` evolution with original/candidate comparisons,
   evidence-based acceptance and reversion, and regression checks. Keep the

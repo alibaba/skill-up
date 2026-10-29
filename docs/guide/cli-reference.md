@@ -234,7 +234,141 @@ skill-up report result.json --format html --output-dir ./reports
 | `html`  | `report.html`  | Human-readable visualization; open in a browser                    |
 | `markdown` | `report.md` | Concise Markdown summary for CI logs and GitHub PR comments        |
 
-`markdown` is intentionally limited to `skill-up report` as an offline conversion format for an existing `result.json`. It is not currently accepted by `skill-up run --format`, `skill-up debug report --format`, `skill-up debug judge --report`, or `eval.yaml report.formats`.
+For single-run reports, `markdown` is limited to `skill-up report` as an offline conversion format for an existing `result.json`. It is not currently accepted by `skill-up run --format`, `skill-up debug report --format`, `skill-up debug judge --report`, or `eval.yaml report.formats`.
+
+---
+
+## skill-up compare
+
+Compare two or more existing canonical `result.json` (or equivalent `report.json`)
+files without running evaluations or calling any Agent or Judge.
+
+```bash
+skill-up compare <result.json> <result.json>... [flags]
+```
+
+The first file is the reference for deltas and gates. Every remaining file is
+compared independently against it, preserving argument order. This comparison
+role does not determine its display name. Any failed comparison makes the
+command fail; inputs are never compared as a sequential chain.
+
+### Flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--format` | `text` | `text`, `json`, `html`, or `markdown` |
+| `--output` | stdout | Write the comparison to this file; its parent directory must exist |
+| `--baseline-label` | automatic | Override the first run's display label |
+| `--candidate-label` | automatic | Override later runs' display labels in input order; repeat once per later input or omit the flag |
+| `--fail-on-regression` | `false` | Return a non-zero exit code for any shared case moving from PASS to another status |
+| `--max-token-increase-percent` | disabled | Maximum permitted increase in run-level total tokens (finite, non-negative percentage) |
+
+### Examples
+
+```bash
+# Compare several finished runs in one self-contained HTML report
+skill-up compare baseline/result.json skill-a/result.json skill-b/result.json \
+  --format html --output comparison.html
+
+# Two-run comparisons use the same command and report structure
+skill-up compare old/result.json new/result.json --format html --output pair.html
+
+# Markdown tables for PR reviews and CI artifacts
+skill-up compare old/result.json new/result.json --format markdown --output comparison.md \
+  --baseline-label "Released Skill" --candidate-label "Proposed Skill"
+
+# Explicit labels for multiple candidates (repeatable, commas remain literal)
+skill-up compare baseline.json a.json b.json --format markdown --output variants.md \
+  --candidate-label "Skill A" --candidate-label "Skill B"
+
+# Produce a report even if the regression gate fails
+skill-up compare old/result.json new/result.json --format html --output comparison.html \
+  --fail-on-regression --max-token-increase-percent 20
+
+# Stable machine-readable output
+skill-up compare old/result.json new/result.json --format json
+```
+
+All formats use the same comparison and gates. Reports include run metrics,
+metadata, original source paths, a side-by-side overview of all runs, a case
+status matrix across the union of case IDs, and detailed fixed, regressed, changed,
+unchanged, added, and removed cases for each candidate against the baseline.
+The case matrix marks cases absent from a run explicitly; JSON uses null matrix
+cells. Matrix outcomes follow input order, and baseline-only cases are retained.
+JSON always uses the same top-level `baseline`, `runs`, `case_matrix`,
+`comparisons`, and `gates` structure, including for exactly two input files.
+`comparisons` contains one baseline comparison per candidate, with individual
+gate results; top-level `gates` aggregates failures and identifies the candidate.
+All runs have a one-based numeric ID (`runs[].source.id`) assigned in input
+order, including the reference. These IDs are also retained in each comparison's
+source identity; display labels do not change them.
+
+Default display labels are the input paths exactly as supplied. Relative paths
+remain relative (including a leading `./` or `..`); absolute paths remain absolute.
+Directory names are not shortened, and numeric IDs are not used as display labels.
+The source path is shown once, rather than repeated below the label.
+
+Explicit label flags override path-based display labels. The first run is never
+automatically named `Baseline`, nor are later runs automatically named `Candidate`.
+The JSON keys `baseline` and `candidate` describe comparison roles only.
+
+HTML extends the existing evaluation report with a Comparison tab and a run
+selector. In Comparison, the Reference and Compared selectors can choose any two
+inputs, in either direction. The selected pair shows metrics, metadata, coverage,
+and case transitions calculated with the same Go comparison logic. These controls
+do not change the first-input reference used by CLI/CI gates or text/JSON/Markdown.
+The case-response button opens the reused case viewer inside Comparison, showing
+both selected files' primary case results side by side: prompts, full responses
+(including recorded turns), grades and evidence. Case IDs absent on either side
+are explicitly marked absent. Cross-file comparison is read-only; normal Run
+details preserve each file's own with/without-Skill pairing and feedback.
+Pair summaries are pre-rendered for every ordered pair, so HTML size grows with
+the number of run pairs. No Agent or Judge is called when switching pairs. Selecting a run reuses the original Cases and Benchmark views, including
+prompts, responses, formal grades, and evidence. The existing single-run and
+with/without-Skill report presentation is unchanged. Comparison-mode feedback is
+isolated per run and exported locally, without using the single-run feedback API.
+HTML embeds its styles and filtering script, with
+no external assets or network requests; all cases remain readable without
+JavaScript. Markdown includes tables suitable for GitHub PR descriptions.
+Source result artifacts are preserved; output may not overwrite any input.
+
+Cases align by case ID using the existing primary-result rule: prefer
+`with_skill`, then a non-baseline configuration, falling back to `without_skill`
+only when no other result for that case is available. In the usual with/without
+benchmark, cross-file comparison therefore compares **each revision's with_skill
+result**, not all variants against one another. This same selection rule drives
+metrics, the case matrix, transitions, and the interactive side-by-side viewer.
+Each file's internal with/without binding remains in Run details. The page keeps
+this rule in a collapsed explanation; the full selection semantics are documented
+here. Benchmark is the original single-run statistics view (including with/without
+deltas when recorded), and is shown in comparison mode only when the selected
+run actually contains benchmark data. The selected
+configuration is exposed in the matrix and transition tables.
+
+For more than three inputs, overview/matrix columns retain readable widths and
+scroll horizontally with the first column pinned. Selectors wrap to new rows
+on narrow screens and reserve spacing for the dropdown arrow; the pair viewer
+always compares two selected inputs, regardless of the total input count.
+Benchmark reference entries do not double-count case counts or pass rates.
+Configuration identity is retained in case tables. Shared cases flag prompt changes
+when both prompts were recorded; otherwise the prompt comparison is unknown.
+Requested, applied, and observed agent configurations are compared when recorded. Total tokens are the recorded
+run-level total across all configurations; input/output tokens sum primary cases.
+Duration is run wall time, and pass-rate changes are percentage points.
+
+Added and removed cases are shown separately, with shared-case coverage. Aggregate
+changes include each run's full primary case set, so different case sets are not
+paired samples. A change between two non-PASS statuses is classified as changed,
+not fixed or regressed. Recorded zero tokens remain zero; missing token metrics
+are `unknown` in human-readable reports and `null` in JSON, including deltas.
+The token gate fails when the total-token measurement is unknown, or when a zero
+baseline increases to a positive value.
+
+Reports compare recorded outcomes only and do not regrade scores. Missing
+provenance is unknown; matching case IDs do not establish identical prompts,
+suites, Skill revisions, or judge/rubric definitions. Review those conditions
+before interpreting a change as an improvement. Gates are opt-in, apply equally
+to every output format, and write the report before returning a gate failure.
 
 ---
 

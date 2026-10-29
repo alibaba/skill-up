@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>skill-up Report: {{.SkillName}}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
+  {{if not .ComparisonRuns}}<link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <style>
+  {{end}}<style>
     :root {
       --bg: #f7f8fa; --surface: #ffffff; --border: #e5e7eb;
       --text: #0f172a; --text-muted: #94a3b8;
@@ -167,6 +167,54 @@
 
     .toast { position: fixed; bottom: 5rem; left: 50%; transform: translateX(-50%); background: var(--header-bg); color: var(--header-text); padding: 0.625rem 1.25rem; border-radius: var(--radius); font-size: 0.875rem; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 200; }
     .toast.visible { opacity: 1; }
+    {{if .ComparisonRuns}}
+    #pair-case-details .config-col h3 { text-transform: none; overflow-wrap: anywhere; }
+    #pair-case-details .cases-layout { height: 850px; min-height: 500px; }
+    #panel-comparison [hidden] { display: none !important; }
+    #panel-comparison .section { margin-bottom: 1.25rem; }
+    #panel-comparison .section-header { margin: 0; font-size: .75rem; }
+    #panel-comparison .section-body { font-size: .8125rem; line-height: 1.6; }
+    #panel-comparison .comparison-path { text-transform: none; letter-spacing: normal; overflow-wrap: anywhere; min-width: 0; }
+    #panel-comparison th.comparison-path { max-width: 22rem; }
+    #panel-comparison .comparison-positive { color: #047857; font-weight: 600; }
+    #panel-comparison .comparison-negative { color: var(--red); font-weight: 600; }
+    #panel-comparison .comparison-warning { color: #a16207; font-weight: 600; }
+    #panel-comparison .comparison-neutral { color: #64748b; }
+    #panel-comparison .comparison-changed { color: #1d4ed8; font-weight: 600; }
+    #panel-comparison .comparison-status.sb-pass { color: #047857; }
+    #panel-comparison .comparison-absent { color: #64748b; background: var(--bg); }
+    #panel-comparison .comparison-note { color: var(--text-muted); font-size: .75rem; }
+    #panel-comparison .comparison-toolbar { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; margin-top: .75rem; }
+    #panel-comparison .comparison-toolbar a { text-decoration: none; }
+    #panel-comparison .summary-bar { margin-bottom: 1.25rem; }
+    #panel-comparison .comparison-toolbar > label { display: flex; flex-direction: column; gap: .5rem; flex: 1 1 20rem; min-width: 0; max-width: 100%; }
+    #panel-comparison .comparison-toolbar input, #panel-comparison .comparison-toolbar select { width: 100%; box-sizing: border-box; min-width: 0; }
+    #panel-comparison select, #comparison-run { padding: .625rem 2.75rem .625rem .875rem; line-height: 1.5; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right .875rem center; background-size: 1rem; }
+    #panel-comparison .comparison-table-scroll { max-width: 100%; max-height: 34rem; overflow: auto; }
+    #panel-comparison .comparison-matrix { width: max-content; min-width: 100%; table-layout: fixed; }
+    #panel-comparison .comparison-matrix th, #panel-comparison .comparison-matrix td { width: 16rem; min-width: 14rem; max-width: 20rem; vertical-align: top; overflow-wrap: anywhere; }
+    #panel-comparison .comparison-matrix th:first-child, #panel-comparison .comparison-matrix td:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); }
+    #panel-comparison .comparison-matrix th:first-child { background: var(--header-bg); z-index: 2; }
+    @media (max-width: 600px) {
+      #panel-comparison .comparison-matrix th:first-child, #panel-comparison .comparison-matrix td:first-child { width: 9rem; min-width: 9rem; max-width: 9rem; }
+      #panel-comparison .comparison-toolbar > label { flex-basis: 100%; }
+    }
+    #panel-comparison .comparison-help { font-size: .75rem; color: var(--text-muted); }
+    #panel-comparison .comparison-help summary { cursor: pointer; }
+    #panel-comparison .comparison-help p { margin: .5rem 0 0; }
+    #panel-comparison .comparison-pair-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; margin-top: 0; }
+    #panel-comparison .comparison-pair-controls select, #panel-comparison .comparison-pair-controls button { height: 2.75rem; box-sizing: border-box; line-height: 1.5; }
+    #panel-comparison .comparison-pair-controls button { align-self: end; }
+    @media (max-width: 900px) {
+      #panel-comparison .comparison-pair-controls { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+      #panel-comparison .comparison-pair-controls button { grid-column: 1 / -1; width: 100%; }
+    }
+    @media (max-width: 600px) {
+      #panel-comparison .comparison-pair-controls { grid-template-columns: minmax(0, 1fr); }
+    }
+    #comparison-run { min-width: 0; max-width: 100%; flex: 1; text-transform: none; }
+    .comparison-run-control { display: flex; align-items: center; gap: .75rem; font-size: .8125rem; }
+    {{end}}
   </style>
 </head>
 <body>
@@ -182,14 +230,17 @@
       <div class="progress" id="progress"></div>
     </div>
 
+    {{if .ComparisonRuns}}<div class="section-body"><label class="comparison-run-control">Run details <select class="nav-btn" id="comparison-run" onchange="selectComparisonRun(this.value)"></select></label></div>{{end}}
     <div class="summary-bar" id="summary-bar"></div>
 
     <div class="view-tabs" id="view-tabs" style="display:none;">
-      <button class="view-tab active" data-view="cases" onclick="switchView('cases')">Cases</button>
+      {{if .ComparisonRuns}}<button class="view-tab active" data-view="comparison" onclick="switchView('comparison')">Comparison</button>{{end}}
+      <button class="view-tab{{if not .ComparisonRuns}} active{{end}}" data-view="cases" onclick="switchView('cases')">Cases</button>
       <button class="view-tab" data-view="benchmark" onclick="switchView('benchmark')">Benchmark</button>
     </div>
 
-    <div class="view-panel active" id="panel-cases">
+    {{if .ComparisonRuns}}<div class="view-panel active" id="panel-comparison" style="overflow:auto;">{{.ComparisonSection}}</div>{{end}}
+    <div class="view-panel{{if not .ComparisonRuns}} active{{end}}" id="panel-cases">
       <div class="cases-layout">
         <aside class="case-sidebar" id="case-sidebar">
           <div class="sidebar-header">
@@ -263,6 +314,101 @@
 
   <script>
     var DATA = {{.EmbeddedDataJSON}};
+    {{if .ComparisonRuns}}
+    var comparisonRuns = {{.ComparisonRuns}};
+    var comparisonFeedback = {};
+    var pairLabels = null, pairOpen = false;
+    function selectComparisonPair(changed) {
+      var left = document.getElementById('pair-reference'), right = document.getElementById('pair-target');
+      if (left.value === right.value) {
+        var other = changed === 'target' ? left : right;
+        other.value = String((Number(other.value) + 1) % comparisonRuns.length);
+      }
+      document.querySelectorAll('.comparison-detail').forEach(function(article) {
+        article.hidden = article.dataset.reference !== left.value || article.dataset.target !== right.value;
+      });
+      if (pairOpen) openPairDetails();
+    }
+    function openPairDetails() {
+      var leftIndex = Number(document.getElementById('pair-reference').value);
+      var rightIndex = Number(document.getElementById('pair-target').value);
+      var left = comparisonRuns[leftIndex], right = comparisonRuns[rightIndex];
+      if (!pairOpen) {
+        saveCurrentFeedback();
+        comparisonFeedback[document.getElementById('comparison-run').dataset.selected || '0'] = feedbackMap;
+      }
+      document.getElementById('comparison-run').value = String(rightIndex);
+      document.getElementById('comparison-run').dataset.selected = String(rightIndex);
+      pairLabels = [left.label, right.label]; pairOpen = true;
+      DATA = JSON.parse(JSON.stringify(right.data));
+      var leftCases = new Map(left.primary_cases.map(function(c) { return [c.id, c]; }));
+      var rightCases = new Map(right.primary_cases.map(function(c) { return [c.id, c]; }));
+      var ids = Array.from(new Set(left.primary_cases.concat(right.primary_cases).map(function(c) { return c.id; })));
+      DATA.cases = ids.map(function(id) {
+        var a = leftCases.get(id), b = rightCases.get(id), c = Object.assign({}, b || a);
+        c.baseline = null; c.turn_results = null; c.pairLeft = a; c.pairRight = b; return c;
+      });
+      feedbackMap = {}; currentIndex = 0; visitedCases = {};
+      var container = document.getElementById('pair-case-details'); container.hidden = false;
+      container.appendChild(document.querySelector('.cases-layout'));
+      init(); switchView('comparison');
+      container.scrollIntoView({block: 'start'});
+    }
+    function renderPairDetails(c) {
+      var response = document.getElementById('response-body'), responseSection = document.getElementById('response-section');
+      var sides = [c.pairLeft, c.pairRight], responses = [];
+      sides.forEach(function(side) {
+        if (!side) { responses.push('<p>Case absent from this run.</p>'); return; }
+        renderResponse(Object.assign({}, side, {baseline: null}));
+        responses.push(responseSection.style.display === 'none' ? '<p>No recorded response.</p>' : response.innerHTML);
+      });
+      function columns(contents) {
+        return '<div class="comparison">' + contents.map(function(content, i) {
+          return '<div class="config-col"><h3>' + esc(pairLabels[i]) + '</h3>' + content + '</div>';
+        }).join('') + '</div>';
+      }
+      response.innerHTML = columns(responses); responseSection.style.display = 'block';
+      document.getElementById('grades-section').style.display = 'block';
+      document.getElementById('grades-content').innerHTML = columns(sides.map(function(side) { return side ? renderCaseGrading(side) : '<p>Case absent from this run.</p>'; }));
+      document.getElementById('prompt-section').style.display = 'block';
+      document.getElementById('prompt-text').innerHTML = columns(sides.map(function(side) { return '<div class="response-box">' + esc(side ? (side.prompt || 'Prompt unknown') : 'Case absent from this run.') + '</div>'; }));
+      var errorSection = document.getElementById('error-section');
+      errorSection.style.display = sides.some(function(side) { return side && side.error; }) ? 'block' : 'none';
+      document.getElementById('error-text').innerHTML = columns(sides.map(function(side) { return esc(side ? (side.error || 'No recorded error') : 'Case absent from this run.'); }));
+      var badge = document.getElementById('case-badge'); badge.className = 'status-badge';
+      badge.replaceChildren();
+      sides.forEach(function(side, index) {
+        if (index) badge.appendChild(document.createTextNode(' → '));
+        var status = document.createElement('span');
+        var value = side ? side.status : 'absent';
+        status.className = 'status-badge ' + (side ? 'sb-' + value.toLowerCase() + ' comparison-status' : 'comparison-absent');
+        status.textContent = value; badge.appendChild(status);
+      });
+      document.getElementById('case-header-metrics').textContent = 'Cross-run comparison of primary results';
+    }
+
+    function selectComparisonRun(index) {
+      var wasPair = pairOpen;
+      if (pairOpen) {
+        document.getElementById('panel-cases').appendChild(document.querySelector('.cases-layout'));
+        document.getElementById('pair-case-details').hidden = true;
+        pairOpen = false; pairLabels = null; feedbackMap = {};
+      }
+      if (!wasPair) {
+        saveCurrentFeedback();
+        comparisonFeedback[document.getElementById('comparison-run').dataset.selected || '0'] = feedbackMap;
+      }
+      DATA = comparisonRuns[index].data;
+      feedbackMap = comparisonFeedback[index] || {};
+      currentIndex = 0; visitedCases = {};
+      document.getElementById('comparison-run').dataset.selected = index;
+      document.getElementById('done-btn').classList.remove('ready');
+      document.getElementById('view-tabs').style.display = 'flex';
+      document.getElementById('benchmark-content').innerHTML = '<div class="benchmark-empty">No benchmark data available.</div>';
+      init();
+      switchView('cases');
+    }
+    {{end}}
     var feedbackMap = {};
     var currentIndex = 0;
     var visitedCases = {};
@@ -296,8 +442,13 @@
         renderBenchmark();
       }
 
+      {{if .ComparisonRuns}}document.getElementById('view-tabs').style.display = 'flex';
+      var benchmarkTab = document.querySelector('[data-view="benchmark"]');
+      benchmarkTab.hidden = !DATA.benchmark;
+      benchmarkTab.title = 'Statistics for this run, including with/without Skill when recorded';{{end}}
       renderCaseList();
 
+      {{if .ComparisonRuns}}showCase(0);{{else}}
       try {
         fetch("/api/feedback").then(function(r) { return r.json(); }).then(function(d) {
           if (d.reviews) { for (var i = 0; i < d.reviews.length; i++) feedbackMap[d.reviews[i].run_id] = d.reviews[i].feedback; }
@@ -305,13 +456,14 @@
         }).catch(function() { showCase(0); });
       } catch(e) { showCase(0); }
 
+      {{end}}
       var ta = document.getElementById("feedback");
       var timer = null;
-      ta.addEventListener("input", function() {
+      {{if .ComparisonRuns}}ta.oninput = function() { {{else}}ta.addEventListener("input", function() { {{end}}
         clearTimeout(timer);
         document.getElementById("feedback-status").textContent = "";
         timer = setTimeout(function() { saveCurrentFeedback(); }, 800);
-      });
+      {{if .ComparisonRuns}}};{{else}}});{{end}}
     }
 
     function sumCard(label, value, cls) {
@@ -394,6 +546,9 @@
 
       renderResponse(c);
       renderGrades(c);
+      {{if .ComparisonRuns}}if (pairLabels) renderPairDetails(c);
+      document.getElementById("feedback").closest(".section").hidden = !!pairLabels;
+      document.getElementById("done-btn").hidden = !!pairLabels;{{end}}
 
       document.getElementById("feedback").value = feedbackMap[c.id] || "";
       document.getElementById("feedback-status").textContent = "";
@@ -608,6 +763,13 @@
     }
 
     function saveCurrentFeedback() {
+      {{if .ComparisonRuns}}
+      if (pairOpen) return;
+      var c = DATA.cases[currentIndex];
+      if (c) feedbackMap[c.id] = document.getElementById('feedback').value;
+      document.getElementById('feedback-status').textContent = 'Saved locally for this run';
+      return;
+      {{end}}
       var c = DATA.cases[currentIndex];
       var text = document.getElementById("feedback").value;
       if (text.trim() === "") { delete feedbackMap[c.id]; } else { feedbackMap[c.id] = text; }
@@ -630,6 +792,16 @@
         reviews.push({ run_id: DATA.cases[i].id, feedback: feedbackMap[DATA.cases[i].id] || "", timestamp: ts });
       }
       var payload = JSON.stringify({ reviews: reviews, status: "complete" }, null, 2);
+      {{if .ComparisonRuns}}
+      var runIndex = Number(document.getElementById('comparison-run').value);
+      payload = JSON.stringify({source: {id: runIndex + 1, label: comparisonRuns[runIndex].label}, reviews: reviews, status: 'complete'}, null, 2);
+      var blob = new Blob([payload], {type: 'application/json'});
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a'); a.href = url; a.download = 'feedback-' + (runIndex + 1) + '.json'; a.click();
+      URL.revokeObjectURL(url);
+      document.getElementById('done-overlay').classList.add('visible');
+      return;
+      {{end}}
       fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: payload })
         .then(function() { document.getElementById("done-overlay").classList.add("visible"); })
         .catch(function() {
@@ -647,6 +819,7 @@
     }
 
     function switchView(view) {
+      {{if .ComparisonRuns}}if (view === "cases" && pairOpen) { selectComparisonRun(document.getElementById("comparison-run").value); return; }{{end}}
       var tabs = document.querySelectorAll(".view-tab");
       var panels = document.querySelectorAll(".view-panel");
       for (var i = 0; i < tabs.length; i++) tabs[i].classList.remove("active");
@@ -711,12 +884,37 @@
     }
 
     document.addEventListener("keydown", function(e) {
+      {{if .ComparisonRuns}}if (e.target.closest("input, select, textarea, button")) return;{{end}}
       if (e.target.tagName === "TEXTAREA") return;
       if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); navigate(-1); }
       else if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); navigate(1); }
     });
 
+    {{if .ComparisonRuns}}
+    document.querySelectorAll('.comparison-detail').forEach(function(report) {
+      var search = report.querySelector('.case-search'), group = report.querySelector('.case-filter');
+      if (!search || !group) return;
+      function filterCases() {
+        var count = 0, query = search.value.trim().toLowerCase();
+        report.querySelectorAll('.case-group').forEach(function(section) {
+          var visible = 0, selected = !group.value || section.dataset.group === group.value;
+          section.querySelectorAll('tbody tr').forEach(function(row) {
+            row.hidden = !selected || !row.textContent.toLowerCase().includes(query);
+            if (!row.hidden) visible++;
+          });
+          section.hidden = !selected || (!!query && !visible); count += visible;
+        });
+        report.querySelector('.match-count').textContent = count + ' matching cases';
+      }
+      search.addEventListener('input', filterCases); group.addEventListener('change', filterCases); filterCases();
+    });
+    var selector = document.getElementById('comparison-run');
+    comparisonRuns.forEach(function(run, index) {
+      var option = document.createElement('option'); option.value = index; option.textContent = run.label; selector.appendChild(option);
+    });
+    {{end}}
     init();
+    {{if .ComparisonRuns}}switchView('comparison');{{end}}
   </script>
 </body>
 </html>
