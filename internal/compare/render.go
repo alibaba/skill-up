@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html"
 	"html/template"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,8 +17,9 @@ import (
 )
 
 const (
-	unknownValue = "unknown"
-	jsonFormat   = "json"
+	unknownValue           = "unknown"
+	comparisonNeutralClass = "comparison-neutral"
+	jsonFormat             = "json"
 )
 
 //go:embed templates/compare.html
@@ -26,7 +28,7 @@ var htmlSource string
 //go:embed templates/set.html
 var setHTMLSource string
 
-var comparisonTemplate = template.Must(template.New("comparison").Funcs(template.FuncMap{"promptChange": promptChange}).Parse(htmlSource + setHTMLSource))
+var comparisonTemplate = template.Must(template.New("comparison").Funcs(template.FuncMap{"promptChange": promptChange, "statusClass": comparisonStatusClass, "metricClass": comparisonMetricClass, "deltaClass": comparisonDeltaClass, "changeClass": comparisonChangeClass}).Parse(htmlSource + setHTMLSource))
 
 type (
 	comparisonRow struct{ Name, Old, New, Delta string }
@@ -210,4 +212,71 @@ func markdownCell(value string) string {
 		return "—"
 	}
 	return value
+}
+
+func comparisonStatusClass(value any) string {
+	switch strings.ToUpper(fmt.Sprint(value)) {
+	case "PASS":
+		return "status-badge sb-pass comparison-status"
+	case "FAIL":
+		return "status-badge sb-fail comparison-status"
+	case "ERROR":
+		return "status-badge sb-error comparison-status"
+	case "SKIP":
+		return "status-badge sb-skip comparison-status"
+	default:
+		return "status-badge comparison-absent"
+	}
+}
+
+func comparisonNumber(value string) (float64, bool) {
+	fields := strings.Fields(strings.TrimSuffix(value, "%"))
+	if len(fields) == 0 {
+		return 0, false
+	}
+	number, err := strconv.ParseFloat(fields[0], 64)
+	return number, err == nil && !math.IsNaN(number) && !math.IsInf(number, 0)
+}
+
+func comparisonMetricClass(name, value string) string {
+	if value == unknownValue {
+		return comparisonNeutralClass
+	}
+	if name != "Pass rate" {
+		return ""
+	}
+	number, known := comparisonNumber(value)
+	if !known {
+		return comparisonNeutralClass
+	}
+	if number == 100 {
+		return "comparison-positive"
+	}
+	if number == 0 {
+		return "comparison-negative"
+	}
+	return "comparison-warning"
+}
+
+func comparisonDeltaClass(name, value string) string {
+	number, known := comparisonNumber(value)
+	if !known || number == 0 {
+		return comparisonNeutralClass
+	}
+	if strings.Contains(name, "tokens") || strings.Contains(name, "duration") {
+		number = -number
+	} else if name != "Pass rate" && name != "Passed" {
+		return "comparison-changed"
+	}
+	if number > 0 {
+		return "comparison-positive"
+	}
+	return "comparison-negative"
+}
+
+func comparisonChangeClass(value string) string {
+	if value == "changed" {
+		return "comparison-changed"
+	}
+	return comparisonNeutralClass
 }

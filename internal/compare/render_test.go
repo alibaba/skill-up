@@ -137,3 +137,33 @@ func TestRecordedConfigurationAndPromptDifferences(t *testing.T) {
 		}
 	}
 }
+
+func TestMetricColorsRespectMetricDirectionAndMissingValues(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, value string
+		delta       bool
+		want        string
+	}{
+		{"Pass rate", "+25.00 pp", true, "comparison-positive"},
+		{"Pass rate", "-25.00 pp", true, "comparison-negative"},
+		{"Pass rate", "100.00%", false, "comparison-positive"},
+		{"Pass rate", "50.00%", false, "comparison-warning"},
+		{"Pass rate", "0.00%", false, "comparison-negative"},
+		{"Total tokens (all configurations)", "+500", true, "comparison-negative"},
+		{"Total tokens (all configurations)", "-500", true, "comparison-positive"},
+		{"Run duration (ms)", "-500", true, "comparison-positive"},
+		{"Run duration (ms)", "+0", true, "comparison-neutral"},
+		{"Cases", "+1", true, "comparison-changed"},
+		{"Pass rate", "unknown", true, "comparison-neutral"},
+	}
+	for _, tc := range tests {
+		color := comparisonMetricClass
+		if tc.delta {
+			color = comparisonDeltaClass
+		}
+		if got := color(tc.name, tc.value); got != tc.want {
+			t.Errorf("%s %s: got %s, want %s", tc.name, tc.value, got, tc.want)
+		}
+	}
+}

@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   existing report with a comparison tab and run selector, retaining the original
   case details and leaving existing report output unchanged. Comparison supports
   selecting any two input files and reviewing aligned prompts, responses, and
-  grades side by side without changing CI gate references.
+  grades side by side without changing CI gate references. Color-code pass rates,
+  case statuses, and metric changes, with cost/time direction handled separately.
 
 ### Changed
 - Strengthen `skill-upper` evolution with original/candidate comparisons,

@@ -176,6 +176,13 @@
     #panel-comparison .section-body { font-size: .8125rem; line-height: 1.6; }
     #panel-comparison .comparison-path { text-transform: none; letter-spacing: normal; overflow-wrap: anywhere; min-width: 0; }
     #panel-comparison th.comparison-path { max-width: 22rem; }
+    #panel-comparison .comparison-positive { color: #047857; font-weight: 600; }
+    #panel-comparison .comparison-negative { color: var(--red); font-weight: 600; }
+    #panel-comparison .comparison-warning { color: #a16207; font-weight: 600; }
+    #panel-comparison .comparison-neutral { color: #64748b; }
+    #panel-comparison .comparison-changed { color: #1d4ed8; font-weight: 600; }
+    #panel-comparison .comparison-status.sb-pass { color: #047857; }
+    #panel-comparison .comparison-absent { color: #64748b; background: var(--bg); }
     #panel-comparison .comparison-note { color: var(--text-muted); font-size: .75rem; }
     #panel-comparison .comparison-toolbar { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; margin-top: .75rem; }
     #panel-comparison .comparison-toolbar a { text-decoration: none; }
@@ -344,7 +351,14 @@
       errorSection.style.display = sides.some(function(side) { return side && side.error; }) ? 'block' : 'none';
       document.getElementById('error-text').innerHTML = columns(sides.map(function(side) { return esc(side ? (side.error || 'No recorded error') : 'Case absent from this run.'); }));
       var badge = document.getElementById('case-badge'); badge.className = 'status-badge';
-      badge.textContent = sides.map(function(side) { return side ? side.status : 'absent'; }).join(' → ');
+      badge.replaceChildren();
+      sides.forEach(function(side, index) {
+        if (index) badge.appendChild(document.createTextNode(' → '));
+        var status = document.createElement('span');
+        var value = side ? side.status : 'absent';
+        status.className = 'status-badge ' + (side ? 'sb-' + value.toLowerCase() + ' comparison-status' : 'comparison-absent');
+        status.textContent = value; badge.appendChild(status);
+      });
       document.getElementById('case-header-metrics').textContent = 'Cross-run comparison of primary results';
     }
 
