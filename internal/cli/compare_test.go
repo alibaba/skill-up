@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -465,5 +466,77 @@ func assertMultipleCompareJSON(t *testing.T, data []byte) {
 	}
 	if len(set.Runs) != 3 || len(set.Comparisons) != 2 || !set.Comparisons[0].Gates.Passed || set.Comparisons[1].Gates.Passed {
 		t.Fatalf("wrong per-candidate gates: %+v", set)
+	}
+}
+
+func TestAutomaticCompareLabels(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	path := func(parts ...string) string { return filepath.Join(append([]string{root}, parts...)...) }
+	tests := []struct {
+		name  string
+		paths []string
+		want  []string
+	}{
+		{"distinct directories", []string{path("alpha", "result.json"), path("beta", "result.json"), path("gamma", "result.json")}, []string{"alpha", "beta", "gamma"}},
+		{"same directory", []string{path("alpha", "a.json"), path("alpha", "b.json")}, []string{"1", "2"}},
+		{"one duplicate switches all labels", []string{path("alpha", "result.json"), path("beta", "a.json"), path("beta", "b.json")}, []string{"1", "2", "3"}},
+		{"same directory basename", []string{path("a", "run", "result.json"), path("b", "run", "result.json")}, []string{"1", "2"}},
+		{"bare filenames", []string{"old.json", "new.json", "other.json"}, []string{"1", "2", "3"}},
+		{"clean relative paths", []string{filepath.Join("alpha", "nested", "..", "result.json"), filepath.Join("beta", "result.json")}, []string{"alpha", "beta"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := automaticCompareLabels(tc.paths); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("labels = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAutomaticLabelsPropagateToReportsAndRunIdentity(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	var paths []string
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		dir := filepath.Join(root, name)
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, writeCompareResultJSON(t, dir, "result.json", makeReportInput(judge.StatusPass)))
+	}
+	for _, format := range []string{"json", "html", "markdown", "text"} {
+		cmd := newCompareCmd()
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		if err := cmd.Flags().Set("format", format); err != nil {
+			t.Fatal(err)
+		}
+		if err := runCompare(cmd, paths); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(out.String(), "Candidate 1") || strings.Contains(out.String(), "Baseline") {
+			t.Errorf("%s still uses role-based display labels", format)
+		}
+		if format == jsonFormat {
+			assertDirectoryRunIdentity(t, out.Bytes())
+		}
+	}
+}
+
+func assertDirectoryRunIdentity(t *testing.T, data []byte) {
+	t.Helper()
+	var set comparepkg.Set
+	if err := json.Unmarshal(data, &set); err != nil {
+		t.Fatal(err)
+	}
+	for i, name := range []string{"alpha", "beta", "gamma"} {
+		if source := set.Runs[i].Source; source.ID != i+1 || source.Label != name {
+			t.Fatalf("wrong run identity: %+v", source)
+		}
+	}
+	if set.Baseline != set.Runs[0].Source || set.Comparisons[1].Candidate != set.Runs[2].Source {
+		t.Fatal("reference or comparison lost run identity")
 	}
 }

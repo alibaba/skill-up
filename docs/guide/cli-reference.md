@@ -244,12 +244,13 @@ Compare two or more existing canonical `result.json` (or equivalent `report.json
 files without running evaluations or calling any Agent or Judge.
 
 ```bash
-skill-up compare <baseline-result.json> <candidate-result.json>... [flags]
+skill-up compare <result.json> <result.json>... [flags]
 ```
 
-The first file is the baseline. Every remaining file is compared independently
-against it, preserving argument order. Gates apply to every candidate; any failed
-comparison makes the command fail. Inputs are never compared as a sequential chain.
+The first file is the reference for deltas and gates. Every remaining file is
+compared independently against it, preserving argument order. This comparison
+role does not determine its display name. Any failed comparison makes the
+command fail; inputs are never compared as a sequential chain.
 
 ### Flags
 
@@ -257,8 +258,8 @@ comparison makes the command fail. Inputs are never compared as a sequential cha
 |---|---|---|
 | `--format` | `text` | `text`, `json`, `html`, or `markdown` |
 | `--output` | stdout | Write the comparison to this file; its parent directory must exist |
-| `--baseline-label` | `Baseline` | Display name for the first, baseline run |
-| `--candidate-label` | automatic | Repeat once per candidate to label candidates in input order; supply all labels or omit the flag |
+| `--baseline-label` | automatic | Override the first run's display label |
+| `--candidate-label` | automatic | Override later runs' display labels in input order; repeat once per later input or omit the flag |
 | `--fail-on-regression` | `false` | Return a non-zero exit code for any shared case moving from PASS to another status |
 | `--max-token-increase-percent` | disabled | Maximum permitted increase in run-level total tokens (finite, non-negative percentage) |
 
@@ -298,11 +299,27 @@ JSON always uses the same top-level `baseline`, `runs`, `case_matrix`,
 `comparisons`, and `gates` structure, including for exactly two input files.
 `comparisons` contains one baseline comparison per candidate, with individual
 gate results; top-level `gates` aggregates failures and identifies the candidate.
-Default labels are `Candidate` for one candidate, or `Candidate 1`, `Candidate 2`,
-and so on for multiple candidates. HTML embeds its styles and filtering script, with
+All runs have a one-based numeric ID (`runs[].source.id`) assigned in input
+order, including the reference. These IDs are also retained in each comparison's
+source identity; display labels do not change them.
+
+Default display labels use the immediate parent-directory names if those names
+are nonempty and unique across **all** inputs. Relative paths are resolved from
+the current working directory. If any names collide or cannot identify a
+directory, **all** labels fall back to the IDs `1`, `2`, `3`, and so on. For example:
+
+- `alpha/result.json beta/result.json gamma/result.json` → `alpha`, `beta`, `gamma`.
+- `old.json new.json other.json` in one directory → `1`, `2`, `3`.
+- `a/run/result.json b/run/result.json` → `1`, `2` (same directory basename).
+
+Explicit label flags override automatic display labels. The first run is never
+automatically named `Baseline`, nor are later runs automatically named `Candidate`.
+The JSON keys `baseline` and `candidate` describe comparison roles only.
+
+HTML embeds its styles and filtering script, with
 no external assets or network requests; all cases remain readable without
 JavaScript. Markdown includes tables suitable for GitHub PR descriptions.
-Source result artifacts are preserved; output may not overwrite either input.
+Source result artifacts are preserved; output may not overwrite any input.
 
 Cases align by case ID using the existing primary-result rule: prefer
 `with_skill`, then a non-baseline configuration, falling back to `without_skill`.

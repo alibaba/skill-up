@@ -154,7 +154,7 @@ func RenderMarkdown(result Result) string {
 	fmt.Fprintf(&b, "**%s** → **%s**\n\n", markdownCell(result.Baseline.Label), markdownCell(result.Candidate.Label))
 	fmt.Fprintf(&b, "Sources: %s → %s\n\n", markdownCell(result.Baseline.Path), markdownCell(result.Candidate.Path))
 	fmt.Fprintf(&b, "Shared cases: **%d**; added: **%d**; removed: **%d**.\n\n", result.Coverage.Shared, result.Coverage.Added, result.Coverage.Removed)
-	fmt.Fprintf(&b, "Comparison coverage: %d / %d baseline cases; %d / %d candidate cases.\n\n", result.Coverage.Shared, result.Run.Old.CaseCount, result.Coverage.Shared, result.Run.New.CaseCount)
+	fmt.Fprintf(&b, "Comparison coverage: %d / %d reference cases; %d / %d compared cases.\n\n", result.Coverage.Shared, result.Run.Old.CaseCount, result.Coverage.Shared, result.Run.New.CaseCount)
 	if result.Coverage.Added+result.Coverage.Removed > 0 {
 		b.WriteString("> Different case sets: run-level deltas include unpaired cases. Only shared case IDs are classified as fixed or regressed.\n\n")
 	}
@@ -191,7 +191,7 @@ func writeMarkdownGroup(b *strings.Builder, group caseGroup) {
 		b.WriteString("None.\n\n")
 		return
 	}
-	b.WriteString("| Case ID | Baseline title | Candidate title | Baseline status | Candidate status | Baseline configuration | Candidate configuration | Prompt |\n|---|---|---|---|---|---|---|---|\n")
+	b.WriteString("| Case ID | Reference title | Compared title | Reference status | Compared status | Reference configuration | Compared configuration | Prompt |\n|---|---|---|---|---|---|---|---|\n")
 	for _, cr := range group.Cases {
 		fmt.Fprintf(b, "| %s | %s | %s | %s | %s | %s | %s | %s |\n", markdownCell(cr.CaseID), markdownCell(cr.OldTitle), markdownCell(cr.NewTitle), markdownCell(string(cr.OldStatus)), markdownCell(string(cr.NewStatus)), markdownCell(cr.OldConfiguration), markdownCell(cr.NewConfiguration), promptChange(cr.PromptChanged))
 	}

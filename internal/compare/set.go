@@ -54,15 +54,18 @@ func BuildSet(runs []RunInput, options Options) (Set, error) {
 		return Set{}, errors.New("compare requires at least two result files")
 	}
 	set := Set{Baseline: runs[0].Source, Comparisons: make([]Result, 0, len(runs)-1), Gates: GateResult{Passed: true, Failures: []string{}}}
-	for _, run := range runs {
+	for index, run := range runs {
+		source := run.Source
+		source.ID = index + 1
 		metrics := collectRunMetrics(run.Input)
 		metrics.Missing = run.MissingMetrics
-		set.Runs = append(set.Runs, RunSummary{Source: run.Source, Metrics: metrics})
+		set.Runs = append(set.Runs, RunSummary{Source: source, Metrics: metrics})
 	}
-	for _, candidate := range runs[1:] {
+	set.Baseline = set.Runs[0].Source
+	for index, candidate := range runs[1:] {
 		options.OldMissingMetrics, options.NewMissingMetrics = runs[0].MissingMetrics, candidate.MissingMetrics
 		result := Compare(runs[0].Input, candidate.Input, options)
-		result.Baseline, result.Candidate = runs[0].Source, candidate.Source
+		result.Baseline, result.Candidate = set.Baseline, set.Runs[index+1].Source
 		set.Comparisons = append(set.Comparisons, result)
 		for _, failure := range result.Gates.Failures {
 			set.Gates.Failures = append(set.Gates.Failures, fmt.Sprintf("%s (%s): %s", candidate.Source.Label, candidate.Source.Path, failure))
@@ -156,7 +159,7 @@ func RenderSet(set Set, format string) ([]byte, error) {
 func renderSetMarkdown(set Set) string {
 	view := newSetView(set)
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Evaluation comparison: %d runs\n\nBaseline: **%s**. Each candidate is compared independently against this baseline.\n\n", len(set.Runs), markdownCell(set.Baseline.Label))
+	fmt.Fprintf(&b, "# Evaluation comparison: %d runs\n\nReference for changes: **%s**. Every other run is compared independently against this reference.\n\n", len(set.Runs), markdownCell(set.Baseline.Label))
 	b.WriteString("## Run overview\n\n")
 	writeSetMarkdownTable(&b, "Metric", set.Runs, view.Metrics)
 	b.WriteString("\n## Case matrix\n\nAbsent means that the case was not present in that run.\n\n")
@@ -203,7 +206,7 @@ func writeSetMarkdownTable(b *strings.Builder, firstHeading string, runs []RunSu
 
 func renderSetText(set Set) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Run overview (%d runs; baseline: %s)\n", len(set.Runs), set.Baseline.Label)
+	fmt.Fprintf(&b, "Run overview (%d runs; reference: %s)\n", len(set.Runs), set.Baseline.Label)
 	view := newSetView(set)
 	writeSetTextTable(&b, "Metric", set.Runs, view.Metrics)
 	b.WriteString("\nCase matrix (absent = case not present in run)\n")

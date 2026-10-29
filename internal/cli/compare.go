@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -19,14 +20,15 @@ import (
 const jsonFormat = "json"
 
 var compareCmd = &cobra.Command{
-	Use:   "compare <baseline-result.json> <candidate-result.json>...",
+	Use:   "compare <result.json> <result.json>...",
 	Short: "Compare two or more offline evaluation results",
 	Long: `Compare existing results without running an Agent or Judge.
 
-The first result is the baseline; every later result is compared against it.
+The first input is the reference for changes and gates. Display labels use
+unique parent-directory names, or numeric IDs when those names are ambiguous.
 
 Examples:
-  skill-up compare baseline.json skill-a.json skill-b.json --format html --output compare.html
+  skill-up compare run-a/result.json run-b/result.json run-c/result.json --format html --output compare.html
   skill-up compare old.json new.json --format html --output compare.html
   skill-up compare old.json new.json --format markdown --output compare.md
   skill-up compare old.json new.json --format json --fail-on-regression`,
@@ -41,8 +43,8 @@ func init() {
 func configureCompareFlags(cmd *cobra.Command) {
 	cmd.Flags().String("format", "text", "Output format: text, json, html, markdown")
 	cmd.Flags().String("output", "", "Write report to a file instead of stdout")
-	cmd.Flags().String("baseline-label", "Baseline", "Label for the old run")
-	cmd.Flags().StringArray("candidate-label", nil, "Candidate labels in input order; repeat once per candidate, or omit for automatic labels")
+	cmd.Flags().String("baseline-label", "", "Override the first run's automatic display label")
+	cmd.Flags().StringArray("candidate-label", nil, "Override later runs' automatic labels; repeat once per later input, or omit")
 	cmd.Flags().Bool("fail-on-regression", false, "Fail when any case regresses")
 	cmd.Flags().Float64("max-token-increase-percent", 0, "Maximum allowed total token increase percentage")
 }
@@ -99,31 +101,56 @@ func runCompare(cmd *cobra.Command, args []string) error {
 }
 
 func loadBuildSet(cmd *cobra.Command, args []string) ([]comparepkg.RunInput, error) {
+	labels := automaticCompareLabels(args)
 	baselineLabel, _ := cmd.Flags().GetString("baseline-label")
+	if baselineLabel != "" {
+		labels[0] = baselineLabel
+	}
 	candidateLabels, _ := cmd.Flags().GetStringArray("candidate-label")
 	if len(candidateLabels) != 0 && len(candidateLabels) != len(args)-1 {
 		return nil, fmt.Errorf("--candidate-label must be omitted or supplied once per candidate: got %d labels for %d candidates", len(candidateLabels), len(args)-1)
 	}
 	runs := make([]comparepkg.RunInput, 0, len(args))
 	for i, path := range args {
-		role, label := "old baseline", baselineLabel
+		role := "old reference"
 		if i > 0 {
-			role = fmt.Sprintf("new candidate %d", i)
-			label = "Candidate"
-			if len(args) > 2 {
-				label = fmt.Sprintf("Candidate %d", i)
-			}
-			if len(candidateLabels) > 0 {
-				label = candidateLabels[i-1]
+			role = fmt.Sprintf("new input %d", i+1)
+			if len(candidateLabels) > 0 && candidateLabels[i-1] != "" {
+				labels[i] = candidateLabels[i-1]
 			}
 		}
 		input, missing, err := loadCompareInput(role, path)
 		if err != nil {
 			return nil, err
 		}
-		runs = append(runs, comparepkg.RunInput{Source: comparepkg.Source{Label: label, Path: path}, Input: input, MissingMetrics: missing})
+		runs = append(runs, comparepkg.RunInput{Source: comparepkg.Source{Label: labels[i], Path: path}, Input: input, MissingMetrics: missing})
 	}
 	return runs, nil
+}
+
+func automaticCompareLabels(paths []string) []string {
+	labels := make([]string, len(paths))
+	seen := make(map[string]bool, len(paths))
+	unique := true
+	for i, path := range paths {
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			unique = false
+			continue
+		}
+		name := filepath.Base(filepath.Dir(absolute))
+		if name == "." || name == string(filepath.Separator) || strings.TrimSpace(name) == "" || seen[name] {
+			unique = false
+		}
+		seen[name] = true
+		labels[i] = name
+	}
+	if !unique {
+		for i := range labels {
+			labels[i] = strconv.Itoa(i + 1)
+		}
+	}
+	return labels
 }
 
 func writeComparison(cmd *cobra.Command, inputs []string, output string, data []byte) error {

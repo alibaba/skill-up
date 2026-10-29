@@ -32,6 +32,7 @@ type Result struct {
 
 // Source identifies an original result artifact independently of its configuration.
 type Source struct {
+	ID    int    `json:"id,omitempty"`
 	Label string `json:"label"`
 	Path  string `json:"path"`
 }

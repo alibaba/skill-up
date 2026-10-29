@@ -17,7 +17,7 @@
 <header><div class="eyebrow">SKILL-UP / OFFLINE COMPARISON</div>
 <h1>{{.Result.Baseline.Label}} → {{.Result.Candidate.Label}}</h1>
 <p class="muted">Evaluation changes, case by case. Existing results only; no Agent or Judge calls.</p>
-<p class="sources"><strong>Baseline source:</strong> {{.Result.Baseline.Path}}<br><strong>Candidate source:</strong> {{.Result.Candidate.Path}}</p>
+<p class="sources"><strong>Reference source:</strong> {{.Result.Baseline.Path}}<br><strong>Compared source:</strong> {{.Result.Candidate.Path}}</p>
 </header>
 <div class="cards">
 <div class="card"><strong>{{.Result.Coverage.Shared}}</strong><span>Shared cases</span></div>
@@ -26,7 +26,7 @@
 <div class="card"><strong>{{.Result.Coverage.Added}}</strong><span>Added</span></div>
 <div class="card"><strong>{{.Result.Coverage.Removed}}</strong><span>Removed</span></div>
 </div>
-<p class="muted">Comparison coverage: {{.Result.Coverage.Shared}} / {{.Result.Run.Old.CaseCount}} baseline cases; {{.Result.Coverage.Shared}} / {{.Result.Run.New.CaseCount}} candidate cases.</p>
+<p class="muted">Comparison coverage: {{.Result.Coverage.Shared}} / {{.Result.Run.Old.CaseCount}} reference cases; {{.Result.Coverage.Shared}} / {{.Result.Run.New.CaseCount}} compared cases.</p>
 {{if or .Result.Coverage.Added .Result.Coverage.Removed}}<p class="notice">Different case sets: run-level deltas include unpaired cases. Only shared case IDs are classified as fixed or regressed.</p>{{end}}
 <section><h2>Run summary</h2><div class="scroll"><table>
 <thead><tr><th>Metric</th><th>{{.Result.Baseline.Label}}</th><th>{{.Result.Candidate.Label}}</th><th>Change</th></tr></thead>
@@ -42,7 +42,7 @@
 <div class="toolbar filters" hidden><label>Search cases <input class="case-search" type="search" placeholder="Case ID or title"></label><label>Transition <select class="case-filter"><option value="">All transitions</option>{{range .Groups}}<option>{{.Name}}</option>{{end}}</select></label></div>
 <p class="match-count muted" aria-live="polite"></p>
 {{range .Groups}}<details class="case-group" data-group="{{.Name}}" open><summary>{{.Name}} ({{len .Cases}})</summary>
-{{if .Cases}}<div class="scroll"><table class="case-table"><thead><tr><th>Case ID</th><th>Baseline title</th><th>Candidate title</th><th>Baseline status</th><th>Candidate status</th><th>Baseline configuration</th><th>Candidate configuration</th><th>Prompt</th></tr></thead>
+{{if .Cases}}<div class="scroll"><table class="case-table"><thead><tr><th>Case ID</th><th>Reference title</th><th>Compared title</th><th>Reference status</th><th>Compared status</th><th>Reference configuration</th><th>Compared configuration</th><th>Prompt</th></tr></thead>
 <tbody>{{range .Cases}}<tr><td>{{.CaseID}}</td><td>{{if .OldTitle}}{{.OldTitle}}{{else}}—{{end}}</td><td>{{if .NewTitle}}{{.NewTitle}}{{else}}—{{end}}</td><td>{{if .OldStatus}}{{.OldStatus}}{{else}}—{{end}}</td><td>{{if .NewStatus}}{{.NewStatus}}{{else}}—{{end}}</td><td>{{if .OldConfiguration}}{{.OldConfiguration}}{{else}}—{{end}}</td><td>{{if .NewConfiguration}}{{.NewConfiguration}}{{else}}—{{end}}</td><td>{{promptChange .PromptChanged}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="muted">None.</p>{{end}}</details>{{end}}
 </section>
 <section><h2>Gates: {{if .Result.Gates.Passed}}<span class="passed">passed</span>{{else}}<span class="failed">failed</span>{{end}}</h2>
