@@ -333,7 +333,18 @@ JavaScript. Markdown includes tables suitable for GitHub PR descriptions.
 Source result artifacts are preserved; output may not overwrite any input.
 
 Cases align by case ID using the existing primary-result rule: prefer
-`with_skill`, then a non-baseline configuration, falling back to `without_skill`.
+`with_skill`, then a non-baseline configuration, falling back to `without_skill`
+only when no other result for that case is available. In the usual with/without
+benchmark, cross-file comparison therefore compares **each revision's with_skill
+result**, not all variants against one another. This same selection rule drives
+metrics, the case matrix, transitions, and the interactive side-by-side viewer.
+Each file's internal with/without binding remains in Run details. The selected
+configuration is exposed in the matrix and transition tables.
+
+For more than three inputs, overview/matrix columns retain readable widths and
+scroll horizontally with the first column pinned. Selectors wrap to new rows
+on narrow screens and reserve spacing for the dropdown arrow; the pair viewer
+always compares two selected inputs, regardless of the total input count.
 Benchmark reference entries do not double-count case counts or pass rates.
 Configuration identity is retained in case tables. Shared cases flag prompt changes
 when both prompts were recorded; otherwise the prompt comparison is unknown.

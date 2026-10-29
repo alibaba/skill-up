@@ -187,6 +187,18 @@
     #panel-comparison .comparison-toolbar { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; margin-top: .75rem; }
     #panel-comparison .comparison-toolbar a { text-decoration: none; }
     #panel-comparison .summary-bar { margin-bottom: 1.25rem; }
+    #panel-comparison .comparison-toolbar > label { display: flex; flex-direction: column; gap: .5rem; flex: 1 1 20rem; min-width: 0; max-width: 100%; }
+    #panel-comparison .comparison-toolbar input, #panel-comparison .comparison-toolbar select { width: 100%; box-sizing: border-box; min-width: 0; }
+    #panel-comparison select, #comparison-run { padding: .625rem 2.75rem .625rem .875rem; line-height: 1.5; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right .875rem center; background-size: 1rem; }
+    #panel-comparison .comparison-table-scroll { max-width: 100%; max-height: 34rem; overflow: auto; }
+    #panel-comparison .comparison-matrix { width: max-content; min-width: 100%; table-layout: fixed; }
+    #panel-comparison .comparison-matrix th, #panel-comparison .comparison-matrix td { width: 16rem; min-width: 14rem; max-width: 20rem; vertical-align: top; overflow-wrap: anywhere; }
+    #panel-comparison .comparison-matrix th:first-child, #panel-comparison .comparison-matrix td:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); }
+    #panel-comparison .comparison-matrix th:first-child { background: var(--header-bg); z-index: 2; }
+    @media (max-width: 600px) {
+      #panel-comparison .comparison-matrix th:first-child, #panel-comparison .comparison-matrix td:first-child { width: 9rem; min-width: 9rem; max-width: 9rem; }
+      #panel-comparison .comparison-toolbar > label { flex-basis: 100%; }
+    }
     #comparison-run { min-width: 0; max-width: 100%; flex: 1; text-transform: none; }
     .comparison-run-control { display: flex; align-items: center; gap: .75rem; font-size: .8125rem; }
     {{end}}
@@ -316,9 +328,9 @@
       document.getElementById('comparison-run').dataset.selected = String(rightIndex);
       pairLabels = [left.label, right.label]; pairOpen = true;
       DATA = JSON.parse(JSON.stringify(right.data));
-      var leftCases = new Map(left.data.cases.map(function(c) { return [c.id, c]; }));
-      var rightCases = new Map(right.data.cases.map(function(c) { return [c.id, c]; }));
-      var ids = Array.from(new Set(left.data.cases.concat(right.data.cases).map(function(c) { return c.id; })));
+      var leftCases = new Map(left.primary_cases.map(function(c) { return [c.id, c]; }));
+      var rightCases = new Map(right.primary_cases.map(function(c) { return [c.id, c]; }));
+      var ids = Array.from(new Set(left.primary_cases.concat(right.primary_cases).map(function(c) { return c.id; })));
       DATA.cases = ids.map(function(id) {
         var a = leftCases.get(id), b = rightCases.get(id), c = Object.assign({}, b || a);
         c.baseline = null; c.turn_results = null; c.pairLeft = a; c.pairRight = b; return c;
@@ -856,6 +868,7 @@
     }
 
     document.addEventListener("keydown", function(e) {
+      {{if .ComparisonRuns}}if (e.target.closest("input, select, textarea, button")) return;{{end}}
       if (e.target.tagName === "TEXTAREA") return;
       if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); navigate(-1); }
       else if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); navigate(1); }

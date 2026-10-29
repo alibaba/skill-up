@@ -64,19 +64,22 @@ func RenderComparisonHTML(runs []ComparisonRun, section template.HTML) ([]byte, 
 	if err != nil {
 		return nil, err
 	}
-	var payload []struct {
-		Label string          `json:"label"`
-		Data  json.RawMessage `json:"data"`
+	type runPayload struct {
+		Label        string          `json:"label"`
+		Data         json.RawMessage `json:"data"`
+		PrimaryCases []embeddedCase  `json:"primary_cases"`
 	}
+	var payload []runPayload
 	for _, run := range runs {
 		runData, err := reporter.buildTemplateData(run.Input)
 		if err != nil {
 			return nil, err
 		}
-		payload = append(payload, struct {
-			Label string          `json:"label"`
-			Data  json.RawMessage `json:"data"`
-		}{run.Label, json.RawMessage(runData.EmbeddedDataJSON)})
+		primary := make([]embeddedCase, 0)
+		for _, cr := range run.Input.PrimaryCaseResults() {
+			primary = append(primary, caseResultToEmbeddedCase(cr))
+		}
+		payload = append(payload, runPayload{Label: run.Label, Data: json.RawMessage(runData.EmbeddedDataJSON), PrimaryCases: primary})
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {

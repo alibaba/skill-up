@@ -2,6 +2,7 @@ package report
 
 import (
 	"context"
+	"encoding/json"
 	"html/template"
 	"os"
 	"path/filepath"
@@ -40,5 +41,42 @@ func TestComparisonExtendsOriginalCaseDetails(t *testing.T) {
 	}
 	if strings.Contains(string(legacy), "comparison-run") || strings.Contains(string(legacy), "Comparison marker") {
 		t.Fatal("comparison controls leaked into legacy report")
+	}
+}
+
+func TestCrossFileDetailsUseCanonicalPrimaryResults(t *testing.T) {
+	t.Parallel()
+	const (
+		withSkill    = "with_skill"
+		withoutSkill = "without_skill"
+	)
+	input := Input{CaseResults: []CaseResult{
+		{CaseID: "shared", Configuration: withSkill, Status: judge.StatusPass, Response: "with skill answer"},
+		{CaseID: "shared", Configuration: "custom", Status: judge.StatusFail, Response: "custom answer"},
+		{CaseID: "shared", Configuration: withoutSkill, Status: judge.StatusFail, Response: "without skill answer"},
+		{CaseID: "fallback", Configuration: withoutSkill, Status: judge.StatusPass},
+	}}
+	output, err := RenderComparisonHTML([]ComparisonRun{{Label: "input.json", Input: input}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, assignment, found := strings.Cut(string(output), "var comparisonRuns = ")
+	if !found {
+		t.Fatal("comparison payload missing")
+	}
+	var runs []struct {
+		Primary []embeddedCase `json:"primary_cases"`
+	}
+	if err := json.NewDecoder(strings.NewReader(assignment)).Decode(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 || len(runs[0].Primary) != 2 {
+		t.Fatalf("incorrect primary payload: %+v", runs)
+	}
+	if cr := runs[0].Primary[0]; cr.Configuration != withSkill || cr.Response != "with skill answer" {
+		t.Fatalf("interactive viewer did not prefer with_skill: %+v", cr)
+	}
+	if runs[0].Primary[1].Configuration != withoutSkill {
+		t.Fatal("without_skill-only fallback lost")
 	}
 }
