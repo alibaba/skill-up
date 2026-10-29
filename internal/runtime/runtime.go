@@ -14,6 +14,8 @@ import (
 )
 
 const (
+	// VariantEnvName identifies the framework-owned execution configuration variable.
+	VariantEnvName = "SKILL_UP_VARIANT"
 	// ClaudeDirMode is the default directory mode for Claude files.
 	ClaudeDirMode = 0o755
 	// ClaudeFileMode is the default file mode for Claude files.

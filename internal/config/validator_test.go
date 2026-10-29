@@ -2335,3 +2335,15 @@ func TestValidator_RejectsWhitespaceOnlyInput(t *testing.T) {
 		})
 	}
 }
+
+func TestValidatorReservedVariant(t *testing.T) {
+	for _, value := range []string{"", "with_skill", "without_skill", "v1.0"} {
+		t.Run(value, func(t *testing.T) {
+			cfg := &EvalConfig{SchemaVersion: "v1alpha1", Environment: Environment{Type: "none", Env: map[string]string{"SKILL_UP_VARIANT": value}}, Engine: EngineConfig{Name: "qodercli"}, Cases: CasesConfig{Files: []string{"case.yaml"}}}
+			err := NewValidator().ValidateEvalConfig(cfg)
+			if err == nil || !strings.Contains(err.Error(), "environment.env.SKILL_UP_VARIANT is reserved") {
+				t.Fatalf("expected reserved-name error, got %v", err)
+			}
+		})
+	}
+}

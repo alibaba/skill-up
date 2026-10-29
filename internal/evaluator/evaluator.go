@@ -442,6 +442,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	)
 	if overrideRT != nil {
 		rt = overrideRT
+		rt.MergeEnv(map[string]string{runtime.VariantEnvName: configName})
 		var err error
 		observation, err = agent.Preflight(ctx, rt, runAgent)
 		if err != nil {
@@ -1261,6 +1262,9 @@ func mergeFileContains(a, b []config.FileContainsCheck) []config.FileContainsChe
 }
 
 func (e *defaultEvaluator) prepareRuntimeForCase(ctx context.Context, caseCfg *config.CaseConfig, configName string, ag agent.Agent) (runtime.Runtime, agent.RuntimeObservation, error) {
+	if _, exists := e.evalCfg.Environment.Env[runtime.VariantEnvName]; exists {
+		return nil, agent.RuntimeObservation{}, errors.New("environment.env.SKILL_UP_VARIANT is reserved for the framework")
+	}
 	rtCfg := e.evalCfg.Environment.ToRuntimeConfig()
 	rtCfg.Delete = e.deleteWorkspace
 	rtCfg.WorkspaceDir = e.workspaceDir
@@ -1268,7 +1272,11 @@ func (e *defaultEvaluator) prepareRuntimeForCase(ctx context.Context, caseCfg *c
 	if err != nil {
 		return nil, agent.RuntimeObservation{}, err
 	}
-	rtCfg.Env = mergeEnvMaps(rtCfg.Env, mcpEnv)
+	rtCfg.Env = mergeEnvMaps(maps.Clone(rtCfg.Env), mcpEnv)
+	if rtCfg.Env == nil {
+		rtCfg.Env = make(map[string]string)
+	}
+	rtCfg.Env[runtime.VariantEnvName] = configName
 
 	rt, err := runtime.NewRuntime(rtCfg)
 	if err != nil {
