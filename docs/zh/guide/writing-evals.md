@@ -386,6 +386,28 @@ mcp:
 
 > **建议**：如果你的 Skill 不涉及文件操作，使用 `none` 可以省去沙箱准备时间。
 
+#### 按实验分组执行初始化
+
+框架在 setup 前注入 `SKILL_UP_VARIANT`，并让 `none`、Docker 和 OpenSandbox 的后续 runtime 命令都能读取。它标识任务实际使用的执行配置，当前为 `with_skill` 或 `without_skill`。非 benchmark 运行即使 Skill 列表为空也使用 `with_skill`；这个值不代表 Skill 已安装或被调用。未来配置名可以是 `v1.0`、`v1.1` 等，但这个变量本身不会启用自定义分组。
+
+`SKILL_UP_VARIANT` 是保留名：在 `environment.env` 中配置会报错，即使值为空或与实际分组一致。框架会用实际任务配置覆盖宿主机继承值及 MCP 提供的同名值，不修改宿主进程环境。各用例、分组、重试和迭代使用独立的 runtime 环境。
+
+```yaml
+environment:
+  type: none
+  setup_steps:
+    - run: |
+        case "$SKILL_UP_VARIANT" in
+          with_skill)    bash /opt/eval/init-with.sh ;;
+          without_skill) bash /opt/eval/init-without.sh ;;
+          *) exit 1 ;;
+        esac
+benchmark:
+  enabled: true
+```
+
+脚本必须预先存在于所选 runtime 中，case fixtures 在 setup **之后**才上传。以上使用 POSIX shell 语法。本地 qodercli 可通过 `environment.type: none` 使用此配置；benchmark 任务仍使用独立工作区并生成原有对比报告。`--workspace` 与 benchmark 的现有限制保持有效。
+
 #### OpenSandbox 配置
 
 使用 `environment.type: opensandbox` 时，沙箱鉴权从进程环境变量 `OPENSANDBOX_API_KEY` 读取。服务地址、扩展参数等非敏感配置建议放在 `environment.kwargs` 中；Agent 自动安装后的可执行文件路径由对应 Agent 实现处理，通常不需要在评测配置中手动补 `PATH`。

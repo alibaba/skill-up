@@ -69,6 +69,8 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 		errs = append(errs, "environment.type must be one of: none, opensandbox, docker")
 	}
 
+	errs = append(errs, validateReservedEnvironment(cfg.Environment)...)
+
 	// Docker-runtime fields that would otherwise silently pass `skill-up
 	// validate` and only fail later when NewDockerRuntime constructs the
 	// container — catch them at the preflight gate.
@@ -835,6 +837,13 @@ func validateCustomHTTP(h *customengine.HTTPConfig) []string {
 
 func isValidRuntimeType(t string) bool {
 	return t == runtimeTypeNone || t == runtimeTypeOpenSandbox || t == runtimeTypeDocker
+}
+
+func validateReservedEnvironment(env Environment) []string {
+	if _, exists := env.Env["SKILL_UP_VARIANT"]; exists {
+		return []string{"environment.env.SKILL_UP_VARIANT is reserved for the framework"}
+	}
+	return nil
 }
 
 // validateDockerEnvironment collects preflight errors for fields the docker

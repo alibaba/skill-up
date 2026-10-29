@@ -422,6 +422,28 @@ Rules and constraints:
 
 > **Tip:** if your Skill does not touch the filesystem, `none` avoids sandbox provisioning and is significantly faster.
 
+#### Branching setup by experiment group
+
+The framework injects `SKILL_UP_VARIANT` before setup and keeps it available to subsequent runtime commands in `none`, Docker, and OpenSandbox. It identifies the scheduled execution configuration: currently `with_skill` or `without_skill`. Non-benchmark runs use `with_skill`, even when the Skill list is empty; this does not prove that a Skill was installed or invoked. Future configurations may use other names (for example, `v1.0` or `v1.1`); custom groups are not enabled by this variable alone.
+
+`SKILL_UP_VARIANT` is reserved: defining it in `environment.env` is an error, including an empty or matching value. The framework overrides an inherited host value and any MCP-provided value with the actual task configuration, without changing the host process environment. Cases, variants, retries, and iterations receive their own runtime environment.
+
+```yaml
+environment:
+  type: none
+  setup_steps:
+    - run: |
+        case "$SKILL_UP_VARIANT" in
+          with_skill)    bash /opt/eval/init-with.sh ;;
+          without_skill) bash /opt/eval/init-without.sh ;;
+          *) exit 1 ;;
+        esac
+benchmark:
+  enabled: true
+```
+
+The scripts must already exist in the selected runtime; case fixtures are uploaded **after** setup. POSIX shell syntax is shown above. Local qodercli can use this setup with `environment.type: none`; benchmark tasks still use independent workspaces and generate the existing comparison report. The existing restriction on `--workspace` with benchmark remains in effect.
+
 #### OpenSandbox configuration
 
 When `environment.type: opensandbox` is used, sandbox auth is read from the `OPENSANDBOX_API_KEY` environment variable. Non-secret options such as service URL or extension flags belong in `environment.kwargs`. The Agent runtime handles its own binary path; you usually do **not** need to set `PATH` inside the eval config.

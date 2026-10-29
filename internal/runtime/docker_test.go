@@ -1037,3 +1037,25 @@ func TestDockerRuntime_MergeEnv_AppliesToSubsequentExec(t *testing.T) {
 		t.Errorf("post-MergeEnv exec missing --env FROM_MERGE=1; got %v", args)
 	}
 }
+
+func TestDockerRuntimeVariantPropagation(t *testing.T) {
+	t.Parallel()
+	for _, variant := range []string{"with_skill", "without_skill"} {
+		t.Run(variant, func(t *testing.T) {
+			t.Parallel()
+			fd := newFakeDocker(t, append(createScript("abc"), scriptedCall{match: "exec", response: fakeDockerResponse{}}))
+			rt := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20", Env: map[string]string{VariantEnvName: variant}}, fd)
+			if err := rt.Create(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := rt.Exec(context.Background(), "true", ExecOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			for _, call := range []int{0, createCallCount} {
+				if args := strings.Join(fd.callArgs(call), " "); !strings.Contains(args, "--env "+VariantEnvName+"="+variant) {
+					t.Fatalf("variant missing in call %d: %s", call, args)
+				}
+			}
+		})
+	}
+}
