@@ -273,9 +273,9 @@ func (a *BaseAgent) CheckCredentials(ctx context.Context) error {
 	return nil
 }
 
-func (a *BaseAgent) logCredentialStatus(ctx context.Context, apiKeyEnv, baseURLEnv, missingMessage string) {
+func (a *BaseAgent) logCredentialStatus(ctx context.Context, credentialEnvName, baseURLEnv, missingMessage string) {
 	if a.Cfg.APIKey != "" {
-		logging.DebugContextf(ctx, "%s detected for %s (masked: %s, source=agent_config)", apiKeyEnv, a.Name(), credential.MaskAPIKey(a.Cfg.APIKey))
+		logging.DebugContextf(ctx, "%s detected for %s (source=agent_config)", credentialEnvName, a.Name())
 		if baseURLEnv != "" && a.Cfg.BaseURL != "" {
 			logging.DebugContextf(ctx, "%s detected for %s (value: %s, source=agent_config)", baseURLEnv, a.Name(), a.Cfg.BaseURL)
 		}
@@ -283,8 +283,8 @@ func (a *BaseAgent) logCredentialStatus(ctx context.Context, apiKeyEnv, baseURLE
 	}
 	// Fall back to the current provider's process env for observability only.
 	// This does not scan unrelated providers.
-	if apiKey := os.Getenv(apiKeyEnv); apiKey != "" {
-		logging.DebugContextf(ctx, "%s detected for %s (source=process_env)", apiKeyEnv, a.Name())
+	if os.Getenv(credentialEnvName) != "" {
+		logging.DebugContextf(ctx, "%s detected for %s (source=process_env)", credentialEnvName, a.Name())
 		if baseURLEnv != "" && os.Getenv(baseURLEnv) != "" {
 			logging.DebugContextf(ctx, "%s detected for %s (source=process_env)", baseURLEnv, a.Name())
 		}
