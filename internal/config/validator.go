@@ -277,6 +277,7 @@ func validateJudgeTypeAndLocalFields(judge JudgeConfig) []string {
 	errs = append(errs, validateJudgeEngine(judge)...)
 
 	errs = append(errs, validatePassThreshold(judge.PassThreshold)...)
+	errs = append(errs, validateJudgeMetrics("judge.metrics", judge.Metrics)...)
 	errs = append(errs, validateJudgeContext(judge.Context)...)
 
 	if judge.TimeoutSeconds != nil && *judge.TimeoutSeconds < 0 {
@@ -631,6 +632,33 @@ func validateJudgeList(members *[]JudgeConfig) []string {
 		seen[member.ID] = true
 		for _, detail := range validateJudgeTypeAndRequiredFields(member) {
 			errs = append(errs, fmt.Sprintf("judges[%d]: %s", i, detail))
+		}
+		for _, detail := range validateJudgeMetrics("metrics", member.Metrics) {
+			errs = append(errs, fmt.Sprintf("judges[%d].%s", i, detail))
+		}
+	}
+	return errs
+}
+
+// validateJudgeMetrics checks the planned named-metric registry. Ids are stable
+// configuration identifiers, must be unique, and a configured threshold has to sit
+// inside the declared [0,1] score range.
+func validateJudgeMetrics(configPath string, metrics []MetricConfig) []string {
+	if len(metrics) == 0 {
+		return nil
+	}
+	var errs []string
+	seen := make(map[string]bool, len(metrics))
+	for i, metric := range metrics {
+		if !judgeIDPattern.MatchString(metric.ID) {
+			errs = append(errs, fmt.Sprintf("%s.metrics[%d].id must be a safe lowercase identifier", configPath, i))
+		}
+		if seen[metric.ID] {
+			errs = append(errs, fmt.Sprintf("%s.metrics[%d].id %q is duplicated", configPath, i, metric.ID))
+		}
+		seen[metric.ID] = true
+		if metric.MinScore != nil && (*metric.MinScore < 0.0 || *metric.MinScore > 1.0) {
+			errs = append(errs, fmt.Sprintf("%s.metrics[%d].min_score must be between 0.0 and 1.0", configPath, i))
 		}
 	}
 	return errs

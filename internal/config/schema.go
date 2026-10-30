@@ -200,6 +200,23 @@ type JudgeConfig struct {
 	TimeoutSeconds *int   `json:"timeout_seconds,omitempty" yaml:"timeout_seconds,omitempty"`
 	Success        []Rule `json:"success,omitempty"        yaml:"success,omitempty"`
 	Failure        []Rule `json:"failure,omitempty"        yaml:"failure,omitempty"`
+	// Metrics declares the planned named-metric slots for this judge. The list is
+	// the registry: one slot per entry, fixed before execution, and the coverage
+	// denominator never moves. Omitted means no named metrics for this judge.
+	Metrics []MetricConfig `json:"metrics,omitempty" yaml:"metrics,omitempty"`
+}
+
+// MetricConfig is one planned named-metric registry slot.
+type MetricConfig struct {
+	// ID is a stable configuration identifier, never a display label produced by a judge.
+	ID string `json:"id" yaml:"id"`
+	// Required marks the metric as part of the declared scoring requirements.
+	Required bool `json:"required,omitempty" yaml:"required,omitempty"`
+	// MinScore is an optional quality threshold. Nil means no threshold decision is
+	// configured for this metric, which is distinct from a threshold of zero.
+	MinScore *float64 `json:"min_score,omitempty" yaml:"min_score,omitempty"`
+	// EvidenceRequires makes non-empty evidence mandatory for an AVAILABLE score.
+	EvidenceRequired bool `json:"evidence_required,omitempty" yaml:"evidence_required,omitempty"`
 }
 
 // JudgeContextConfig controls how agent_judge receives evaluation materials.

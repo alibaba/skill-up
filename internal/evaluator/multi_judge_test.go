@@ -369,17 +369,25 @@ func TestMultiJudgeMultiTurnEarlyExitPreservesSkippedOutcomes(t *testing.T) {
 			if ag.turnCall != 1 || ag.runCall.Load() != 0 {
 				t.Fatalf("unexpected agent or judge calls: turns=%d runs=%d", ag.turnCall, ag.runCall.Load())
 			}
-			assertSkippedJudgeOutcomes(t, result.JudgeResults, members, tc.wantReason)
+			assertSkippedJudgeOutcomes(t, result, members, tc.wantReason)
 		})
 	}
 }
 
-func assertSkippedJudgeOutcomes(t *testing.T, outcomes []JudgeOutcome, members []config.JudgeConfig, reason string) {
+func assertSkippedJudgeOutcomes(t *testing.T, result EvalResult, members []config.JudgeConfig, reason string) {
 	t.Helper()
-	for i, outcome := range outcomes {
+	cause := causeForReason(reason)
+	for i, outcome := range result.JudgeResults {
 		if outcome.ID != members[i].ID || outcome.Type != members[i].Type || outcome.Status != judge.StatusSkip || outcome.SkipReason != reason || outcome.Result != nil {
 			t.Fatalf("unexpected outcome: %+v", outcome)
 		}
+		if outcome.Execution == nil || outcome.Execution.Completion != judge.CompletionInterrupted ||
+			outcome.Execution.Stage != judge.StageNotInvoked || outcome.Execution.Cause != cause {
+			t.Fatalf("skipped outcome %s execution = %+v, want interrupted/not-invoked/%s", outcome.ID, outcome.Execution, cause)
+		}
+	}
+	if result.GroupCompletion != judge.CompletionInterrupted || result.GroupCause != cause {
+		t.Fatalf("group state on the %s short circuit = %s/%s, want INTERRUPTED/%s", reason, result.GroupCompletion, result.GroupCause, cause)
 	}
 }
 
@@ -403,7 +411,7 @@ func TestMultiJudgeSingleTurnExecutionErrorPreservesSkippedOutcomes(t *testing.T
 			if result.Status != judge.StatusError || result.AggregationStrategy != "all_required" || len(result.JudgeResults) != len(members) || ag.runCall.Load() != 1 {
 				t.Fatalf("unexpected result: %+v", result)
 			}
-			assertSkippedJudgeOutcomes(t, result.JudgeResults, members, "agent_execution_failed")
+			assertSkippedJudgeOutcomes(t, result, members, "agent_execution_failed")
 		})
 	}
 }
@@ -452,7 +460,7 @@ func TestMultiJudgeUserSimulatorGroupedOutcomes(t *testing.T) {
 func assertSimulatedJudgeStatuses(t *testing.T, result EvalResult, members []config.JudgeConfig) {
 	t.Helper()
 	if result.Status == judge.StatusError {
-		assertSkippedJudgeOutcomes(t, result.JudgeResults, members, "agent_execution_failed")
+		assertSkippedJudgeOutcomes(t, result, members, "agent_execution_failed")
 		return
 	}
 	for _, outcome := range result.JudgeResults {
@@ -478,5 +486,5 @@ func TestMultiJudgeUnsupportedSessionResumerPreservesSkippedOutcomes(t *testing.
 	if result.Status != judge.StatusError || len(result.JudgeResults) != len(members) || ag.runCall.Load() != 0 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
-	assertSkippedJudgeOutcomes(t, result.JudgeResults, members, "session_resumption_unsupported")
+	assertSkippedJudgeOutcomes(t, result, members, "session_resumption_unsupported")
 }

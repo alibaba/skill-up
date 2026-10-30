@@ -167,10 +167,33 @@ func runEvalWithEventLog(
 
 func installEvaluationSignalContext(cmd *cobra.Command) func() {
 	parent := cmd.Context()
+	// Register the observer before NotifyContext so the buffered signal is already
+	// queued when the cancel path runs, and drain it non-blockingly on ctx.Done so a
+	// signal that arrived first is still attributed. A cancellation with no queued
+	// signal stays "unknown" rather than being guessed as user-initiated.
+	observer := &evaluator.SignalObserver{}
+	observed := make(chan os.Signal, 1)
+	signal.Notify(observed, os.Interrupt, syscall.SIGTERM)
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
-	cmd.SetContext(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		select {
+		case <-observed:
+			observer.MarkSignalObserved()
+		case <-ctx.Done():
+			select {
+			case <-observed:
+				observer.MarkSignalObserved()
+			default:
+			}
+		}
+	}()
+	cmd.SetContext(evaluator.ContextWithSignalObserver(ctx, observer))
 	return func() {
 		stop()
+		<-done
+		signal.Stop(observed)
 		cmd.SetContext(parent)
 	}
 }
