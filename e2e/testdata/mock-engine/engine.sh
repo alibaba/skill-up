@@ -101,7 +101,9 @@ fi
 
 # Handle an agent_judge correction prompt before the initial-prompt detector:
 # fallback retries contain the original prompt in their message history.
-if [[ "${MOCK_JUDGE_CORRECTION_RETRY:-}" == "1" ]] && echo "$PROMPT" | grep -q "Agent Judge Output Correction"; then
+# Match in Bash: grep -q can close its pipe early and make echo fail with
+# SIGPIPE under pipefail, turning a matching long prompt into a false negative.
+if [[ "${MOCK_JUDGE_CORRECTION_RETRY:-}" == "1" && "$PROMPT" == *"Agent Judge Output Correction"* ]]; then
   if [[ -n "${MOCK_JUDGE_STATE_FILE:-}" ]]; then
     echo "correction" >> "$MOCK_JUDGE_STATE_FILE"
   fi
@@ -118,7 +120,7 @@ fi
 # The judge prompt always contains "Required Response Format" and "## Criteria".
 # We parse the stable criterion IDs and return a valid JSON response so that
 # agent_judge can succeed in mock/CI scenarios without a real LLM.
-if echo "$PROMPT" | grep -q "Required Response Format" && echo "$PROMPT" | grep -q "## Criteria"; then
+if [[ "$PROMPT" == *"Required Response Format"* && "$PROMPT" == *"## Criteria"* ]]; then
   JSON_RESULTS=$(printf '%s\n' "$PROMPT" |
     { grep -E '^\[criterion-[0-9]+\][[:space:]]+' || true; } |
     sed -E 's/^\[([^]]+)\].*/\1/' |
@@ -143,17 +145,18 @@ if [[ -n "${MOCK_RESPONSE:-}" ]]; then
 fi
 
 # Default: return deterministic response based on prompt keywords
-if echo "$PROMPT" | grep -qi "null"; then
+shopt -s nocasematch
+if [[ "$PROMPT" == *null* ]]; then
   echo "I found a null pointer bug at line 42. The variable 'data' is dereferenced without a null check, which could cause a NullPointerException at runtime."
-elif echo "$PROMPT" | grep -qi "review"; then
+elif [[ "$PROMPT" == *review* ]]; then
   echo "Code review complete. Found 2 issues: 1) Missing error handling in processData(). 2) Potential race condition in updateCounter(). Recommendation: Add proper error handling and use mutex for thread safety."
-elif echo "$PROMPT" | grep -qi "hello"; then
+elif [[ "$PROMPT" == *hello* ]]; then
   echo "Hello! I'm ready to assist you with code review and analysis."
-elif echo "$PROMPT" | grep -qi "bug"; then
+elif [[ "$PROMPT" == *bug* ]]; then
   echo "Bug analysis complete. Found a boundary check issue: the loop iterates from 0 to array.length (inclusive), causing an off-by-one error that leads to ArrayIndexOutOfBoundsException."
-elif echo "$PROMPT" | grep -qi "error"; then
+elif [[ "$PROMPT" == *error* ]]; then
   echo "Error analysis: The function fails to handle the edge case where input is empty. Adding a guard clause at the top of the function would prevent the downstream TypeError."
-elif echo "$PROMPT" | grep -qi "fail"; then
+elif [[ "$PROMPT" == *fail* ]]; then
   echo "Analysis indicates LGTM - no issues found." 
 else
   echo "I have analyzed the provided code. The implementation looks correct with no obvious issues detected. Output includes the prompt content for verification: $PROMPT"
