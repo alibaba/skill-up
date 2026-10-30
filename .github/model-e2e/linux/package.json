@@ -1,0 +1,11 @@
+{
+  "name": "skill-up-model-e2e-linux-tools",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.217",
+    "@openai/codex": "0.80.0",
+    "@qwen-code/qwen-code": "0.20.1",
+    "opencode-ai": "1.18.33"
+  }
+}
