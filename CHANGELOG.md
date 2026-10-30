@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   DeepSeek Harness packages to 0.1.5-rc.3 while retaining the required cordis 4.0.2.
 
 ### Fixed
+- Remove overflow-prone runtime kwargs preallocation while preserving
+  eval-over-user precedence and independent merged maps.
 - Avoid logging API key fragments and redact secrets in custom-engine
   output-file paths and errors without changing file operations or fallbacks.
 - Reject whitespace-only `input.prompt` and `input.turns[].content` during validation while preserving mutual-exclusion semantics and the original prompt bytes.
