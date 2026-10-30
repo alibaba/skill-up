@@ -11,6 +11,7 @@ import (
 
 	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/credential"
+	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
@@ -27,6 +28,41 @@ func newCustomTestRuntime(t *testing.T) *runtime.NoneRuntime {
 
 func customLocalAgent(custom *config.CustomEngineConfig) *CustomAgent {
 	return NewCustomAgent(Config{Name: "my-agent", Custom: custom})
+}
+
+func TestCustomAgent_OutputFileLogsRedactSecrets(t *testing.T) {
+	logging.SetVerbosity(1)
+	defer logging.SetVerbosity(0)
+
+	for _, source := range []string{"api_key", "custom_env"} {
+		t.Run(source, func(t *testing.T) {
+			rt := newCustomTestRuntime(t)
+			secret := strings.Join([]string{"output", "file", "secret"}, "-")
+			custom := &config.CustomEngineConfig{Local: &config.CustomLocalConfig{OutputFile: "configured"}}
+			ag := customLocalAgent(custom)
+			if source == "api_key" {
+				ag.Cfg.APIKey = secret
+			} else {
+				custom.Env = map[string]string{"CUSTOM_TOKEN": secret}
+			}
+			outside := filepath.Join(t.TempDir(), secret+".json")
+			inside := filepath.Join(rt.Workspace(), secret+".json")
+			output := captureStdout(t, func() {
+				if ag.clearStaleOutputFile(context.Background(), rt, outside) {
+					t.Fatal("cleared a path outside the workspace")
+				}
+				for _, path := range []string{outside, inside} {
+					raw, produced := ag.readRawResult(context.Background(), rt, custom, ExecResult{Stdout: "fallback"}, path)
+					if raw != "fallback" || produced {
+						t.Fatalf("readRawResult = (%q, %v), want stdout fallback", raw, produced)
+					}
+				}
+			})
+			if strings.Contains(output, secret) || !strings.Contains(output, "***REDACTED***") {
+				t.Fatalf("output file diagnostics did not redact secrets: %q", output)
+			}
+		})
+	}
 }
 
 func userMessages() []transcript.Message {

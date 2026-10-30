@@ -102,7 +102,7 @@ func MergeKwargs(c Config, envType string, evalKwargs map[string]string) map[str
 		return evalKwargs
 	}
 
-	out := make(map[string]string, len(userKwargs)+len(evalKwargs))
+	out := make(map[string]string, len(userKwargs))
 	maps.Copy(out, userKwargs)
 	maps.Copy(out, evalKwargs)
 	return out

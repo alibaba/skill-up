@@ -110,7 +110,7 @@ func TestCodexCheckCredentials(t *testing.T) {
 	}
 }
 
-func TestCodexCheckCredentials_LogsMaskedTokenAndBaseURL(t *testing.T) {
+func TestCodexCheckCredentials_LogsTokenPresenceAndBaseURL(t *testing.T) {
 	// Not parallel: captureStdout redirects package-level log output.
 
 	logging.SetVerbosity(1)
@@ -127,11 +127,11 @@ func TestCodexCheckCredentials_LogsMaskedTokenAndBaseURL(t *testing.T) {
 			t.Fatalf("expected no error, got %v", err)
 		}
 	})
-	if !strings.Contains(output, `level=DEBUG msg="OPENAI_API_KEY detected for codex (masked: `) {
+	if !strings.Contains(output, `level=DEBUG msg="OPENAI_API_KEY detected for codex (source=agent_config)"`) {
 		t.Fatalf("expected api key log, got %q", output)
 	}
-	if !strings.Contains(output, credential.MaskAPIKey(apiKey)) {
-		t.Fatalf("expected masked key log, got %q", output)
+	if strings.Contains(output, apiKey) || strings.Contains(output, "****") {
+		t.Fatalf("key material leaked into log: %q", output)
 	}
 	if !strings.Contains(output, `level=DEBUG msg="OPENAI_BASE_URL detected for codex (value: https://openai.example.com/v1, source=agent_config)"`) {
 		t.Fatalf("expected base url log, got %q", output)
