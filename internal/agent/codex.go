@@ -1065,10 +1065,7 @@ func applyCodexItemCompleted(state *codexParseState, event codexEvent) {
 			})
 		}
 
-		status := toolStatusSuccess
-		if event.Item.ExitCode != nil && *event.Item.ExitCode != 0 {
-			status = toolStatusError
-		}
+		status := codexCommandResultStatus(event.Item.ExitCode, event.Item.Status)
 
 		state.messages = append(state.messages, transcript.Message{
 			Role: transcript.RoleToolResult,
@@ -1198,10 +1195,10 @@ type codexSessionParseResult struct {
 	inputTokens  int
 	outputTokens int
 	err          error
-	// functionCallIDs holds the call IDs of function_call items already in
-	// the transcript. Codex also writes an item_completed event for a direct
+	// functionCallIDs maps the call ID of each function_call item to its
+	// transcript index. Codex also writes an item_completed event for a direct
 	// exec_command call, under the same ID, after the function_call.
-	functionCallIDs map[string]struct{}
+	functionCallIDs map[string]int
 }
 
 // codexSessionItem is an item_completed payload. In the session file a
@@ -1262,15 +1259,15 @@ func applyCodexSessionFileEvent(parsed *codexSessionParseResult, currentTurn *in
 			parsed.finalMsg = finalMsg
 		}
 		*currentTurn = turn
-		if event.Payload.Type == codexFnCall && event.Payload.CallID != "" {
+		if event.Payload.Type == codexFnCall && event.Payload.CallID != "" && len(messages) == 1 {
 			if parsed.functionCallIDs == nil {
-				parsed.functionCallIDs = make(map[string]struct{})
+				parsed.functionCallIDs = make(map[string]int)
 			}
-			parsed.functionCallIDs[event.Payload.CallID] = struct{}{}
+			parsed.functionCallIDs[event.Payload.CallID] = len(parsed.transcript) - 1
 		}
 	case "event_msg":
 		if event.Payload.Type == codexItemCompleted {
-			parsed.transcript = append(parsed.transcript, codexSessionItemMessages(event.Payload.Item, *currentTurn, parsed.functionCallIDs)...)
+			applyCodexSessionItem(parsed, event.Payload.Item, *currentTurn)
 			return
 		}
 		messages, finalMsg, inputTokens, outputTokens := applyCodexSessionEventMsg(*event.Payload, *currentTurn)
@@ -1361,50 +1358,67 @@ func applyCodexSessionEventMsg(payload codexSessionPayload, currentTurn int) (ms
 	return msgs, finalMsg, inputTokens, outputTokens
 }
 
-// codexSessionItemMessages reads an MCP call or a shell command from an
+// applyCodexSessionItem records an MCP call or a shell command from an
 // item_completed event. Newer Codex CLIs run both from inside their code tool,
 // so the session file has no function_call for them and this event is the only
-// record. Items of other types, items that do not decode, and items for a call
-// already recorded from its function_call are skipped.
-func codexSessionItemMessages(raw json.RawMessage, currentTurn int, functionCallIDs map[string]struct{}) []transcript.Message {
+// record. For a direct call Codex writes both a function_call and an item under
+// the same ID; that call takes the item's name and arguments, which match the
+// stream transcript, and keeps the result from its function_call_output.
+func applyCodexSessionItem(parsed *codexSessionParseResult, raw json.RawMessage, currentTurn int) {
+	call, result, ok := codexSessionItemCall(raw)
+	if !ok {
+		return
+	}
+	if idx, recorded := parsed.functionCallIDs[call.ID]; recorded {
+		parsed.transcript[idx].ToolCall = &call
+		return
+	}
+	turn := max(currentTurn, 1)
+	parsed.transcript = append(parsed.transcript,
+		transcript.Message{Role: transcript.RoleToolCall, ToolCall: &call, Turn: turn},
+		transcript.Message{Role: transcript.RoleToolResult, ToolResult: &result, Turn: turn},
+	)
+}
+
+// codexSessionItemCall converts an McpToolCall or CommandExecution item into
+// the tool call and result the stream path produces. Other item types and
+// items that do not decode are skipped.
+func codexSessionItemCall(raw json.RawMessage) (transcript.ToolCallInfo, transcript.ToolResultInfo, bool) {
 	var item codexSessionItem
 	if len(raw) == 0 || json.Unmarshal(raw, &item) != nil {
-		return nil
+		return transcript.ToolCallInfo{}, transcript.ToolResultInfo{}, false
 	}
-	if _, recorded := functionCallIDs[item.ID]; recorded {
-		return nil
-	}
-
-	var call transcript.ToolCallInfo
-	var result transcript.ToolResultInfo
 	switch item.Type {
 	case codexSessionMCPToolCall:
-		call = transcript.ToolCallInfo{ID: item.ID, Name: codexMCPToolName(item.Server, item.Tool), Arguments: item.Arguments}
-		result = transcript.ToolResultInfo{
-			CallID:  item.ID,
-			Status:  codexMCPToolResultStatus(item.Status),
-			Content: codexMCPToolOutput(item.Result, item.Error),
-		}
+		return transcript.ToolCallInfo{ID: item.ID, Name: codexMCPToolName(item.Server, item.Tool), Arguments: item.Arguments},
+			transcript.ToolResultInfo{
+				CallID:  item.ID,
+				Status:  codexMCPToolResultStatus(item.Status),
+				Content: codexMCPToolOutput(item.Result, item.Error),
+			}, true
 	case codexSessionCommandExec:
-		call = transcript.ToolCallInfo{
-			ID:        item.ID,
-			Name:      codexCommandToolName,
-			Arguments: map[string]any{"command": codexJoinCommand(item.Command)},
-		}
-		status := toolStatusSuccess
-		if item.ExitCode != nil && *item.ExitCode != 0 {
-			status = toolStatusError
-		}
-		result = transcript.ToolResultInfo{CallID: item.ID, Status: status, Content: item.AggregatedOutput}
+		return transcript.ToolCallInfo{
+				ID:        item.ID,
+				Name:      codexCommandToolName,
+				Arguments: map[string]any{"command": codexJoinCommand(item.Command)},
+			},
+			transcript.ToolResultInfo{
+				CallID:  item.ID,
+				Status:  codexCommandResultStatus(item.ExitCode, item.Status),
+				Content: item.AggregatedOutput,
+			}, true
 	default:
-		return nil
+		return transcript.ToolCallInfo{}, transcript.ToolResultInfo{}, false
 	}
+}
 
-	turn := max(currentTurn, 1)
-	return []transcript.Message{
-		{Role: transcript.RoleToolCall, ToolCall: &call, Turn: turn},
-		{Role: transcript.RoleToolResult, ToolResult: &result, Turn: turn},
+// codexCommandResultStatus fails a command on a nonzero exit code or a failed
+// status. A command that failed before its process started has no exit code.
+func codexCommandResultStatus(exitCode *int, status string) string {
+	if exitCode != nil && *exitCode != 0 {
+		return toolStatusError
 	}
+	return codexMCPToolResultStatus(status)
 }
 
 var codexShellSafeArg = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)

@@ -834,7 +834,7 @@ func TestParseCodexSessionFile_MCPToolCallItem(t *testing.T) {
 	}
 }
 
-func TestParseCodexSessionFile_SkipsItemsForRecordedFunctionCalls(t *testing.T) {
+func TestParseCodexSessionFile_NormalizesDirectFunctionCalls(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -851,11 +851,36 @@ func TestParseCodexSessionFile_SkipsItemsForRecordedFunctionCalls(t *testing.T) 
 	if len(trans) != 3 {
 		t.Fatalf("expected the direct call once (3 messages), got %d: %+v", len(trans), trans)
 	}
-	if trans[1].ToolCall == nil || trans[1].ToolCall.Name != "exec_command" {
-		t.Fatalf("trans[1]: expected the function_call, got %+v", trans[1])
+	call := trans[1].ToolCall
+	if call == nil || call.ID != "call_9" || call.Name != codexCommandToolName || call.Arguments["command"] != "/bin/zsh -lc ls" {
+		t.Fatalf("trans[1]: expected the direct call in the stream's command_execution form, got %+v", trans[1])
 	}
-	if trans[2].ToolResult == nil || trans[2].ToolResult.Status != testStatusError {
+	if trans[2].ToolResult == nil || trans[2].ToolResult.CallID != "call_9" || trans[2].ToolResult.Status != testStatusError {
 		t.Fatalf("trans[2]: expected the function_call_output with error status, got %+v", trans[2])
+	}
+}
+
+func TestCodexCommandFailedBeforeStartIsAnError(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session-not-started.jsonl")
+	content := `{"timestamp":"2026-11-01T07:00:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Run it."}]}}
+{"timestamp":"2026-11-01T07:00:01.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"exec-7","command":["/bin/zsh","-lc","./run.sh"],"exit_code":null,"aggregated_output":"","status":"failed"}}}`
+	if err := os.WriteFile(sessionPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+	trans := parseCodexSessionFile(sessionPath).transcript
+	if len(trans) != 3 || trans[2].ToolResult == nil || trans[2].ToolResult.Status != toolStatusError {
+		t.Fatalf("session: expected a failed command result, got %+v", trans)
+	}
+
+	output := `{"type":"thread.started","thread_id":"abc"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"/bin/zsh -lc ./run.sh","aggregated_output":"","exit_code":null,"status":"failed"}}`
+	streamTrans := parseCodexOutput(context.Background(), output).transcript
+	if len(streamTrans) != 2 || streamTrans[1].ToolResult == nil || streamTrans[1].ToolResult.Status != toolStatusError {
+		t.Fatalf("stream: expected a failed command result, got %+v", streamTrans)
 	}
 }
 
