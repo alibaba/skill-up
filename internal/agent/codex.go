@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -52,6 +53,8 @@ const (
 	codexTokenCount             = "token_count"
 	codexItemCompleted          = "item_completed"
 	codexSessionMCPToolCall     = "McpToolCall"
+	codexSessionCommandExec     = "CommandExecution"
+	codexCommandToolName        = "command_execution"
 	codexStdoutArtifactPath     = "stdout.json"
 	codexRunArtifactPrefix      = "skill-up-codex."
 	codexDefaultRecordBytes     = 16 << 20
@@ -1087,7 +1090,7 @@ func applyCodexItemCompleted(state *codexParseState, event codexEvent) {
 			ToolResult: &transcript.ToolResultInfo{
 				CallID:  event.Item.ID,
 				Status:  codexMCPToolResultStatus(event.Item.Status),
-				Content: codexMCPToolOutput(event.Item),
+				Content: codexMCPToolOutput(event.Item.Result, event.Item.Error),
 			},
 			Turn: turn,
 		})
@@ -1118,11 +1121,11 @@ func codexMCPToolName(server, tool string) string {
 
 // codexMCPToolOutput falls back to the error message because a failed call
 // (for example one refused by the approval policy) carries no result.
-func codexMCPToolOutput(item *codexItem) string {
-	if item.Result == nil && item.Error != nil {
-		return item.Error.Message
+func codexMCPToolOutput(result any, itemErr *codexItemErr) string {
+	if result == nil && itemErr != nil {
+		return itemErr.Message
 	}
-	return codexMCPToolResultContent(item.Result)
+	return codexMCPToolResultContent(result)
 }
 
 func codexMCPToolResultContent(result any) string {
@@ -1195,6 +1198,26 @@ type codexSessionParseResult struct {
 	inputTokens  int
 	outputTokens int
 	err          error
+	// functionCallIDs holds the call IDs of function_call items already in
+	// the transcript. Codex also writes an item_completed event for a direct
+	// exec_command call, under the same ID, after the function_call.
+	functionCallIDs map[string]struct{}
+}
+
+// codexSessionItem is an item_completed payload. In the session file a
+// CommandExecution command is an argv array, not the string the stream uses.
+type codexSessionItem struct {
+	Type             string         `json:"type"`
+	ID               string         `json:"id"`
+	Server           string         `json:"server,omitempty"`
+	Tool             string         `json:"tool,omitempty"`
+	Arguments        map[string]any `json:"arguments,omitempty"`
+	Result           any            `json:"result,omitempty"`
+	Error            *codexItemErr  `json:"error,omitempty"`
+	Status           string         `json:"status,omitempty"`
+	Command          []string       `json:"command,omitempty"`
+	AggregatedOutput string         `json:"aggregated_output,omitempty"`
+	ExitCode         *int           `json:"exit_code,omitempty"`
 }
 
 func parseCodexSessionFile(sessionFile string) codexSessionParseResult {
@@ -1239,7 +1262,17 @@ func applyCodexSessionFileEvent(parsed *codexSessionParseResult, currentTurn *in
 			parsed.finalMsg = finalMsg
 		}
 		*currentTurn = turn
+		if event.Payload.Type == codexFnCall && event.Payload.CallID != "" {
+			if parsed.functionCallIDs == nil {
+				parsed.functionCallIDs = make(map[string]struct{})
+			}
+			parsed.functionCallIDs[event.Payload.CallID] = struct{}{}
+		}
 	case "event_msg":
+		if event.Payload.Type == codexItemCompleted {
+			parsed.transcript = append(parsed.transcript, codexSessionItemMessages(event.Payload.Item, *currentTurn, parsed.functionCallIDs)...)
+			return
+		}
 		messages, finalMsg, inputTokens, outputTokens := applyCodexSessionEventMsg(*event.Payload, *currentTurn)
 		parsed.transcript = append(parsed.transcript, messages...)
 		if finalMsg != "" {
@@ -1324,45 +1357,70 @@ func applyCodexSessionEventMsg(payload codexSessionPayload, currentTurn int) (ms
 			inputTokens = codexUsageInputTotal(*payload.Info.TotalTokenUsage)
 			outputTokens = payload.Info.TotalTokenUsage.OutputTokens
 		}
-	case codexItemCompleted:
-		msgs = codexSessionMCPToolCallMessages(payload.Item, currentTurn)
 	}
 	return msgs, finalMsg, inputTokens, outputTokens
 }
 
-// codexSessionMCPToolCallMessages reads an MCP call from an item_completed
-// event. Newer Codex CLIs call MCP tools from inside their code tool, so the
-// session file has no function_call for them; this event is the only record.
-// Other item types are skipped, including ones whose fields do not fit codexItem.
-func codexSessionMCPToolCallMessages(raw json.RawMessage, currentTurn int) []transcript.Message {
-	if len(raw) == 0 {
+// codexSessionItemMessages reads an MCP call or a shell command from an
+// item_completed event. Newer Codex CLIs run both from inside their code tool,
+// so the session file has no function_call for them and this event is the only
+// record. Items of other types, items that do not decode, and items for a call
+// already recorded from its function_call are skipped.
+func codexSessionItemMessages(raw json.RawMessage, currentTurn int, functionCallIDs map[string]struct{}) []transcript.Message {
+	var item codexSessionItem
+	if len(raw) == 0 || json.Unmarshal(raw, &item) != nil {
 		return nil
 	}
-	var item codexItem
-	if err := json.Unmarshal(raw, &item); err != nil || item.Type != codexSessionMCPToolCall {
+	if _, recorded := functionCallIDs[item.ID]; recorded {
 		return nil
 	}
+
+	var call transcript.ToolCallInfo
+	var result transcript.ToolResultInfo
+	switch item.Type {
+	case codexSessionMCPToolCall:
+		call = transcript.ToolCallInfo{ID: item.ID, Name: codexMCPToolName(item.Server, item.Tool), Arguments: item.Arguments}
+		result = transcript.ToolResultInfo{
+			CallID:  item.ID,
+			Status:  codexMCPToolResultStatus(item.Status),
+			Content: codexMCPToolOutput(item.Result, item.Error),
+		}
+	case codexSessionCommandExec:
+		call = transcript.ToolCallInfo{
+			ID:        item.ID,
+			Name:      codexCommandToolName,
+			Arguments: map[string]any{"command": codexJoinCommand(item.Command)},
+		}
+		status := toolStatusSuccess
+		if item.ExitCode != nil && *item.ExitCode != 0 {
+			status = toolStatusError
+		}
+		result = transcript.ToolResultInfo{CallID: item.ID, Status: status, Content: item.AggregatedOutput}
+	default:
+		return nil
+	}
+
 	turn := max(currentTurn, 1)
 	return []transcript.Message{
-		{
-			Role: transcript.RoleToolCall,
-			ToolCall: &transcript.ToolCallInfo{
-				ID:        item.ID,
-				Name:      codexMCPToolName(item.Server, item.Tool),
-				Arguments: item.Arguments,
-			},
-			Turn: turn,
-		},
-		{
-			Role: transcript.RoleToolResult,
-			ToolResult: &transcript.ToolResultInfo{
-				CallID:  item.ID,
-				Status:  codexMCPToolResultStatus(item.Status),
-				Content: codexMCPToolOutput(&item),
-			},
-			Turn: turn,
-		},
+		{Role: transcript.RoleToolCall, ToolCall: &call, Turn: turn},
+		{Role: transcript.RoleToolResult, ToolResult: &result, Turn: turn},
 	}
+}
+
+var codexShellSafeArg = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
+
+// codexJoinCommand joins a session argv into the shell string the stream
+// reports, quoting only the arguments that need it.
+func codexJoinCommand(argv []string) string {
+	parts := make([]string, len(argv))
+	for i, arg := range argv {
+		if codexShellSafeArg.MatchString(arg) {
+			parts[i] = arg
+		} else {
+			parts[i] = shellQuote(arg)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 func codexUsageInputTotal(u codexUsage) int {

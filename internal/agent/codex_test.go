@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -804,7 +805,8 @@ func TestParseCodexSessionFile_MCPToolCallItem(t *testing.T) {
 {"timestamp":"2026-11-01T07:11:45.000Z","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"call_1","name":"exec","input":"text(await tools.mcp__shop__get_order({order_id:42}));"}}
 {"timestamp":"2026-11-01T07:11:45.100Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"exec-1","server":"shop","tool":"get_order","arguments":{"order_id":42},"status":"completed","result":{"content":[{"type":"text","text":"{\"status\":\"SHIPPED-7F3Q\"}"}]}}}}
 {"timestamp":"2026-11-01T07:11:45.200Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_1","output":[{"type":"input_text","text":"Script completed"}]}}
-{"timestamp":"2026-11-01T07:11:45.300Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"exec-2","command":"pwd","exit_code":0,"aggregated_output":"/workspace\n","status":"completed"}}}
+{"timestamp":"2026-11-01T07:11:45.300Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"exec-2","command":["/bin/zsh","-lc","cat SKILL.md"],"exit_code":0,"aggregated_output":"Call get_order.\n","status":"completed"}}}
+{"timestamp":"2026-11-01T07:11:45.400Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"msg-1","content":[{"type":"Text","text":"skipped"}]}}}
 {"timestamp":"2026-11-01T07:11:46.000Z","type":"event_msg","payload":{"type":"agent_message","message":"Order 42 is SHIPPED-7F3Q.","phase":"final_answer"}}`
 	if err := os.WriteFile(sessionPath, []byte(content), 0o600); err != nil {
 		t.Fatalf("write session file: %v", err)
@@ -815,12 +817,44 @@ func TestParseCodexSessionFile_MCPToolCallItem(t *testing.T) {
 		t.Fatalf("parse session file: %v", parsed.err)
 	}
 	trans := parsed.transcript
-	if len(trans) != 4 {
-		t.Fatalf("expected 4 transcript messages, got %d: %+v", len(trans), trans)
+	if len(trans) != 6 {
+		t.Fatalf("expected 6 transcript messages, got %d: %+v", len(trans), trans)
 	}
 	assertCodexShopGetOrderPair(t, trans[1], trans[2], toolStatusSuccess, `{"content":[{"text":"{\"status\":\"SHIPPED-7F3Q\"}","type":"text"}]}`)
+	cmdCall, cmdResult := trans[3].ToolCall, trans[4].ToolResult
+	if cmdCall == nil || cmdCall.Name != codexCommandToolName || cmdCall.ID != "exec-2" || cmdCall.Arguments["command"] != "/bin/zsh -lc 'cat SKILL.md'" {
+		t.Fatalf("trans[3]: expected command_execution exec-2, got %+v", trans[3])
+	}
+	if cmdResult == nil || cmdResult.CallID != "exec-2" || cmdResult.Status != toolStatusSuccess || cmdResult.Content != "Call get_order.\n" {
+		t.Fatalf("trans[4]: expected successful exec-2 result, got %+v", trans[4])
+	}
 	if parsed.finalMsg != "Order 42 is SHIPPED-7F3Q." {
 		t.Fatalf("final message = %q", parsed.finalMsg)
+	}
+}
+
+func TestParseCodexSessionFile_SkipsItemsForRecordedFunctionCalls(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session-direct-call.jsonl")
+	content := `{"timestamp":"2026-11-01T07:00:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"List files."}]}}
+{"timestamp":"2026-11-01T07:00:01.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"ls\"}","call_id":"call_9"}}
+{"timestamp":"2026-11-01T07:00:01.500Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"call_9","command":["/bin/zsh","-lc","ls"],"exit_code":1,"aggregated_output":"boom","status":"failed"}}}
+{"timestamp":"2026-11-01T07:00:02.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_9","output":"Process exited with code 1\nOutput:\nboom\n"}}`
+	if err := os.WriteFile(sessionPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	trans := parseCodexSessionFile(sessionPath).transcript
+	if len(trans) != 3 {
+		t.Fatalf("expected the direct call once (3 messages), got %d: %+v", len(trans), trans)
+	}
+	if trans[1].ToolCall == nil || trans[1].ToolCall.Name != "exec_command" {
+		t.Fatalf("trans[1]: expected the function_call, got %+v", trans[1])
+	}
+	if trans[2].ToolResult == nil || trans[2].ToolResult.Status != testStatusError {
+		t.Fatalf("trans[2]: expected the function_call_output with error status, got %+v", trans[2])
 	}
 }
 
@@ -1192,14 +1226,16 @@ func TestCodexRun_SessionTranscriptKeepsMCPToolCalls(t *testing.T) {
 		sessionPath: "/tmp/codex-session.jsonl",
 		sessionBytes: []byte(`{"timestamp":"2026-11-01T07:11:40.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"What is the status of order 42?"}]}}
 {"timestamp":"2026-11-01T07:11:41.000Z","type":"event_msg","payload":{"type":"agent_message","message":"Reading the skill.","phase":"commentary"}}
-{"timestamp":"2026-11-01T07:11:42.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"cat SKILL.md\"}","call_id":"call_1"}}
-{"timestamp":"2026-11-01T07:11:42.500Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"Output:\nCall get_order.\n"}}
+{"timestamp":"2026-11-01T07:11:42.000Z","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"call_1","name":"exec","input":"text(await tools.exec_command({cmd:\"cat SKILL.md\"}));"}}
+{"timestamp":"2026-11-01T07:11:42.400Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"exec-2","command":["/bin/zsh","-lc","cat SKILL.md"],"exit_code":0,"aggregated_output":"Call get_order.\n","status":"completed"}}}
+{"timestamp":"2026-11-01T07:11:42.500Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_1","output":[{"type":"input_text","text":"Script completed"}]}}
 {"timestamp":"2026-11-01T07:11:45.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"exec-1","server":"shop","tool":"get_order","arguments":{"order_id":42},"status":"completed","result":{"content":[{"type":"text","text":"SHIPPED-7F3Q"}]}}}}
 {"timestamp":"2026-11-01T07:11:46.000Z","type":"event_msg","payload":{"type":"agent_message","message":"Order 42 is SHIPPED-7F3Q.","phase":"final_answer"}}`),
 		execResult: runtime.ExecResult{
 			ExitCode: 0,
 			Stdout: `{"type":"thread.started","thread_id":"thread-123"}
 {"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"/bin/zsh -lc 'cat SKILL.md'","aggregated_output":"Call get_order.\n","exit_code":0,"status":"completed"}}
 {"type":"item.started","item":{"id":"item_1","type":"mcp_tool_call","server":"shop","tool":"get_order","arguments":{"order_id":42},"result":null,"error":null,"status":"in_progress"}}
 {"type":"item.completed","item":{"id":"item_1","type":"mcp_tool_call","server":"shop","tool":"get_order","arguments":{"order_id":42},"result":{"content":[{"type":"text","text":"SHIPPED-7F3Q"}]},"error":null,"status":"completed"}}
 {"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"Order 42 is SHIPPED-7F3Q."}}
@@ -1217,14 +1253,15 @@ func TestCodexRun_SessionTranscriptKeepsMCPToolCalls(t *testing.T) {
 	if got := sessionResult.Transcript.FinalAssistantMessage(); got != "Order 42 is SHIPPED-7F3Q." {
 		t.Fatalf("final assistant message = %q", got)
 	}
-	var mcpCalls int
+	var calls []string
 	for _, msg := range sessionResult.Transcript {
-		if msg.ToolCall != nil && msg.ToolCall.Name == "mcp__shop__get_order" {
-			mcpCalls++
+		if msg.ToolCall != nil {
+			calls = append(calls, msg.ToolCall.ID+" "+msg.ToolCall.Name)
 		}
 	}
-	if mcpCalls != 1 {
-		t.Fatalf("mcp__shop__get_order calls = %d, want 1; transcript = %+v", mcpCalls, sessionResult.Transcript)
+	want := []string{"exec-2 " + codexCommandToolName, "exec-1 mcp__shop__get_order"}
+	if !slices.Equal(calls, want) {
+		t.Fatalf("tool calls = %v, want the session calls %v", calls, want)
 	}
 }
 

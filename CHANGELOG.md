@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in the localized-regression judge while rejecting checksum manifest modes.
   Keep credential-probe verification within the caller's allowed command profile.
 - Add `case_results[].judge_recovery` metadata to reports when an agent judge verdict is recovered after a call error, distinguishing recovered output from a healthy judge call.
-- Keep MCP tool calls in Codex transcripts built from the session file, so `tool_called` matches calls that newer Codex CLIs make from their code tool. A failed Codex MCP call now keeps its error message as the tool result.
+- Keep MCP tool calls and shell commands in Codex transcripts built from the session file, so `tool_called` matches calls that newer Codex CLIs make from their code tool. A failed Codex MCP call now keeps its error message as the tool result.
 
 ## [0.14.0] - 2026-10-20
 
