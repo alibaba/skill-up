@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1285,63 +1286,102 @@ func TestCodexSessionLookupScript_HonoursCodexHome(t *testing.T) {
 	}
 }
 
-func TestCodexRun_ApprovesInstalledMCPServersUnderProcessSandbox(t *testing.T) {
+func codexApprovalFlag(name string) string {
+	return `-c 'mcp_servers.` + name + `.default_tools_approval_mode="approve"'`
+}
+
+func codexRunCommand(t *testing.T, rt *codexTestRuntime) string {
+	t.Helper()
+	for i := len(rt.commands) - 1; i >= 0; i-- {
+		if strings.Contains(rt.commands[i], "codex exec") {
+			return rt.commands[i]
+		}
+	}
+	t.Fatalf("no codex exec command recorded: %v", rt.commands)
+	return ""
+}
+
+// Cases share one CodexAgent and run concurrently, so each run must approve
+// only the servers installed for its own runtime.
+func TestCodexRun_ApprovesOnlyThisCasesMCPServers(t *testing.T) {
 	t.Parallel()
 
-	const approveShop = `-c 'mcp_servers.shop.default_tools_approval_mode="approve"'`
-	const approveDocs = `-c 'mcp_servers.docs-v2_x.default_tools_approval_mode="approve"'`
-	mcpCfg := runtime.MCPConfig{Servers: []runtime.MCPServerConfig{
-		{Name: "shop", Transport: "stdio", Command: "node", Args: []string{"shop.js"}},
-		{Name: "docs-v2_x", Transport: "stdio", Command: "node", Args: []string{"docs.js"}},
-		{Name: "bad.name", Transport: "stdio", Command: "node", Args: []string{"bad.js"}},
-	}}
 	stdout := `{"type":"thread.started","thread_id":"thread-123"}
 {"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"OK"}}`
-
-	cases := []struct {
-		name        string
-		workspace   string
-		kwargs      map[string]string
-		installMCP  bool
-		wantApprove bool
-	}{
-		{name: "none runtime approves installed servers", workspace: t.TempDir(), installMCP: true, wantApprove: true},
-		{name: "none runtime without MCP servers adds no approval", workspace: t.TempDir()},
-		{name: "bypass_sandbox already skips approvals", workspace: t.TempDir(), kwargs: map[string]string{KwargBypassSandbox: "true"}, installMCP: true},
-		{name: "opensandbox already bypasses", workspace: "opensandbox", installMCP: true},
+	stdio := func(name string) runtime.MCPServerConfig {
+		return runtime.MCPServerConfig{Name: name, Transport: "stdio", Command: "node", Args: []string{name + ".js"}}
 	}
-	for _, tc := range cases {
+	cases := []struct {
+		name    string
+		servers []runtime.MCPServerConfig
+		want    []string
+		notWant []string
+	}{
+		{name: "shop only", servers: []runtime.MCPServerConfig{stdio("shop")}, want: []string{"shop"}, notWant: []string{"docs-v2_x"}},
+		{name: "docs and a dotted name", servers: []runtime.MCPServerConfig{stdio("docs-v2_x"), stdio("bad.name")}, want: []string{"docs-v2_x"}, notWant: []string{"shop", "bad.name"}},
+		{name: "no servers", notWant: []string{"shop", "docs-v2_x"}},
+	}
+
+	ag := NewCodexAgent(Config{})
+	runtimes := make([]*codexTestRuntime, len(cases))
+	var wg sync.WaitGroup
+	for i, tc := range cases {
+		runtimes[i] = &codexTestRuntime{workspace: t.TempDir(), execResult: runtime.ExecResult{Stdout: stdout, ExitCode: 0}}
+		wg.Add(1)
+		go func(rt *codexTestRuntime, servers []runtime.MCPServerConfig) {
+			defer wg.Done()
+			if err := ag.InstallMCP(context.Background(), rt, runtime.MCPConfig{Servers: servers}); err != nil {
+				t.Errorf("InstallMCP failed: %v", err)
+				return
+			}
+			if _, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{Role: transcript.RoleUser, Content: "hi", Turn: 1}}); err != nil {
+				t.Errorf("Run failed: %v", err)
+			}
+		}(runtimes[i], tc.servers)
+	}
+	wg.Wait()
+
+	for i, tc := range cases {
+		runCmd := codexRunCommand(t, runtimes[i])
+		for _, name := range tc.want {
+			if !strings.Contains(runCmd, codexApprovalFlag(name)) {
+				t.Errorf("%s: missing approval for %q: %s", tc.name, name, runCmd)
+			}
+		}
+		for _, name := range tc.notWant {
+			if strings.Contains(runCmd, "mcp_servers."+name+".") {
+				t.Errorf("%s: unexpected approval for %q: %s", tc.name, name, runCmd)
+			}
+		}
+	}
+}
+
+func TestCodexRun_NoMCPApprovalWhenApprovalsAreBypassed(t *testing.T) {
+	t.Parallel()
+
+	stdout := `{"type":"thread.started","thread_id":"thread-123"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"OK"}}`
+	mcpCfg := runtime.MCPConfig{Servers: []runtime.MCPServerConfig{{Name: "shop", Transport: "stdio", Command: "node", Args: []string{"shop.js"}}}}
+	for _, tc := range []struct {
+		name      string
+		workspace string
+		kwargs    map[string]string
+	}{
+		{name: "bypass_sandbox", workspace: t.TempDir(), kwargs: map[string]string{KwargBypassSandbox: "true"}},
+		{name: "opensandbox", workspace: "opensandbox"},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			rt := &codexTestRuntime{
-				workspace:  tc.workspace,
-				execResult: runtime.ExecResult{Stdout: stdout, ExitCode: 0},
-			}
+			rt := &codexTestRuntime{workspace: tc.workspace, execResult: runtime.ExecResult{Stdout: stdout, ExitCode: 0}}
 			ag := NewCodexAgent(Config{Kwargs: tc.kwargs})
-			if tc.installMCP {
-				if err := ag.InstallMCP(context.Background(), rt, mcpCfg); err != nil {
-					t.Fatalf("InstallMCP failed: %v", err)
-				}
+			if err := ag.InstallMCP(context.Background(), rt, mcpCfg); err != nil {
+				t.Fatalf("InstallMCP failed: %v", err)
 			}
-			if _, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{
-				Role:    transcript.RoleUser,
-				Content: "hi",
-				Turn:    1,
-			}}); err != nil {
+			if _, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{Role: transcript.RoleUser, Content: "hi", Turn: 1}}); err != nil {
 				t.Fatalf("Run failed: %v", err)
 			}
-			runCmd := rt.commands[len(rt.commands)-1]
-			for _, cmd := range rt.commands {
-				if strings.Contains(cmd, "codex exec") {
-					runCmd = cmd
-				}
-			}
-			gotShop, gotDocs := strings.Contains(runCmd, approveShop), strings.Contains(runCmd, approveDocs)
-			if gotShop != tc.wantApprove || gotDocs != tc.wantApprove {
-				t.Fatalf("approval flags present = %v/%v, want %v; command = %s", gotShop, gotDocs, tc.wantApprove, runCmd)
-			}
-			if strings.Contains(runCmd, "bad.name") {
-				t.Fatalf("server name a -c path cannot address leaked into the command: %s", runCmd)
+			if runCmd := codexRunCommand(t, rt); strings.Contains(runCmd, "default_tools_approval_mode") {
+				t.Fatalf("approval override added although approvals are bypassed: %s", runCmd)
 			}
 		})
 	}
