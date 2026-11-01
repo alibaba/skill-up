@@ -1136,16 +1136,20 @@ func codexMCPToolResultContent(result any) string {
 	return string(data)
 }
 
+// codexSessionLookupScript finds the session file of a thread. Codex writes
+// sessions under $CODEX_HOME, which defaults to $HOME/.codex.
+const codexSessionLookupScript = `codex_home=$(printenv CODEX_HOME)
+if [ -z "$codex_home" ]; then home=$(printenv HOME); [ -n "$home" ] || exit 0; codex_home="$home/.codex"; fi
+root="$codex_home/sessions"; [ -d "$root" ] || exit 0
+find "$root" -type f -name "*$SKILL_UP_CODEX_THREAD_ID*.jsonl" 2>/dev/null | head -1`
+
 func findCodexSessionPath(ctx context.Context, rt Runtime, threadID string) string {
 	threadID = strings.TrimSpace(threadID)
 	if threadID == "" {
 		return ""
 	}
 
-	script := `home=$(printenv HOME); [ -n "$home" ] || exit 0
-root="$home/.codex/sessions"; [ -d "$root" ] || exit 0
-find "$root" -type f -name "*$SKILL_UP_CODEX_THREAD_ID*.jsonl" 2>/dev/null | head -1`
-	result, err := rt.Exec(ctx, script, ExecOptions{
+	result, err := rt.Exec(ctx, codexSessionLookupScript, ExecOptions{
 		Env: map[string]string{"SKILL_UP_CODEX_THREAD_ID": threadID},
 	})
 	if err != nil || result.ExitCode != 0 {
