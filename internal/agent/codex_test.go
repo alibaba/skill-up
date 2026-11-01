@@ -685,10 +685,15 @@ func TestParseCodexSessionFile(t *testing.T) {
 
 	dir := t.TempDir()
 	sessionPath := filepath.Join(dir, "session.jsonl")
+	// Includes issue #359 session shapes from openai/codex:
+	// response_item custom_tool_call name=exec (skipped as an MCP tool name),
+	// and event_msg item_completed with item.type McpToolCall (PascalCase).
 	content := `{"timestamp":"2026-04-20T04:05:27.815Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Run the code-stats skill to analyze the current directory."}]}}
 {"timestamp":"2026-04-20T04:05:38.215Z","type":"event_msg","payload":{"type":"agent_message","message":"I'm using the code-stats skill.","phase":"commentary"}}
 {"timestamp":"2026-04-20T04:05:38.216Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"pwd\"}","call_id":"call_1"}}
 {"timestamp":"2026-04-20T04:05:38.436Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"Output:\n/private/tmp/workspace\n"}}
+{"timestamp":"2026-04-20T04:05:40.100Z","type":"response_item","payload":{"type":"custom_tool_call","call_id":"call_exec_1","name":"exec","input":"text(await tools.mcp__shop__get_order({order_id:42}));"}}
+{"timestamp":"2026-04-20T04:05:40.200Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"mcp_shop_1","server":"shop","tool":"get_order","arguments":{"order_id":42},"status":"completed","result":{"content":[{"type":"text","text":"{\"order_id\":\"42\",\"status\":\"SHIPPED-7F3Q\"}"}]}}}}
 {"timestamp":"2026-04-20T04:05:59.400Z","type":"event_msg","payload":{"type":"agent_message","message":"# Code Statistics","phase":"final_answer"}}
 {"timestamp":"2026-04-20T04:05:59.418Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":61324,"cached_input_tokens":56448,"output_tokens":1115}}}}`
 	if err := os.WriteFile(sessionPath, []byte(content), 0o600); err != nil {
@@ -697,8 +702,9 @@ func TestParseCodexSessionFile(t *testing.T) {
 
 	parsed := parseCodexSessionFile(sessionPath)
 	trans := parsed.transcript
-	if len(trans) != 5 {
-		t.Fatalf("expected 5 transcript messages, got %d", len(trans))
+	// user, commentary, function_call, function_call_output, McpToolCall, McpToolCall result, final agent_message
+	if len(trans) != 7 {
+		t.Fatalf("expected 7 transcript messages, got %d", len(trans))
 	}
 
 	for _, tc := range []struct {
@@ -708,7 +714,7 @@ func TestParseCodexSessionFile(t *testing.T) {
 	}{
 		{0, transcript.RoleUser, "Run the code-stats skill to analyze the current directory."},
 		{1, testAssistantRole, "I'm using the code-stats skill."},
-		{4, testAssistantRole, "# Code Statistics"},
+		{6, testAssistantRole, "# Code Statistics"},
 	} {
 		if trans[tc.idx].Role != tc.role {
 			t.Fatalf("trans[%d]: expected role %q, got %q", tc.idx, tc.role, trans[tc.idx].Role)
@@ -732,6 +738,27 @@ func TestParseCodexSessionFile(t *testing.T) {
 	if trans[3].ToolResult.CallID != "call_1" {
 		t.Fatalf("trans[3]: expected ToolResult.CallID 'call_1', got %q", trans[3].ToolResult.CallID)
 	}
+	if trans[4].ToolCall == nil || trans[4].ToolCall.Name != "mcp__shop__get_order" {
+		t.Fatalf("trans[4]: expected ToolCall mcp__shop__get_order, got %+v", trans[4].ToolCall)
+	}
+	if trans[4].ToolCall.ID != "mcp_shop_1" {
+		t.Fatalf("trans[4]: expected ToolCall.ID mcp_shop_1, got %q", trans[4].ToolCall.ID)
+	}
+	if got, ok := trans[4].ToolCall.Arguments["order_id"].(float64); !ok || got != 42 {
+		t.Fatalf("trans[4]: expected Arguments order_id=42, got %+v", trans[4].ToolCall.Arguments)
+	}
+	if trans[5].ToolResult == nil || trans[5].ToolResult.CallID != "mcp_shop_1" {
+		t.Fatalf("trans[5]: expected ToolResult for mcp_shop_1, got %+v", trans[5].ToolResult)
+	}
+	if trans[5].ToolResult.Status != toolStatusSuccess {
+		t.Fatalf("trans[5]: expected success status, got %q", trans[5].ToolResult.Status)
+	}
+	// custom_tool_call name=exec must not appear as an MCP tool call name
+	for _, msg := range trans {
+		if msg.ToolCall != nil && msg.ToolCall.Name == "exec" {
+			t.Fatalf("custom_tool_call name=exec must not be projected as a tool call; got %+v", msg.ToolCall)
+		}
+	}
 	if parsed.finalMsg != "# Code Statistics" {
 		t.Fatalf("expected final message from session, got %q", parsed.finalMsg)
 	}
@@ -740,6 +767,43 @@ func TestParseCodexSessionFile(t *testing.T) {
 	}
 	if parsed.outputTokens != 1115 {
 		t.Fatalf("expected output tokens 1115, got %d", parsed.outputTokens)
+	}
+}
+
+func TestParseCodexSessionFile_McpToolCallFailedStatus(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session-mcp-failed.jsonl")
+	content := `{"timestamp":"2026-04-20T04:05:27.815Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Fetch the order."}]}}
+{"timestamp":"2026-04-20T04:05:40.200Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"mcp_shop_err","server":"shop","tool":"get_order","arguments":{"order_id":7},"status":"failed","result":{"content":[{"type":"text","text":"order not found"}]}}}}`
+	if err := os.WriteFile(sessionPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	parsed := parseCodexSessionFile(sessionPath)
+	trans := parsed.transcript
+	if len(trans) != 3 {
+		t.Fatalf("expected 3 transcript messages, got %d", len(trans))
+	}
+	if trans[1].ToolCall == nil || trans[1].ToolCall.Name != "mcp__shop__get_order" {
+		t.Fatalf("trans[1]: expected ToolCall mcp__shop__get_order, got %+v", trans[1].ToolCall)
+	}
+	if got, ok := trans[1].ToolCall.Arguments["order_id"].(float64); !ok || got != 7 {
+		t.Fatalf("trans[1]: expected Arguments order_id=7, got %+v", trans[1].ToolCall.Arguments)
+	}
+	if trans[2].Role != testToolResRole || trans[2].ToolResult == nil {
+		t.Fatalf("unexpected tool result: %+v", trans[2])
+	}
+	if trans[2].ToolResult.CallID != "mcp_shop_err" {
+		t.Fatalf("expected ToolResult.CallID mcp_shop_err, got %q", trans[2].ToolResult.CallID)
+	}
+	if trans[2].ToolResult.Status != testStatusError {
+		t.Fatalf("expected tool result status error, got %q", trans[2].ToolResult.Status)
+	}
+	resultContent, _ := trans[2].ToolResult.Content.(string)
+	if !strings.Contains(resultContent, "order not found") {
+		t.Fatalf("unexpected tool result content: %+v", trans[2].ToolResult.Content)
 	}
 }
 
