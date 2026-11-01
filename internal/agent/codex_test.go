@@ -65,6 +65,7 @@ const (
 	testToolCallRole  = "tool_call"
 	testToolResRole   = "tool_result"
 	testStatusError   = "error"
+	testCommandCallID = "exec-2"
 	testJudgeJSON     = `{"results":[]}`
 	testThreadID      = "abc"
 )
@@ -822,10 +823,10 @@ func TestParseCodexSessionFile_MCPToolCallItem(t *testing.T) {
 	}
 	assertCodexShopGetOrderPair(t, trans[1], trans[2], toolStatusSuccess, `{"content":[{"text":"{\"status\":\"SHIPPED-7F3Q\"}","type":"text"}]}`)
 	cmdCall, cmdResult := trans[3].ToolCall, trans[4].ToolResult
-	if cmdCall == nil || cmdCall.Name != codexCommandToolName || cmdCall.ID != "exec-2" || cmdCall.Arguments["command"] != "/bin/zsh -lc 'cat SKILL.md'" {
+	if cmdCall == nil || cmdCall.Name != codexCommandToolName || cmdCall.ID != testCommandCallID || cmdCall.Arguments["command"] != "/bin/zsh -lc 'cat SKILL.md'" {
 		t.Fatalf("trans[3]: expected command_execution exec-2, got %+v", trans[3])
 	}
-	if cmdResult == nil || cmdResult.CallID != "exec-2" || cmdResult.Status != toolStatusSuccess || cmdResult.Content != "Call get_order.\n" {
+	if cmdResult == nil || cmdResult.CallID != testCommandCallID || cmdResult.Status != toolStatusSuccess || cmdResult.Content != "Call get_order.\n" {
 		t.Fatalf("trans[4]: expected successful exec-2 result, got %+v", trans[4])
 	}
 	if parsed.finalMsg != "Order 42 is SHIPPED-7F3Q." {
@@ -864,16 +865,24 @@ func TestParseCodexSessionFile_MCPToolCallItemFailure(t *testing.T) {
 	dir := t.TempDir()
 	sessionPath := filepath.Join(dir, "session-mcp-failed.jsonl")
 	content := `{"timestamp":"2026-11-01T07:09:27.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"What is the status of order 42?"}]}}
-{"timestamp":"2026-11-01T07:09:30.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"exec-1","server":"shop","tool":"get_order","arguments":{"order_id":42},"status":"failed","error":{"message":"MCP tool call requires approval"}}}}`
+{"timestamp":"2026-11-01T07:09:30.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"exec-1","server":"shop","tool":"get_order","arguments":{"order_id":42},"status":"failed","error":{"message":"MCP tool call requires approval"}}}}
+{"timestamp":"2026-11-01T07:09:31.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"exec-2","command":["/bin/zsh","-lc","cat missing.txt"],"exit_code":1,"aggregated_output":"cat: missing.txt: No such file or directory\n","status":"failed"}}}`
 	if err := os.WriteFile(sessionPath, []byte(content), 0o600); err != nil {
 		t.Fatalf("write session file: %v", err)
 	}
 
 	trans := parseCodexSessionFile(sessionPath).transcript
-	if len(trans) != 3 {
-		t.Fatalf("expected 3 transcript messages, got %d: %+v", len(trans), trans)
+	if len(trans) != 5 {
+		t.Fatalf("expected 5 transcript messages, got %d: %+v", len(trans), trans)
 	}
 	assertCodexShopGetOrderPair(t, trans[1], trans[2], toolStatusError, "MCP tool call requires approval")
+	if trans[3].ToolCall == nil || trans[3].ToolCall.ID != testCommandCallID || trans[3].ToolCall.Arguments["command"] != "/bin/zsh -lc 'cat missing.txt'" {
+		t.Fatalf("trans[3]: expected command_execution exec-2, got %+v", trans[3])
+	}
+	result := trans[4].ToolResult
+	if result == nil || result.CallID != testCommandCallID || result.Status != toolStatusError || result.Content != "cat: missing.txt: No such file or directory\n" {
+		t.Fatalf("trans[4]: expected failed exec-2 result with its output, got %+v", trans[4])
+	}
 }
 
 func assertCodexShopGetOrderPair(t *testing.T, callMsg, resultMsg transcript.Message, wantStatus, wantContent string) {
