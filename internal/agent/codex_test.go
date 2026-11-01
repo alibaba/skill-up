@@ -596,6 +596,29 @@ func TestParseCodexOutput_MCPToolCallErrorStatus(t *testing.T) {
 	}
 }
 
+func TestParseCodexOutput_MCPToolCallFailureKeepsErrorMessage(t *testing.T) {
+	t.Parallel()
+
+	output := `
+{"type":"thread.started","thread_id":"abc"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"mcp_tool_call","server":"shop","tool":"get_order","arguments":{"order_id":42},"result":null,"error":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"mcp_tool_call","server":"shop","tool":"get_order","arguments":{"order_id":42},"result":null,"error":{"message":"MCP tool call requires approval"},"status":"failed"}}
+`
+
+	trans := parseCodexOutput(context.Background(), output).transcript
+	if len(trans) != 2 {
+		t.Fatalf("expected 2 transcript messages, got %d", len(trans))
+	}
+	result := trans[1].ToolResult
+	if result == nil || result.Status != toolStatusError {
+		t.Fatalf("expected failed tool result, got %+v", trans[1])
+	}
+	if result.Content != "MCP tool call requires approval" {
+		t.Fatalf("tool result content = %q, want the error message", result.Content)
+	}
+}
+
 func TestParseCodexOutput_ConcatenatedEvents(t *testing.T) {
 	t.Parallel()
 
@@ -769,6 +792,75 @@ func TestParseCodexSessionFile_ToolErrorStatus(t *testing.T) {
 	}
 	if trans[2].ToolResult.Status != testStatusError {
 		t.Fatalf("expected tool result status error, got %q", trans[2].ToolResult.Status)
+	}
+}
+
+func TestParseCodexSessionFile_MCPToolCallItem(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session-mcp.jsonl")
+	content := `{"timestamp":"2026-11-01T07:11:40.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"What is the status of order 42?"}]}}
+{"timestamp":"2026-11-01T07:11:45.000Z","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"call_1","name":"exec","input":"text(await tools.mcp__shop__get_order({order_id:42}));"}}
+{"timestamp":"2026-11-01T07:11:45.100Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"exec-1","server":"shop","tool":"get_order","arguments":{"order_id":42},"status":"completed","result":{"content":[{"type":"text","text":"{\"status\":\"SHIPPED-7F3Q\"}"}]}}}}
+{"timestamp":"2026-11-01T07:11:45.200Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_1","output":[{"type":"input_text","text":"Script completed"}]}}
+{"timestamp":"2026-11-01T07:11:45.300Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"exec-2","command":"pwd","exit_code":0,"aggregated_output":"/workspace\n","status":"completed"}}}
+{"timestamp":"2026-11-01T07:11:46.000Z","type":"event_msg","payload":{"type":"agent_message","message":"Order 42 is SHIPPED-7F3Q.","phase":"final_answer"}}`
+	if err := os.WriteFile(sessionPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	parsed := parseCodexSessionFile(sessionPath)
+	if parsed.err != nil {
+		t.Fatalf("parse session file: %v", parsed.err)
+	}
+	trans := parsed.transcript
+	if len(trans) != 4 {
+		t.Fatalf("expected 4 transcript messages, got %d: %+v", len(trans), trans)
+	}
+	assertCodexShopGetOrderPair(t, trans[1], trans[2], toolStatusSuccess, `{"content":[{"text":"{\"status\":\"SHIPPED-7F3Q\"}","type":"text"}]}`)
+	if parsed.finalMsg != "Order 42 is SHIPPED-7F3Q." {
+		t.Fatalf("final message = %q", parsed.finalMsg)
+	}
+}
+
+func TestParseCodexSessionFile_MCPToolCallItemFailure(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session-mcp-failed.jsonl")
+	content := `{"timestamp":"2026-11-01T07:09:27.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"What is the status of order 42?"}]}}
+{"timestamp":"2026-11-01T07:09:30.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"exec-1","server":"shop","tool":"get_order","arguments":{"order_id":42},"status":"failed","error":{"message":"MCP tool call requires approval"}}}}`
+	if err := os.WriteFile(sessionPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	trans := parseCodexSessionFile(sessionPath).transcript
+	if len(trans) != 3 {
+		t.Fatalf("expected 3 transcript messages, got %d: %+v", len(trans), trans)
+	}
+	assertCodexShopGetOrderPair(t, trans[1], trans[2], toolStatusError, "MCP tool call requires approval")
+}
+
+func assertCodexShopGetOrderPair(t *testing.T, callMsg, resultMsg transcript.Message, wantStatus, wantContent string) {
+	t.Helper()
+
+	call := callMsg.ToolCall
+	if callMsg.Role != testToolCallRole || call == nil || callMsg.Turn != 1 {
+		t.Fatalf("expected turn 1 tool call, got %+v", callMsg)
+	}
+	if call.Name != "mcp__shop__get_order" || call.ID != "exec-1" {
+		t.Fatalf("tool call = %q (id %q), want mcp__shop__get_order (id exec-1)", call.Name, call.ID)
+	}
+	if got, ok := call.Arguments["order_id"].(float64); !ok || got != 42 {
+		t.Fatalf("tool call arguments = %+v, want order_id 42", call.Arguments)
+	}
+	result := resultMsg.ToolResult
+	if resultMsg.Role != testToolResRole || result == nil {
+		t.Fatalf("expected tool result, got %+v", resultMsg)
+	}
+	if result.CallID != "exec-1" || result.Status != wantStatus || result.Content != wantContent {
+		t.Fatalf("tool result = %+v, want call exec-1, status %q, content %q", result, wantStatus, wantContent)
 	}
 }
 
@@ -1086,6 +1178,53 @@ func TestCodexRun_KeepsStreamFinalMessageWhenSessionHasNoFinalMessage(t *testing
 	wantStdoutPath := filepath.Join(artifactDir, codexStdoutArtifactPath)
 	if len(sessionResult.Artifacts.GeneratedFiles) == 0 || sessionResult.Artifacts.GeneratedFiles[0] != wantStdoutPath {
 		t.Fatalf("generated files = %v, want local stdout artifact %q", sessionResult.Artifacts.GeneratedFiles, wantStdoutPath)
+	}
+}
+
+// A Codex CLI that calls MCP tools from its code tool records them in the
+// session file only as item_completed events. The session transcript is longer
+// than the stream one here, so it wins and must still carry the MCP call.
+func TestCodexRun_SessionTranscriptKeepsMCPToolCalls(t *testing.T) {
+	t.Parallel()
+
+	rt := &codexTestRuntime{
+		workspace:   t.TempDir(),
+		sessionPath: "/tmp/codex-session.jsonl",
+		sessionBytes: []byte(`{"timestamp":"2026-11-01T07:11:40.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"What is the status of order 42?"}]}}
+{"timestamp":"2026-11-01T07:11:41.000Z","type":"event_msg","payload":{"type":"agent_message","message":"Reading the skill.","phase":"commentary"}}
+{"timestamp":"2026-11-01T07:11:42.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"cat SKILL.md\"}","call_id":"call_1"}}
+{"timestamp":"2026-11-01T07:11:42.500Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"Output:\nCall get_order.\n"}}
+{"timestamp":"2026-11-01T07:11:45.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"exec-1","server":"shop","tool":"get_order","arguments":{"order_id":42},"status":"completed","result":{"content":[{"type":"text","text":"SHIPPED-7F3Q"}]}}}}
+{"timestamp":"2026-11-01T07:11:46.000Z","type":"event_msg","payload":{"type":"agent_message","message":"Order 42 is SHIPPED-7F3Q.","phase":"final_answer"}}`),
+		execResult: runtime.ExecResult{
+			ExitCode: 0,
+			Stdout: `{"type":"thread.started","thread_id":"thread-123"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_1","type":"mcp_tool_call","server":"shop","tool":"get_order","arguments":{"order_id":42},"result":null,"error":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"mcp_tool_call","server":"shop","tool":"get_order","arguments":{"order_id":42},"result":{"content":[{"type":"text","text":"SHIPPED-7F3Q"}]},"error":null,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"Order 42 is SHIPPED-7F3Q."}}
+{"type":"turn.completed","usage":{"input_tokens":0,"cached_input_tokens":0,"output_tokens":0}}`,
+		},
+	}
+	ag := NewCodexAgent(Config{})
+
+	sessionResult, err := ag.Run(context.Background(), rt, ExecOptions{ArtifactDir: t.TempDir()}, []transcript.Message{
+		{Role: transcript.RoleUser, Content: "What is the status of order 42?", Turn: 1},
+	})
+	if err != nil {
+		t.Fatalf("run codex: %v", err)
+	}
+	if got := sessionResult.Transcript.FinalAssistantMessage(); got != "Order 42 is SHIPPED-7F3Q." {
+		t.Fatalf("final assistant message = %q", got)
+	}
+	var mcpCalls int
+	for _, msg := range sessionResult.Transcript {
+		if msg.ToolCall != nil && msg.ToolCall.Name == "mcp__shop__get_order" {
+			mcpCalls++
+		}
+	}
+	if mcpCalls != 1 {
+		t.Fatalf("mcp__shop__get_order calls = %d, want 1; transcript = %+v", mcpCalls, sessionResult.Transcript)
 	}
 }
 

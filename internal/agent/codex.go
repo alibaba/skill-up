@@ -50,6 +50,8 @@ const (
 	codexFnCall                 = "function_call"
 	codexFnCallOut              = "function_call_output"
 	codexTokenCount             = "token_count"
+	codexItemCompleted          = "item_completed"
+	codexSessionMCPToolCall     = "McpToolCall"
 	codexStdoutArtifactPath     = "stdout.json"
 	codexRunArtifactPrefix      = "skill-up-codex."
 	codexDefaultRecordBytes     = 16 << 20
@@ -852,6 +854,11 @@ type codexItem struct {
 	AggregatedOutput string         `json:"aggregated_output,omitempty"`
 	ExitCode         *int           `json:"exit_code,omitempty"`
 	Status           string         `json:"status,omitempty"`
+	Error            *codexItemErr  `json:"error,omitempty"`
+}
+
+type codexItemErr struct {
+	Message string `json:"message,omitempty"`
 }
 
 type codexUsage struct {
@@ -1080,7 +1087,7 @@ func applyCodexItemCompleted(state *codexParseState, event codexEvent) {
 			ToolResult: &transcript.ToolResultInfo{
 				CallID:  event.Item.ID,
 				Status:  codexMCPToolResultStatus(event.Item.Status),
-				Content: codexMCPToolResultContent(event.Item.Result),
+				Content: codexMCPToolOutput(event.Item),
 			},
 			Turn: turn,
 		})
@@ -1107,6 +1114,15 @@ func codexMCPToolName(server, tool string) string {
 		return tool
 	}
 	return "mcp__" + server + "__" + tool
+}
+
+// codexMCPToolOutput falls back to the error message because a failed call
+// (for example one refused by the approval policy) carries no result.
+func codexMCPToolOutput(item *codexItem) string {
+	if item.Result == nil && item.Error != nil {
+		return item.Error.Message
+	}
+	return codexMCPToolResultContent(item.Result)
 }
 
 func codexMCPToolResultContent(result any) string {
@@ -1161,6 +1177,7 @@ type codexSessionPayload struct {
 	CallID    string                 `json:"call_id,omitempty"`
 	Output    string                 `json:"output,omitempty"`
 	Info      *codexSessionTokenInfo `json:"info,omitempty"`
+	Item      json.RawMessage        `json:"item,omitempty"`
 }
 
 type codexSessionContent struct {
@@ -1307,8 +1324,45 @@ func applyCodexSessionEventMsg(payload codexSessionPayload, currentTurn int) (ms
 			inputTokens = codexUsageInputTotal(*payload.Info.TotalTokenUsage)
 			outputTokens = payload.Info.TotalTokenUsage.OutputTokens
 		}
+	case codexItemCompleted:
+		msgs = codexSessionMCPToolCallMessages(payload.Item, currentTurn)
 	}
 	return msgs, finalMsg, inputTokens, outputTokens
+}
+
+// codexSessionMCPToolCallMessages reads an MCP call from an item_completed
+// event. Newer Codex CLIs call MCP tools from inside their code tool, so the
+// session file has no function_call for them; this event is the only record.
+// Other item types are skipped, including ones whose fields do not fit codexItem.
+func codexSessionMCPToolCallMessages(raw json.RawMessage, currentTurn int) []transcript.Message {
+	if len(raw) == 0 {
+		return nil
+	}
+	var item codexItem
+	if err := json.Unmarshal(raw, &item); err != nil || item.Type != codexSessionMCPToolCall {
+		return nil
+	}
+	turn := max(currentTurn, 1)
+	return []transcript.Message{
+		{
+			Role: transcript.RoleToolCall,
+			ToolCall: &transcript.ToolCallInfo{
+				ID:        item.ID,
+				Name:      codexMCPToolName(item.Server, item.Tool),
+				Arguments: item.Arguments,
+			},
+			Turn: turn,
+		},
+		{
+			Role: transcript.RoleToolResult,
+			ToolResult: &transcript.ToolResultInfo{
+				CallID:  item.ID,
+				Status:  codexMCPToolResultStatus(item.Status),
+				Content: codexMCPToolOutput(&item),
+			},
+			Turn: turn,
+		},
+	}
 }
 
 func codexUsageInputTotal(u codexUsage) int {
