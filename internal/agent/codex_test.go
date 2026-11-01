@@ -855,8 +855,38 @@ func TestParseCodexSessionFile_NormalizesDirectFunctionCalls(t *testing.T) {
 	if call == nil || call.ID != "call_9" || call.Name != codexCommandToolName || call.Arguments["command"] != "/bin/zsh -lc ls" {
 		t.Fatalf("trans[1]: expected the direct call in the stream's command_execution form, got %+v", trans[1])
 	}
-	if trans[2].ToolResult == nil || trans[2].ToolResult.CallID != "call_9" || trans[2].ToolResult.Status != testStatusError {
-		t.Fatalf("trans[2]: expected the function_call_output with error status, got %+v", trans[2])
+	if trans[2].ToolResult == nil || trans[2].ToolResult.CallID != "call_9" || trans[2].ToolResult.Status != testStatusError ||
+		trans[2].ToolResult.Content != "Process exited with code 1\nOutput:\nboom\n" {
+		t.Fatalf("trans[2]: expected the function_call_output content with error status, got %+v", trans[2])
+	}
+}
+
+// A direct call whose item failed without an exit code stays failed even when
+// its function_call_output carries no exit-code marker, in either line order.
+func TestParseCodexSessionFile_DirectCallItemFailureWins(t *testing.T) {
+	t.Parallel()
+
+	call := `{"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"./run.sh\"}","call_id":"call_5"}}`
+	item := `{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"call_5","command":["/bin/zsh","-lc","./run.sh"],"exit_code":null,"aggregated_output":"","status":"failed"}}}`
+	output := `{"type":"response_item","payload":{"type":"function_call_output","call_id":"call_5","output":"exec failed: sandbox denied"}}`
+	for name, lines := range map[string][]string{
+		"item before output": {call, item, output},
+		"output before item": {call, output, item},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+			if err := os.WriteFile(sessionPath, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
+				t.Fatalf("write session file: %v", err)
+			}
+			trans := parseCodexSessionFile(sessionPath).transcript
+			if len(trans) != 2 || trans[1].ToolResult == nil {
+				t.Fatalf("expected one call and one result, got %+v", trans)
+			}
+			if got := trans[1].ToolResult; got.Status != toolStatusError || got.Content != "exec failed: sandbox denied" {
+				t.Fatalf("result = %+v, want error status with the function_call_output content", got)
+			}
+		})
 	}
 }
 

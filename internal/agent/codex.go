@@ -1199,6 +1199,11 @@ type codexSessionParseResult struct {
 	// transcript index. Codex also writes an item_completed event for a direct
 	// exec_command call, under the same ID, after the function_call.
 	functionCallIDs map[string]int
+	// functionResultIDs maps a function_call_output call ID to its transcript
+	// index, and failedItemIDs holds direct calls whose item reported failure
+	// before their output arrived. The item and the output come in either order.
+	functionResultIDs map[string]int
+	failedItemIDs     map[string]struct{}
 }
 
 // codexSessionItem is an item_completed payload. In the session file a
@@ -1259,12 +1264,7 @@ func applyCodexSessionFileEvent(parsed *codexSessionParseResult, currentTurn *in
 			parsed.finalMsg = finalMsg
 		}
 		*currentTurn = turn
-		if event.Payload.Type == codexFnCall && event.Payload.CallID != "" && len(messages) == 1 {
-			if parsed.functionCallIDs == nil {
-				parsed.functionCallIDs = make(map[string]int)
-			}
-			parsed.functionCallIDs[event.Payload.CallID] = len(parsed.transcript) - 1
-		}
+		recordCodexSessionFunctionMessage(parsed, *event.Payload, len(messages))
 	case "event_msg":
 		if event.Payload.Type == codexItemCompleted {
 			applyCodexSessionItem(parsed, event.Payload.Item, *currentTurn)
@@ -1371,6 +1371,9 @@ func applyCodexSessionItem(parsed *codexSessionParseResult, raw json.RawMessage,
 	}
 	if idx, recorded := parsed.functionCallIDs[call.ID]; recorded {
 		parsed.transcript[idx].ToolCall = &call
+		if result.Status == toolStatusError {
+			markCodexSessionCallFailed(parsed, call.ID)
+		}
 		return
 	}
 	turn := max(currentTurn, 1)
@@ -1378,6 +1381,43 @@ func applyCodexSessionItem(parsed *codexSessionParseResult, raw json.RawMessage,
 		transcript.Message{Role: transcript.RoleToolCall, ToolCall: &call, Turn: turn},
 		transcript.Message{Role: transcript.RoleToolResult, ToolResult: &result, Turn: turn},
 	)
+}
+
+// recordCodexSessionFunctionMessage indexes a function_call or its output so a
+// later item for the same direct call can be merged into it.
+func recordCodexSessionFunctionMessage(parsed *codexSessionParseResult, payload codexSessionPayload, appended int) {
+	if payload.CallID == "" || appended != 1 {
+		return
+	}
+	idx := len(parsed.transcript) - 1
+	switch payload.Type {
+	case codexFnCall:
+		if parsed.functionCallIDs == nil {
+			parsed.functionCallIDs = make(map[string]int)
+		}
+		parsed.functionCallIDs[payload.CallID] = idx
+	case codexFnCallOut:
+		if parsed.functionResultIDs == nil {
+			parsed.functionResultIDs = make(map[string]int)
+		}
+		parsed.functionResultIDs[payload.CallID] = idx
+		if _, failed := parsed.failedItemIDs[payload.CallID]; failed {
+			parsed.transcript[idx].ToolResult.Status = toolStatusError
+		}
+	}
+}
+
+// markCodexSessionCallFailed marks a direct call's result as an error, now if
+// its function_call_output is already recorded, or when it arrives.
+func markCodexSessionCallFailed(parsed *codexSessionParseResult, callID string) {
+	if idx, ok := parsed.functionResultIDs[callID]; ok {
+		parsed.transcript[idx].ToolResult.Status = toolStatusError
+		return
+	}
+	if parsed.failedItemIDs == nil {
+		parsed.failedItemIDs = make(map[string]struct{})
+	}
+	parsed.failedItemIDs[callID] = struct{}{}
 }
 
 // codexSessionItemCall converts an McpToolCall or CommandExecution item into
