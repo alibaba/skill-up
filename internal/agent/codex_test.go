@@ -1343,6 +1343,9 @@ func TestCodexRun_ApprovesOnlyThisCasesMCPServers(t *testing.T) {
 
 	for i, tc := range cases {
 		runCmd := codexRunCommand(t, runtimes[i])
+		if !strings.Contains(runCmd, codexProcessSandbox) || strings.Contains(runCmd, codexBypassSandbox) {
+			t.Errorf("%s: approval must keep the workspace-write sandbox: %s", tc.name, runCmd)
+		}
 		for _, name := range tc.want {
 			if !strings.Contains(runCmd, codexApprovalFlag(name)) {
 				t.Errorf("%s: missing approval for %q: %s", tc.name, name, runCmd)
@@ -1351,6 +1354,50 @@ func TestCodexRun_ApprovesOnlyThisCasesMCPServers(t *testing.T) {
 		for _, name := range tc.notWant {
 			if strings.Contains(runCmd, "mcp_servers."+name+".") {
 				t.Errorf("%s: unexpected approval for %q: %s", tc.name, name, runCmd)
+			}
+		}
+	}
+}
+
+// A reused workspace runs its cases one after another; each install replaces
+// the approved set instead of adding to it.
+func TestCodexRun_ReinstallReplacesApprovedMCPServers(t *testing.T) {
+	t.Parallel()
+
+	rt := &codexTestRuntime{
+		workspace: t.TempDir(),
+		execResult: runtime.ExecResult{Stdout: `{"type":"thread.started","thread_id":"thread-123"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"OK"}}`, ExitCode: 0},
+	}
+	ag := NewCodexAgent(Config{})
+	for _, step := range []struct {
+		install []string
+		want    []string
+		notWant []string
+	}{
+		{install: []string{"shop"}, want: []string{"shop"}},
+		{install: []string{"docs"}, want: []string{"docs"}, notWant: []string{"shop"}},
+		{notWant: []string{"shop", "docs"}},
+	} {
+		servers := make([]runtime.MCPServerConfig, 0, len(step.install))
+		for _, name := range step.install {
+			servers = append(servers, runtime.MCPServerConfig{Name: name, Transport: "stdio", Command: "node", Args: []string{name + ".js"}})
+		}
+		if err := ag.InstallMCP(context.Background(), rt, runtime.MCPConfig{Servers: servers}); err != nil {
+			t.Fatalf("InstallMCP(%v) failed: %v", step.install, err)
+		}
+		if _, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{Role: transcript.RoleUser, Content: "hi", Turn: 1}}); err != nil {
+			t.Fatalf("Run after installing %v failed: %v", step.install, err)
+		}
+		runCmd := codexRunCommand(t, rt)
+		for _, name := range step.want {
+			if !strings.Contains(runCmd, codexApprovalFlag(name)) {
+				t.Fatalf("after installing %v: missing approval for %q: %s", step.install, name, runCmd)
+			}
+		}
+		for _, name := range step.notWant {
+			if strings.Contains(runCmd, "mcp_servers."+name+".") {
+				t.Fatalf("after installing %v: stale approval for %q: %s", step.install, name, runCmd)
 			}
 		}
 	}
