@@ -49,6 +49,7 @@ const (
 	codexAgentMsg               = "agent_message"
 	codexFnCall                 = "function_call"
 	codexFnCallOut              = "function_call_output"
+	codexItemCompleted          = "item_completed"
 	codexTokenCount             = "token_count"
 	codexStdoutArtifactPath     = "stdout.json"
 	codexRunArtifactPrefix      = "skill-up-codex."
@@ -1161,6 +1162,19 @@ type codexSessionPayload struct {
 	CallID    string                 `json:"call_id,omitempty"`
 	Output    string                 `json:"output,omitempty"`
 	Info      *codexSessionTokenInfo `json:"info,omitempty"`
+	Item      *codexSessionTurnItem  `json:"item,omitempty"`
+}
+
+// codexSessionTurnItem is the nested TurnItem on item_completed event_msg
+// payloads (openai/codex protocol EventMsg + items.TurnItem).
+type codexSessionTurnItem struct {
+	Type      string         `json:"type,omitempty"`
+	ID        string         `json:"id,omitempty"`
+	Server    string         `json:"server,omitempty"`
+	Tool      string         `json:"tool,omitempty"`
+	Arguments map[string]any `json:"arguments,omitempty"`
+	Status    string         `json:"status,omitempty"`
+	Result    any            `json:"result,omitempty"`
 }
 
 type codexSessionContent struct {
@@ -1307,8 +1321,56 @@ func applyCodexSessionEventMsg(payload codexSessionPayload, currentTurn int) (ms
 			inputTokens = codexUsageInputTotal(*payload.Info.TotalTokenUsage)
 			outputTokens = payload.Info.TotalTokenUsage.OutputTokens
 		}
+	case codexItemCompleted:
+		msgs = codexSessionMCPToolCallCompletedMessages(payload.Item, currentTurn)
 	}
 	return msgs, finalMsg, inputTokens, outputTokens
+}
+
+func codexSessionMCPToolCallCompletedMessages(item *codexSessionTurnItem, turn int) []transcript.Message {
+	call := codexSessionMCPToolCallMessage(item, turn)
+	if call == nil {
+		return nil
+	}
+	return []transcript.Message{
+		*call,
+		{
+			Role: transcript.RoleToolResult,
+			ToolResult: &transcript.ToolResultInfo{
+				CallID:  item.ID,
+				Status:  codexMCPToolResultStatus(item.Status),
+				Content: codexMCPToolResultContent(item.Result),
+			},
+			Turn: call.Turn,
+		},
+	}
+}
+
+func codexSessionMCPToolCallMessage(item *codexSessionTurnItem, turn int) *transcript.Message {
+	if item == nil || !codexSessionItemIsMCPToolCall(item.Type) {
+		return nil
+	}
+	if turn == 0 {
+		turn = 1
+	}
+	return &transcript.Message{
+		Role: transcript.RoleToolCall,
+		ToolCall: &transcript.ToolCallInfo{
+			ID:        item.ID,
+			Name:      codexMCPToolName(item.Server, item.Tool),
+			Arguments: item.Arguments,
+		},
+		Turn: turn,
+	}
+}
+
+func codexSessionItemIsMCPToolCall(itemType string) bool {
+	switch itemType {
+	case "McpToolCall", "mcpToolCall", "mcp_tool_call":
+		return true
+	default:
+		return false
+	}
 }
 
 func codexUsageInputTotal(u codexUsage) int {
