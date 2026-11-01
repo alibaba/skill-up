@@ -10,12 +10,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alibaba/skill-up/internal/credential"
@@ -29,7 +32,14 @@ import (
 // CodexAgent implements Agent for codex CLI.
 type CodexAgent struct {
 	CLIAgent
+
+	mcpMu      sync.Mutex
+	mcpServers map[string]struct{}
 }
+
+// codexConfigKeyPattern matches the server names a dotted `-c mcp_servers.<name>...`
+// path can address. Codex fails to load its config for any other name.
+var codexConfigKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 const (
 	codexEngineName     = "codex"
@@ -143,7 +153,43 @@ func (a *CodexAgent) InstallMCP(ctx context.Context, rt Runtime, mcpCfg runtime.
 	if err := ensureNodeRuntime(ctx, rt, codexEngineName, ExecOptions{}); err != nil {
 		return err
 	}
-	return installMCPServers(ctx, rt, mcpCfg, buildCodexMCPInstallCmd)
+	if err := installMCPServers(ctx, rt, mcpCfg, buildCodexMCPInstallCmd); err != nil {
+		return err
+	}
+	a.rememberMCPServers(ctx, mcpCfg.Servers)
+	return nil
+}
+
+func (a *CodexAgent) rememberMCPServers(ctx context.Context, servers []runtime.MCPServerConfig) {
+	a.mcpMu.Lock()
+	defer a.mcpMu.Unlock()
+	for _, server := range servers {
+		if !codexConfigKeyPattern.MatchString(server.Name) {
+			logging.WarnContextf(ctx, "CodexAgent: cannot auto-approve MCP server %q (name must match %s); Codex may reject its tool calls under --sandbox workspace-write", server.Name, codexConfigKeyPattern)
+			continue
+		}
+		if a.mcpServers == nil {
+			a.mcpServers = make(map[string]struct{})
+		}
+		a.mcpServers[server.Name] = struct{}{}
+	}
+}
+
+// mcpApprovalFlags approves tool calls to the MCP servers skill-up installed.
+// codex exec runs with approval policy "never", so under --sandbox
+// workspace-write Codex rejects every MCP call that needs approval. Only these
+// servers are approved, not other servers in the user's Codex config.
+func (a *CodexAgent) mcpApprovalFlags() string {
+	a.mcpMu.Lock()
+	names := slices.Sorted(maps.Keys(a.mcpServers))
+	a.mcpMu.Unlock()
+
+	var flags strings.Builder
+	for _, name := range names {
+		flags.WriteString(" -c ")
+		flags.WriteString(shellQuote("mcp_servers." + name + `.default_tools_approval_mode="approve"`))
+	}
+	return flags.String()
 }
 
 func buildCodexMCPInstallCmd(server runtime.MCPServerConfig) (string, error) {
@@ -362,7 +408,7 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 	// (e.g. CI containers that block Landlock syscalls).
 	sandboxFlag := codexBypassSandbox
 	if rt.RequiresProcessSandbox() && !EngineKwargBool(a.Cfg.Kwargs, KwargBypassSandbox) {
-		sandboxFlag = codexProcessSandbox
+		sandboxFlag = codexProcessSandbox + a.mcpApprovalFlags()
 	}
 	envVars := a.credentialEnvVars(credential.EnvOpenAIAPIKey, credential.EnvOpenAIBaseURL)
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))

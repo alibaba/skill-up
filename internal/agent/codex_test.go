@@ -1285,6 +1285,68 @@ func TestCodexSessionLookupScript_HonoursCodexHome(t *testing.T) {
 	}
 }
 
+func TestCodexRun_ApprovesInstalledMCPServersUnderProcessSandbox(t *testing.T) {
+	t.Parallel()
+
+	const approveShop = `-c 'mcp_servers.shop.default_tools_approval_mode="approve"'`
+	const approveDocs = `-c 'mcp_servers.docs-v2_x.default_tools_approval_mode="approve"'`
+	mcpCfg := runtime.MCPConfig{Servers: []runtime.MCPServerConfig{
+		{Name: "shop", Transport: "stdio", Command: "node", Args: []string{"shop.js"}},
+		{Name: "docs-v2_x", Transport: "stdio", Command: "node", Args: []string{"docs.js"}},
+		{Name: "bad.name", Transport: "stdio", Command: "node", Args: []string{"bad.js"}},
+	}}
+	stdout := `{"type":"thread.started","thread_id":"thread-123"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"OK"}}`
+
+	cases := []struct {
+		name        string
+		workspace   string
+		kwargs      map[string]string
+		installMCP  bool
+		wantApprove bool
+	}{
+		{name: "none runtime approves installed servers", workspace: t.TempDir(), installMCP: true, wantApprove: true},
+		{name: "none runtime without MCP servers adds no approval", workspace: t.TempDir()},
+		{name: "bypass_sandbox already skips approvals", workspace: t.TempDir(), kwargs: map[string]string{KwargBypassSandbox: "true"}, installMCP: true},
+		{name: "opensandbox already bypasses", workspace: "opensandbox", installMCP: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rt := &codexTestRuntime{
+				workspace:  tc.workspace,
+				execResult: runtime.ExecResult{Stdout: stdout, ExitCode: 0},
+			}
+			ag := NewCodexAgent(Config{Kwargs: tc.kwargs})
+			if tc.installMCP {
+				if err := ag.InstallMCP(context.Background(), rt, mcpCfg); err != nil {
+					t.Fatalf("InstallMCP failed: %v", err)
+				}
+			}
+			if _, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{
+				Role:    transcript.RoleUser,
+				Content: "hi",
+				Turn:    1,
+			}}); err != nil {
+				t.Fatalf("Run failed: %v", err)
+			}
+			runCmd := rt.commands[len(rt.commands)-1]
+			for _, cmd := range rt.commands {
+				if strings.Contains(cmd, "codex exec") {
+					runCmd = cmd
+				}
+			}
+			gotShop, gotDocs := strings.Contains(runCmd, approveShop), strings.Contains(runCmd, approveDocs)
+			if gotShop != tc.wantApprove || gotDocs != tc.wantApprove {
+				t.Fatalf("approval flags present = %v/%v, want %v; command = %s", gotShop, gotDocs, tc.wantApprove, runCmd)
+			}
+			if strings.Contains(runCmd, "bad.name") {
+				t.Fatalf("server name a -c path cannot address leaked into the command: %s", runCmd)
+			}
+		})
+	}
+}
+
 func TestCodexRun_KeepsStreamFinalMessageWhenSessionHasNoFinalMessage(t *testing.T) {
 	t.Parallel()
 
