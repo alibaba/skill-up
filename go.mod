@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/alibaba/OpenSandbox/sdks/sandbox/go v1.1.1
 	github.com/anthropics/anthropic-sdk-go v1.82.0
-	github.com/bmatcuk/doublestar/v4 v4.10.3
+	github.com/bmatcuk/doublestar/v4 v4.10.4
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/openai/openai-go/v3 v3.82.0
