@@ -1136,18 +1136,6 @@ func TestValidator_ReportsUnknownTopLevelKeys(t *testing.T) {
 		}
 	})
 
-	t.Run("repeated merged alias is reported once", func(t *testing.T) {
-		t.Parallel()
-		content := "id: typo\ninput: &in\n  prompt: hi\n<<: [*in, *in]\n"
-		cfg, err := writeUnknownKeySkill(t, validEval, content).LoadCaseConfig("evals/cases/typo.yaml")
-		if err != nil {
-			t.Fatalf("LoadCaseConfig: %v", err)
-		}
-		if len(cfg.UnknownKeys) != 1 {
-			t.Fatalf("unknown keys = %q, want one entry for the twice-merged alias", cfg.UnknownKeys)
-		}
-	})
-
 	t.Run("valid merge passes", func(t *testing.T) {
 		t.Parallel()
 		cfg, err := writeUnknownKeySkill(t, validEval, validCase+"<<: {title: from merge}\n").LoadCaseConfig("evals/cases/typo.yaml")
@@ -1161,4 +1149,18 @@ func TestValidator_ReportsUnknownTopLevelKeys(t *testing.T) {
 			t.Fatalf("ValidateCaseConfig with a valid merge: %v", err)
 		}
 	})
+}
+
+func TestLoader_RepeatedMergedAliasReportedOnce(t *testing.T) {
+	t.Parallel()
+
+	const evalContent = "schema_version: v1alpha1\nenvironment:\n  type: none\nengine:\n  name: claude_code\ncases:\n  files: [evals/cases/typo.yaml]\n"
+	content := "id: typo\ninput: &in\n  prompt: hi\n<<: [*in, *in]\n"
+	cfg, err := writeUnknownKeySkill(t, evalContent, content).LoadCaseConfig("evals/cases/typo.yaml")
+	if err != nil {
+		t.Fatalf("LoadCaseConfig: %v", err)
+	}
+	if len(cfg.UnknownKeys) != 1 {
+		t.Fatalf("unknown keys = %q, want one entry for the twice-merged alias", cfg.UnknownKeys)
+	}
 }
