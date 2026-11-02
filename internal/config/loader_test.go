@@ -1086,41 +1086,67 @@ func writeUnknownKeySkill(t *testing.T, evalContent, caseContent string) *Loader
 	return NewLoader(filepath.Join(skillDir, "evals", "eval.yaml"))
 }
 
-// A misspelled top-level block must fail loading; before, it was dropped and the
-// case ran with no judge and passed with zero checks (#365).
-func TestLoader_RejectsUnknownTopLevelKeys(t *testing.T) {
+// A misspelled top-level block must fail validation; before, it was dropped and
+// the case ran with no judge and passed with zero checks (#365).
+func TestValidator_ReportsUnknownTopLevelKeys(t *testing.T) {
 	t.Parallel()
 
 	const validEval = "schema_version: v1alpha1\nenvironment:\n  type: none\nengine:\n  name: claude_code\ncases:\n  files: [evals/cases/typo.yaml]\n"
 	const validCase = "id: typo\ninput:\n  prompt: hi\n"
 
+	caseErr := func(t *testing.T, caseContent string) error {
+		t.Helper()
+		cfg, err := writeUnknownKeySkill(t, validEval, caseContent).LoadCaseConfig("evals/cases/typo.yaml")
+		if err != nil {
+			t.Fatalf("LoadCaseConfig: %v", err)
+		}
+		return NewValidator().ValidateCaseConfig(cfg)
+	}
+
 	t.Run("case file", func(t *testing.T) {
 		t.Parallel()
-		loader := writeUnknownKeySkill(t, validEval, validCase+"judgez:\n  type: rule_based\n")
-		_, err := loader.LoadCaseConfig("evals/cases/typo.yaml")
-		if err == nil || !strings.Contains(err.Error(), `line 4: unknown field "judgez"`) {
-			t.Fatalf("LoadCaseConfig error = %v, want line 4 unknown field \"judgez\"", err)
+		if err := caseErr(t, validCase+"judgez:\n  type: rule_based\n"); err == nil || !strings.Contains(err.Error(), `unknown field "judgez" (line 4)`) {
+			t.Fatalf("ValidateCaseConfig error = %v, want unknown field \"judgez\" (line 4)", err)
 		}
 	})
 
 	t.Run("eval.yaml", func(t *testing.T) {
 		t.Parallel()
-		loader := writeUnknownKeySkill(t, validEval+"judgez:\n  type: rule_based\n", validCase)
-		_, err := loader.LoadEvalConfig()
-		if err == nil || !strings.Contains(err.Error(), `unknown field "judgez"`) {
-			t.Fatalf("LoadEvalConfig error = %v, want unknown field \"judgez\"", err)
+		cfg, err := writeUnknownKeySkill(t, validEval+"judgez:\n  type: rule_based\n", validCase).LoadEvalConfig()
+		if err != nil {
+			t.Fatalf("LoadEvalConfig: %v", err)
+		}
+		if err := NewValidator().ValidateEvalConfig(cfg); err == nil || !strings.Contains(err.Error(), `unknown field "judgez"`) {
+			t.Fatalf("ValidateEvalConfig error = %v, want unknown field \"judgez\"", err)
 		}
 	})
 
-	t.Run("merge key still loads", func(t *testing.T) {
+	t.Run("typo inside a merge", func(t *testing.T) {
 		t.Parallel()
-		loader := writeUnknownKeySkill(t, validEval, validCase+"<<: {title: from merge}\n")
-		cfg, err := loader.LoadCaseConfig("evals/cases/typo.yaml")
+		if err := caseErr(t, validCase+"<<: {judgez: []}\n"); err == nil || !strings.Contains(err.Error(), `unknown field "judgez"`) {
+			t.Fatalf("ValidateCaseConfig error = %v, want unknown field \"judgez\" from the merge", err)
+		}
+	})
+
+	t.Run("typo inside a merged alias", func(t *testing.T) {
+		t.Parallel()
+		content := "id: typo\ninput: &in\n  prompt: hi\n<<: [*in]\n"
+		if err := caseErr(t, content); err == nil || !strings.Contains(err.Error(), `unknown field "prompt"`) {
+			t.Fatalf("ValidateCaseConfig error = %v, want unknown field \"prompt\" merged from the alias", err)
+		}
+	})
+
+	t.Run("valid merge passes", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := writeUnknownKeySkill(t, validEval, validCase+"<<: {title: from merge}\n").LoadCaseConfig("evals/cases/typo.yaml")
 		if err != nil {
 			t.Fatalf("LoadCaseConfig with a merge key: %v", err)
 		}
 		if cfg.Title != "from merge" {
 			t.Fatalf("title = %q, want the merged value", cfg.Title)
+		}
+		if err := NewValidator().ValidateCaseConfig(cfg); err != nil {
+			t.Fatalf("ValidateCaseConfig with a valid merge: %v", err)
 		}
 	})
 }

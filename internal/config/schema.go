@@ -14,16 +14,19 @@ import (
 
 // EvalConfig is the root document loaded from evals/eval.yaml (v1alpha1).
 type EvalConfig struct {
-	SchemaVersion string             `yaml:"schema_version"`
-	Environment   Environment        `yaml:"environment"`
-	MCP           MCPConfig          `yaml:"mcp"`
-	Skills        []SkillRef         `yaml:"skills"`
-	Engine        EngineConfig       `yaml:"engine"`
-	Cases         CasesConfig        `yaml:"cases"`
-	Judge         JudgeConfig        `yaml:"judge"`
-	Judges        *[]JudgeConfig     `yaml:"judges,omitempty"`
-	JudgeSet      bool               `yaml:"-" json:"-"`
-	JudgesSet     bool               `yaml:"-" json:"-"`
+	SchemaVersion string         `yaml:"schema_version"`
+	Environment   Environment    `yaml:"environment"`
+	MCP           MCPConfig      `yaml:"mcp"`
+	Skills        []SkillRef     `yaml:"skills"`
+	Engine        EngineConfig   `yaml:"engine"`
+	Cases         CasesConfig    `yaml:"cases"`
+	Judge         JudgeConfig    `yaml:"judge"`
+	Judges        *[]JudgeConfig `yaml:"judges,omitempty"`
+	JudgeSet      bool           `yaml:"-" json:"-"`
+	JudgesSet     bool           `yaml:"-" json:"-"`
+	// UnknownKeys holds top-level keys that match no field, reported by the
+	// validator so `run` can skip them for cases its filters leave out.
+	UnknownKeys   []string           `yaml:"-" json:"-"`
 	Benchmark     BenchmarkConfig    `yaml:"benchmark"`
 	Report        ReportConfig       `yaml:"report"`
 	UserSimulator UserSimulatorModel `yaml:"user_simulator,omitempty"`
@@ -36,10 +39,8 @@ func (e *EvalConfig) UnmarshalYAML(node *yaml.Node) error {
 	if err := node.Decode(&decoded); err != nil {
 		return err
 	}
-	if err := rejectUnknownKeys(node, reflect.TypeFor[plain]()); err != nil {
-		return err
-	}
 	*e = EvalConfig(decoded)
+	e.UnknownKeys = unknownTopLevelKeys(node, reflect.TypeFor[plain]())
 	e.JudgeSet, e.JudgesSet = judgeFieldPresence(node)
 	return nil
 }
@@ -311,18 +312,20 @@ type ReportConfig struct {
 
 // CaseConfig is a single test case loaded from the case files listed in evals/eval.yaml.
 type CaseConfig struct {
-	ID            string                 `yaml:"id"`
-	Title         string                 `yaml:"title"`
-	Description   string                 `yaml:"description"`
-	Tag           string                 `yaml:"tag"` // trigger_test, functional_test
-	Input         Input                  `yaml:"input"`
-	Context       Context                `yaml:"context"`
-	Constraints   Constraints            `yaml:"constraints"`
-	Expect        Expect                 `yaml:"expect"`
-	Judge         JudgeConfig            `yaml:"judge,omitempty"`
-	Judges        *[]JudgeConfig         `yaml:"judges,omitempty"`
-	JudgeSet      bool                   `yaml:"-" json:"-"`
-	JudgesSet     bool                   `yaml:"-" json:"-"`
+	ID          string         `yaml:"id"`
+	Title       string         `yaml:"title"`
+	Description string         `yaml:"description"`
+	Tag         string         `yaml:"tag"` // trigger_test, functional_test
+	Input       Input          `yaml:"input"`
+	Context     Context        `yaml:"context"`
+	Constraints Constraints    `yaml:"constraints"`
+	Expect      Expect         `yaml:"expect"`
+	Judge       JudgeConfig    `yaml:"judge,omitempty"`
+	Judges      *[]JudgeConfig `yaml:"judges,omitempty"`
+	JudgeSet    bool           `yaml:"-" json:"-"`
+	JudgesSet   bool           `yaml:"-" json:"-"`
+	// UnknownKeys holds top-level keys that match no field; see EvalConfig.
+	UnknownKeys   []string               `yaml:"-" json:"-"`
 	UserSimulator *UserSimulatorScenario `yaml:"user_simulator,omitempty"`
 	// MCP declares case-level MCP server overrides. Servers are merged with
 	// eval-level mcp.servers by name: a same-name entry replaces the whole
@@ -351,30 +354,58 @@ func (c *CaseConfig) UnmarshalYAML(node *yaml.Node) error {
 	if err := node.Decode(&decoded); err != nil {
 		return err
 	}
-	if err := rejectUnknownKeys(node, reflect.TypeFor[plain]()); err != nil {
-		return err
-	}
 	*c = CaseConfig(decoded)
+	c.UnknownKeys = unknownTopLevelKeys(node, reflect.TypeFor[plain]())
 	c.JudgeSet, c.JudgesSet = judgeFieldPresence(node)
 	return nil
 }
 
-// rejectUnknownKeys reports a top-level key that matches no field of t, so a
-// misspelled block such as `judgez:` fails loading instead of being dropped.
-// It is needed because node.Decode inside a custom UnmarshalYAML does not
-// inherit a caller's Decoder.KnownFields(true). Nested keys are not checked.
-func rejectUnknownKeys(node *yaml.Node, t reflect.Type) error {
-	if node.Kind != yaml.MappingNode {
-		return nil
-	}
+// unknownTopLevelKeys lists top-level keys of node that match no field of t,
+// including keys brought in by `<<` merges, so a misspelled block such as
+// `judgez:` is reported instead of dropped. It is needed because node.Decode
+// inside a custom UnmarshalYAML does not inherit a caller's
+// Decoder.KnownFields(true). Nested keys are not checked.
+func unknownTopLevelKeys(node *yaml.Node, t reflect.Type) []string {
 	known := map[string]bool{}
 	collectYAMLKeys(t, known)
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := node.Content[i]
-		if key.Tag == "!!merge" || known[key.Value] {
-			continue
+	var unknown []string
+	var walk func(*yaml.Node)
+	walk = func(m *yaml.Node) {
+		if m.Kind != yaml.MappingNode {
+			return
 		}
-		return fmt.Errorf("line %d: unknown field %q", key.Line, key.Value)
+		for i := 0; i+1 < len(m.Content); i += 2 {
+			key, value := m.Content[i], m.Content[i+1]
+			switch {
+			case key.Tag == "!!merge":
+				for _, src := range mergeSources(value) {
+					walk(src)
+				}
+			case !known[key.Value]:
+				unknown = append(unknown, fmt.Sprintf("unknown field %q (line %d)", key.Value, key.Line))
+			}
+		}
+	}
+	walk(node)
+	return unknown
+}
+
+// mergeSources returns the mappings a `<<` value merges in: a mapping, an
+// alias to one, or a sequence of those.
+func mergeSources(value *yaml.Node) []*yaml.Node {
+	switch value.Kind {
+	case yaml.MappingNode:
+		return []*yaml.Node{value}
+	case yaml.AliasNode:
+		if value.Alias != nil {
+			return mergeSources(value.Alias)
+		}
+	case yaml.SequenceNode:
+		var sources []*yaml.Node
+		for _, item := range value.Content {
+			sources = append(sources, mergeSources(item)...)
+		}
+		return sources
 	}
 	return nil
 }

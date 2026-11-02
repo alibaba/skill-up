@@ -293,6 +293,43 @@ func TestRunEvalValidatesOnlySelectedCases(t *testing.T) {
 	}
 }
 
+// An unknown top-level key in a filtered-out case must not block the run, but
+// it must fail validation once that case is selected (#365).
+func TestRunEvalReportsUnknownKeysOnlyForSelectedCases(t *testing.T) {
+	root := t.TempDir()
+	writeAutoModeSkill(t, root)
+	writeSmokeAndFullEval(t, root)
+	typo := "id: full\ninput:\n  prompt: Do full\njudgez:\n  type: rule_based\n"
+	if err := os.WriteFile(filepath.Join(root, "evals", "cases", "full.yaml"), []byte(typo), 0o600); err != nil {
+		t.Fatalf("failed to write full.yaml: %v", err)
+	}
+
+	dryRunCmd := func() *cobra.Command {
+		cmd := newRunPhaseTestCommand(t)
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		for name, val := range map[string]string{"dry-run": testFlagBoolTrue, runtimeFlagName: "none"} {
+			if err := cmd.Flags().Set(name, val); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return cmd
+	}
+
+	okCmd := dryRunCmd()
+	if err := okCmd.Flags().Set("include-case-name", "smoke"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := captureStdout(t, func() error { return runEval(okCmd, []string{root}) }); err != nil {
+		t.Fatalf("filtered run over the valid smoke case should succeed, got %v", err)
+	}
+
+	_, err := captureStdout(t, func() error { return runEval(dryRunCmd(), []string{root}) })
+	if err == nil || !strings.Contains(err.Error(), `unknown field "judgez"`) {
+		t.Fatalf("unfiltered run error = %v, want unknown field \"judgez\"", err)
+	}
+}
+
 func TestRunPhaseHelpers(t *testing.T) {
 	var out bytes.Buffer
 	observer := &uiProgressObserver{}
