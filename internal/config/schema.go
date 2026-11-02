@@ -366,28 +366,37 @@ func (c *CaseConfig) UnmarshalYAML(node *yaml.Node) error {
 // inside a custom UnmarshalYAML does not inherit a caller's
 // Decoder.KnownFields(true). Nested keys are not checked.
 func unknownTopLevelKeys(node *yaml.Node, t reflect.Type) []string {
-	known := map[string]bool{}
-	collectYAMLKeys(t, known)
-	var unknown []string
-	var walk func(*yaml.Node)
-	walk = func(m *yaml.Node) {
-		if m.Kind != yaml.MappingNode {
-			return
-		}
-		for i := 0; i+1 < len(m.Content); i += 2 {
-			key, value := m.Content[i], m.Content[i+1]
-			switch {
-			case key.Tag == "!!merge":
-				for _, src := range mergeSources(value) {
-					walk(src)
-				}
-			case !known[key.Value]:
-				unknown = append(unknown, fmt.Sprintf("unknown field %q (line %d)", key.Value, key.Line))
+	w := unknownKeyWalker{known: map[string]bool{}, visited: map[*yaml.Node]bool{}}
+	collectYAMLKeys(t, w.known)
+	w.walk(node)
+	return w.unknown
+}
+
+type unknownKeyWalker struct {
+	known   map[string]bool
+	visited map[*yaml.Node]bool
+	unknown []string
+}
+
+// walk records unknown keys of mapping m and of the mappings it merges in,
+// visiting each mapping once so a repeated alias is reported once.
+func (w *unknownKeyWalker) walk(m *yaml.Node) {
+	if m.Kind != yaml.MappingNode || w.visited[m] {
+		return
+	}
+	w.visited[m] = true
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		key, value := m.Content[i], m.Content[i+1]
+		if key.Tag == "!!merge" {
+			for _, src := range mergeSources(value) {
+				w.walk(src)
 			}
+			continue
+		}
+		if !w.known[key.Value] {
+			w.unknown = append(w.unknown, fmt.Sprintf("unknown field %q (line %d)", key.Value, key.Line))
 		}
 	}
-	walk(node)
-	return unknown
 }
 
 // mergeSources returns the mappings a `<<` value merges in: a mapping, an
