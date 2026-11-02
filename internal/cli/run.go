@@ -804,7 +804,12 @@ func loadRunInputs(ctx context.Context, cmd *cobra.Command, args []string) ([]*c
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		cases, evalCfg, loader, err := loadAutoModeEvaluation(ctx, autoRoot)
+		include, _ := cmd.Flags().GetStringArray("include-case-name")
+		exclude, _ := cmd.Flags().GetStringArray("exclude-case-name")
+		selected := func(caseID string) bool {
+			return len(filterCases([]*config.CaseConfig{{ID: caseID}}, include, exclude)) == 1
+		}
+		cases, evalCfg, loader, err := loadAutoModeEvaluation(ctx, autoRoot, selected)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -826,7 +831,7 @@ func loadRunInputs(ctx context.Context, cmd *cobra.Command, args []string) ([]*c
 }
 
 // loadAutoModeEvaluation handles the --auto mode for loading eval.yaml or evals.json.
-func loadAutoModeEvaluation(ctx context.Context, targetPath string) ([]*config.CaseConfig, *config.EvalConfig, *config.Loader, error) {
+func loadAutoModeEvaluation(ctx context.Context, targetPath string, selected func(caseID string) bool) ([]*config.CaseConfig, *config.EvalConfig, *config.Loader, error) {
 	evalsDir := filepath.Join(targetPath, "evals")
 	evalsJSONPath := filepath.Join(evalsDir, "evals.json")
 	evalYamlPath := filepath.Join(evalsDir, "eval.yaml")
@@ -838,7 +843,7 @@ func loadAutoModeEvaluation(ctx context.Context, targetPath string) ([]*config.C
 		return cases, evalCfg, loader, err
 	case fileExists(evalsJSONPath):
 		logging.InfoContextf(ctx, "Config: Auto-detected Anthropic evals.json at %s", evalsJSONPath)
-		cases, err := loadAnthropicEvals(evalsJSONPath)
+		cases, err := loadAnthropicEvals(evalsJSONPath, selected)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -916,8 +921,9 @@ func isRegularFile(pathname string) bool {
 	return err == nil && !info.IsDir()
 }
 
-// loadAnthropicEvals loads an Anthropic evals.json file and converts it to CaseConfigs.
-func loadAnthropicEvals(evalsJSONPath string) ([]*config.CaseConfig, error) {
+// loadAnthropicEvals loads an Anthropic evals.json file and converts it to
+// CaseConfigs, reading listed files only for cases that selected keeps.
+func loadAnthropicEvals(evalsJSONPath string, selected func(caseID string) bool) ([]*config.CaseConfig, error) {
 	data, err := os.ReadFile(evalsJSONPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read evals.json: %w", err)
@@ -928,17 +934,7 @@ func loadAnthropicEvals(evalsJSONPath string) ([]*config.CaseConfig, error) {
 		return nil, fmt.Errorf("failed to parse evals.json: %w", err)
 	}
 
-	skillDir := anthropicSkillRoot(evalsJSONPath)
-	cases := make([]*config.CaseConfig, 0, len(evalsData.Evals))
-	for _, eval := range evalsData.Evals {
-		caseCfg, err := convertEvalToCase(eval, evalsData.SkillName, skillDir)
-		if err != nil {
-			return nil, err
-		}
-		cases = append(cases, caseCfg)
-	}
-
-	return cases, nil
+	return convertAnthropicEvals(evalsData, anthropicSkillRoot(evalsJSONPath), selected)
 }
 
 func filterCases(cases []*config.CaseConfig, include, exclude []string) []*config.CaseConfig {

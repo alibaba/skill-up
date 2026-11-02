@@ -622,7 +622,7 @@ func TestLoadAnthropicEvals(t *testing.T) {
 		t.Fatalf("failed to close temp file: %v", err)
 	}
 
-	cases, err := loadAnthropicEvals(tmpFile.Name())
+	cases, err := loadAnthropicEvals(tmpFile.Name(), nil)
 	if err != nil {
 		t.Fatalf("loadAnthropicEvals failed: %v", err)
 	}
@@ -672,7 +672,7 @@ func TestLoadAutoModeEvaluation_EvalsJSONInstallsLocalSkill(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cases, evalCfg, loader, err := loadAutoModeEvaluation(t.Context(), root)
+	cases, evalCfg, loader, err := loadAutoModeEvaluation(t.Context(), root, nil)
 	if err != nil {
 		t.Fatalf("loadAutoModeEvaluation failed: %v", err)
 	}
@@ -698,7 +698,7 @@ func TestLoadAutoModeEvaluation_EvalsJSONReadsFilesFromSkillRoot(t *testing.T) {
 	writeSkillFile(t, root, "evals/files/data.csv", "a,b\n1,2\n")
 	writeSkillFile(t, root, "evals/evals.json", `{"skill_name":"test-skill","evals":[{"id":1,"prompt":"Summarize the csv","files":["evals/files/data.csv"],"expectations":["Mentions the csv"]}]}`)
 
-	cases, _, _, err := loadAutoModeEvaluation(t.Context(), root)
+	cases, _, _, err := loadAutoModeEvaluation(t.Context(), root, nil)
 	if err != nil {
 		t.Fatalf("loadAutoModeEvaluation failed: %v", err)
 	}
@@ -716,7 +716,7 @@ func TestLoadAutoModeEvaluation_PrefersEvalYAML(t *testing.T) {
 	writeAutoModeEvalYAML(t, root, "yaml-case")
 	writeAutoModeEvalsJSON(t, root)
 
-	cases, _, _, err := loadAutoModeEvaluation(t.Context(), root)
+	cases, _, _, err := loadAutoModeEvaluation(t.Context(), root, nil)
 	if err != nil {
 		t.Fatalf("loadAutoModeEvaluation failed: %v", err)
 	}
@@ -734,7 +734,7 @@ func TestLoadAutoModeEvaluation_FallsBackToEvalsJSON(t *testing.T) {
 	writeAutoModeSkill(t, root)
 	writeAutoModeEvalsJSON(t, root)
 
-	cases, _, _, err := loadAutoModeEvaluation(t.Context(), root)
+	cases, _, _, err := loadAutoModeEvaluation(t.Context(), root, nil)
 	if err != nil {
 		t.Fatalf("loadAutoModeEvaluation failed: %v", err)
 	}
@@ -1091,7 +1091,7 @@ func TestLoadAutoModeEvaluation_AddsLocalSkillWhenSkillFileExists(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	cases, evalCfg, loader, err := loadAutoModeEvaluation(t.Context(), root)
+	cases, evalCfg, loader, err := loadAutoModeEvaluation(t.Context(), root, nil)
 	if err != nil {
 		t.Fatalf("loadAutoModeEvaluation: %v", err)
 	}
@@ -1123,7 +1123,7 @@ func TestLoadAutoModeEvaluation_DoesNotAddLocalSkillWithoutSkillFile(t *testing.
 		t.Fatal(err)
 	}
 
-	cases, evalCfg, loader, err := loadAutoModeEvaluation(t.Context(), root)
+	cases, evalCfg, loader, err := loadAutoModeEvaluation(t.Context(), root, nil)
 	if err != nil {
 		t.Fatalf("loadAutoModeEvaluation: %v", err)
 	}

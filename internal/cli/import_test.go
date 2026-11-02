@@ -25,14 +25,7 @@ func TestConvertEvalToCase(t *testing.T) {
 		Expectations:   []string{"Expect 1", "Expect 2"},
 	}
 
-	skillDir := t.TempDir()
-	writeSkillFile(t, skillDir, "file1.txt", "alpha\n")
-	writeSkillFile(t, skillDir, "file2.go", "package two\n")
-
-	result, err := convertEvalToCase(eval, "test-skill", skillDir)
-	if err != nil {
-		t.Fatalf("convertEvalToCase: %v", err)
-	}
+	result := convertEvalToCase(eval, "test-skill")
 
 	if result.ID != "case-1" {
 		t.Errorf("expected ID 'case-1', got '%s'", result.ID)
@@ -50,8 +43,8 @@ func TestConvertEvalToCase(t *testing.T) {
 		t.Errorf("expected Input.Prompt 'Test prompt', got '%s'", result.Input.Prompt)
 	}
 
-	if got := result.Context.Files; len(got) != 2 || got["file1.txt"] != "alpha\n" || got["file2.go"] != "package two\n" {
-		t.Errorf("context files = %q, want the contents of file1.txt and file2.go", got)
+	if len(result.Context.Files) != 0 {
+		t.Errorf("expected no context files before they are read, got %d", len(result.Context.Files))
 	}
 
 	if result.Judge.Type != agentJudgeType {
@@ -74,10 +67,7 @@ func TestConvertEvalToCase_WithNoFiles(t *testing.T) {
 		Expectations:   []string{"Single expectation"},
 	}
 
-	result, err := convertEvalToCase(eval, "my-skill", t.TempDir())
-	if err != nil {
-		t.Fatalf("convertEvalToCase: %v", err)
-	}
+	result := convertEvalToCase(eval, "my-skill")
 
 	if result.ID != "case-42" {
 		t.Errorf("expected ID 'case-42', got '%s'", result.ID)
@@ -88,10 +78,35 @@ func TestConvertEvalToCase_WithNoFiles(t *testing.T) {
 	}
 }
 
-func TestConvertEvalToCase_RejectsUnreadableFiles(t *testing.T) {
+func TestConvertAnthropicEvals_ReadsFiles(t *testing.T) {
 	t.Parallel()
 
 	skillDir := t.TempDir()
+	writeSkillFile(t, skillDir, "file1.txt", "alpha\n")
+	writeSkillFile(t, skillDir, "dir/file2.go", "package two\n")
+	evals := anthropicEvals{SkillName: "s", Evals: []anthropicEval{{ID: 1, Prompt: "p", Files: []string{"file1.txt", "dir/file2.go"}}}}
+
+	cases, err := convertAnthropicEvals(evals, skillDir, nil)
+	if err != nil {
+		t.Fatalf("convertAnthropicEvals: %v", err)
+	}
+	if got := cases[0].Context.Files; len(got) != 2 || got["file1.txt"] != "alpha\n" || got["dir/file2.go"] != "package two\n" {
+		t.Errorf("context files = %q, want the contents of file1.txt and dir/file2.go", got)
+	}
+}
+
+func TestConvertAnthropicEvals_RejectsUnreadableFiles(t *testing.T) {
+	t.Parallel()
+
+	skillDir := t.TempDir()
+	outside := t.TempDir()
+	writeSkillFile(t, outside, "secret.txt", "outside\n")
+	if err := os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(skillDir, "file-link.txt")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(skillDir, "dir-link")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
 	for _, tc := range []struct {
 		file string
 		want string
@@ -99,11 +114,54 @@ func TestConvertEvalToCase_RejectsUnreadableFiles(t *testing.T) {
 		{file: "evals/files/missing.csv", want: "failed to read file"},
 		{file: "../outside.txt", want: "relative path inside the skill directory"},
 		{file: "/etc/hosts", want: "relative path inside the skill directory"},
+		{file: "file-link.txt", want: "failed to read file"},
+		{file: "dir-link/secret.txt", want: "failed to read file"},
 	} {
-		eval := anthropicEval{ID: 7, Prompt: "p", Files: []string{tc.file}}
-		if _, err := convertEvalToCase(eval, "s", skillDir); err == nil || !strings.Contains(err.Error(), tc.want) {
+		evals := anthropicEvals{SkillName: "s", Evals: []anthropicEval{{ID: 7, Prompt: "p", Files: []string{tc.file}}}}
+		if _, err := convertAnthropicEvals(evals, skillDir, nil); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("file %q: error = %v, want one containing %q", tc.file, err, tc.want)
 		}
+	}
+}
+
+// A case removed by the case-name filter must not fail the run because one of
+// its files is missing.
+func TestConvertAnthropicEvals_SkipsFilesOfUnselectedCases(t *testing.T) {
+	t.Parallel()
+
+	skillDir := t.TempDir()
+	writeSkillFile(t, skillDir, "ok.txt", "ok\n")
+	evals := anthropicEvals{SkillName: "s", Evals: []anthropicEval{
+		{ID: 1, Prompt: "p", Files: []string{"ok.txt"}},
+		{ID: 2, Prompt: "p", Files: []string{"missing.txt"}},
+	}}
+
+	keep := importedCaseID(1)
+	cases, err := convertAnthropicEvals(evals, skillDir, func(caseID string) bool { return caseID == keep })
+	if err != nil {
+		t.Fatalf("convertAnthropicEvals: %v", err)
+	}
+	if len(cases) != 1 || cases[0].ID != keep || cases[0].Context.Files["ok.txt"] != "ok\n" {
+		t.Fatalf("cases = %+v, want only case-1 with ok.txt read", cases)
+	}
+}
+
+// A missing file in any eval fails the import before any case file is written.
+func TestImportCmd_MissingFileWritesNothing(t *testing.T) {
+	t.Parallel()
+
+	skillDir := t.TempDir()
+	writeSkillFile(t, skillDir, "SKILL.md", "---\nname: s\n---\n")
+	writeSkillFile(t, skillDir, "evals/files/ok.txt", "ok\n")
+	writeSkillFile(t, skillDir, "evals/evals.json", `{"skill_name":"s","evals":[{"id":1,"prompt":"p","files":["evals/files/ok.txt"]},{"id":2,"prompt":"p","files":["evals/files/missing.txt"]}]}`)
+
+	cmd := newImportCmd()
+	cmd.SetArgs([]string{filepath.Join(skillDir, "evals", "evals.json")})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "missing.txt") {
+		t.Fatalf("import error = %v, want one naming missing.txt", err)
+	}
+	if _, err := os.Stat(filepath.Join(skillDir, "evals", "cases")); !os.IsNotExist(err) {
+		t.Fatalf("cases directory exists after a failed import (stat err %v)", err)
 	}
 }
 
@@ -212,10 +270,7 @@ func TestConvertEvalToCase_IDFormatting(t *testing.T) {
 
 	for _, tc := range tests {
 		eval := anthropicEval{ID: tc.id, Prompt: "p", ExpectedOutput: "e"}
-		result, err := convertEvalToCase(eval, "s", t.TempDir())
-		if err != nil {
-			t.Fatalf("convertEvalToCase: %v", err)
-		}
+		result := convertEvalToCase(eval, "s")
 		if result.ID != tc.expected {
 			t.Errorf("ID %d: expected '%s', got '%s'", tc.id, tc.expected, result.ID)
 		}

@@ -42,6 +42,13 @@ var importCmd = &cobra.Command{
 			return errors.New("evals.json missing required field: skill_name")
 		}
 
+		// Convert every eval, files included, before writing anything, so a
+		// missing file leaves earlier output untouched.
+		cases, err := convertAnthropicEvals(evalsData, anthropicSkillRoot(evalsPath), nil)
+		if err != nil {
+			return err
+		}
+
 		// Determine output directory
 		outputDir, _ := cmd.Flags().GetString("output")
 		if outputDir == "" {
@@ -52,14 +59,9 @@ var importCmd = &cobra.Command{
 			return fmt.Errorf("failed to create cases directory: %w", err)
 		}
 
-		// Convert each eval entry to a CaseConfig
-		skillDir := anthropicSkillRoot(evalsPath)
-		caseIDs := make([]string, 0, len(evalsData.Evals))
-		for _, eval := range evalsData.Evals {
-			caseCfg, err := convertEvalToCase(eval, evalsData.SkillName, skillDir)
-			if err != nil {
-				return err
-			}
+		caseIDs := make([]string, 0, len(cases))
+		for i, caseCfg := range cases {
+			eval := evalsData.Evals[i]
 			caseIDs = append(caseIDs, caseCfg.ID)
 
 			// Marshal to YAML
@@ -127,23 +129,57 @@ func anthropicSkillRoot(evalsJSONPath string) string {
 	return skillDir
 }
 
-// convertEvalToCase converts an Anthropic eval entry to a skill-up CaseConfig.
-// Each entry in eval.Files is a path relative to skillDir; its content is
-// read and placed at the same relative path in the case workspace.
-func convertEvalToCase(eval anthropicEval, skillName, skillDir string) (*config.CaseConfig, error) {
-	caseID := importedCaseID(eval.ID)
+// convertAnthropicEvals converts evals to cases and reads the files each one
+// lists. Evals whose case ID selected rejects are skipped before their files
+// are read, so a filtered-out case cannot fail the run; nil selects all.
+func convertAnthropicEvals(evalsData anthropicEvals, skillDir string, selected func(caseID string) bool) ([]*config.CaseConfig, error) {
+	root, err := os.OpenRoot(skillDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open skill directory %s: %w", skillDir, err)
+	}
+	defer root.Close() //nolint:errcheck
 
+	cases := make([]*config.CaseConfig, 0, len(evalsData.Evals))
+	for _, eval := range evalsData.Evals {
+		caseCfg := convertEvalToCase(eval, evalsData.SkillName)
+		if selected != nil && !selected(caseCfg.ID) {
+			continue
+		}
+		files, err := readEvalFiles(eval, root)
+		if err != nil {
+			return nil, err
+		}
+		caseCfg.Context.Files = files
+		cases = append(cases, caseCfg)
+	}
+	return cases, nil
+}
+
+// readEvalFiles reads the files an eval lists. skill-creator's evals.json
+// paths are relative to the Skill root; reading through os.Root keeps every
+// read inside it, symlinks included.
+func readEvalFiles(eval anthropicEval, root *os.Root) (map[string]string, error) {
+	if len(eval.Files) == 0 {
+		return nil, nil
+	}
 	files := make(map[string]string, len(eval.Files))
 	for _, f := range eval.Files {
 		if !filepath.IsLocal(filepath.FromSlash(f)) {
 			return nil, fmt.Errorf("eval %d: file %q must be a relative path inside the skill directory", eval.ID, f)
 		}
-		content, err := os.ReadFile(filepath.Join(skillDir, filepath.FromSlash(f)))
+		content, err := root.ReadFile(filepath.FromSlash(f))
 		if err != nil {
 			return nil, fmt.Errorf("eval %d: failed to read file %q: %w", eval.ID, f, err)
 		}
 		files[f] = string(content)
 	}
+	return files, nil
+}
+
+// convertEvalToCase converts an Anthropic eval entry to a skill-up CaseConfig.
+// Its context files are filled in by convertAnthropicEvals.
+func convertEvalToCase(eval anthropicEval, skillName string) *config.CaseConfig {
+	caseID := importedCaseID(eval.ID)
 
 	// Since expectations are natural language, use agent_judge
 	judgeCfg := config.JudgeConfig{
@@ -160,12 +196,9 @@ func convertEvalToCase(eval anthropicEval, skillName, skillDir string) (*config.
 		Input: config.Input{
 			Prompt: eval.Prompt,
 		},
-		Context: config.Context{
-			Files: files,
-		},
 		Expect: config.Expect{},
 		Judge:  judgeCfg,
-	}, nil
+	}
 }
 
 // generateEvalConfig creates a basic EvalConfig for imported cases.
