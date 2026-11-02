@@ -1,6 +1,9 @@
 package config
 
 import (
+	"fmt"
+	"reflect"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -31,6 +34,9 @@ func (e *EvalConfig) UnmarshalYAML(node *yaml.Node) error {
 	type plain EvalConfig
 	var decoded plain
 	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	if err := rejectUnknownKeys(node, reflect.TypeFor[plain]()); err != nil {
 		return err
 	}
 	*e = EvalConfig(decoded)
@@ -345,9 +351,53 @@ func (c *CaseConfig) UnmarshalYAML(node *yaml.Node) error {
 	if err := node.Decode(&decoded); err != nil {
 		return err
 	}
+	if err := rejectUnknownKeys(node, reflect.TypeFor[plain]()); err != nil {
+		return err
+	}
 	*c = CaseConfig(decoded)
 	c.JudgeSet, c.JudgesSet = judgeFieldPresence(node)
 	return nil
+}
+
+// rejectUnknownKeys reports a top-level key that matches no field of t, so a
+// misspelled block such as `judgez:` fails loading instead of being dropped.
+// It is needed because node.Decode inside a custom UnmarshalYAML does not
+// inherit a caller's Decoder.KnownFields(true). Nested keys are not checked.
+func rejectUnknownKeys(node *yaml.Node, t reflect.Type) error {
+	if node.Kind != yaml.MappingNode {
+		return nil
+	}
+	known := map[string]bool{}
+	collectYAMLKeys(t, known)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := node.Content[i]
+		if key.Tag == "!!merge" || known[key.Value] {
+			continue
+		}
+		return fmt.Errorf("line %d: unknown field %q", key.Line, key.Value)
+	}
+	return nil
+}
+
+// collectYAMLKeys adds the mapping keys yaml.v3 decodes into struct t.
+func collectYAMLKeys(t reflect.Type, known map[string]bool) {
+	for field := range t.Fields() {
+		if !field.IsExported() {
+			continue
+		}
+		name, opts, _ := strings.Cut(field.Tag.Get("yaml"), ",")
+		if name == "-" {
+			continue
+		}
+		if strings.Contains(opts, "inline") && field.Type.Kind() == reflect.Struct {
+			collectYAMLKeys(field.Type, known)
+			continue
+		}
+		if name == "" {
+			name = strings.ToLower(field.Name)
+		}
+		known[name] = true
+	}
 }
 
 func judgeFieldPresence(node *yaml.Node) (singular, plural bool) {

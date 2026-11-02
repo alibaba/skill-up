@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -1062,4 +1063,64 @@ func TestLoader_SkillName(t *testing.T) {
 			}
 		})
 	}
+}
+
+// writeUnknownKeySkill lays out a Skill with eval.yaml and one case file and
+// returns a loader for it.
+func writeUnknownKeySkill(t *testing.T, evalContent, caseContent string) *Loader {
+	t.Helper()
+	skillDir := filepath.Join(t.TempDir(), "typo-skill")
+	casesDir := filepath.Join(skillDir, "evals", "cases")
+	if err := os.MkdirAll(casesDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for path, content := range map[string]string{
+		filepath.Join(skillDir, "SKILL.md"):           "# skill\n",
+		filepath.Join(skillDir, "evals", "eval.yaml"): evalContent,
+		filepath.Join(casesDir, "typo.yaml"):          caseContent,
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	return NewLoader(filepath.Join(skillDir, "evals", "eval.yaml"))
+}
+
+// A misspelled top-level block must fail loading; before, it was dropped and the
+// case ran with no judge and passed with zero checks (#365).
+func TestLoader_RejectsUnknownTopLevelKeys(t *testing.T) {
+	t.Parallel()
+
+	const validEval = "schema_version: v1alpha1\nenvironment:\n  type: none\nengine:\n  name: claude_code\ncases:\n  files: [evals/cases/typo.yaml]\n"
+	const validCase = "id: typo\ninput:\n  prompt: hi\n"
+
+	t.Run("case file", func(t *testing.T) {
+		t.Parallel()
+		loader := writeUnknownKeySkill(t, validEval, validCase+"judgez:\n  type: rule_based\n")
+		_, err := loader.LoadCaseConfig("evals/cases/typo.yaml")
+		if err == nil || !strings.Contains(err.Error(), `line 4: unknown field "judgez"`) {
+			t.Fatalf("LoadCaseConfig error = %v, want line 4 unknown field \"judgez\"", err)
+		}
+	})
+
+	t.Run("eval.yaml", func(t *testing.T) {
+		t.Parallel()
+		loader := writeUnknownKeySkill(t, validEval+"judgez:\n  type: rule_based\n", validCase)
+		_, err := loader.LoadEvalConfig()
+		if err == nil || !strings.Contains(err.Error(), `unknown field "judgez"`) {
+			t.Fatalf("LoadEvalConfig error = %v, want unknown field \"judgez\"", err)
+		}
+	})
+
+	t.Run("merge key still loads", func(t *testing.T) {
+		t.Parallel()
+		loader := writeUnknownKeySkill(t, validEval, validCase+"<<: {title: from merge}\n")
+		cfg, err := loader.LoadCaseConfig("evals/cases/typo.yaml")
+		if err != nil {
+			t.Fatalf("LoadCaseConfig with a merge key: %v", err)
+		}
+		if cfg.Title != "from merge" {
+			t.Fatalf("title = %q, want the merged value", cfg.Title)
+		}
+	})
 }
