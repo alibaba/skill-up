@@ -130,8 +130,9 @@ func anthropicSkillRoot(evalsJSONPath string) string {
 }
 
 // convertAnthropicEvals converts evals to cases and reads the files each one
-// lists. Evals whose case ID selected rejects are skipped before their files
-// are read, so a filtered-out case cannot fail the run; nil selects all.
+// lists. Files are not read for cases whose ID selected rejects, so a case the
+// run will filter out cannot fail it; such cases are still returned, so the
+// caller's filter reports matches as before. A nil selected reads all files.
 func convertAnthropicEvals(evalsData anthropicEvals, skillDir string, selected func(caseID string) bool) ([]*config.CaseConfig, error) {
 	root, err := os.OpenRoot(skillDir)
 	if err != nil {
@@ -142,6 +143,7 @@ func convertAnthropicEvals(evalsData anthropicEvals, skillDir string, selected f
 	cases := make([]*config.CaseConfig, 0, len(evalsData.Evals))
 	for _, eval := range evalsData.Evals {
 		caseCfg := convertEvalToCase(eval, evalsData.SkillName)
+		cases = append(cases, caseCfg)
 		if selected != nil && !selected(caseCfg.ID) {
 			continue
 		}
@@ -150,7 +152,6 @@ func convertAnthropicEvals(evalsData anthropicEvals, skillDir string, selected f
 			return nil, err
 		}
 		caseCfg.Context.Files = files
-		cases = append(cases, caseCfg)
 	}
 	return cases, nil
 }

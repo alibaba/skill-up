@@ -99,29 +99,30 @@ func TestConvertAnthropicEvals_RejectsUnreadableFiles(t *testing.T) {
 	t.Parallel()
 
 	skillDir := t.TempDir()
-	outside := t.TempDir()
-	writeSkillFile(t, outside, "secret.txt", "outside\n")
-	if err := os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(skillDir, "file-link.txt")); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
-	}
-	if err := os.Symlink(outside, filepath.Join(skillDir, "dir-link")); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
-	}
-	for _, tc := range []struct {
-		file string
-		want string
-	}{
-		{file: "evals/files/missing.csv", want: "failed to read file"},
-		{file: "../outside.txt", want: "relative path inside the skill directory"},
-		{file: "/etc/hosts", want: "relative path inside the skill directory"},
-		{file: "file-link.txt", want: "failed to read file"},
-		{file: "dir-link/secret.txt", want: "failed to read file"},
-	} {
-		evals := anthropicEvals{SkillName: "s", Evals: []anthropicEval{{ID: 7, Prompt: "p", Files: []string{tc.file}}}}
-		if _, err := convertAnthropicEvals(evals, skillDir, nil); err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("file %q: error = %v, want one containing %q", tc.file, err, tc.want)
+	expectReadError := func(t *testing.T, file, want string) {
+		t.Helper()
+		evals := anthropicEvals{SkillName: "s", Evals: []anthropicEval{{ID: 7, Prompt: "p", Files: []string{file}}}}
+		if _, err := convertAnthropicEvals(evals, skillDir, nil); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("file %q: error = %v, want one containing %q", file, err, want)
 		}
 	}
+	expectReadError(t, "evals/files/missing.csv", "failed to read file")
+	expectReadError(t, "../outside.txt", "relative path inside the skill directory")
+	expectReadError(t, "/etc/hosts", "relative path inside the skill directory")
+
+	t.Run("symlinks leaving the skill directory", func(t *testing.T) {
+		t.Parallel()
+		outside := t.TempDir()
+		writeSkillFile(t, outside, "secret.txt", "outside\n")
+		if err := os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(skillDir, "file-link.txt")); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		if err := os.Symlink(outside, filepath.Join(skillDir, "dir-link")); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		expectReadError(t, "file-link.txt", "failed to read file")
+		expectReadError(t, "dir-link/secret.txt", "failed to read file")
+	})
 }
 
 // A case removed by the case-name filter must not fail the run because one of
@@ -141,8 +142,8 @@ func TestConvertAnthropicEvals_SkipsFilesOfUnselectedCases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("convertAnthropicEvals: %v", err)
 	}
-	if len(cases) != 1 || cases[0].ID != keep || cases[0].Context.Files["ok.txt"] != "ok\n" {
-		t.Fatalf("cases = %+v, want only case-1 with ok.txt read", cases)
+	if len(cases) != 2 || cases[0].ID != keep || cases[0].Context.Files["ok.txt"] != "ok\n" || len(cases[1].Context.Files) != 0 {
+		t.Fatalf("cases = %+v, want both cases, with files read only for %s", cases, keep)
 	}
 }
 
