@@ -690,6 +690,26 @@ func TestLoadAutoModeEvaluation_EvalsJSONInstallsLocalSkill(t *testing.T) {
 	}
 }
 
+func TestLoadAutoModeEvaluation_EvalsJSONReadsFilesFromSkillRoot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeSkillFile(t, root, "SKILL.md", "# Test Skill")
+	writeSkillFile(t, root, "evals/files/data.csv", "a,b\n1,2\n")
+	writeSkillFile(t, root, "evals/evals.json", `{"skill_name":"test-skill","evals":[{"id":1,"prompt":"Summarize the csv","files":["evals/files/data.csv"],"expectations":["Mentions the csv"]}]}`)
+
+	cases, _, _, err := loadAutoModeEvaluation(t.Context(), root)
+	if err != nil {
+		t.Fatalf("loadAutoModeEvaluation failed: %v", err)
+	}
+	if len(cases) != 1 {
+		t.Fatalf("expected 1 case, got %d", len(cases))
+	}
+	if got := cases[0].Context.Files["evals/files/data.csv"]; got != "a,b\n1,2\n" {
+		t.Fatalf("data.csv content = %q, want the file's bytes", got)
+	}
+}
+
 func TestLoadAutoModeEvaluation_PrefersEvalYAML(t *testing.T) {
 	root := t.TempDir()
 	writeAutoModeSkill(t, root)

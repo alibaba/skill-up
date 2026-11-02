@@ -928,9 +928,14 @@ func loadAnthropicEvals(evalsJSONPath string) ([]*config.CaseConfig, error) {
 		return nil, fmt.Errorf("failed to parse evals.json: %w", err)
 	}
 
+	skillDir := anthropicSkillRoot(evalsJSONPath)
 	cases := make([]*config.CaseConfig, 0, len(evalsData.Evals))
 	for _, eval := range evalsData.Evals {
-		cases = append(cases, convertEvalToCase(eval, evalsData.SkillName))
+		caseCfg, err := convertEvalToCase(eval, evalsData.SkillName, skillDir)
+		if err != nil {
+			return nil, err
+		}
+		cases = append(cases, caseCfg)
 	}
 
 	return cases, nil

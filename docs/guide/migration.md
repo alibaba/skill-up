@@ -104,7 +104,7 @@ Conversion mapping:
 | `prompt`           | `input.prompt`                                     |
 | `expectations`     | `judge.criteria` (agent_judge rubric)               |
 | `expected_output`  | The case `description`                             |
-| `files`            | `context.files`                                    |
+| `files`            | `context.files` (each file is read from the Skill root and placed at the same path in the workspace) |
 
 ---
 

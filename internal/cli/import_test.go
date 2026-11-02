@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
+
+	"github.com/alibaba/skill-up/internal/config"
 )
 
 func TestConvertEvalToCase(t *testing.T) {
@@ -21,7 +25,14 @@ func TestConvertEvalToCase(t *testing.T) {
 		Expectations:   []string{"Expect 1", "Expect 2"},
 	}
 
-	result := convertEvalToCase(eval, "test-skill")
+	skillDir := t.TempDir()
+	writeSkillFile(t, skillDir, "file1.txt", "alpha\n")
+	writeSkillFile(t, skillDir, "file2.go", "package two\n")
+
+	result, err := convertEvalToCase(eval, "test-skill", skillDir)
+	if err != nil {
+		t.Fatalf("convertEvalToCase: %v", err)
+	}
 
 	if result.ID != "case-1" {
 		t.Errorf("expected ID 'case-1', got '%s'", result.ID)
@@ -39,8 +50,8 @@ func TestConvertEvalToCase(t *testing.T) {
 		t.Errorf("expected Input.Prompt 'Test prompt', got '%s'", result.Input.Prompt)
 	}
 
-	if len(result.Context.Files) != 2 {
-		t.Errorf("expected 2 files in context, got %d", len(result.Context.Files))
+	if got := result.Context.Files; len(got) != 2 || got["file1.txt"] != "alpha\n" || got["file2.go"] != "package two\n" {
+		t.Errorf("context files = %q, want the contents of file1.txt and file2.go", got)
 	}
 
 	if result.Judge.Type != agentJudgeType {
@@ -63,7 +74,10 @@ func TestConvertEvalToCase_WithNoFiles(t *testing.T) {
 		Expectations:   []string{"Single expectation"},
 	}
 
-	result := convertEvalToCase(eval, "my-skill")
+	result, err := convertEvalToCase(eval, "my-skill", t.TempDir())
+	if err != nil {
+		t.Fatalf("convertEvalToCase: %v", err)
+	}
 
 	if result.ID != "case-42" {
 		t.Errorf("expected ID 'case-42', got '%s'", result.ID)
@@ -71,6 +85,36 @@ func TestConvertEvalToCase_WithNoFiles(t *testing.T) {
 
 	if len(result.Context.Files) != 0 {
 		t.Errorf("expected 0 files in context, got %d", len(result.Context.Files))
+	}
+}
+
+func TestConvertEvalToCase_RejectsUnreadableFiles(t *testing.T) {
+	t.Parallel()
+
+	skillDir := t.TempDir()
+	for _, tc := range []struct {
+		file string
+		want string
+	}{
+		{file: "evals/files/missing.csv", want: "failed to read file"},
+		{file: "../outside.txt", want: "relative path inside the skill directory"},
+		{file: "/etc/hosts", want: "relative path inside the skill directory"},
+	} {
+		eval := anthropicEval{ID: 7, Prompt: "p", Files: []string{tc.file}}
+		if _, err := convertEvalToCase(eval, "s", skillDir); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("file %q: error = %v, want one containing %q", tc.file, err, tc.want)
+		}
+	}
+}
+
+func writeSkillFile(t *testing.T, skillDir, rel, content string) {
+	t.Helper()
+	target := filepath.Join(skillDir, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", rel, err)
+	}
+	if err := os.WriteFile(target, []byte(content), 0o600); err != nil {
+		t.Fatalf("write %s: %v", rel, err)
 	}
 }
 
@@ -168,7 +212,10 @@ func TestConvertEvalToCase_IDFormatting(t *testing.T) {
 
 	for _, tc := range tests {
 		eval := anthropicEval{ID: tc.id, Prompt: "p", ExpectedOutput: "e"}
-		result := convertEvalToCase(eval, "s")
+		result, err := convertEvalToCase(eval, "s", t.TempDir())
+		if err != nil {
+			t.Fatalf("convertEvalToCase: %v", err)
+		}
 		if result.ID != tc.expected {
 			t.Errorf("ID %d: expected '%s', got '%s'", tc.id, tc.expected, result.ID)
 		}
@@ -408,5 +455,41 @@ func TestImportCmd_MissingFile(t *testing.T) {
 	err := cmd.RunE(cmd, []string{"/nonexistent/evals.json"})
 	if err == nil {
 		t.Fatal("expected error for missing file, got nil")
+	}
+}
+
+// evals.json file paths are relative to the Skill root (Anthropic skill-creator
+// schema); the imported case must carry each file's bytes, binary included.
+func TestImportCmd_ReadsFilesFromSkillRoot(t *testing.T) {
+	t.Parallel()
+
+	skillDir := t.TempDir()
+	writeSkillFile(t, skillDir, "SKILL.md", "---\nname: csv-skill\n---\n")
+	writeSkillFile(t, skillDir, "evals/files/data.csv", "a,b\n1,2\n")
+	binary := string([]byte{0x00, 0xff, 0xfe, 'P', 'D', 'F'})
+	writeSkillFile(t, skillDir, "evals/files/blob.bin", binary)
+	evalsJSON := `{"skill_name":"csv-skill","evals":[{"id":1,"prompt":"Summarize the csv","files":["evals/files/data.csv","evals/files/blob.bin"],"expectations":["Mentions the csv"]}]}`
+	evalsPath := filepath.Join(skillDir, "evals", "evals.json")
+	writeSkillFile(t, skillDir, "evals/evals.json", evalsJSON)
+
+	cmd := newImportCmd()
+	cmd.SetArgs([]string{evalsPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(skillDir, "evals", "cases", "case-1.yaml"))
+	if err != nil {
+		t.Fatalf("read imported case: %v", err)
+	}
+	var caseCfg config.CaseConfig
+	if err := yaml.Unmarshal(data, &caseCfg); err != nil {
+		t.Fatalf("parse imported case: %v", err)
+	}
+	if got := caseCfg.Context.Files["evals/files/data.csv"]; got != "a,b\n1,2\n" {
+		t.Errorf("data.csv content = %q, want the file's bytes", got)
+	}
+	if got := caseCfg.Context.Files["evals/files/blob.bin"]; got != binary {
+		t.Errorf("blob.bin content = %q, want %q", got, binary)
 	}
 }

@@ -53,9 +53,13 @@ var importCmd = &cobra.Command{
 		}
 
 		// Convert each eval entry to a CaseConfig
+		skillDir := anthropicSkillRoot(evalsPath)
 		caseIDs := make([]string, 0, len(evalsData.Evals))
 		for _, eval := range evalsData.Evals {
-			caseCfg := convertEvalToCase(eval, evalsData.SkillName)
+			caseCfg, err := convertEvalToCase(eval, evalsData.SkillName, skillDir)
+			if err != nil {
+				return err
+			}
 			caseIDs = append(caseIDs, caseCfg.ID)
 
 			// Marshal to YAML
@@ -111,14 +115,34 @@ type anthropicEval struct {
 	Expectations   []string `json:"expectations"`
 }
 
+// anthropicSkillRoot returns the Skill root that evals.json file paths are
+// relative to: the nearest directory holding SKILL.md above evals.json, or the
+// parent of the directory containing evals.json.
+func anthropicSkillRoot(evalsJSONPath string) string {
+	evalsDir := filepath.Dir(evalsJSONPath)
+	if abs, err := filepath.Abs(evalsDir); err == nil {
+		evalsDir = abs
+	}
+	skillDir, _ := config.FindSkillDir(evalsDir)
+	return skillDir
+}
+
 // convertEvalToCase converts an Anthropic eval entry to a skill-up CaseConfig.
-func convertEvalToCase(eval anthropicEval, skillName string) *config.CaseConfig {
+// Each entry in eval.Files is a path relative to skillDir; its content is
+// read and placed at the same relative path in the case workspace.
+func convertEvalToCase(eval anthropicEval, skillName, skillDir string) (*config.CaseConfig, error) {
 	caseID := importedCaseID(eval.ID)
 
-	// Build files context
-	files := make(map[string]string)
+	files := make(map[string]string, len(eval.Files))
 	for _, f := range eval.Files {
-		files[f] = f // placeholder - actual file content would need to be read
+		if !filepath.IsLocal(filepath.FromSlash(f)) {
+			return nil, fmt.Errorf("eval %d: file %q must be a relative path inside the skill directory", eval.ID, f)
+		}
+		content, err := os.ReadFile(filepath.Join(skillDir, filepath.FromSlash(f)))
+		if err != nil {
+			return nil, fmt.Errorf("eval %d: failed to read file %q: %w", eval.ID, f, err)
+		}
+		files[f] = string(content)
 	}
 
 	// Since expectations are natural language, use agent_judge
@@ -141,7 +165,7 @@ func convertEvalToCase(eval anthropicEval, skillName string) *config.CaseConfig 
 		},
 		Expect: config.Expect{},
 		Judge:  judgeCfg,
-	}
+	}, nil
 }
 
 // generateEvalConfig creates a basic EvalConfig for imported cases.
