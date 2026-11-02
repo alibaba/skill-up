@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"maps"
+	"math"
 	"path"
 	"regexp"
 	"slices"
@@ -657,7 +658,11 @@ func validateJudgeMetrics(configPath string, metrics []MetricConfig) []string {
 			errs = append(errs, fmt.Sprintf("%s.metrics[%d].id %q is duplicated", configPath, i, metric.ID))
 		}
 		seen[metric.ID] = true
-		if metric.MinScore != nil && (*metric.MinScore < 0.0 || *metric.MinScore > 1.0) {
+		// NaN slips through a bare range check because every comparison against it
+		// is false, and a non-finite threshold would then make the quality
+		// derivation report MET for any score.
+		if metric.MinScore != nil && (math.IsNaN(*metric.MinScore) || math.IsInf(*metric.MinScore, 0) ||
+			*metric.MinScore < 0.0 || *metric.MinScore > 1.0) {
 			errs = append(errs, fmt.Sprintf("%s.metrics[%d].min_score must be between 0.0 and 1.0", configPath, i))
 		}
 	}

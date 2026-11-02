@@ -120,6 +120,11 @@ func decodeMetricsEntry(entry map[string]json.RawMessage) (EmittedMetric, Payloa
 // payload can be trusted.
 func checkTopLevelKeys(raw []byte) PayloadProblem {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
+	// Numbers stay as json.Number here: this scan only checks structure and key
+	// uniqueness, and converting a syntactically valid number that overflows
+	// float64 (1e309) would reject the whole payload instead of letting the entry
+	// decoder poison just that slot.
+	decoder.UseNumber()
 	token, err := decoder.Token()
 	if err != nil {
 		return ProblemUnparseable

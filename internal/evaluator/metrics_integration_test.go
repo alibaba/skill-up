@@ -2,6 +2,7 @@ package evaluator
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -14,6 +15,7 @@ import (
 	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/judge"
 	"github.com/alibaba/skill-up/internal/runtime"
+	"github.com/alibaba/skill-up/pkg/transcript"
 )
 
 // Integration tests for the named-metrics path through the real evaluator: a
@@ -936,5 +938,224 @@ func TestExecuteCaseCancellationInterruptsRunningMember(t *testing.T) {
 	}
 	if result.GroupCompletion != judge.CompletionInterrupted || result.GroupCause != judge.CauseCancellation {
 		t.Fatalf("group = %s/%s", result.GroupCompletion, result.GroupCause)
+	}
+}
+
+// TestExecuteCaseRelativeOutputDirStillBindsMetricsResult covers the CLI shape
+// where --output-dir is relative (the flag is documented as a plain directory and
+// is passed through without resolution). The injected host path is handed to the
+// script, whose working directory is the case workspace, while the collector reads
+// the same string from the skill-up process's working directory: both sides have to
+// agree on one file or every score is lost.
+func TestExecuteCaseRelativeOutputDirStillBindsMetricsResult(t *testing.T) {
+	root := t.TempDir()
+	scriptDir := t.TempDir()
+	script := metricsScript(t, scriptDir, pick(posixScore, powershellScore))
+	limit := 30
+	member := config.JudgeConfig{ID: "scorer", Type: "script", ScriptPath: script, TimeoutSeconds: &limit, Metrics: scoreRegistry()}
+	t.Chdir(root)
+	e := newTestEvaluator(EvalOptions{
+		Agent: &mockAgent{name: "test", output: "done"}, OutputDir: "results",
+		EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none"}, Judge: member},
+	})
+	result := e.executeCase(context.Background(), &config.CaseConfig{ID: "relative-out", Input: config.Input{Prompt: "hello"}}, "with_skill", newScriptRuntime(t), nil)
+	if result.Status != judge.StatusPass || result.Metrics == nil || result.Metrics.Coverage.Available != 2 {
+		written, _ := filepath.Glob(filepath.Join(root, "results", "relative-out", "with_skill", "outputs", "judge", "run", "metrics-*.json"))
+		t.Fatalf("status=%s metrics=%+v: writer and reader disagreed on the result path; artifacts found under the process cwd: %v",
+			result.Status, result.Metrics, written)
+	}
+}
+
+// TestExecuteCaseJudgeExecutionErrorWithoutResultKeepsExecutionCause covers the
+// path where the judge never produced a grading result at all (an unreadable
+// script, an upload failure). Inferring "scoring reached a final outcome" turns a
+// plain execution failure into a metric contract error and reports MISSING instead
+// of the slots that were never produced.
+func TestExecuteCaseJudgeExecutionErrorWithoutResultKeepsExecutionCause(t *testing.T) {
+	limit := 30
+	missing := filepath.Join(t.TempDir(), "absent.sh")
+	member := config.JudgeConfig{ID: "scorer", Type: "script", ScriptPath: missing, TimeoutSeconds: &limit, Metrics: scoreRegistry()}
+	e := newTestEvaluator(EvalOptions{
+		Agent: &mockAgent{name: "test", output: "done"}, OutputDir: t.TempDir(),
+		EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none"}, Judge: member},
+	})
+	result := e.executeCase(context.Background(), &config.CaseConfig{ID: "judge-no-result", Input: config.Input{Prompt: "hello"}}, "with_skill", newScriptRuntime(t), nil)
+
+	if result.Status != judge.StatusError {
+		t.Fatalf("status = %s, want ERROR", result.Status)
+	}
+	if result.Execution == nil || result.Execution.Stage != judge.StageStarted ||
+		result.Execution.Completion != judge.CompletionFailed || result.Execution.Cause != judge.CauseExecutionError {
+		t.Fatalf("execution = %+v, want STARTED/FAILED/execution_error", result.Execution)
+	}
+	if result.Metrics == nil || result.Metrics.Coverage.NotProduced != 2 {
+		t.Fatalf("metrics = %+v, want both planned slots NOT_PRODUCED", result.Metrics)
+	}
+}
+
+// TestExecuteCaseContextStopSurvivesSkippedJudgeMaterialization checks that a case
+// deadline or cancellation which stops the agent before judging keeps its real
+// termination cause. Deriving the cause from the generic "agent_execution_failed"
+// reason alone discards deadline/cancellation provenance for every skipped member.
+func TestExecuteCaseContextStopSurvivesSkippedJudgeMaterialization(t *testing.T) {
+	registry := scoreRegistry()
+	blocking := &mockAgent{name: "test", runFunc: func(ctx context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ []transcript.Message) (*agent.SessionResult, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}}
+
+	t.Run("case deadline", func(t *testing.T) {
+		members := []config.JudgeConfig{{ID: "a", Type: "script", ScriptPath: "unused-a", Metrics: registry}}
+		e := newTestEvaluator(EvalOptions{
+			Agent: blocking, OutputDir: t.TempDir(),
+			EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none"}, Judges: &members},
+		})
+		result := e.executeCase(context.Background(), &config.CaseConfig{
+			ID: "deadline-skip", Input: config.Input{Prompt: "hello"},
+			Constraints: config.Constraints{TimeoutSeconds: 1},
+		}, "with_skill", newScriptRuntime(t), nil)
+		if len(result.JudgeResults) != 1 {
+			t.Fatalf("outcomes = %d", len(result.JudgeResults))
+		}
+		member := result.JudgeResults[0]
+		if member.Execution == nil || member.Execution.Cause != judge.CauseDeadlineExpiry ||
+			member.Execution.DeadlineSource != caseTimeoutDeadlineSource ||
+			member.Execution.Timeout == nil || !member.Execution.Timeout.Occurred {
+			t.Fatalf("member execution = %+v, want the expired case deadline", member.Execution)
+		}
+		if result.GroupCause != judge.CauseDeadlineExpiry {
+			t.Fatalf("group cause = %s, want deadline_expiry", result.GroupCause)
+		}
+	})
+
+	t.Run("cancellation with a single judge", func(t *testing.T) {
+		member := config.JudgeConfig{ID: "solo", Type: "script", ScriptPath: "unused-solo", Metrics: registry}
+		e := newTestEvaluator(EvalOptions{
+			Agent: blocking, OutputDir: t.TempDir(),
+			EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none"}, Judge: member},
+		})
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		result := e.executeCase(ctx, &config.CaseConfig{ID: "cancel-skip", Input: config.Input{Prompt: "hello"}}, "with_skill", newScriptRuntime(t), nil)
+		if result.Execution == nil || result.Execution.Cause != judge.CauseCancellation {
+			t.Fatalf("single execution = %+v, want cancellation", result.Execution)
+		}
+		if result.Metrics == nil || result.Metrics.Coverage.NotProduced != 2 {
+			t.Fatalf("single metrics = %+v, want both slots NOT_PRODUCED", result.Metrics)
+		}
+	})
+}
+
+// TestExecuteCaseUnrelatedAgentFailureAfterContextExpiryKeepsExecutionCause checks
+// the other side of the skipped-judge precedence: an unrelated engine failure must
+// not be relabelled as a cancellation just because the case context expired during
+// or after it. Only a failure that is itself the context stop carries that cause.
+func TestExecuteCaseUnrelatedAgentFailureAfterContextExpiryKeepsExecutionCause(t *testing.T) {
+	boom := errors.New("engine exploded")
+	ag := &mockAgent{name: "test", runFunc: func(context.Context, runtime.Runtime, agent.ExecOptions, []transcript.Message) (*agent.SessionResult, error) {
+		return nil, boom
+	}}
+	limit := 30
+	members := []config.JudgeConfig{{ID: "a", Type: "script", ScriptPath: "unused-a", TimeoutSeconds: &limit, Metrics: scoreRegistry()}}
+	e := newTestEvaluator(EvalOptions{
+		Agent: ag, OutputDir: t.TempDir(),
+		EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none"}, Judges: &members},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result := e.executeCase(ctx, &config.CaseConfig{ID: "unrelated-failure", Input: config.Input{Prompt: "hello"}}, "with_skill", newScriptRuntime(t), nil)
+
+	if len(result.JudgeResults) != 1 {
+		t.Fatalf("outcomes = %d", len(result.JudgeResults))
+	}
+	member := result.JudgeResults[0]
+	if member.Execution == nil || member.Execution.Cause != judge.CauseExecutionError {
+		t.Fatalf("member execution = %+v, want execution_error for an unrelated failure", member.Execution)
+	}
+	if member.Execution.Timeout != nil {
+		t.Fatalf("member execution invented a timeout: %+v", member.Execution)
+	}
+	if member.SkipReason != "agent_execution_failed" {
+		t.Fatalf("compat skip reason = %q", member.SkipReason)
+	}
+	if result.GroupCause != judge.CauseExecutionError {
+		t.Fatalf("group cause = %s, want execution_error", result.GroupCause)
+	}
+}
+
+// multiTurnStopEvaluator builds an evaluator whose resumed turns die on the case
+// context, with one registry-carrying script judge planned: a multi-turn case is
+// exactly where a long run is cut short by the budget, and its skipped judges have
+// to record that stop rather than a generic execution error.
+func multiTurnStopEvaluator(t *testing.T, runTurn func(context.Context, runtime.Runtime, agent.ExecOptions, transcript.Message, string) (*agent.SessionResult, error)) *defaultEvaluator {
+	t.Helper()
+	ag := &mockResumerAgent{mockAgent: mockAgent{name: "test"}, runTurnFunc: runTurn}
+	members := []config.JudgeConfig{{ID: "a", Type: "script", ScriptPath: "unused-a", Metrics: scoreRegistry()}}
+	return newTestEvaluator(EvalOptions{
+		Agent: ag, OutputDir: t.TempDir(),
+		EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none"}, Judges: &members},
+	})
+}
+
+func twoTurnCase(id string, timeoutSeconds int) *config.CaseConfig {
+	return &config.CaseConfig{
+		ID:          id,
+		Input:       config.Input{Turns: []config.Turn{{Role: "user", Content: "first"}, {Role: "user", Content: "second"}}},
+		Constraints: config.Constraints{TimeoutSeconds: timeoutSeconds},
+	}
+}
+
+// onlyStoppedMember returns the planned member's skipped outcome and checks the
+// parts every context stop shares: the compat reason and the registry denominator.
+func onlyStoppedMember(t *testing.T, result EvalResult) JudgeOutcome {
+	t.Helper()
+	if len(result.JudgeResults) != 1 {
+		t.Fatalf("outcomes = %d, want the one planned member", len(result.JudgeResults))
+	}
+	member := result.JudgeResults[0]
+	if member.SkipReason != "agent_execution_failed" {
+		t.Fatalf("member reason = %q, want agent_execution_failed", member.SkipReason)
+	}
+	if member.Metrics == nil || member.Metrics.Coverage.NotProduced != 2 {
+		t.Fatalf("member metrics = %+v, want both planned slots NOT_PRODUCED", member.Metrics)
+	}
+	return member
+}
+
+func TestExecuteCaseMultiTurnCaseDeadlineReachesSkippedJudgeCause(t *testing.T) {
+	e := multiTurnStopEvaluator(t, func(ctx context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ transcript.Message, _ string) (*agent.SessionResult, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	result := e.executeCase(context.Background(), twoTurnCase("multi-deadline", 1), "with_skill", newScriptRuntime(t), nil)
+
+	member := onlyStoppedMember(t, result)
+	if member.Execution == nil || member.Execution.Cause != judge.CauseDeadlineExpiry ||
+		member.Execution.DeadlineSource != caseTimeoutDeadlineSource ||
+		member.Execution.Timeout == nil || !member.Execution.Timeout.Occurred {
+		t.Fatalf("member execution = %+v, want the expired case deadline", member.Execution)
+	}
+	if result.GroupCause != judge.CauseDeadlineExpiry {
+		t.Fatalf("group cause = %s, want deadline_expiry", result.GroupCause)
+	}
+}
+
+func TestExecuteCaseMultiTurnCancellationReachesSkippedJudgeCause(t *testing.T) {
+	e := multiTurnStopEvaluator(t, func(ctx context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ transcript.Message, _ string) (*agent.SessionResult, error) {
+		return nil, ctx.Err()
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result := e.executeCase(ctx, twoTurnCase("multi-cancel", 0), "with_skill", newScriptRuntime(t), nil)
+
+	member := onlyStoppedMember(t, result)
+	if member.Execution == nil || member.Execution.Cause != judge.CauseCancellation {
+		t.Fatalf("member execution = %+v, want cancellation", member.Execution)
+	}
+	if member.Execution.Timeout != nil {
+		t.Fatalf("a cancellation must not be reported as a timeout: %+v", member.Execution)
+	}
+	if result.Status != judge.StatusError {
+		t.Fatalf("status = %s, want ERROR", result.Status)
 	}
 }

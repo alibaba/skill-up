@@ -1,6 +1,9 @@
 package config
 
 import (
+	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -42,6 +45,16 @@ func TestValidateJudgeMetrics(t *testing.T) {
 			name:     "duplicate slot ids are rejected",
 			metrics:  []MetricConfig{{ID: "correctness"}, {ID: "correctness"}},
 			wantErrs: []string{`metrics[1].id "correctness" is duplicated`},
+		},
+		{
+			name:     "a NaN threshold is rejected because every comparison against it is false",
+			metrics:  []MetricConfig{{ID: "correctness", MinScore: new(math.NaN())}},
+			wantErrs: []string{"min_score must be between 0.0 and 1.0"},
+		},
+		{
+			name:     "an infinite threshold is rejected",
+			metrics:  []MetricConfig{{ID: "correctness", MinScore: new(math.Inf(1))}},
+			wantErrs: []string{"min_score must be between 0.0 and 1.0"},
 		},
 		{
 			name:     "an unsafe identifier is rejected",
@@ -86,5 +99,38 @@ func TestMetricRegistryKeepsAnAbsentThresholdDistinctFromZero(t *testing.T) {
 	}
 	if zero.MinScore == nil || *zero.MinScore != 0 {
 		t.Fatal("an explicit zero threshold was lost")
+	}
+}
+
+// TestYAMLRegistryParsesNanThreshold pins the premise behind the non-finite
+// rejection: the real YAML loader turns `min_score: .nan` into a NaN *float64, and
+// every comparison against NaN is false, so an unvalidated registry would reach
+// quality derivation and report MET for any available score.
+func TestYAMLRegistryParsesNanThreshold(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "eval.yaml")
+	content := `schema_version: v1alpha1
+judge:
+  type: script
+  script_path: score.sh
+  metrics:
+    - id: correctness
+      min_score: .nan
+cases:
+  files: []
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := NewLoader(path).LoadEvalConfig()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	metric := cfg.Judge.Metrics[0]
+	if metric.MinScore == nil || !math.IsNaN(*metric.MinScore) {
+		t.Fatalf("min_score = %+v, want NaN parsed from `.nan`", metric.MinScore)
+	}
+	if errs := validateJudgeMetrics("judge.metrics", cfg.Judge.Metrics); len(errs) == 0 || !strings.Contains(errs[0], "min_score") {
+		t.Fatalf("validation errors = %v, want the NaN threshold rejected", errs)
 	}
 }

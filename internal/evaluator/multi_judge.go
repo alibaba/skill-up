@@ -340,15 +340,15 @@ func summarizeJudgeErrors(outcomes []JudgeOutcome) string {
 // keeps execution metadata and its registry-derived metric slots even though no
 // judge ran, so a gate or execution failure never loses that information. The
 // reason strings are unchanged for compatibility; the machine-readable cause is
-// the new source of truth.
-func recordSkippedJudges(result *EvalResult, plan config.JudgePlan, reason string) {
-	cause := causeForReason(reason)
+// the new source of truth and prefers the stop the case context actually observed.
+func recordSkippedJudges(ctx context.Context, cause error, result *EvalResult, plan config.JudgePlan, reason string) {
+	stop := skippedJudgeStop(ctx, cause, reason)
 	if !plan.Multi {
 		if len(plan.Judges) > 0 {
 			member := plan.Judges[0]
 			result.Metrics = preventedMetrics(member.ID, member.Metrics)
 			if result.Metrics != nil {
-				result.Execution = interruptedExecution(judge.StageNotInvoked, judge.Stop{Cause: cause, Detail: reason})
+				result.Execution = interruptedExecution(judge.StageNotInvoked, stop)
 			}
 		}
 		return
@@ -356,11 +356,33 @@ func recordSkippedJudges(result *EvalResult, plan config.JudgePlan, reason strin
 	for _, member := range plan.Judges {
 		result.JudgeResults = append(result.JudgeResults, JudgeOutcome{
 			ID: member.ID, Type: member.Type, Status: judge.StatusSkip, SkipReason: reason,
-			Execution: interruptedExecution(judge.StageNotInvoked, judge.Stop{Cause: cause, Detail: reason}),
+			Execution: interruptedExecution(judge.StageNotInvoked, stop),
 			Metrics:   preventedMetrics(member.ID, member.Metrics),
 		})
 	}
 	result.GroupCompletion, result.GroupCause = foldGroupState(result.JudgeResults)
+}
+
+// skippedJudgeStop records why judging was skipped. A context stop wins over the
+// generic reason only when it is the same stop that ended the agent: the case
+// context is expired and the failure wraps that very error. Otherwise the cause
+// would claim a knob skill-up never armed — an agent reporting its own internal
+// timeout, or an unrelated failure after the context expired, stays an execution
+// error. A reason that already names a specific cause (an expect gate, an invalid
+// configuration) is never reclassified.
+func skippedJudgeStop(ctx context.Context, cause error, reason string) judge.Stop {
+	stop := judge.Stop{Cause: causeForReason(reason), Detail: reason}
+	if stop.Cause != judge.CauseExecutionError || cause == nil {
+		return stop
+	}
+	ctxErr := ctx.Err()
+	if ctxErr == nil || !errors.Is(cause, ctxErr) {
+		return stop
+	}
+	return judge.ClassifyStop(cause, judge.StopObservation{
+		DeadlineSource: DeadlineSource(ctx),
+		SignalObserved: SignalObserved(ctx),
+	})
 }
 
 func causeForReason(reason string) judge.Cause {

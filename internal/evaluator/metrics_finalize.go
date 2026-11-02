@@ -9,10 +9,13 @@ import (
 	"github.com/alibaba/skill-up/internal/judge"
 )
 
-func (e *defaultEvaluator) recordSkippedJudgesForCase(result *EvalResult, caseCfg *config.CaseConfig, reason string) {
+// recordSkippedJudgesForCase materializes skipped judges for a case that never
+// reached judging. cause is the error that ended the agent run, if any: it lets a
+// case deadline or cancellation keep its own termination cause.
+func (e *defaultEvaluator) recordSkippedJudgesForCase(ctx context.Context, cause error, result *EvalResult, caseCfg *config.CaseConfig, reason string) {
 	plan, err := config.ResolveJudgePlan(e.evalCfg, caseCfg)
 	if err == nil {
-		recordSkippedJudges(result, plan, reason)
+		recordSkippedJudges(ctx, cause, result, plan, reason)
 	}
 }
 
@@ -60,6 +63,11 @@ func caseMetricsEnvelope(ctx context.Context, result *EvalResult, cfg config.Jud
 // than MISSING, so an execution failure is never reported as omitted output.
 func metricProduction(ctx context.Context, result *EvalResult, stage judge.Stage) judge.MetricProduction {
 	if stage != judge.StageStarted || ctx.Err() != nil {
+		return judge.MetricPrevented
+	}
+	if result.Error != nil && result.Grading == nil {
+		// The judge failed before producing any grading result, so scoring never
+		// reached an outcome to omit: the slots were not produced.
 		return judge.MetricPrevented
 	}
 	if ex := gradingExecution(result); ex != nil && ex.Completion != judge.CompletionFinished {

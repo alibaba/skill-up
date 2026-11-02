@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -275,7 +276,7 @@ func TestSkippedJudgesRetainSlotsPerCause(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.reason, func(t *testing.T) {
 			result := &EvalResult{}
-			recordSkippedJudges(result, config.JudgePlan{Judges: members, Multi: true}, tc.reason)
+			recordSkippedJudges(context.Background(), nil, result, config.JudgePlan{Judges: members, Multi: true}, tc.reason)
 			if len(result.JudgeResults) != 2 {
 				t.Fatalf("outcomes = %d, want 2", len(result.JudgeResults))
 			}
@@ -299,9 +300,65 @@ func TestSkippedJudgesRetainSlotsPerCause(t *testing.T) {
 	}
 }
 
+// TestSkippedJudgeCauseKeepsSpecificReasonsWhenContextEnded checks the precedence
+// between a context stop and the recorded reason: a context stop is only adopted
+// when it is the same stop that ended the agent, so an unrelated failure after the
+// context expired, and an agent reporting its own internal timeout while the case
+// budget is still live, both keep the execution cause. A reason naming a specific
+// cause (an expect gate, a contract violation) is never reclassified.
+func TestSkippedJudgeCauseKeepsSpecificReasonsWhenContextEnded(t *testing.T) {
+	deadlineErr := fmt.Errorf("agent run: %w", context.DeadlineExceeded)
+	canceledErr := fmt.Errorf("agent run: %w", context.Canceled)
+	unrelatedErr := errors.New("engine exploded")
+	cases := []struct {
+		name    string
+		stopped string
+		reason  string
+		cause   error
+		want    judge.Cause
+	}{
+		{"expired case deadline caused the failure", "expired", "agent_execution_failed", deadlineErr, judge.CauseDeadlineExpiry},
+		{"cancellation caused the failure", "cancelled", "agent_execution_failed", canceledErr, judge.CauseCancellation},
+		{"unrelated failure after the context expired", "cancelled", "agent_execution_failed", unrelatedErr, judge.CauseExecutionError},
+		{"generic failure without an error object", "cancelled", "agent_execution_failed", nil, judge.CauseExecutionError},
+		{"agent-internal timeout under a live case budget", "live", "agent_execution_failed", deadlineErr, judge.CauseExecutionError},
+		{"turn error without a cause", "cancelled", "turn_error", nil, judge.CauseExecutionError},
+		{"expect gate keeps its own cause", "cancelled", "gate_failed", canceledErr, judge.CauseExpectGate},
+		{"contract reason is never reclassified", "expired", "invalid_judge_config", deadlineErr, judge.CauseContractError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stop := skippedJudgeStop(stoppedContext(tc.stopped), tc.cause, tc.reason)
+			if stop.Cause != tc.want || stop.Detail == "" {
+				t.Fatalf("stop = %+v, want cause %s with a reason detail", stop, tc.want)
+			}
+		})
+	}
+	expiredStop := skippedJudgeStop(stoppedContext("expired"), deadlineErr, "agent_execution_failed")
+	if expiredStop.DeadlineSource != "case.constraints.timeout_seconds" {
+		t.Fatalf("expired case deadline must name the knob that armed it: %+v", expiredStop)
+	}
+	if execution := interruptedExecution(judge.StageNotInvoked, expiredStop); execution.Timeout == nil || !execution.Timeout.Occurred {
+		t.Fatalf("an expired deadline must stay visible as a timeout: %+v", execution)
+	}
+}
+
+// stoppedContext builds the case context a skipped-judge call would observe. The
+// table stores a state name instead of a context so no row carries a Context value.
+func stoppedContext(state string) context.Context {
+	switch state {
+	case "expired":
+		return expiredDeadlineContext("case.constraints.timeout_seconds")
+	case "cancelled":
+		return canceledContext()
+	default:
+		return context.Background()
+	}
+}
+
 func TestSkippedJudgesAreNoopForSingleJudgePlans(t *testing.T) {
 	result := &EvalResult{}
-	recordSkippedJudges(result, config.JudgePlan{Judges: []config.JudgeConfig{{ID: "a"}}}, "gate_failed")
+	recordSkippedJudges(context.Background(), nil, result, config.JudgePlan{Judges: []config.JudgeConfig{{ID: "a"}}}, "gate_failed")
 	if len(result.JudgeResults) != 0 {
 		t.Fatalf("single-judge plan gained member outcomes: %+v", result.JudgeResults)
 	}

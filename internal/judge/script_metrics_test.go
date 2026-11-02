@@ -97,6 +97,17 @@ exit 0
 	windowsOneBadValue = "$body = '{\"schema_version\":1,\"invocation_id\":\"' + $env:EVAL_METRICS_INVOCATION_ID + '\",\"metrics\":[{\"metric_id\":\"correctness\",\"availability\":\"AVAILABLE\",\"value\":1.4,\"evidence\":[\"out of range\"]},{\"metric_id\":\"completeness\",\"availability\":\"AVAILABLE\",\"value\":0.4,\"evidence\":[\"fine\"]}]}'\n" +
 		"Set-Content -LiteralPath $env:EVAL_METRICS_RESULT_PATH -Value $body\nexit 0\n"
 
+	// A JSON number that is syntactically valid but outside float64's range must
+	// poison only its own slot, because it is still structurally valid JSON.
+	posixOverflowNumber = `#!/bin/sh
+cat > "$EVAL_METRICS_RESULT_PATH" <<JSON
+{"schema_version":1,"invocation_id":"$EVAL_METRICS_INVOCATION_ID","metrics":[{"metric_id":"correctness","availability":"AVAILABLE","value":0.8,"evidence":["fine"]},{"metric_id":"completeness","availability":"AVAILABLE","value":1e309,"evidence":["overflow"]}]}
+JSON
+exit 0
+`
+	windowsOverflowNumber = "$body = '{\"schema_version\":1,\"invocation_id\":\"' + $env:EVAL_METRICS_INVOCATION_ID + '\",\"metrics\":[{\"metric_id\":\"correctness\",\"availability\":\"AVAILABLE\",\"value\":0.8,\"evidence\":[\"fine\"]},{\"metric_id\":\"completeness\",\"availability\":\"AVAILABLE\",\"value\":1e309,\"evidence\":[\"overflow\"]}]}'\n" +
+		"Set-Content -LiteralPath $env:EVAL_METRICS_RESULT_PATH -Value $body\nexit 0\n"
+
 	posixDuplicateKey = `#!/bin/sh
 cat > "$EVAL_METRICS_RESULT_PATH" <<JSON
 {"schema_version":1,"schema_version":2,"invocation_id":"$EVAL_METRICS_INVOCATION_ID","metrics":[]}
@@ -177,6 +188,19 @@ func metricsScriptBasicCases() []metricsScriptCase {
 			expectQuality: QualityNotConfigured,
 			expectPlanned: 2,
 			expectReasons: map[string]string{"correctness": "invalid_value"},
+		},
+		{
+			name:     "a number beyond float64 range poisons only its own slot",
+			posix:    posixOverflowNumber,
+			windows:  windowsOverflowNumber,
+			registry: twoMetricRegistry(),
+			expectAvailability: map[string]Availability{
+				"correctness": Available, "completeness": Errored,
+			},
+			expectValues:  map[string]float64{"correctness": 0.8},
+			expectQuality: QualityNotConfigured,
+			expectPlanned: 2,
+			expectReasons: map[string]string{"completeness": "invalid_value"},
 		},
 		{
 			name:     "duplicate json key invalidates the whole payload",
@@ -580,4 +604,42 @@ func TestScriptJudgeRejectsOversizedAndNonRegularResults(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestScriptJudgeCollectsMetricsFromBashScript covers the one combination the
+// platform-specific fixtures never reached: a `.sh` judge (bash on Windows, the
+// same interpreter that gets EVAL_TRANSCRIPT_PATH in forward-slash form) with a
+// named-metric registry. The script must be able to create the file the collector
+// then reads, whatever separator form the injected path uses.
+func TestScriptJudgeCollectsMetricsFromBashScript(t *testing.T) {
+	target := platform.Host().Target
+	if target.GOOS == platform.GOOSWindows && !target.IsBash() {
+		t.Skip("a .sh judge needs a bash target shell, which this Windows host does not provide")
+	}
+	dir := t.TempDir()
+	script := filepath.Join(dir, "score.sh")
+	body := `#!/bin/sh
+cat > "$EVAL_METRICS_RESULT_PATH" <<JSON
+{"schema_version":1,"invocation_id":"$EVAL_METRICS_INVOCATION_ID","metrics":[{"metric_id":"correctness","availability":"AVAILABLE","value":0.8,"evidence":["bash path form"]}]}
+JSON
+exit 0
+`
+	if err := os.WriteFile(script, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	j := &ScriptJudge{
+		ScriptPath:          script,
+		MetricJudgeID:       "scorer",
+		MetricSlots:         SlotsFromConfig([]config.MetricConfig{{ID: "correctness", Required: true}}),
+		MetricsResultPath:   filepath.Join(dir, "metrics-result.json"),
+		MetricsInvocationID: "inv-42",
+	}
+	res, err := j.Evaluate(context.Background(), Input{WorkspacePath: dir, FinalMessage: "output", ExitCode: 0})
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if res.Metrics == nil || res.Metrics.Coverage.Available != 1 || len(res.Metrics.Metrics) != 1 ||
+		res.Metrics.Metrics[0].Value == nil || *res.Metrics.Metrics[0].Value != 0.8 {
+		t.Fatalf("a .sh judge must have its result file collected: %+v", res.Metrics)
+	}
 }
