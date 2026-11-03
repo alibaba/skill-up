@@ -393,8 +393,12 @@ func (w *unknownKeyWalker) walk(m *yaml.Node) {
 			}
 			continue
 		}
-		if !w.known[key.Value] {
-			w.unknown = append(w.unknown, fmt.Sprintf("unknown field %q (line %d)", key.Value, key.Line))
+		name := key.Value
+		if key.Kind == yaml.AliasNode && key.Alias != nil {
+			name = key.Alias.Value
+		}
+		if !w.known[name] {
+			w.unknown = append(w.unknown, fmt.Sprintf("unknown field %q (line %d)", name, key.Line))
 		}
 	}
 }

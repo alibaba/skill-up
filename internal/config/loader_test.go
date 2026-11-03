@@ -1164,3 +1164,45 @@ func TestLoader_RepeatedMergedAliasReportedOnce(t *testing.T) {
 		t.Fatalf("unknown keys = %q, want one entry for the twice-merged alias", cfg.UnknownKeys)
 	}
 }
+
+func TestValidator_AliasedCaseKeys(t *testing.T) {
+	t.Parallel()
+	const evalContent = "schema_version: v1alpha1\nenvironment:\n  type: none\nengine:\n  name: claude_code\ncases:\n  files: [evals/cases/typo.yaml]\n"
+	for _, tt := range []struct {
+		name    string
+		content string
+		wantErr string
+	}{
+		{"unknown key with known anchor", "id: typo\ninput: {prompt: &id judgez}\n*id: []\n", `unknown field "judgez" (line 3)`},
+		{"known key with unknown anchor", "id: typo\ninput: {prompt: &key title}\n*key: aliased title\n", ""},
+		{"unknown key inside merge", "id: typo\ninput: {prompt: &id judgez}\n<<: {*id: []}\n", `unknown field "judgez" (line 3)`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, err := writeUnknownKeySkill(t, evalContent, tt.content).LoadCaseConfig("evals/cases/typo.yaml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = NewValidator().ValidateCaseConfig(cfg)
+			if tt.wantErr == "" {
+				if err != nil || cfg.Title != "aliased title" {
+					t.Fatalf("title = %q, validation error = %v", cfg.Title, err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("validation error = %v, want %s", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidator_AliasedEvalKey(t *testing.T) {
+	t.Parallel()
+	const evalContent = "schema_version: &cases v1alpha1\nenvironment: {type: none}\nengine: {name: claude_code}\ncases: {files: [evals/cases/typo.yaml]}\n*cases: []\n"
+	cfg, err := writeUnknownKeySkill(t, evalContent, "id: typo\ninput: {prompt: hi}\n").LoadEvalConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := NewValidator().ValidateEvalConfig(cfg); err == nil || !strings.Contains(err.Error(), `unknown field "v1alpha1" (line 5)`) {
+		t.Fatalf("validation error = %v, want unknown aliased key on line 5", err)
+	}
+}
