@@ -325,6 +325,54 @@ func TestRuleBased_ToolCalled_EmptyTranscript(t *testing.T) {
 	assertStatus(t, r, StatusFail)
 }
 
+func TestRuleBased_ToolCalled_EmptyName_Fail(t *testing.T) {
+	for _, name := range []string{"", "   "} {
+		j := NewRuleBasedJudge(config.JudgeConfig{
+			Success: []config.Rule{{
+				ToolCalled: &config.ToolCalledRule{Name: name},
+			}},
+		})
+		in := Input{
+			Transcript: transcript.Transcript{
+				{Role: transcript.RoleToolCall, ToolCall: &transcript.ToolCallInfo{
+					Name: "bash",
+				}},
+			},
+		}
+		r, err := j.Evaluate(context.Background(), in)
+		assertNoError(t, err)
+		assertStatus(t, r, StatusFail)
+	}
+}
+
+func TestRuleBased_FilesExist_EmptyAndDot_Fail(t *testing.T) {
+	ws := t.TempDir()
+	for _, invalid := range []string{"", "   ", ".", "./", ".\\", "/"} {
+		j := NewRuleBasedJudge(config.JudgeConfig{
+			Success: []config.Rule{{
+				FilesExist: []string{invalid},
+			}},
+		})
+		r, err := j.Evaluate(context.Background(), Input{WorkspacePath: ws})
+		assertNoError(t, err)
+		assertStatus(t, r, StatusFail)
+	}
+}
+
+func TestRuleBased_FilesNotExist_EmptyAndDot_Fail(t *testing.T) {
+	ws := t.TempDir()
+	for _, invalid := range []string{"", "   ", ".", "./", ".\\", "/"} {
+		j := NewRuleBasedJudge(config.JudgeConfig{
+			Success: []config.Rule{{
+				FilesNotExist: []string{invalid},
+			}},
+		})
+		r, err := j.Evaluate(context.Background(), Input{WorkspacePath: ws})
+		assertNoError(t, err)
+		assertStatus(t, r, StatusFail)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // output_contains not (replaces removed turn_response_contains/not_contains)
 // ---------------------------------------------------------------------------

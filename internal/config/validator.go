@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -282,8 +283,14 @@ func validateJudgeTypeAndLocalFields(judge JudgeConfig) []string {
 	if judge.TimeoutSeconds != nil && *judge.TimeoutSeconds < 0 {
 		errs = append(errs, "judge.timeout_seconds must be non-negative")
 	}
+	errs = append(errs, validateOutputContainsRules("judge.success", judge.Success)...)
+	errs = append(errs, validateOutputContainsRules("judge.failure", judge.Failure)...)
 	errs = append(errs, validateOutputMatchesRules("judge.success", judge.Success)...)
 	errs = append(errs, validateOutputMatchesRules("judge.failure", judge.Failure)...)
+	errs = append(errs, validateToolCalledRules("judge.success", judge.Success)...)
+	errs = append(errs, validateToolCalledRules("judge.failure", judge.Failure)...)
+	errs = append(errs, validateFileRules("judge.success", judge.Success)...)
+	errs = append(errs, validateFileRules("judge.failure", judge.Failure)...)
 	errs = append(errs, validateRecognizableRules("judge.success", judge.Success)...)
 	errs = append(errs, validateRecognizableRules("judge.failure", judge.Failure)...)
 
@@ -354,6 +361,24 @@ func ruleHasRecognizableField(rule Rule) bool {
 		rule.ToolNotCalledInTurn != nil
 }
 
+func validateOutputContainsRules(field string, rules []Rule) []string {
+	var errs []string
+	for i, rule := range rules {
+		if rule.OutputContains == nil {
+			continue
+		}
+		prefix := fmt.Sprintf("%s[%d].output_contains", field, i)
+		if len(rule.OutputContains.All) == 0 && len(rule.OutputContains.Any) == 0 && len(rule.OutputContains.Not) == 0 {
+			errs = append(errs, prefix+" must specify at least one of all, any, or not")
+			continue
+		}
+		errs = append(errs, validateNonEmptyStringList(prefix+".all", rule.OutputContains.All)...)
+		errs = append(errs, validateNonEmptyStringList(prefix+".any", rule.OutputContains.Any)...)
+		errs = append(errs, validateNonEmptyStringList(prefix+".not", rule.OutputContains.Not)...)
+	}
+	return errs
+}
+
 func validateOutputMatchesRules(field string, rules []Rule) []string {
 	var errs []string
 	for i, rule := range rules {
@@ -361,6 +386,10 @@ func validateOutputMatchesRules(field string, rules []Rule) []string {
 			continue
 		}
 		prefix := fmt.Sprintf("%s[%d].output_matches", field, i)
+		if len(rule.OutputMatches.All) == 0 && len(rule.OutputMatches.Any) == 0 && len(rule.OutputMatches.Not) == 0 {
+			errs = append(errs, prefix+" must specify at least one of all, any, or not")
+			continue
+		}
 		errs = append(errs, validateRegexList(prefix+".all", rule.OutputMatches.All)...)
 		errs = append(errs, validateRegexList(prefix+".any", rule.OutputMatches.Any)...)
 		errs = append(errs, validateRegexList(prefix+".not", rule.OutputMatches.Not)...)
@@ -368,9 +397,57 @@ func validateOutputMatchesRules(field string, rules []Rule) []string {
 	return errs
 }
 
+func validateToolCalledRules(field string, rules []Rule) []string {
+	var errs []string
+	for i, rule := range rules {
+		if rule.ToolCalled == nil {
+			continue
+		}
+		if strings.TrimSpace(rule.ToolCalled.Name) == "" {
+			errs = append(errs, fmt.Sprintf("%s[%d].tool_called.name is required", field, i))
+		}
+	}
+	return errs
+}
+
+func validateFileRules(field string, rules []Rule) []string {
+	var errs []string
+	for i, rule := range rules {
+		for j, f := range rule.FilesExist {
+			if strings.TrimSpace(f) == "" {
+				errs = append(errs, fmt.Sprintf("%s[%d].files_exist[%d] must not be empty", field, i, j))
+			} else if clean := filepath.Clean(f); clean == "." || clean == "/" || clean == `\` {
+				errs = append(errs, fmt.Sprintf("%s[%d].files_exist[%d] invalid file path %q", field, i, j, f))
+			}
+		}
+		for j, f := range rule.FilesNotExist {
+			if strings.TrimSpace(f) == "" {
+				errs = append(errs, fmt.Sprintf("%s[%d].files_not_exist[%d] must not be empty", field, i, j))
+			} else if clean := filepath.Clean(f); clean == "." || clean == "/" || clean == `\` {
+				errs = append(errs, fmt.Sprintf("%s[%d].files_not_exist[%d] invalid file path %q", field, i, j, f))
+			}
+		}
+	}
+	return errs
+}
+
+func validateNonEmptyStringList(field string, values []string) []string {
+	var errs []string
+	for i, val := range values {
+		if strings.TrimSpace(val) == "" {
+			errs = append(errs, fmt.Sprintf("%s[%d] must not be empty", field, i))
+		}
+	}
+	return errs
+}
+
 func validateRegexList(field string, patterns []string) []string {
 	var errs []string
 	for i, pattern := range patterns {
+		if strings.TrimSpace(pattern) == "" {
+			errs = append(errs, fmt.Sprintf("%s[%d] must not be empty", field, i))
+			continue
+		}
 		if _, err := regexp.Compile(pattern); err != nil {
 			errs = append(errs, fmt.Sprintf("%s[%d] is invalid regex %q: %v", field, i, pattern, err))
 		}
@@ -884,6 +961,9 @@ func validatePostCondition(turnIdx int, pc *PostCondition) []string {
 	if len(pc.MustContainAny) == 0 && len(pc.MustContainAll) == 0 && len(pc.MustNotContain) == 0 {
 		errs = append(errs, prefix+" must include at least one of must_contain_any, must_contain_all, or must_not_contain")
 	}
+	errs = append(errs, validateNonEmptyStringList(prefix+".must_contain_any", pc.MustContainAny)...)
+	errs = append(errs, validateNonEmptyStringList(prefix+".must_contain_all", pc.MustContainAll)...)
+	errs = append(errs, validateNonEmptyStringList(prefix+".must_not_contain", pc.MustNotContain)...)
 
 	return errs
 }
@@ -949,6 +1029,8 @@ func validateTurnResponseContainsRule(r *TurnResponseContainsRule, turnsTotal in
 	if len(r.ContainsAll) == 0 && len(r.ContainsAny) == 0 {
 		errs = append(errs, "turn_response_contains must specify contains_all or contains_any")
 	}
+	errs = append(errs, validateNonEmptyStringList("turn_response_contains.contains_all", r.ContainsAll)...)
+	errs = append(errs, validateNonEmptyStringList("turn_response_contains.contains_any", r.ContainsAny)...)
 	return errs
 }
 
@@ -962,6 +1044,7 @@ func validateTurnResponseNotContainsRule(r *TurnResponseNotContainsRule, turnsTo
 	if len(r.NotContains) == 0 {
 		errs = append(errs, "turn_response_not_contains.not_contains is required")
 	}
+	errs = append(errs, validateNonEmptyStringList("turn_response_not_contains.not_contains", r.NotContains)...)
 	return errs
 }
 
@@ -972,7 +1055,7 @@ func validateToolCalledInTurnRule(r *ToolCalledInTurnRule, turnsTotal int) []str
 	} else if turnsTotal > 0 && r.Turn > turnsTotal {
 		errs = append(errs, fmt.Sprintf("tool_called_in_turn.turn %d exceeds total turns %d", r.Turn, turnsTotal))
 	}
-	if r.Name == "" {
+	if strings.TrimSpace(r.Name) == "" {
 		errs = append(errs, "tool_called_in_turn.name is required")
 	}
 	return errs
@@ -985,7 +1068,7 @@ func validateToolNotCalledInTurnRule(r *ToolNotCalledInTurnRule, turnsTotal int)
 	} else if turnsTotal > 0 && r.Turn > turnsTotal {
 		errs = append(errs, fmt.Sprintf("tool_not_called_in_turn.turn %d exceeds total turns %d", r.Turn, turnsTotal))
 	}
-	if r.Name == "" {
+	if strings.TrimSpace(r.Name) == "" {
 		errs = append(errs, "tool_not_called_in_turn.name is required")
 	}
 	return errs

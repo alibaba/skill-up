@@ -129,6 +129,236 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			errMsg:  "judge.failure[0]: assertion has no recognizable matcher field",
 		},
 		{
+			name: "output_contains with no fields is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{OutputContains: &OutputContainsRule{}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0].output_contains must specify at least one of all, any, or not",
+		},
+		{
+			name: "output_contains with empty keyword is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{OutputContains: &OutputContainsRule{All: []string{""}}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0].output_contains.all[0] must not be empty",
+		},
+		{
+			name: "output_contains with whitespace keyword is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{OutputContains: &OutputContainsRule{Any: []string{"   "}}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0].output_contains.any[0] must not be empty",
+		},
+		{
+			name: "output_matches with no fields is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{OutputMatches: &OutputMatchesRule{}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0].output_matches must specify at least one of all, any, or not",
+		},
+		{
+			name: "output_matches with empty pattern is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{OutputMatches: &OutputMatchesRule{Not: []string{""}}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0].output_matches.not[0] must not be empty",
+		},
+		{
+			name: "tool_called with empty name is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Failure: []Rule{{ToolCalled: &ToolCalledRule{}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.failure[0].tool_called.name is required",
+		},
+		{
+			name: "tool_called with whitespace name is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{ToolCalled: &ToolCalledRule{Name: "   "}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0].tool_called.name is required",
+		},
+		{
+			name: "files_exist with empty string is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{FilesExist: []string{""}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0].files_exist[0] must not be empty",
+		},
+		{
+			name: "files_exist with dot is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{FilesExist: []string{"."}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0].files_exist[0] invalid file path \".\"",
+		},
+		{
+			name: "files_not_exist with empty string is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Failure: []Rule{{FilesNotExist: []string{""}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.failure[0].files_not_exist[0] must not be empty",
+		},
+		{
 			name: "rules with supported matchers are accepted",
 			cfg: &EvalConfig{
 				SchemaVersion: "v1alpha1",
@@ -1025,6 +1255,107 @@ func TestValidator_ValidateCaseConfig(t *testing.T) {
 				},
 			},
 			wantErr: false,
+		},
+		{
+			name: "turn_response_contains with empty string in contains_all is rejected",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{TurnResponseContains: &TurnResponseContainsRule{Turn: 1, ContainsAll: []string{""}}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "turn_response_contains.contains_all[0] must not be empty",
+		},
+		{
+			name: "turn_response_not_contains with whitespace string is rejected",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{TurnResponseNotContains: &TurnResponseNotContainsRule{Turn: 1, NotContains: []string{"   "}}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "turn_response_not_contains.not_contains[0] must not be empty",
+		},
+		{
+			name: "tool_called_in_turn with whitespace name is rejected",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{ToolCalledInTurn: &ToolCalledInTurnRule{Turn: 1, Name: "   "}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "tool_called_in_turn.name is required",
+		},
+		{
+			name: "tool_not_called_in_turn with whitespace name is rejected",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Turns: []Turn{
+						{Role: "user", Content: "Hello"},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{ToolNotCalledInTurn: &ToolNotCalledInTurnRule{Turn: 1, Name: "   "}},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "tool_not_called_in_turn.name is required",
+		},
+		{
+			name: "post_condition with whitespace in must_contain_all is rejected",
+			cfg: &CaseConfig{
+				ID: "test-case",
+				Input: Input{
+					Turns: []Turn{
+						{
+							Role:    "user",
+							Content: "Hello",
+							PostCondition: &PostCondition{
+								MustContainAll: []string{"   "},
+							},
+						},
+					},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{ExitCode: new(0)},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "input.turns[0].post_condition.must_contain_all[0] must not be empty",
 		},
 		{
 			name: "missing prompt and turns",

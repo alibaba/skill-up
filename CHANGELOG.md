@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   DeepSeek Harness packages to 0.1.5-rc.3 while retaining the required cordis 4.0.2.
 
 ### Fixed
+- Reject empty and incomplete `rule_based` judge assertions in `skill-up validate` (empty `output_contains`, empty `output_matches`, `tool_called` without `name`, empty or dot file paths in `files_exist`/`files_not_exist`, and whitespace-only keyword values). Previously, typo'd matcher subfields decoded to empty structs that bypassed validation and either silently passed or no-oped failure rules at runtime.
 - Reject whitespace-only `input.prompt` and `input.turns[].content` during validation while preserving mutual-exclusion semantics and the original prompt bytes.
 - Clarify nested YAML comments and keep `skill-upper` scaffolding focused on
   the requested cases and scoring contract. Accept read-only checksum queries
