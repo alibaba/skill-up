@@ -167,7 +167,7 @@ to an adapter and are now explicitly ignored with migration warnings. Use
 
 | key | agent | `true` behaviour | unset / `false` |
 | :---: | :---: | :--- | :--- |
-| `bypass_sandbox` | `codex` | Forces `--dangerously-bypass-approvals-and-sandbox`; overrides the runtime-derived choice. Use when the host kernel lacks Landlock support (e.g. some CI containers) | Default: `none` runtime → `--sandbox workspace-write`; other runtimes already bypass |
+| `bypass_sandbox` | `codex` | Forces `--dangerously-bypass-approvals-and-sandbox`; overrides the runtime-derived choice. Use when the host kernel lacks Landlock support (e.g. some CI containers) | Default: `none` runtime → `--sandbox workspace-write`, with tool calls approved for the MCP servers skill-up installed whose names match `^[A-Za-z0-9_-]+$` (other names cannot be addressed by a Codex `-c` override, so Codex still rejects their calls); other runtimes already bypass |
 | `bypass_sandbox` | `claude_code` | No-op — claude already runs with `--permission-mode=bypassPermissions` | No-op |
 | `bypass_sandbox` | `qodercli` | No-op — no equivalent flag | No-op |
 | `bypass_sandbox` | `qwen_code` | No-op — `qwen_code` never imposes its own sandbox (`--yolo` only auto-approves tool calls; it does **not** isolate). Like `claude_code`/`qodercli`, isolation is the runtime's job | No-op |
