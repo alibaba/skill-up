@@ -1176,6 +1176,9 @@ func TestValidator_AliasedCaseKeys(t *testing.T) {
 		{"unknown key with known anchor", "id: typo\ninput: {prompt: &id judgez}\n*id: []\n", `unknown field "judgez" (line 3)`},
 		{"known key with unknown anchor", "id: typo\ninput: {prompt: &key title}\n*key: aliased title\n", ""},
 		{"unknown key inside merge", "id: typo\ninput: {prompt: &id judgez}\n<<: {*id: []}\n", `unknown field "judgez" (line 3)`},
+		{"null judges alias", "id: typo\ninput: {prompt: &anchor judges}\n*anchor: null\n", "judges must contain at least one member"},
+		{"singular judge alias with judges", "id: typo\ninput: {prompt: &anchor judge}\n*anchor: {}\njudges: null\n", "judge and judges cannot be configured together"},
+		{"judge anchor on another field", "id: typo\ninput: {prompt: &judges title}\n*judges: aliased title\n", ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -1204,5 +1207,17 @@ func TestValidator_AliasedEvalKey(t *testing.T) {
 	}
 	if err := NewValidator().ValidateEvalConfig(cfg); err == nil || !strings.Contains(err.Error(), `unknown field "v1alpha1" (line 5)`) {
 		t.Fatalf("validation error = %v, want unknown aliased key on line 5", err)
+	}
+}
+
+func TestValidator_AliasedEvalJudgesCannotBeNull(t *testing.T) {
+	t.Parallel()
+	const evalContent = "schema_version: v1alpha1\nenvironment: {type: none, metadata: {label: &anchor judges}}\nengine: {name: claude_code}\ncases: {files: [evals/cases/typo.yaml]}\n*anchor: null\n"
+	cfg, err := writeUnknownKeySkill(t, evalContent, "id: typo\ninput: {prompt: hi}\n").LoadEvalConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := NewValidator().ValidateEvalConfig(cfg); err == nil || !strings.Contains(err.Error(), "judges must contain at least one member") {
+		t.Fatalf("validation error = %v, want explicit-null judges error", err)
 	}
 }

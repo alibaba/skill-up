@@ -393,10 +393,7 @@ func (w *unknownKeyWalker) walk(m *yaml.Node) {
 			}
 			continue
 		}
-		name := key.Value
-		if key.Kind == yaml.AliasNode && key.Alias != nil {
-			name = key.Alias.Value
-		}
+		name := yamlKeyName(key)
 		if !w.known[name] {
 			w.unknown = append(w.unknown, fmt.Sprintf("unknown field %q (line %d)", name, key.Line))
 		}
@@ -444,9 +441,16 @@ func collectYAMLKeys(t reflect.Type, known map[string]bool) {
 	}
 }
 
+func yamlKeyName(key *yaml.Node) string {
+	if key.Kind == yaml.AliasNode && key.Alias != nil {
+		return key.Alias.Value
+	}
+	return key.Value
+}
+
 func judgeFieldPresence(node *yaml.Node) (singular, plural bool) {
 	for i := 0; i+1 < len(node.Content); i += 2 {
-		switch node.Content[i].Value {
+		switch yamlKeyName(node.Content[i]) {
 		case "judge":
 			singular = true
 		case "judges":

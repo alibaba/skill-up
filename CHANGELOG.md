@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Find Codex session files under `$CODEX_HOME/sessions` when `CODEX_HOME` is set, instead of always under `$HOME/.codex/sessions`.
 - Let Codex call the MCP servers skill-up installs on the `none` runtime. Codex rejected these calls under `--sandbox workspace-write` with "approval policy is never"; skill-up now approves tool calls for those servers only, with the sandbox kept. Server names outside `^[A-Za-z0-9_-]+$` are not covered.
 - Read the files listed in Anthropic `evals.json` entries from the Skill root during `skill-up import` and `skill-up run --auto`. Cases previously received each file's path as its content; a missing file or a path outside the Skill now fails with a clear error.
-- Report unknown top-level keys in `eval.yaml` and case files as validation errors with the key and line, including keys brought in by `<<` merges. A misspelled block such as `judgez:` was silently dropped, so the case ran with no judge and passed with zero checks. As with other case errors, `run` reports them only for the cases its filters select.
+- Report unknown top-level keys in `eval.yaml` and case files as validation errors with the key and line, including keys brought in by `<<` merges. Aliased keys are checked by their scalar value, with errors pointing to the alias's line; aliased `judge` and `judges` keys also retain the existing presence checks. A misspelled block such as `judgez:` was silently dropped, so the case ran with no judge and passed with zero checks. As with other case errors, `run` reports them only for the cases its filters select.
 
 ## [0.14.0] - 2026-10-20
 
