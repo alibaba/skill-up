@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
+	goruntime "runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -1234,6 +1236,52 @@ func TestCodexRun_SandboxFlagHonoursKwargAndRuntime(t *testing.T) {
 				t.Fatalf("commands unexpectedly contain %q; commands=%v", tc.notWantFlag, rt.commands)
 			}
 		})
+	}
+}
+
+func TestCodexSessionLookupScript_HonoursCodexHome(t *testing.T) {
+	t.Parallel()
+	if goruntime.GOOS == platform.GOOSWindows {
+		t.Skip("POSIX shell script")
+	}
+
+	const threadID = "01a195f3-1c06-7a31-95c2-eed72a7ac24e"
+	writeSession := func(t *testing.T, codexHome string) string {
+		t.Helper()
+		dir := filepath.Join(codexHome, "sessions", "2026", "11", "01")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir sessions: %v", err)
+		}
+		sessionFile := filepath.Join(dir, "rollout-2026-11-01T12-41-40-"+threadID+".jsonl")
+		if err := os.WriteFile(sessionFile, []byte("{}\n"), 0o600); err != nil {
+			t.Fatalf("write session: %v", err)
+		}
+		return sessionFile
+	}
+	run := func(t *testing.T, env ...string) string {
+		t.Helper()
+		cmd := exec.CommandContext(t.Context(), "sh", "-c", codexSessionLookupScript)
+		cmd.Env = append([]string{"PATH=" + os.Getenv("PATH"), "SKILL_UP_CODEX_THREAD_ID=" + threadID}, env...)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("lookup script failed: %v", err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	home := t.TempDir()
+	codexHome := t.TempDir()
+	inHome := writeSession(t, filepath.Join(home, ".codex"))
+	inCodexHome := writeSession(t, codexHome)
+
+	if got := run(t, "HOME="+home); got != inHome {
+		t.Fatalf("without CODEX_HOME: got %q, want %q", got, inHome)
+	}
+	if got := run(t, "HOME="+home, "CODEX_HOME="+codexHome); got != inCodexHome {
+		t.Fatalf("with CODEX_HOME: got %q, want %q", got, inCodexHome)
+	}
+	if got := run(t, "HOME="+home, "CODEX_HOME="+t.TempDir()); got != "" {
+		t.Fatalf("CODEX_HOME without sessions: got %q, want no match", got)
 	}
 }
 
