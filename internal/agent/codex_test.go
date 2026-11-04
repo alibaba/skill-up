@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
+	goruntime "runtime"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -64,6 +68,7 @@ const (
 	testToolCallRole  = "tool_call"
 	testToolResRole   = "tool_result"
 	testStatusError   = "error"
+	testCommandCallID = "exec-2"
 	testJudgeJSON     = `{"results":[]}`
 	testThreadID      = "abc"
 )
@@ -596,6 +601,29 @@ func TestParseCodexOutput_MCPToolCallErrorStatus(t *testing.T) {
 	}
 }
 
+func TestParseCodexOutput_MCPToolCallFailureKeepsErrorMessage(t *testing.T) {
+	t.Parallel()
+
+	output := `
+{"type":"thread.started","thread_id":"abc"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"mcp_tool_call","server":"shop","tool":"get_order","arguments":{"order_id":42},"result":null,"error":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"mcp_tool_call","server":"shop","tool":"get_order","arguments":{"order_id":42},"result":null,"error":{"message":"MCP tool call requires approval"},"status":"failed"}}
+`
+
+	trans := parseCodexOutput(context.Background(), output).transcript
+	if len(trans) != 2 {
+		t.Fatalf("expected 2 transcript messages, got %d", len(trans))
+	}
+	result := trans[1].ToolResult
+	if result == nil || result.Status != toolStatusError {
+		t.Fatalf("expected failed tool result, got %+v", trans[1])
+	}
+	if result.Content != "MCP tool call requires approval" {
+		t.Fatalf("tool result content = %q, want the error message", result.Content)
+	}
+}
+
 func TestParseCodexOutput_ConcatenatedEvents(t *testing.T) {
 	t.Parallel()
 
@@ -769,6 +797,171 @@ func TestParseCodexSessionFile_ToolErrorStatus(t *testing.T) {
 	}
 	if trans[2].ToolResult.Status != testStatusError {
 		t.Fatalf("expected tool result status error, got %q", trans[2].ToolResult.Status)
+	}
+}
+
+func TestParseCodexSessionFile_MCPToolCallItem(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session-mcp.jsonl")
+	content := `{"timestamp":"2026-11-01T07:11:40.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"What is the status of order 42?"}]}}
+{"timestamp":"2026-11-01T07:11:45.000Z","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"call_1","name":"exec","input":"text(await tools.mcp__shop__get_order({order_id:42}));"}}
+{"timestamp":"2026-11-01T07:11:45.100Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"exec-1","server":"shop","tool":"get_order","arguments":{"order_id":42},"status":"completed","result":{"content":[{"type":"text","text":"{\"status\":\"SHIPPED-7F3Q\"}"}]}}}}
+{"timestamp":"2026-11-01T07:11:45.200Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_1","output":[{"type":"input_text","text":"Script completed"}]}}
+{"timestamp":"2026-11-01T07:11:45.300Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"exec-2","command":["/bin/zsh","-lc","cat SKILL.md"],"exit_code":0,"aggregated_output":"Call get_order.\n","status":"completed"}}}
+{"timestamp":"2026-11-01T07:11:45.400Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"msg-1","content":[{"type":"Text","text":"skipped"}]}}}
+{"timestamp":"2026-11-01T07:11:46.000Z","type":"event_msg","payload":{"type":"agent_message","message":"Order 42 is SHIPPED-7F3Q.","phase":"final_answer"}}`
+	if err := os.WriteFile(sessionPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	parsed := parseCodexSessionFile(sessionPath)
+	if parsed.err != nil {
+		t.Fatalf("parse session file: %v", parsed.err)
+	}
+	trans := parsed.transcript
+	if len(trans) != 6 {
+		t.Fatalf("expected 6 transcript messages, got %d: %+v", len(trans), trans)
+	}
+	assertCodexShopGetOrderPair(t, trans[1], trans[2], toolStatusSuccess, `{"content":[{"text":"{\"status\":\"SHIPPED-7F3Q\"}","type":"text"}]}`)
+	cmdCall, cmdResult := trans[3].ToolCall, trans[4].ToolResult
+	if cmdCall == nil || cmdCall.Name != codexCommandToolName || cmdCall.ID != testCommandCallID || cmdCall.Arguments["command"] != "/bin/zsh -lc 'cat SKILL.md'" {
+		t.Fatalf("trans[3]: expected command_execution exec-2, got %+v", trans[3])
+	}
+	if cmdResult == nil || cmdResult.CallID != testCommandCallID || cmdResult.Status != toolStatusSuccess || cmdResult.Content != "Call get_order.\n" {
+		t.Fatalf("trans[4]: expected successful exec-2 result, got %+v", trans[4])
+	}
+	if parsed.finalMsg != "Order 42 is SHIPPED-7F3Q." {
+		t.Fatalf("final message = %q", parsed.finalMsg)
+	}
+}
+
+func TestParseCodexSessionFile_NormalizesDirectFunctionCalls(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session-direct-call.jsonl")
+	content := `{"timestamp":"2026-11-01T07:00:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"List files."}]}}
+{"timestamp":"2026-11-01T07:00:01.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"ls\"}","call_id":"call_9"}}
+{"timestamp":"2026-11-01T07:00:01.500Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"call_9","command":["/bin/zsh","-lc","ls"],"exit_code":1,"aggregated_output":"boom","status":"failed"}}}
+{"timestamp":"2026-11-01T07:00:02.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_9","output":"Process exited with code 1\nOutput:\nboom\n"}}`
+	if err := os.WriteFile(sessionPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	trans := parseCodexSessionFile(sessionPath).transcript
+	if len(trans) != 3 {
+		t.Fatalf("expected the direct call once (3 messages), got %d: %+v", len(trans), trans)
+	}
+	call := trans[1].ToolCall
+	if call == nil || call.ID != "call_9" || call.Name != codexCommandToolName || call.Arguments["command"] != "/bin/zsh -lc ls" {
+		t.Fatalf("trans[1]: expected the direct call in the stream's command_execution form, got %+v", trans[1])
+	}
+	if trans[2].ToolResult == nil || trans[2].ToolResult.CallID != "call_9" || trans[2].ToolResult.Status != testStatusError ||
+		trans[2].ToolResult.Content != "Process exited with code 1\nOutput:\nboom\n" {
+		t.Fatalf("trans[2]: expected the function_call_output content with error status, got %+v", trans[2])
+	}
+}
+
+// A direct call whose item failed without an exit code stays failed even when
+// its function_call_output carries no exit-code marker, in either line order.
+func TestParseCodexSessionFile_DirectCallItemFailureWins(t *testing.T) {
+	t.Parallel()
+
+	call := `{"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"./run.sh\"}","call_id":"call_5"}}`
+	item := `{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"call_5","command":["/bin/zsh","-lc","./run.sh"],"exit_code":null,"aggregated_output":"","status":"failed"}}}`
+	output := `{"type":"response_item","payload":{"type":"function_call_output","call_id":"call_5","output":"exec failed: sandbox denied"}}`
+	for name, lines := range map[string][]string{
+		"item before output": {call, item, output},
+		"output before item": {call, output, item},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+			if err := os.WriteFile(sessionPath, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
+				t.Fatalf("write session file: %v", err)
+			}
+			trans := parseCodexSessionFile(sessionPath).transcript
+			if len(trans) != 2 || trans[1].ToolResult == nil {
+				t.Fatalf("expected one call and one result, got %+v", trans)
+			}
+			if got := trans[1].ToolResult; got.Status != toolStatusError || got.Content != "exec failed: sandbox denied" {
+				t.Fatalf("result = %+v, want error status with the function_call_output content", got)
+			}
+		})
+	}
+}
+
+func TestCodexCommandFailedBeforeStartIsAnError(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session-not-started.jsonl")
+	content := `{"timestamp":"2026-11-01T07:00:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Run it."}]}}
+{"timestamp":"2026-11-01T07:00:01.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"exec-7","command":["/bin/zsh","-lc","./run.sh"],"exit_code":null,"aggregated_output":"","status":"failed"}}}`
+	if err := os.WriteFile(sessionPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+	trans := parseCodexSessionFile(sessionPath).transcript
+	if len(trans) != 3 || trans[2].ToolResult == nil || trans[2].ToolResult.Status != toolStatusError {
+		t.Fatalf("session: expected a failed command result, got %+v", trans)
+	}
+
+	output := `{"type":"thread.started","thread_id":"abc"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"/bin/zsh -lc ./run.sh","aggregated_output":"","exit_code":null,"status":"failed"}}`
+	streamTrans := parseCodexOutput(context.Background(), output).transcript
+	if len(streamTrans) != 2 || streamTrans[1].ToolResult == nil || streamTrans[1].ToolResult.Status != toolStatusError {
+		t.Fatalf("stream: expected a failed command result, got %+v", streamTrans)
+	}
+}
+
+func TestParseCodexSessionFile_MCPToolCallItemFailure(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session-mcp-failed.jsonl")
+	content := `{"timestamp":"2026-11-01T07:09:27.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"What is the status of order 42?"}]}}
+{"timestamp":"2026-11-01T07:09:30.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"exec-1","server":"shop","tool":"get_order","arguments":{"order_id":42},"status":"failed","error":{"message":"MCP tool call requires approval"}}}}
+{"timestamp":"2026-11-01T07:09:31.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"exec-2","command":["/bin/zsh","-lc","cat missing.txt"],"exit_code":1,"aggregated_output":"cat: missing.txt: No such file or directory\n","status":"failed"}}}`
+	if err := os.WriteFile(sessionPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	trans := parseCodexSessionFile(sessionPath).transcript
+	if len(trans) != 5 {
+		t.Fatalf("expected 5 transcript messages, got %d: %+v", len(trans), trans)
+	}
+	assertCodexShopGetOrderPair(t, trans[1], trans[2], toolStatusError, "MCP tool call requires approval")
+	if trans[3].ToolCall == nil || trans[3].ToolCall.ID != testCommandCallID || trans[3].ToolCall.Arguments["command"] != "/bin/zsh -lc 'cat missing.txt'" {
+		t.Fatalf("trans[3]: expected command_execution exec-2, got %+v", trans[3])
+	}
+	result := trans[4].ToolResult
+	if result == nil || result.CallID != testCommandCallID || result.Status != toolStatusError || result.Content != "cat: missing.txt: No such file or directory\n" {
+		t.Fatalf("trans[4]: expected failed exec-2 result with its output, got %+v", trans[4])
+	}
+}
+
+func assertCodexShopGetOrderPair(t *testing.T, callMsg, resultMsg transcript.Message, wantStatus, wantContent string) {
+	t.Helper()
+
+	call := callMsg.ToolCall
+	if callMsg.Role != testToolCallRole || call == nil || callMsg.Turn != 1 {
+		t.Fatalf("expected turn 1 tool call, got %+v", callMsg)
+	}
+	if call.Name != "mcp__shop__get_order" || call.ID != "exec-1" {
+		t.Fatalf("tool call = %q (id %q), want mcp__shop__get_order (id exec-1)", call.Name, call.ID)
+	}
+	if got, ok := call.Arguments["order_id"].(float64); !ok || got != 42 {
+		t.Fatalf("tool call arguments = %+v, want order_id 42", call.Arguments)
+	}
+	result := resultMsg.ToolResult
+	if resultMsg.Role != testToolResRole || result == nil {
+		t.Fatalf("expected tool result, got %+v", resultMsg)
+	}
+	if result.CallID != "exec-1" || result.Status != wantStatus || result.Content != wantContent {
+		t.Fatalf("tool result = %+v, want call exec-1, status %q, content %q", result, wantStatus, wantContent)
 	}
 }
 
@@ -1047,6 +1240,200 @@ func TestCodexRun_SandboxFlagHonoursKwargAndRuntime(t *testing.T) {
 	}
 }
 
+func TestCodexSessionLookupScript_HonoursCodexHome(t *testing.T) {
+	t.Parallel()
+	if goruntime.GOOS == platform.GOOSWindows {
+		t.Skip("POSIX shell script")
+	}
+
+	const threadID = "01a195f3-1c06-7a31-95c2-eed72a7ac24e"
+	writeSession := func(t *testing.T, codexHome string) string {
+		t.Helper()
+		dir := filepath.Join(codexHome, "sessions", "2026", "11", "01")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir sessions: %v", err)
+		}
+		sessionFile := filepath.Join(dir, "rollout-2026-11-01T12-41-40-"+threadID+".jsonl")
+		if err := os.WriteFile(sessionFile, []byte("{}\n"), 0o600); err != nil {
+			t.Fatalf("write session: %v", err)
+		}
+		return sessionFile
+	}
+	run := func(t *testing.T, env ...string) string {
+		t.Helper()
+		cmd := exec.CommandContext(t.Context(), "sh", "-c", codexSessionLookupScript)
+		cmd.Env = append([]string{"PATH=" + os.Getenv("PATH"), "SKILL_UP_CODEX_THREAD_ID=" + threadID}, env...)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("lookup script failed: %v", err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	home := t.TempDir()
+	codexHome := t.TempDir()
+	inHome := writeSession(t, filepath.Join(home, ".codex"))
+	inCodexHome := writeSession(t, codexHome)
+
+	if got := run(t, "HOME="+home); got != inHome {
+		t.Fatalf("without CODEX_HOME: got %q, want %q", got, inHome)
+	}
+	if got := run(t, "HOME="+home, "CODEX_HOME="+codexHome); got != inCodexHome {
+		t.Fatalf("with CODEX_HOME: got %q, want %q", got, inCodexHome)
+	}
+	if got := run(t, "HOME="+home, "CODEX_HOME="+t.TempDir()); got != "" {
+		t.Fatalf("CODEX_HOME without sessions: got %q, want no match", got)
+	}
+}
+
+func codexApprovalFlag(name string) string {
+	return `-c 'mcp_servers.` + name + `.default_tools_approval_mode="approve"'`
+}
+
+func codexRunCommand(t *testing.T, rt *codexTestRuntime) string {
+	t.Helper()
+	for i := len(rt.commands) - 1; i >= 0; i-- {
+		if strings.Contains(rt.commands[i], "codex exec") {
+			return rt.commands[i]
+		}
+	}
+	t.Fatalf("no codex exec command recorded: %v", rt.commands)
+	return ""
+}
+
+// Cases share one CodexAgent and run concurrently, so each run must approve
+// only the servers installed for its own runtime.
+func TestCodexRun_ApprovesOnlyThisCasesMCPServers(t *testing.T) {
+	t.Parallel()
+
+	stdout := `{"type":"thread.started","thread_id":"thread-123"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"OK"}}`
+	stdio := func(name string) runtime.MCPServerConfig {
+		return runtime.MCPServerConfig{Name: name, Transport: "stdio", Command: "node", Args: []string{name + ".js"}}
+	}
+	cases := []struct {
+		name    string
+		servers []runtime.MCPServerConfig
+		want    []string
+		notWant []string
+	}{
+		{name: "shop only", servers: []runtime.MCPServerConfig{stdio("shop")}, want: []string{"shop"}, notWant: []string{"docs-v2_x"}},
+		{name: "docs and a dotted name", servers: []runtime.MCPServerConfig{stdio("docs-v2_x"), stdio("bad.name")}, want: []string{"docs-v2_x"}, notWant: []string{"shop", "bad.name"}},
+		{name: "no servers", notWant: []string{"shop", "docs-v2_x"}},
+	}
+
+	ag := NewCodexAgent(Config{})
+	runtimes := make([]*codexTestRuntime, len(cases))
+	var wg sync.WaitGroup
+	for i, tc := range cases {
+		runtimes[i] = &codexTestRuntime{workspace: t.TempDir(), execResult: runtime.ExecResult{Stdout: stdout, ExitCode: 0}}
+		wg.Add(1)
+		go func(rt *codexTestRuntime, servers []runtime.MCPServerConfig) {
+			defer wg.Done()
+			if err := ag.InstallMCP(context.Background(), rt, runtime.MCPConfig{Servers: servers}); err != nil {
+				t.Errorf("InstallMCP failed: %v", err)
+				return
+			}
+			if _, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{Role: transcript.RoleUser, Content: "hi", Turn: 1}}); err != nil {
+				t.Errorf("Run failed: %v", err)
+			}
+		}(runtimes[i], tc.servers)
+	}
+	wg.Wait()
+
+	for i, tc := range cases {
+		runCmd := codexRunCommand(t, runtimes[i])
+		if !strings.Contains(runCmd, codexProcessSandbox) || strings.Contains(runCmd, codexBypassSandbox) {
+			t.Errorf("%s: approval must keep the workspace-write sandbox: %s", tc.name, runCmd)
+		}
+		for _, name := range tc.want {
+			if !strings.Contains(runCmd, codexApprovalFlag(name)) {
+				t.Errorf("%s: missing approval for %q: %s", tc.name, name, runCmd)
+			}
+		}
+		for _, name := range tc.notWant {
+			if strings.Contains(runCmd, "mcp_servers."+name+".") {
+				t.Errorf("%s: unexpected approval for %q: %s", tc.name, name, runCmd)
+			}
+		}
+	}
+}
+
+// A reused workspace runs its cases one after another; each install replaces
+// the approved set instead of adding to it.
+func TestCodexRun_ReinstallReplacesApprovedMCPServers(t *testing.T) {
+	t.Parallel()
+
+	rt := &codexTestRuntime{
+		workspace: t.TempDir(),
+		execResult: runtime.ExecResult{Stdout: `{"type":"thread.started","thread_id":"thread-123"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"OK"}}`, ExitCode: 0},
+	}
+	ag := NewCodexAgent(Config{})
+	for _, step := range []struct {
+		install []string
+		want    []string
+		notWant []string
+	}{
+		{install: []string{"shop"}, want: []string{"shop"}},
+		{install: []string{"docs"}, want: []string{"docs"}, notWant: []string{"shop"}},
+		{notWant: []string{"shop", "docs"}},
+	} {
+		servers := make([]runtime.MCPServerConfig, 0, len(step.install))
+		for _, name := range step.install {
+			servers = append(servers, runtime.MCPServerConfig{Name: name, Transport: "stdio", Command: "node", Args: []string{name + ".js"}})
+		}
+		if err := ag.InstallMCP(context.Background(), rt, runtime.MCPConfig{Servers: servers}); err != nil {
+			t.Fatalf("InstallMCP(%v) failed: %v", step.install, err)
+		}
+		if _, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{Role: transcript.RoleUser, Content: "hi", Turn: 1}}); err != nil {
+			t.Fatalf("Run after installing %v failed: %v", step.install, err)
+		}
+		runCmd := codexRunCommand(t, rt)
+		for _, name := range step.want {
+			if !strings.Contains(runCmd, codexApprovalFlag(name)) {
+				t.Fatalf("after installing %v: missing approval for %q: %s", step.install, name, runCmd)
+			}
+		}
+		for _, name := range step.notWant {
+			if strings.Contains(runCmd, "mcp_servers."+name+".") {
+				t.Fatalf("after installing %v: stale approval for %q: %s", step.install, name, runCmd)
+			}
+		}
+	}
+}
+
+func TestCodexRun_NoMCPApprovalWhenApprovalsAreBypassed(t *testing.T) {
+	t.Parallel()
+
+	stdout := `{"type":"thread.started","thread_id":"thread-123"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"OK"}}`
+	mcpCfg := runtime.MCPConfig{Servers: []runtime.MCPServerConfig{{Name: "shop", Transport: "stdio", Command: "node", Args: []string{"shop.js"}}}}
+	for _, tc := range []struct {
+		name      string
+		workspace string
+		kwargs    map[string]string
+	}{
+		{name: "bypass_sandbox", workspace: t.TempDir(), kwargs: map[string]string{KwargBypassSandbox: "true"}},
+		{name: "opensandbox", workspace: "opensandbox"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rt := &codexTestRuntime{workspace: tc.workspace, execResult: runtime.ExecResult{Stdout: stdout, ExitCode: 0}}
+			ag := NewCodexAgent(Config{Kwargs: tc.kwargs})
+			if err := ag.InstallMCP(context.Background(), rt, mcpCfg); err != nil {
+				t.Fatalf("InstallMCP failed: %v", err)
+			}
+			if _, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{Role: transcript.RoleUser, Content: "hi", Turn: 1}}); err != nil {
+				t.Fatalf("Run failed: %v", err)
+			}
+			if runCmd := codexRunCommand(t, rt); strings.Contains(runCmd, "default_tools_approval_mode") {
+				t.Fatalf("approval override added although approvals are bypassed: %s", runCmd)
+			}
+		})
+	}
+}
+
 func TestCodexRun_KeepsStreamFinalMessageWhenSessionHasNoFinalMessage(t *testing.T) {
 	t.Parallel()
 
@@ -1086,6 +1473,56 @@ func TestCodexRun_KeepsStreamFinalMessageWhenSessionHasNoFinalMessage(t *testing
 	wantStdoutPath := filepath.Join(artifactDir, codexStdoutArtifactPath)
 	if len(sessionResult.Artifacts.GeneratedFiles) == 0 || sessionResult.Artifacts.GeneratedFiles[0] != wantStdoutPath {
 		t.Fatalf("generated files = %v, want local stdout artifact %q", sessionResult.Artifacts.GeneratedFiles, wantStdoutPath)
+	}
+}
+
+// A Codex CLI that calls MCP tools from its code tool records them in the
+// session file only as item_completed events. The session transcript is longer
+// than the stream one here, so it wins and must still carry the MCP call.
+func TestCodexRun_SessionTranscriptKeepsMCPToolCalls(t *testing.T) {
+	t.Parallel()
+
+	rt := &codexTestRuntime{
+		workspace:   t.TempDir(),
+		sessionPath: "/tmp/codex-session.jsonl",
+		sessionBytes: []byte(`{"timestamp":"2026-11-01T07:11:40.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"What is the status of order 42?"}]}}
+{"timestamp":"2026-11-01T07:11:41.000Z","type":"event_msg","payload":{"type":"agent_message","message":"Reading the skill.","phase":"commentary"}}
+{"timestamp":"2026-11-01T07:11:42.000Z","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"call_1","name":"exec","input":"text(await tools.exec_command({cmd:\"cat SKILL.md\"}));"}}
+{"timestamp":"2026-11-01T07:11:42.400Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"exec-2","command":["/bin/zsh","-lc","cat SKILL.md"],"exit_code":0,"aggregated_output":"Call get_order.\n","status":"completed"}}}
+{"timestamp":"2026-11-01T07:11:42.500Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_1","output":[{"type":"input_text","text":"Script completed"}]}}
+{"timestamp":"2026-11-01T07:11:45.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"exec-1","server":"shop","tool":"get_order","arguments":{"order_id":42},"status":"completed","result":{"content":[{"type":"text","text":"SHIPPED-7F3Q"}]}}}}
+{"timestamp":"2026-11-01T07:11:46.000Z","type":"event_msg","payload":{"type":"agent_message","message":"Order 42 is SHIPPED-7F3Q.","phase":"final_answer"}}`),
+		execResult: runtime.ExecResult{
+			ExitCode: 0,
+			Stdout: `{"type":"thread.started","thread_id":"thread-123"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"/bin/zsh -lc 'cat SKILL.md'","aggregated_output":"Call get_order.\n","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_1","type":"mcp_tool_call","server":"shop","tool":"get_order","arguments":{"order_id":42},"result":null,"error":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"mcp_tool_call","server":"shop","tool":"get_order","arguments":{"order_id":42},"result":{"content":[{"type":"text","text":"SHIPPED-7F3Q"}]},"error":null,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"Order 42 is SHIPPED-7F3Q."}}
+{"type":"turn.completed","usage":{"input_tokens":0,"cached_input_tokens":0,"output_tokens":0}}`,
+		},
+	}
+	ag := NewCodexAgent(Config{})
+
+	sessionResult, err := ag.Run(context.Background(), rt, ExecOptions{ArtifactDir: t.TempDir()}, []transcript.Message{
+		{Role: transcript.RoleUser, Content: "What is the status of order 42?", Turn: 1},
+	})
+	if err != nil {
+		t.Fatalf("run codex: %v", err)
+	}
+	if got := sessionResult.Transcript.FinalAssistantMessage(); got != "Order 42 is SHIPPED-7F3Q." {
+		t.Fatalf("final assistant message = %q", got)
+	}
+	var calls []string
+	for _, msg := range sessionResult.Transcript {
+		if msg.ToolCall != nil {
+			calls = append(calls, msg.ToolCall.ID+" "+msg.ToolCall.Name)
+		}
+	}
+	want := []string{"exec-2 " + codexCommandToolName, "exec-1 mcp__shop__get_order"}
+	if !slices.Equal(calls, want) {
+		t.Fatalf("tool calls = %v, want the session calls %v", calls, want)
 	}
 }
 
