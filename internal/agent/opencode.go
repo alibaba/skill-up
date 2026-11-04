@@ -13,6 +13,7 @@ import (
 	"github.com/alibaba/skill-up/internal/agentkind"
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/observability"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
@@ -300,6 +301,11 @@ func (a *OpenCodeAgent) execute(ctx context.Context, rt Runtime, opts ExecOption
 	})
 	if err != nil {
 		return &SessionResult{Engine: a.Name(), ExitCode: 1, Artifacts: &SessionArtifacts{}}, err
+	}
+	if rt.Shell().GOOS == platform.GOOSWindows {
+		// OpenCode's V1 bridge passes PWD to native chdir; Git Bash's /c/...
+		// spelling is not a Windows path. Resolve the actual Exec working directory.
+		cmd = `PWD="$(pwd -W)" && export PWD && ` + cmd
 	}
 	result, execErr := rt.Exec(ctx, cmd, opts)
 	parsed, eventError := parseOpenCodeEvents(result.Stdout, instruction)

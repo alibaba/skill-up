@@ -289,6 +289,36 @@ func TestOpenCodeLocalRuntimeCommandBoundary(t *testing.T) {
 	}
 }
 
+func TestOpenCodePWDUsesTargetOS(t *testing.T) {
+	t.Parallel()
+	for _, goos := range []string{platform.GOOSWindows, platform.GOOSLinux, platform.GOOSDarwin} {
+		t.Run(goos, func(t *testing.T) {
+			t.Parallel()
+			shell := platform.Shell{GOOS: goos, Family: platform.ShellPOSIX}
+			if goos == platform.GOOSWindows {
+				shell.BashPath = `C:\Program Files\Git\bin\bash.exe`
+			}
+			rt := &probeMergeTestRuntime{workspace: t.TempDir(), shell: shell, probeStdout: `{"type":"text","sessionID":"ses_pwd","part":{"text":"ok"}}`}
+			ag := NewOpenCodeAgent(Config{})
+			result, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{Role: transcript.RoleUser, Content: "hello"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, resume := range []bool{false, true} {
+				if resume {
+					_, err = ag.RunTurn(context.Background(), rt, ExecOptions{}, transcript.Message{Role: transcript.RoleUser, Content: "again"}, result.SessionID)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				if got, want := strings.Contains(rt.probeCmd, "pwd -W"), goos == platform.GOOSWindows; got != want {
+					t.Fatalf("resume=%t: native PWD conversion=%t, want %t; command=%q", resume, got, want, rt.probeCmd)
+				}
+			}
+		})
+	}
+}
+
 func TestOpenCodeJudgeClearsOnlyProviderInlineConfiguration(t *testing.T) {
 	ctx := context.Background()
 	rt, err := runtime.NewRuntime(runtime.Config{Type: "none", WorkspaceDir: t.TempDir(), Env: map[string]string{"OPENCODE_CONFIG_CONTENT": `{"provider":{"openai":{"options":{"baseURL":"https://runner.example/v1"}}}}`}})

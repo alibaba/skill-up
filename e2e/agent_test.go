@@ -66,6 +66,61 @@ func TestQwenPromptShellRoundTrip(t *testing.T) {
 	}
 }
 
+func TestOpenCodeWindowsWorkingDirectory(t *testing.T) {
+	t.Parallel()
+	if platform.Host().Target.GOOS != platform.GOOSWindows || !platform.Host().Target.IsBash() {
+		t.Skip("requires Windows with Git Bash")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	bashEnv := filepath.Join(root, "opencode-env.sh")
+	shim := filepath.Join(root, "opencode-shim.sh")
+	writeFile(t, bashEnv, "opencode() { sh \"$FAKE_OPENCODE_SHIM\" \"$@\"; }\n")
+	// Model the npm shell shim followed by OpenCode's native chdir(PWD).
+	writeFile(t, shim, `powershell.exe -NoProfile -NonInteractive -Command '$ErrorActionPreference="Stop"; Set-Location -LiteralPath $env:PWD; if ((Get-Content -LiteralPath ".pwd-probe") -ne $env:FAKE_EXPECTED_CWD) { throw "Unexpected working directory" }' || exit $?
+printf '%s\n' "$*" > "$FAKE_ARGS_PATH"
+echo '{"type":"text","sessionID":"ses_pwd","part":{"text":"cwd ok"}}'
+`)
+	argsPath := filepath.Join(root, "args.txt")
+	rt, err := evalruntime.NewRuntime(evalruntime.Config{Type: "none", WorkspaceDir: root, Env: map[string]string{
+		"BASH_ENV": filepath.ToSlash(bashEnv), "FAKE_OPENCODE_SHIM": filepath.ToSlash(shim), "FAKE_ARGS_PATH": filepath.ToSlash(argsPath),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Create(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+	customCwd := filepath.Join(root, "cwd with spaces")
+	if err := os.Mkdir(customCwd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ag := agent.NewOpenCodeAgent(agent.Config{})
+	for _, cwd := range []string{root, customCwd} {
+		// Short Windows paths and their long aliases identify the same directory.
+		writeFile(t, filepath.Join(cwd, ".pwd-probe"), cwd)
+		opts := agent.ExecOptions{Env: map[string]string{"FAKE_EXPECTED_CWD": cwd}}
+		if cwd != root {
+			opts.Cwd = cwd
+		}
+		result, err := ag.Run(ctx, rt, opts, []transcript.Message{{Role: transcript.RoleUser, Content: "hello"}})
+		if err != nil {
+			t.Fatalf("Run cwd=%q: %v", cwd, err)
+		}
+		result, err = ag.RunTurn(ctx, rt, opts, transcript.Message{Role: transcript.RoleUser, Content: "again"}, result.SessionID)
+		if err != nil || result.FinalMessage != "cwd ok" {
+			t.Fatalf("RunTurn cwd=%q: result=%+v err=%v", cwd, result, err)
+		}
+		args, err := os.ReadFile(argsPath)
+		if err != nil || !strings.Contains(string(args), "--session ses_pwd") || !strings.Contains(string(args), "again") {
+			t.Fatalf("resume arguments=%q err=%v", args, err)
+		}
+		t.Logf("native Windows PWD accepted for cwd=%q", cwd)
+	}
+}
+
 func isQoderCLIInstalled() bool {
 	_, err := exec.LookPath("qodercli")
 	return err == nil

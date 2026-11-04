@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   DeepSeek Harness packages to 0.1.5-rc.3 while retaining the required cordis 4.0.2.
 
 ### Fixed
+- Normalize Git Bash's working directory to a native Windows `PWD` when running or resuming OpenCode, avoiding OpenCode 2.x V1 bridge directory errors.
 - Expand full-value `$VAR` references in real MCP headers and OpenCode endpoints, matching the existing `${VAR}` form.
 - Reject whitespace-only `input.prompt` and `input.turns[].content` during validation while preserving mutual-exclusion semantics and the original prompt bytes.
 - Clarify nested YAML comments and keep `skill-upper` scaffolding focused on
