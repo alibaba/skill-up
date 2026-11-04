@@ -1484,3 +1484,45 @@ All paths (including `cases.files` and fixture paths) are resolved relative to t
 ### When should I use `expect` vs `judge`?
 
 Use `expect` for fast, zero-cost gating (file existence, keyword presence). Use `judge` for richer quality grading. They compose well — when `expect` fails, `judge` is skipped, saving time and tokens.
+
+### Agent judge result files
+
+Set `judge.output.mode: file` to have the Judge edit a framework-created JSON
+file instead of returning JSON in its final chat message. The default remains
+`final_message`. This requires an agent with file tools and a shared runtime
+workspace; built-in none, Docker, and OpenSandbox runtimes provide file transfer.
+
+```yaml
+judge:
+  type: agent_judge
+  engine:
+    name: qodercli
+    model:
+      provider: qoder
+      name: performance
+  output:
+    mode: file
+  criteria:
+    - The implementation satisfies the required behavior with concrete evidence.
+```
+
+Each attempt receives a fresh runtime path and a template with stable criterion
+IDs, `passed: null`, and empty evidence/failure arrays. The Judge must replace all
+placeholders. The framework reads only that file, validates the existing strict
+result contract, and retries correction once if needed. Final chat prose is
+preserved for diagnosis but never used as a fallback verdict. A valid failing
+verdict does not trigger correction. Retries share the original timeout budget.
+
+Unchanged, incomplete, missing, fenced, or malformed files remain errors after
+correction. File output improves delivery reliability; it does not guarantee
+better evaluation accuracy. The framework saves `result-attempt-1.json` and,
+when downloaded, `result-attempt-2.json` beside the original
+`raw-response-attempt-*.txt` chat artifacts. No sample result is used as a backup
+score. Case-level agent judges inherit the global output setting; explicitly set
+`mode: final_message` to override it. Explicit `judges` members are independent.
+See `examples/code-stats/evals/eval-agent-judge-file.yaml` for a runnable example.
+
+A validated file can be recovered after a non-cancellation engine error even if
+chat is empty; reports disclose the recovered call. Explicit cancellation is
+never recovered. After an expired deadline, recovery permits up to five seconds
+only to download the existing result file, without restarting the agent.

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Add opt-in `judge.output.mode: file` for agent judges, with per-attempt JSON
+  templates, strict validation, isolated correction retries, and result artifacts.
+
 ### Changed
 - Strengthen `skill-upper` evolution with original/candidate comparisons,
   evidence-based acceptance and reversion, and regression checks. Keep the
