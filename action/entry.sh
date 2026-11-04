@@ -17,6 +17,28 @@ export PATH
 
 set -euo pipefail
 
+# GitHub mounts a runner-owned temporary HOME into root container actions.
+# Capture its owner before an engine creates private directories inside it.
+home_owner=""
+if [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
+  home_owner="$(stat -c '%u:%g' "$HOME")"
+fi
+
+restore_home_permissions() {
+  [ -n "$home_owner" ] || return 0
+
+  if ! chown -R "$home_owner" "$HOME"; then
+    echo "[entry] failed to restore home ownership" >&2
+    return 1
+  fi
+  # Preserve private modes on credentials while allowing the runner to walk
+  # and remove engine state such as .qodersec/state during temp cleanup.
+  if ! chmod -R u+rwX "$HOME"; then
+    echo "[entry] failed to restore home permissions" >&2
+    return 1
+  fi
+}
+
 restore_workspace_permissions() {
   local workspace="${GITHUB_WORKSPACE:-}"
   [ -n "$workspace" ] || return 0
@@ -45,6 +67,9 @@ restore_workspace_permissions() {
 cleanup() {
   local status=$?
   if ! restore_workspace_permissions && [ "$status" -eq 0 ]; then
+    status=1
+  fi
+  if ! restore_home_permissions && [ "$status" -eq 0 ]; then
     status=1
   fi
   exit "$status"
