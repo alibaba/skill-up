@@ -13,6 +13,8 @@ import (
 
 const judgeTypeScript = "script"
 
+const agentJudgeType = "agent_judge"
+
 // NewJudge creates a Judge instance based on the provided JudgeConfig.
 //
 // Case-level judge config takes precedence over global judge config.
@@ -36,7 +38,7 @@ func NewJudge(cfg config.JudgeConfig, ag agent.Agent, rt runtime.Runtime) (Judge
 			Runtime:        rt,
 		}, nil
 
-	case "agent_judge":
+	case agentJudgeType:
 		if ag == nil {
 			return nil, errors.New("agent_judge requires an Agent")
 		}
@@ -44,7 +46,11 @@ func NewJudge(cfg config.JudgeConfig, ag agent.Agent, rt runtime.Runtime) (Judge
 		if cfg.Engine != nil {
 			model = cfg.Engine.Model.Provider + "/" + cfg.Engine.Model.Name
 		}
-		return NewAgentJudgeWithContextAndSkills(ag, rt, model, cfg.Criteria, cfg.PassThreshold, cfg.Context, derefInt(cfg.TimeoutSeconds), SkillInfosFromRefs(cfg.Skills)), nil
+		j := NewAgentJudgeWithContextAndSkills(ag, rt, model, cfg.Criteria, cfg.PassThreshold, cfg.Context, derefInt(cfg.TimeoutSeconds), SkillInfosFromRefs(cfg.Skills))
+		if cfg.Output != nil {
+			j.OutputMode = cfg.Output.Mode
+		}
+		return j, nil
 
 	case "":
 		// No judge configured — return nil, caller should handle
@@ -77,10 +83,13 @@ func MergeJudgeConfig(global, caseLevel config.JudgeConfig) config.JudgeConfig {
 		return global
 	}
 	merged := caseLevel
+	if merged.Type == agentJudgeType && merged.Output == nil {
+		merged.Output = global.Output
+	}
 	// Fill in defaults from global if case doesn't specify
 	if merged.Model == "" && merged.Engine == nil {
 		merged.Model = global.Model
-		if merged.Type == "agent_judge" {
+		if merged.Type == agentJudgeType {
 			merged.Engine = global.Engine
 		}
 	}

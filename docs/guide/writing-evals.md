@@ -167,7 +167,7 @@ to an adapter and are now explicitly ignored with migration warnings. Use
 
 | key | agent | `true` behaviour | unset / `false` |
 | :---: | :---: | :--- | :--- |
-| `bypass_sandbox` | `codex` | Forces `--dangerously-bypass-approvals-and-sandbox`; overrides the runtime-derived choice. Use when the host kernel lacks Landlock support (e.g. some CI containers) | Default: `none` runtime → `--sandbox workspace-write`; other runtimes already bypass |
+| `bypass_sandbox` | `codex` | Forces `--dangerously-bypass-approvals-and-sandbox`; overrides the runtime-derived choice. Use when the host kernel lacks Landlock support (e.g. some CI containers) | Default: `none` runtime → `--sandbox workspace-write`, with tool calls approved for the MCP servers skill-up installed whose names match `^[A-Za-z0-9_-]+$` (other names cannot be addressed by a Codex `-c` override, so Codex still rejects their calls); other runtimes already bypass |
 | `bypass_sandbox` | `claude_code` | No-op — claude already runs with `--permission-mode=bypassPermissions` | No-op |
 | `bypass_sandbox` | `qodercli` | No-op — no equivalent flag | No-op |
 | `bypass_sandbox` | `qwen_code` | No-op — `qwen_code` never imposes its own sandbox (`--yolo` only auto-approves tool calls; it does **not** isolate). Like `claude_code`/`qodercli`, isolation is the runtime's job | No-op |
@@ -421,6 +421,28 @@ Rules and constraints:
 | `docker`      | Local container isolation, no remote dependency    | Custom toolchains, reproducible CI, offline |
 
 > **Tip:** if your Skill does not touch the filesystem, `none` avoids sandbox provisioning and is significantly faster.
+
+#### Branching setup by experiment group
+
+The framework injects `SKILL_UP_VARIANT` before setup and keeps it available to subsequent runtime commands in `none`, Docker, and OpenSandbox. It identifies the scheduled execution configuration: currently `with_skill` or `without_skill`. Non-benchmark runs use `with_skill`, even when the Skill list is empty; this does not prove that a Skill was installed or invoked. Future configurations may use other names (for example, `v1.0` or `v1.1`); custom groups are not enabled by this variable alone.
+
+`SKILL_UP_VARIANT` is reserved: defining it in `environment.env` is an error, including an empty or matching value. The framework overrides an inherited host value and any MCP-provided value with the actual task configuration, without changing the host process environment. Cases, variants, retries, and iterations receive their own runtime environment.
+
+```yaml
+environment:
+  type: none
+  setup_steps:
+    - run: |
+        case "$SKILL_UP_VARIANT" in
+          with_skill)    bash /opt/eval/init-with.sh ;;
+          without_skill) bash /opt/eval/init-without.sh ;;
+          *) exit 1 ;;
+        esac
+benchmark:
+  enabled: true
+```
+
+The scripts must already exist in the selected runtime; case fixtures are uploaded **after** setup. POSIX shell syntax is shown above. Local qodercli can use this setup with `environment.type: none`; benchmark tasks still use independent workspaces and generate the existing comparison report. The existing restriction on `--workspace` with benchmark remains in effect.
 
 #### OpenSandbox configuration
 
@@ -1484,3 +1506,45 @@ All paths (including `cases.files` and fixture paths) are resolved relative to t
 ### When should I use `expect` vs `judge`?
 
 Use `expect` for fast, zero-cost gating (file existence, keyword presence). Use `judge` for richer quality grading. They compose well — when `expect` fails, `judge` is skipped, saving time and tokens.
+
+### Agent judge result files
+
+Set `judge.output.mode: file` to have the Judge edit a framework-created JSON
+file instead of returning JSON in its final chat message. The default remains
+`final_message`. This requires an agent with file tools and a shared runtime
+workspace; built-in none, Docker, and OpenSandbox runtimes provide file transfer.
+
+```yaml
+judge:
+  type: agent_judge
+  engine:
+    name: qodercli
+    model:
+      provider: qoder
+      name: performance
+  output:
+    mode: file
+  criteria:
+    - The implementation satisfies the required behavior with concrete evidence.
+```
+
+Each attempt receives a fresh runtime path and a template with stable criterion
+IDs, `passed: null`, and empty evidence/failure arrays. The Judge must replace all
+placeholders. The framework reads only that file, validates the existing strict
+result contract, and retries correction once if needed. Final chat prose is
+preserved for diagnosis but never used as a fallback verdict. A valid failing
+verdict does not trigger correction. Retries share the original timeout budget.
+
+Unchanged, incomplete, missing, fenced, or malformed files remain errors after
+correction. File output improves delivery reliability; it does not guarantee
+better evaluation accuracy. The framework saves `result-attempt-1.json` and,
+when downloaded, `result-attempt-2.json` beside the original
+`raw-response-attempt-*.txt` chat artifacts. No sample result is used as a backup
+score. Case-level agent judges inherit the global output setting; explicitly set
+`mode: final_message` to override it. Explicit `judges` members are independent.
+See `examples/code-stats/evals/eval-agent-judge-file.yaml` for a runnable example.
+
+A validated file can be recovered after a non-cancellation engine error even if
+chat is empty; reports disclose the recovered call. Explicit cancellation is
+never recovered. After an expired deadline, recovery permits up to five seconds
+only to download the existing result file, without restarting the agent.

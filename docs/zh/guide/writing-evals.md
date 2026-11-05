@@ -386,6 +386,28 @@ mcp:
 
 > **建议**：如果你的 Skill 不涉及文件操作，使用 `none` 可以省去沙箱准备时间。
 
+#### 按实验分组执行初始化
+
+框架在 setup 前注入 `SKILL_UP_VARIANT`，并让 `none`、Docker 和 OpenSandbox 的后续 runtime 命令都能读取。它标识任务实际使用的执行配置，当前为 `with_skill` 或 `without_skill`。非 benchmark 运行即使 Skill 列表为空也使用 `with_skill`；这个值不代表 Skill 已安装或被调用。未来配置名可以是 `v1.0`、`v1.1` 等，但这个变量本身不会启用自定义分组。
+
+`SKILL_UP_VARIANT` 是保留名：在 `environment.env` 中配置会报错，即使值为空或与实际分组一致。框架会用实际任务配置覆盖宿主机继承值及 MCP 提供的同名值，不修改宿主进程环境。各用例、分组、重试和迭代使用独立的 runtime 环境。
+
+```yaml
+environment:
+  type: none
+  setup_steps:
+    - run: |
+        case "$SKILL_UP_VARIANT" in
+          with_skill)    bash /opt/eval/init-with.sh ;;
+          without_skill) bash /opt/eval/init-without.sh ;;
+          *) exit 1 ;;
+        esac
+benchmark:
+  enabled: true
+```
+
+脚本必须预先存在于所选 runtime 中，case fixtures 在 setup **之后**才上传。以上使用 POSIX shell 语法。本地 qodercli 可通过 `environment.type: none` 使用此配置；benchmark 任务仍使用独立工作区并生成原有对比报告。`--workspace` 与 benchmark 的现有限制保持有效。
+
 #### OpenSandbox 配置
 
 使用 `environment.type: opensandbox` 时，沙箱鉴权从进程环境变量 `OPENSANDBOX_API_KEY` 读取。服务地址、扩展参数等非敏感配置建议放在 `environment.kwargs` 中；Agent 自动安装后的可执行文件路径由对应 Agent 实现处理，通常不需要在评测配置中手动补 `PATH`。
@@ -1316,3 +1338,39 @@ judge:
 ### Q: 什么时候用 expect，什么时候用 judge？
 
 `expect` 用于快速的、零成本的门槛检查（文件是否存在、关键词是否出现）。`judge` 用于更复杂的质量评估。两者可以同时使用——`expect` 不通过时 `judge` 会被跳过，节省时间和 token。
+
+### Agent Judge 文件输出
+
+设置 `judge.output.mode: file`，让 Judge 编辑框架预创建的 JSON 文件。
+默认模式仍为 `final_message`。文件模式要求 Agent 具有文件工具，并能访问
+Runtime 工作区；内置 none、Docker、OpenSandbox 均提供文件传输能力。
+
+```yaml
+judge:
+  type: agent_judge
+  engine:
+    name: qodercli
+    model:
+      provider: qoder
+      name: performance
+  output:
+    mode: file
+  criteria:
+    - 实现满足要求，并提供具体证据。
+```
+
+每次尝试使用独立路径，模板预填稳定 criterion ID、`passed: null` 和空数组。
+Judge 必须填写全部判断、证据和失败原因。框架只读取该文件并严格校验，
+不以聊天回复作为兜底结果。未修改、漏填、文件缺失、Markdown 包装或非法 JSON
+会触发一次纠正；纠正后仍无效则为 ERROR。有效的 FAIL 不触发纠正。
+纠正重试与首次调用共用原有超时预算，且使用新的模板和路径。
+
+下载的结果保留为 `result-attempt-1.json`、`result-attempt-2.json`，
+聊天原文仍保留为 `raw-response-attempt-*.txt`，样例不会作为备用评分。
+文件模式提高交付可靠性，不保证判断准确率。case 级 agent judge 继承全局设置，
+显式配置 `mode: final_message` 可覆盖；`judges` 列表各成员独立配置。
+可运行示例见 `examples/code-stats/evals/eval-agent-judge-file.yaml`。
+
+即使聊天回复为空，非取消类引擎错误后仍可恢复已通过校验的文件结果，
+报告会标记该调用发生过恢复。显式取消始终返回错误。
+已超时的调用最多允许额外五秒下载已有结果文件，不会重新启动 Agent。

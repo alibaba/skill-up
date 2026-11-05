@@ -25,8 +25,6 @@ const (
 	EnvQoderCNAccessToken         = "QODER_CN_ACCESS_TOKEN"         //nolint:gosec // local secret alias, not a credential value
 )
 
-const apiKeyMaskLen = 4 // Length for API key masking
-
 // DefaultConfPath returns the default credentials file path,
 // ~/.skill-up/credentials.yaml. It returns "" when the home directory
 // cannot be determined, in which case the file layer is silently skipped.
@@ -92,16 +90,7 @@ func (r *Resolver) Get(provider string) (*config.APIKeyConfig, bool) {
 	return cred, ok
 }
 
-// MaskAPIKey masks the middle portion of an API key, showing first 2 and last 2 chars.
-func MaskAPIKey(key string) string {
-	if len(key) <= apiKeyMaskLen {
-		return "****"
-	}
-
-	return key[:2] + "****" + key[len(key)-2:]
-}
-
-// logEffectiveConfig prints the currently loaded credentials (API_KEY masked).
+// logEffectiveConfig prints credential presence without including key material.
 func (r *Resolver) logEffectiveConfig() {
 	if len(r.creds) == 0 {
 		logging.Debugf("No credentials loaded from config file.")
@@ -110,7 +99,7 @@ func (r *Resolver) logEffectiveConfig() {
 	}
 	for name, cred := range r.creds {
 		if cred.APIKey != "" {
-			logging.Debugf("CREDENTIAL_DISCOVERED provider=%s source=resolver api_key=%s", name, MaskAPIKey(cred.APIKey))
+			logging.Debugf("CREDENTIAL_DISCOVERED provider=%s source=resolver api_key=present", name)
 		}
 		if cred.BaseURL != "" {
 			logging.Debugf("CREDENTIAL_DISCOVERED provider=%s source=resolver base_url=%s", name, cred.BaseURL)
