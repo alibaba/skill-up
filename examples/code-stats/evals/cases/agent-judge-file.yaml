@@ -1,0 +1,6 @@
+id: agent-judge-file
+title: Evaluate a code statistics report using file delivery
+input:
+  prompt: Analyze this workspace using the code-stats Skill. Report total files, total lines, statistics by extension, and the largest files. Run read-only commands without asking for approval.
+context:
+  repo_fixture: evals/fixtures/repos/sample-project

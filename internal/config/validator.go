@@ -275,6 +275,14 @@ func validateJudgeTypeAndLocalFields(judge JudgeConfig) []string {
 	}
 	errs = append(errs, validateSkillRefs("judge.skills", judge.Skills)...)
 	errs = append(errs, validateJudgeEngine(judge)...)
+	if judge.Output != nil {
+		if judge.Type != "" && judge.Type != judgeTypeAgentJudge {
+			errs = append(errs, "judge.output is only supported when judge.type is agent_judge")
+		}
+		if mode := judge.Output.Mode; mode != "" && mode != "file" && mode != "final_message" {
+			errs = append(errs, "judge.output.mode must be one of: final_message, file")
+		}
+	}
 
 	errs = append(errs, validatePassThreshold(judge.PassThreshold)...)
 	errs = append(errs, validateJudgeContext(judge.Context)...)
@@ -661,6 +669,9 @@ func mergeJudgeConfigForValidation(global, caseLevel JudgeConfig) JudgeConfig {
 		return global
 	}
 	merged := caseLevel
+	if merged.Type == judgeTypeAgentJudge && merged.Output == nil {
+		merged.Output = global.Output
+	}
 	if merged.Model == "" && merged.Engine == nil {
 		merged.Model = global.Model
 		if merged.Type == judgeTypeAgentJudge {
