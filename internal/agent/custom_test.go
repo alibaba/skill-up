@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,6 +63,81 @@ func TestCustomAgent_OutputFileLogsRedactSecrets(t *testing.T) {
 				t.Fatalf("output file diagnostics did not redact secrets: %q", output)
 			}
 		})
+	}
+}
+
+func TestCustomAgent_RunLocal_RejectsAPIKeyInPaths(t *testing.T) {
+	for _, field := range []string{"input_file", "output_file", "cwd"} {
+		for _, indirect := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/kwargs=%v", field, indirect), func(t *testing.T) {
+				rt := newCustomTestRuntime(t)
+				secret := "fixture-path-secret"
+				path := "${api_key}.json"
+				custom := &config.CustomEngineConfig{
+					Transport: "local",
+					Local:     &config.CustomLocalConfig{Command: "printf", Args: []string{"done"}},
+				}
+				if indirect {
+					custom.Kwargs = map[string]string{"target": "../${api_key}.json"}
+					path = "${kwargs.target}"
+				}
+				switch field {
+				case "input_file":
+					custom.Local.InputFile = path
+				case "output_file":
+					custom.Local.OutputFile = path
+				case "cwd":
+					custom.Local.Cwd = path
+				}
+				ag := NewCustomAgent(Config{Name: "test", APIKey: secret, Custom: custom})
+				output := captureStdout(t, func() {
+					_, err := ag.Run(context.Background(), rt, ExecOptions{}, userMessages())
+					if err == nil || !strings.Contains(err.Error(), "engine.custom.local."+field+" contains the API key") {
+						t.Fatalf("expected credential path rejection, got %v", err)
+					}
+					logging.Warnf("custom run failed: %v", err)
+				})
+				if strings.Contains(output, secret) {
+					t.Fatalf("credential leaked in diagnostics: %s", output)
+				}
+				if _, err := os.Stat(filepath.Join(rt.Workspace(), secret+".json")); !os.IsNotExist(err) {
+					t.Fatalf("credential path was used: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestCustomAgent_CustomWorkspacePath_RedactsEscapingSymlink(t *testing.T) {
+	rt := newCustomTestRuntime(t)
+	secret := strings.Join([]string{"fixture", "symlink", "secret"}, "-")
+	outside := filepath.Join(t.TempDir(), secret)
+	if err := os.Mkdir(outside, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(rt.Workspace(), "link")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	ag := NewCustomAgent(Config{APIKey: secret})
+	_, err := ag.customWorkspacePath(rt, "link/result.json", "local.input_file")
+	if err == nil || strings.Contains(err.Error(), secret) {
+		t.Fatalf("expected safe workspace error, got %v", err)
+	}
+}
+
+func TestCustomAgent_CustomWorkspacePath_RejectsResolvedAPIKey(t *testing.T) {
+	rt := newCustomTestRuntime(t)
+	secret := strings.Join([]string{"fixture", "symlink", "secret"}, "-")
+	if err := os.Mkdir(filepath.Join(rt.Workspace(), secret), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(rt.Workspace(), "link")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	ag := NewCustomAgent(Config{APIKey: secret})
+	_, err := ag.customWorkspacePath(rt, "link/result.json", "local.input_file")
+	if err == nil || !strings.Contains(err.Error(), "contains the API key") || strings.Contains(err.Error(), secret) {
+		t.Fatalf("expected safe credential path rejection, got %v", err)
 	}
 }
 
