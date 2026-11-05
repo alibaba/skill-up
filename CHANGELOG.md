@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Expose the framework-owned `SKILL_UP_VARIANT` execution group to setup and subsequent runtime commands across none, Docker, and OpenSandbox; reject the reserved name in `environment.env`.
 - Add opt-in `judge.output.mode: file` for agent judges, with per-attempt JSON
   templates, strict validation, isolated correction retries, and result artifacts.
 
