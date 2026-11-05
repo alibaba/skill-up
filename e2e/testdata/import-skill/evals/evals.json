@@ -5,7 +5,7 @@
       "id": 1,
       "prompt": "Test import prompt 1",
       "expected_output": "Expected output 1",
-      "files": ["file1.txt"],
+      "files": ["evals/files/input.txt"],
       "expectations": ["Expect 1"]
     },
     {
