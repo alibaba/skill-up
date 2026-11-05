@@ -690,6 +690,9 @@
     }
 
     function renderCaseGrading(c) {
+      if (!c.grading && (!c.judge_results || !c.judge_results.length) && c.turn_results && c.turn_results.some(function(tr) { return tr.status === "failed" || tr.status === "error"; })) {
+        return renderTurnFailuresAsGrades(c.turn_results);
+      }
       if (!c.judge_results || !c.judge_results.length) return renderGradingBlock(c.grading);
       var html = '';
       if (c.gates) {
