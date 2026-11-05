@@ -177,8 +177,14 @@ type RetryPolicy struct {
 	RetryOn    []string `yaml:"retry_on,omitempty"` // timeout, error
 }
 
+// JudgeOutputConfig selects the agent judge result delivery channel.
+type JudgeOutputConfig struct {
+	Mode string `json:"mode,omitempty" yaml:"mode,omitempty"` // final_message (default) or file
+}
+
 // JudgeConfig describes the evaluation strategy.
 type JudgeConfig struct {
+	Output     *JudgeOutputConfig  `json:"output,omitempty" yaml:"output,omitempty"`
 	ID         string              `json:"id,omitempty" yaml:"id,omitempty"`
 	Type       string              `json:"type"                     yaml:"type"` // rule_based, script, agent_judge
 	ScriptPath string              `json:"script_path,omitempty"    yaml:"script_path,omitempty"`

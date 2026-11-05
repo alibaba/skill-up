@@ -1338,3 +1338,39 @@ judge:
 ### Q: 什么时候用 expect，什么时候用 judge？
 
 `expect` 用于快速的、零成本的门槛检查（文件是否存在、关键词是否出现）。`judge` 用于更复杂的质量评估。两者可以同时使用——`expect` 不通过时 `judge` 会被跳过，节省时间和 token。
+
+### Agent Judge 文件输出
+
+设置 `judge.output.mode: file`，让 Judge 编辑框架预创建的 JSON 文件。
+默认模式仍为 `final_message`。文件模式要求 Agent 具有文件工具，并能访问
+Runtime 工作区；内置 none、Docker、OpenSandbox 均提供文件传输能力。
+
+```yaml
+judge:
+  type: agent_judge
+  engine:
+    name: qodercli
+    model:
+      provider: qoder
+      name: performance
+  output:
+    mode: file
+  criteria:
+    - 实现满足要求，并提供具体证据。
+```
+
+每次尝试使用独立路径，模板预填稳定 criterion ID、`passed: null` 和空数组。
+Judge 必须填写全部判断、证据和失败原因。框架只读取该文件并严格校验，
+不以聊天回复作为兜底结果。未修改、漏填、文件缺失、Markdown 包装或非法 JSON
+会触发一次纠正；纠正后仍无效则为 ERROR。有效的 FAIL 不触发纠正。
+纠正重试与首次调用共用原有超时预算，且使用新的模板和路径。
+
+下载的结果保留为 `result-attempt-1.json`、`result-attempt-2.json`，
+聊天原文仍保留为 `raw-response-attempt-*.txt`，样例不会作为备用评分。
+文件模式提高交付可靠性，不保证判断准确率。case 级 agent judge 继承全局设置，
+显式配置 `mode: final_message` 可覆盖；`judges` 列表各成员独立配置。
+可运行示例见 `examples/code-stats/evals/eval-agent-judge-file.yaml`。
+
+即使聊天回复为空，非取消类引擎错误后仍可恢复已通过校验的文件结果，
+报告会标记该调用发生过恢复。显式取消始终返回错误。
+已超时的调用最多允许额外五秒下载已有结果文件，不会重新启动 Agent。

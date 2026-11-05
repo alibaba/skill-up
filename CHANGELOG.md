@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Expose the framework-owned `SKILL_UP_VARIANT` execution group to setup and subsequent runtime commands across none, Docker, and OpenSandbox; reject the reserved name in `environment.env`.
+- Add opt-in `judge.output.mode: file` for agent judges, with per-attempt JSON
+  templates, strict validation, isolated correction retries, and result artifacts.
 
 ### Changed
 - Strengthen `skill-upper` evolution with original/candidate comparisons,
@@ -19,12 +21,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   DeepSeek Harness packages to 0.1.5-rc.3 while retaining the required cordis 4.0.2.
 
 ### Fixed
+- Use patched Vite/esbuild dependencies for the documentation site while
+  retaining VitePress 1.x.
+- Remove overflow-prone runtime kwargs preallocation while preserving
+  eval-over-user precedence and independent merged maps.
+- Avoid logging API key fragments and redact secrets in custom-engine
+  output-file paths and errors without changing file operations or fallbacks.
+- Expand full-value `$VAR` references in real MCP headers and OpenCode endpoints, matching the existing `${VAR}` form.
+- Restore the Docker Action's temporary home ownership and owner permissions on exit so private engine state does not block self-hosted runner cleanup.
 - Reject whitespace-only `input.prompt` and `input.turns[].content` during validation while preserving mutual-exclusion semantics and the original prompt bytes.
 - Clarify nested YAML comments and keep `skill-upper` scaffolding focused on
   the requested cases and scoring contract. Accept read-only checksum queries
   in the localized-regression judge while rejecting checksum manifest modes.
   Keep credential-probe verification within the caller's allowed command profile.
 - Add `case_results[].judge_recovery` metadata to reports when an agent judge verdict is recovered after a call error, distinguishing recovered output from a healthy judge call.
+- Keep MCP tool calls and shell commands in Codex transcripts built from the session file, so `tool_called` matches calls that newer Codex CLIs make from their code tool. A failed Codex MCP call now keeps its error message as the tool result.
+- Find Codex session files under `$CODEX_HOME/sessions` when `CODEX_HOME` is set, instead of always under `$HOME/.codex/sessions`.
+- Let Codex call the MCP servers skill-up installs on the `none` runtime. Codex rejected these calls under `--sandbox workspace-write` with "approval policy is never"; skill-up now approves tool calls for those servers only, with the sandbox kept. Server names outside `^[A-Za-z0-9_-]+$` are not covered.
 
 ## [0.14.0] - 2026-10-20
 

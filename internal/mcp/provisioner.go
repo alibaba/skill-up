@@ -142,6 +142,9 @@ func resolveEndpoint(
 	if err != nil {
 		return "", nil, fmt.Errorf("mcp server %q endpoint: %w", server.Name, err)
 	}
+	if name, ok := wholeEnvRef(endpoint); ok {
+		endpoint = "${" + name + "}"
+	}
 	return endpoint, env, nil
 }
 
@@ -293,7 +296,7 @@ func resolveHeaders(
 			if !exists || resolvedValue == "" {
 				return nil, nil, nil, fmt.Errorf("%s: referenced environment variable %s is not set", key, name)
 			}
-			resolved[key] = value
+			resolved[key] = "${" + name + "}"
 			envNames[key] = name
 			runEnv[name] = resolvedValue
 			continue
