@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -325,8 +326,41 @@ func TestRunEvalReportsUnknownKeysOnlyForSelectedCases(t *testing.T) {
 	}
 
 	_, err := captureStdout(t, func() error { return runEval(dryRunCmd(), []string{root}) })
-	if err == nil || !strings.Contains(err.Error(), `unknown field "judgez"`) {
+	if err == nil || !strings.Contains(err.Error(), `field judgez not found`) {
 		t.Fatalf("unfiltered run error = %v, want unknown field \"judgez\"", err)
+	}
+}
+
+func TestLoadRunInputsFiltersBeforeStrictYAMLDecode(t *testing.T) {
+	for _, auto := range []bool{false, true} {
+		for _, invalid := range []string{"input: {promt: typo}\n", "input: wrong-type\n"} {
+			t.Run(fmt.Sprintf("auto=%t/%s", auto, invalid), func(t *testing.T) {
+				root := t.TempDir()
+				writeAutoModeSkill(t, root)
+				writeSmokeAndFullEval(t, root)
+				if err := os.WriteFile(filepath.Join(root, "evals", "cases", "full.yaml"), []byte("id: full\n"+invalid), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				cmd := newRunPhaseTestCommand(t)
+				if err := cmd.Flags().Set("auto", strconv.FormatBool(auto)); err != nil {
+					t.Fatal(err)
+				}
+				if err := cmd.Flags().Set("exclude-case-name", "full"); err != nil {
+					t.Fatal(err)
+				}
+				cases, _, _, err := loadRunInputs(t.Context(), cmd, []string{root})
+				if err != nil || len(cases) != 1 || cases[0].ID != "smoke" {
+					t.Fatalf("filtered cases=%v, error=%v", cases, err)
+				}
+				allCmd := newRunPhaseTestCommand(t)
+				if err := allCmd.Flags().Set("auto", strconv.FormatBool(auto)); err != nil {
+					t.Fatal(err)
+				}
+				if _, _, _, err := loadRunInputs(t.Context(), allCmd, []string{root}); err == nil {
+					t.Fatal("unfiltered load accepted malformed case")
+				}
+			})
+		}
 	}
 }
 
@@ -790,7 +824,7 @@ func TestLoadManualModeEvaluationAcceptsSkillRootOrEvalFile(t *testing.T) {
 	writeAutoModeEvalYAML(t, root, "manual-case")
 	evalPath := filepath.Join(root, "evals", "eval.yaml")
 
-	gotPath, cases, evalCfg, loader, err := loadManualModeEvaluation(t.Context(), root)
+	gotPath, cases, evalCfg, loader, err := loadManualModeEvaluation(t.Context(), root, nil)
 	if err != nil {
 		t.Fatalf("loadManualModeEvaluation(root) returned error: %v", err)
 	}
@@ -801,7 +835,7 @@ func TestLoadManualModeEvaluationAcceptsSkillRootOrEvalFile(t *testing.T) {
 		t.Fatalf("root eval/loader = %+v/%s", evalCfg.Engine, loader.SkillDir())
 	}
 
-	gotPath, cases, _, _, err = loadManualModeEvaluation(t.Context(), evalPath)
+	gotPath, cases, _, _, err = loadManualModeEvaluation(t.Context(), evalPath, nil)
 	if err != nil {
 		t.Fatalf("loadManualModeEvaluation(file) returned error: %v", err)
 	}
@@ -809,7 +843,7 @@ func TestLoadManualModeEvaluationAcceptsSkillRootOrEvalFile(t *testing.T) {
 		t.Fatalf("file load path/cases = %q/%d", gotPath, len(cases))
 	}
 
-	if _, _, _, _, err := loadManualModeEvaluation(t.Context(), filepath.Join(root, "missing")); err == nil {
+	if _, _, _, _, err := loadManualModeEvaluation(t.Context(), filepath.Join(root, "missing"), nil); err == nil {
 		t.Fatal("expected error for missing eval.yaml")
 	}
 }
@@ -1208,7 +1242,7 @@ expect:
 		t.Fatal(err)
 	}
 
-	_, _, evalCfg, loader, err := loadFromEvalYAML(filepath.Join(evalsDir, "eval.yaml"))
+	_, _, evalCfg, loader, err := loadFromEvalYAML(filepath.Join(evalsDir, "eval.yaml"), nil)
 	if err != nil {
 		t.Fatalf("loadFromEvalYAML: %v", err)
 	}
@@ -1258,7 +1292,7 @@ expect:
 	}
 
 	evalPath := filepath.Join(evalsDir, "eval.yaml")
-	gotEvalPath, cases, evalCfg, loader, err := loadFromEvalYAML(evalPath)
+	gotEvalPath, cases, evalCfg, loader, err := loadFromEvalYAML(evalPath, nil)
 	if err != nil {
 		t.Fatalf("loadFromEvalYAML: %v", err)
 	}

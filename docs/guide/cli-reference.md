@@ -47,6 +47,15 @@ skill-up run [path] [flags]
 > blocking a filtered smoke run. Use [`skill-up validate`](#skill-up-validate)
 > to validate the **whole** suite (every case) regardless of filters.
 
+YAML config loading rejects unknown fields, including nested struct fields and
+fields brought in by aliases or `<<` merges. Errors name the field and line.
+Free-form maps such as `engine.kwargs`, environment variables and `context.files`
+still accept arbitrary keys. `run` reads case IDs before strictly decoding selected
+cases, using the filename when an ID is absent. Unknown fields and field-type
+errors in excluded cases do not block the run; unreadable files, malformed YAML,
+and invalid IDs still fail before filtering. A merged `judge` or `judges` block
+counts as present for explicit-null and mutual-exclusion checks.
+
 > **Existing workspace state.** `--workspace` deliberately reuses the same
 > directory for every selected case, retry, and iteration. Runs are serialized,
 > but configured setup/fixtures/skill installation and agent changes carry
@@ -171,6 +180,9 @@ The validator checks that:
 ## skill-up list-cases
 
 List every case referenced by an eval config — handy for quickly inspecting your suite.
+
+Like `validate`, this command strictly decodes every referenced case. Unknown YAML
+fields and field-type errors fail loading even though it does not run judges.
 
 ```bash
 skill-up list-cases [path to eval.yaml]

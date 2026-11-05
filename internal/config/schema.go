@@ -1,12 +1,7 @@
 package config
 
 import (
-	"fmt"
-	"reflect"
-	"strings"
 	"time"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/alibaba/skill-up/internal/customengine"
 	"github.com/alibaba/skill-up/internal/runtime"
@@ -14,35 +9,19 @@ import (
 
 // EvalConfig is the root document loaded from evals/eval.yaml (v1alpha1).
 type EvalConfig struct {
-	SchemaVersion string         `yaml:"schema_version"`
-	Environment   Environment    `yaml:"environment"`
-	MCP           MCPConfig      `yaml:"mcp"`
-	Skills        []SkillRef     `yaml:"skills"`
-	Engine        EngineConfig   `yaml:"engine"`
-	Cases         CasesConfig    `yaml:"cases"`
-	Judge         JudgeConfig    `yaml:"judge"`
-	Judges        *[]JudgeConfig `yaml:"judges,omitempty"`
-	JudgeSet      bool           `yaml:"-" json:"-"`
-	JudgesSet     bool           `yaml:"-" json:"-"`
-	// UnknownKeys holds top-level keys that match no field, reported by the
-	// validator so `run` can skip them for cases its filters leave out.
-	UnknownKeys   []string           `yaml:"-" json:"-"`
+	SchemaVersion string             `yaml:"schema_version"`
+	Environment   Environment        `yaml:"environment"`
+	MCP           MCPConfig          `yaml:"mcp"`
+	Skills        []SkillRef         `yaml:"skills"`
+	Engine        EngineConfig       `yaml:"engine"`
+	Cases         CasesConfig        `yaml:"cases"`
+	Judge         JudgeConfig        `yaml:"judge"`
+	Judges        *[]JudgeConfig     `yaml:"judges,omitempty"`
+	JudgeSet      bool               `yaml:"-" json:"-"`
+	JudgesSet     bool               `yaml:"-" json:"-"`
 	Benchmark     BenchmarkConfig    `yaml:"benchmark"`
 	Report        ReportConfig       `yaml:"report"`
 	UserSimulator UserSimulatorModel `yaml:"user_simulator,omitempty"`
-}
-
-// UnmarshalYAML records judge field presence so empty or null blocks cannot be ignored.
-func (e *EvalConfig) UnmarshalYAML(node *yaml.Node) error {
-	type plain EvalConfig
-	var decoded plain
-	if err := node.Decode(&decoded); err != nil {
-		return err
-	}
-	*e = EvalConfig(decoded)
-	e.UnknownKeys = unknownTopLevelKeys(node, reflect.TypeFor[plain]())
-	e.JudgeSet, e.JudgesSet = judgeFieldPresence(node)
-	return nil
 }
 
 // Environment defines the runtime environment for evaluation.
@@ -312,20 +291,18 @@ type ReportConfig struct {
 
 // CaseConfig is a single test case loaded from the case files listed in evals/eval.yaml.
 type CaseConfig struct {
-	ID          string         `yaml:"id"`
-	Title       string         `yaml:"title"`
-	Description string         `yaml:"description"`
-	Tag         string         `yaml:"tag"` // trigger_test, functional_test
-	Input       Input          `yaml:"input"`
-	Context     Context        `yaml:"context"`
-	Constraints Constraints    `yaml:"constraints"`
-	Expect      Expect         `yaml:"expect"`
-	Judge       JudgeConfig    `yaml:"judge,omitempty"`
-	Judges      *[]JudgeConfig `yaml:"judges,omitempty"`
-	JudgeSet    bool           `yaml:"-" json:"-"`
-	JudgesSet   bool           `yaml:"-" json:"-"`
-	// UnknownKeys holds top-level keys that match no field; see EvalConfig.
-	UnknownKeys   []string               `yaml:"-" json:"-"`
+	ID            string                 `yaml:"id"`
+	Title         string                 `yaml:"title"`
+	Description   string                 `yaml:"description"`
+	Tag           string                 `yaml:"tag"` // trigger_test, functional_test
+	Input         Input                  `yaml:"input"`
+	Context       Context                `yaml:"context"`
+	Constraints   Constraints            `yaml:"constraints"`
+	Expect        Expect                 `yaml:"expect"`
+	Judge         JudgeConfig            `yaml:"judge,omitempty"`
+	Judges        *[]JudgeConfig         `yaml:"judges,omitempty"`
+	JudgeSet      bool                   `yaml:"-" json:"-"`
+	JudgesSet     bool                   `yaml:"-" json:"-"`
 	UserSimulator *UserSimulatorScenario `yaml:"user_simulator,omitempty"`
 	// MCP declares case-level MCP server overrides. Servers are merged with
 	// eval-level mcp.servers by name: a same-name entry replaces the whole
@@ -345,119 +322,6 @@ type CaseConfig struct {
 	// validation keys off it so the check is correct for any case subset (e.g.
 	// the filtered set `skill-up run` executes), not only the full suite.
 	SourceFile string `json:"-" yaml:"-"`
-}
-
-// UnmarshalYAML records judge field presence for case-level overrides.
-func (c *CaseConfig) UnmarshalYAML(node *yaml.Node) error {
-	type plain CaseConfig
-	var decoded plain
-	if err := node.Decode(&decoded); err != nil {
-		return err
-	}
-	*c = CaseConfig(decoded)
-	c.UnknownKeys = unknownTopLevelKeys(node, reflect.TypeFor[plain]())
-	c.JudgeSet, c.JudgesSet = judgeFieldPresence(node)
-	return nil
-}
-
-// unknownTopLevelKeys lists top-level keys of node that match no field of t,
-// including keys brought in by `<<` merges, so a misspelled block such as
-// `judgez:` is reported instead of dropped. It is needed because node.Decode
-// inside a custom UnmarshalYAML does not inherit a caller's
-// Decoder.KnownFields(true). Nested keys are not checked.
-func unknownTopLevelKeys(node *yaml.Node, t reflect.Type) []string {
-	w := unknownKeyWalker{known: map[string]bool{}, visited: map[*yaml.Node]bool{}}
-	collectYAMLKeys(t, w.known)
-	w.walk(node)
-	return w.unknown
-}
-
-type unknownKeyWalker struct {
-	known   map[string]bool
-	visited map[*yaml.Node]bool
-	unknown []string
-}
-
-// walk records unknown keys of mapping m and of the mappings it merges in,
-// visiting each mapping once so a repeated alias is reported once.
-func (w *unknownKeyWalker) walk(m *yaml.Node) {
-	if m.Kind != yaml.MappingNode || w.visited[m] {
-		return
-	}
-	w.visited[m] = true
-	for i := 0; i+1 < len(m.Content); i += 2 {
-		key, value := m.Content[i], m.Content[i+1]
-		if key.Tag == "!!merge" {
-			for _, src := range mergeSources(value) {
-				w.walk(src)
-			}
-			continue
-		}
-		name := yamlKeyName(key)
-		if !w.known[name] {
-			w.unknown = append(w.unknown, fmt.Sprintf("unknown field %q (line %d)", name, key.Line))
-		}
-	}
-}
-
-// mergeSources returns the mappings a `<<` value merges in: a mapping, an
-// alias to one, or a sequence of those.
-func mergeSources(value *yaml.Node) []*yaml.Node {
-	switch value.Kind {
-	case yaml.MappingNode:
-		return []*yaml.Node{value}
-	case yaml.AliasNode:
-		if value.Alias != nil {
-			return mergeSources(value.Alias)
-		}
-	case yaml.SequenceNode:
-		var sources []*yaml.Node
-		for _, item := range value.Content {
-			sources = append(sources, mergeSources(item)...)
-		}
-		return sources
-	}
-	return nil
-}
-
-// collectYAMLKeys adds the mapping keys yaml.v3 decodes into struct t.
-func collectYAMLKeys(t reflect.Type, known map[string]bool) {
-	for field := range t.Fields() {
-		if !field.IsExported() {
-			continue
-		}
-		name, opts, _ := strings.Cut(field.Tag.Get("yaml"), ",")
-		if name == "-" {
-			continue
-		}
-		if strings.Contains(opts, "inline") && field.Type.Kind() == reflect.Struct {
-			collectYAMLKeys(field.Type, known)
-			continue
-		}
-		if name == "" {
-			name = strings.ToLower(field.Name)
-		}
-		known[name] = true
-	}
-}
-
-func yamlKeyName(key *yaml.Node) string {
-	if key.Kind == yaml.AliasNode && key.Alias != nil {
-		return key.Alias.Value
-	}
-	return key.Value
-}
-
-func judgeFieldPresence(node *yaml.Node) (singular, plural bool) {
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		switch yamlKeyName(node.Content[i]) {
-		case "judge":
-			singular = true
-		case "judges":
-			plural = true
-		}
-	}
-	return singular, plural
 }
 
 // Input describes the agent input (prompt or turns).

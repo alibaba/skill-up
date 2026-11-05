@@ -54,7 +54,6 @@ func NewValidator() *Validator {
 // ValidateEvalConfig validates an eval configuration.
 func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	var errs []string
-	errs = append(errs, cfg.UnknownKeys...)
 
 	// schema_version is required and must be v1alpha1
 	if cfg.SchemaVersion == "" {
@@ -125,7 +124,6 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 // ValidateCaseConfig validates a case configuration.
 func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 	var errs []string
-	errs = append(errs, cfg.UnknownKeys...)
 
 	// id is optional - Loader auto-generates from filename if not specified
 	// See loader.go:LoadCaseConfig for the fallback logic
