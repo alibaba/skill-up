@@ -253,6 +253,10 @@ How `${api_key}` is used is decided by the Custom Engine config:
 or HTTP headers. Auto-injection makes the auth semantics of different providers and
 agents opaque, and easily leaks credentials that should not be passed downstream.
 
+Local `input_file`, `output_file`, and `cwd` paths must not contain the resolved
+API key, including values expanded through kwargs or symlinks. Such paths are
+rejected before use; pass credentials through `custom.env` instead.
+
 The real value of `api_key` must be masked in logs, debug output, error messages, and
 reports.
 
