@@ -296,7 +296,7 @@ At a minimum, the following three categories should be distinguished.
 Used to describe what the resolver / env scan found:
 
 ```text
-[CREDENTIAL_DISCOVERED] provider=anthropic source=env api_key=sk****xx
+[CREDENTIAL_DISCOVERED] provider=anthropic source=env api_key=present
 [CREDENTIAL_DISCOVERED] provider=openai source=file base_url=https://...
 ```
 
@@ -332,7 +332,7 @@ These logs are particularly important for qodercli; otherwise users may mistaken
 - When a CLI argument is accepted but ignored by the agent, explicitly note "the argument has been parsed but is not consumed by the current agent"
 - Logs should include `kind=runner|judge`
 - Logs should include `engine=<engine-name>`
-- Sensitive values must be masked
+- API keys must be logged as presence only, without key fragments
 
 ## Relation to the Current Implementation
 

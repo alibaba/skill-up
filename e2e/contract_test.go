@@ -563,7 +563,7 @@ func TestContract_ListCases_MissingConfig_ReturnsError(t *testing.T) {
 func TestContract_Import_AnthropicFormat(t *testing.T) {
 	t.Parallel()
 
-	evalsPath := filepath.Join(projectRootFromTest(), "e2e", "testdata", "evals.json")
+	evalsPath := filepath.Join(projectRootFromTest(), "e2e", "testdata", "import-skill", "evals", "evals.json")
 	tmpDir := t.TempDir()
 
 	result := RunSimple(t, "import", evalsPath, "--output", tmpDir)

@@ -144,7 +144,7 @@ type Result struct {
 	// materials. It is omitted for deterministic judges and older results.
 	JudgeContext *ContextMetadata `json:"judge_context,omitempty"`
 
-	// Recovery records when agent_judge accepted a valid final message after its
+	// Recovery records when agent_judge accepted a valid result after its
 	// agent call returned an error. It is carried into report.json separately so
 	// grading.json remains compatible with the Anthropic grading contract.
 	Recovery *RecoveryMetadata `json:"-"`

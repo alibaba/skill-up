@@ -99,32 +99,6 @@ func TestResolveRunnerConfig_OpenCodeDoesNotInferProviderFromModel(t *testing.T)
 	}
 }
 
-func TestMaskAPIKey(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		key      string
-		expected string
-	}{
-		{name: "normal key", key: "sk-abcdefghijklmnopqrstuvwxyz123456", expected: "sk****56"},
-		{name: "short key (4 chars)", key: "abcd", expected: "****"},
-		{name: "shorter than mask length", key: "abc", expected: "****"},
-		{name: "empty key", key: "", expected: "****"},
-		{name: "exactly 5 chars", key: "abcde", expected: "ab****de"},
-		{name: "anthropic key format", key: "sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", expected: "sk****xx"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			if got := MaskAPIKey(tt.key); got != tt.expected {
-				t.Errorf("MaskAPIKey(%q) = %q, want %q", tt.key, got, tt.expected)
-			}
-		})
-	}
-}
-
 func TestDefaultConfPath(t *testing.T) {
 	t.Parallel()
 
@@ -429,6 +403,22 @@ func TestResolveRunnerConfig_PreservesOpaqueSlashedCLIModel(t *testing.T) {
 	}
 	if resolved.APIKey != "sk-cli-openai" || resolved.APIKeySource != ValueSourceCLI {
 		t.Fatalf("CLI key was not retained for provider-empty model: %#v", resolved)
+	}
+}
+
+func TestResolver_LogEffectiveConfigDoesNotLogKeyMaterial(t *testing.T) {
+	logging.SetVerbosity(1)
+	defer logging.SetVerbosity(0)
+
+	apiKey := strings.Join([]string{"resolver", "test", "credential"}, "-")
+	r := NewResolver("")
+	r.creds["openai"] = &config.APIKeyConfig{APIKey: apiKey}
+	output := captureLogOutput(t, r.logEffectiveConfig)
+	if !strings.Contains(output, "api_key=present") {
+		t.Fatalf("expected credential-presence log, got %q", output)
+	}
+	if strings.Contains(output, apiKey) || strings.Contains(output, "****") {
+		t.Fatalf("key material leaked into log: %q", output)
 	}
 }
 

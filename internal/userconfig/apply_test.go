@@ -2,6 +2,7 @@ package userconfig
 
 import (
 	"context"
+	"maps"
 	"os"
 	"slices"
 	"testing"
@@ -96,6 +97,23 @@ func TestMergeKwargs_NilEval(t *testing.T) {
 	merged := MergeKwargs(c, "opensandbox", nil)
 	if merged["base_url"] != "u" {
 		t.Errorf("user kwarg should fill: %+v", merged)
+	}
+}
+
+func TestMergeKwargs_PreservesInputs(t *testing.T) {
+	t.Parallel()
+
+	userKwargs := Kwargs{"shared": "user", "user-only": "default"}
+	evalKwargs := map[string]string{"shared": "eval", "eval-only": "explicit"}
+	c := Config{RuntimeKwargs: map[string]Kwargs{"opensandbox": userKwargs}}
+	merged := MergeKwargs(c, "opensandbox", evalKwargs)
+	want := map[string]string{"shared": "eval", "user-only": "default", "eval-only": "explicit"}
+	if !maps.Equal(merged, want) {
+		t.Fatalf("merged = %v, want %v", merged, want)
+	}
+	merged["shared"] = "changed"
+	if userKwargs["shared"] != "user" || evalKwargs["shared"] != "eval" {
+		t.Fatal("merged map aliases an input")
 	}
 }
 

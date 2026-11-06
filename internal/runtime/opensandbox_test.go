@@ -1093,3 +1093,20 @@ func TestOpenSandboxRuntime_MergeEnv_AppliesToSubsequentExec(t *testing.T) {
 		t.Fatalf("Envs[FROM_MERGE] = %q, want yes; got envs=%+v", got, fake.lastExec.Envs)
 	}
 }
+
+func TestOpenSandboxRuntimeVariantPropagation(t *testing.T) {
+	for _, variant := range []string{"with_skill", "without_skill"} {
+		t.Run(variant, func(t *testing.T) {
+			fake := &fakeOpenSandbox{}
+			rt := &OpenSandboxRuntime{workspace: "/workspace", cfg: Config{Env: map[string]string{VariantEnvName: variant}}, sandbox: fake}
+			for range 2 {
+				if _, err := rt.Exec(context.Background(), "true", ExecOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				if got := fake.lastExec.Envs[VariantEnvName]; got != variant {
+					t.Fatalf("variant = %q, want %q", got, variant)
+				}
+			}
+		})
+	}
+}

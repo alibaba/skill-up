@@ -290,7 +290,7 @@ func (a *CustomAgent) clearStaleOutputFile(ctx context.Context, rt Runtime, outp
 	// of the workspace.
 	safe, err := workspacePath(rt, outputFile)
 	if err != nil {
-		logging.WarnContextf(ctx, "CustomAgent: refusing to clear output file %s before run: %v", outputFile, err)
+		logging.WarnContextf(ctx, "CustomAgent: refusing to clear output file %s before run: %s", a.maskAPIKey(outputFile), a.maskAPIKey(err.Error()))
 		return false
 	}
 	outputFile = safe
@@ -298,7 +298,7 @@ func (a *CustomAgent) clearStaleOutputFile(ctx context.Context, rt Runtime, outp
 	cmd := "if [ -e " + q + " ]; then rm -f -- " + q + " && printf %s " + shellQuote(customStaleClearedMarker) + "; fi"
 	result, err := rt.Exec(ctx, cmd, ExecOptions{})
 	if err != nil {
-		logging.DebugContextf(ctx, "CustomAgent: could not clear stale output file %s: %v", outputFile, err)
+		logging.DebugContextf(ctx, "CustomAgent: could not clear stale output file %s: %s", a.maskAPIKey(outputFile), a.maskAPIKey(err.Error()))
 		return false
 	}
 	return strings.Contains(result.Stdout, customStaleClearedMarker)
@@ -466,7 +466,7 @@ func (a *CustomAgent) readRawResult(ctx context.Context, rt Runtime, custom *cus
 	if outputFile != "" {
 		safe, err := workspacePath(rt, outputFile)
 		if err != nil {
-			logging.WarnContextf(ctx, "CustomAgent: refusing to read output file %s after run: %v", outputFile, err)
+			logging.WarnContextf(ctx, "CustomAgent: refusing to read output file %s after run: %s", a.maskAPIKey(outputFile), a.maskAPIKey(err.Error()))
 			return strings.TrimSpace(result.Stdout), false
 		}
 		outputFile = safe
@@ -479,7 +479,7 @@ func (a *CustomAgent) readRawResult(ctx context.Context, rt Runtime, custom *cus
 	// same output_file basename.
 	tmpFile, err := os.CreateTemp("", "skill-up-custom-result-*")
 	if err != nil {
-		logging.WarnContextf(ctx, "CustomAgent: cannot create temp file for output_file %s, falling back to stdout: %v", outputFile, err)
+		logging.WarnContextf(ctx, "CustomAgent: cannot create temp file for output_file %s, falling back to stdout: %s", a.maskAPIKey(outputFile), a.maskAPIKey(err.Error()))
 		return result.Stdout, false
 	}
 	tmp := tmpFile.Name()
@@ -487,13 +487,13 @@ func (a *CustomAgent) readRawResult(ctx context.Context, rt Runtime, custom *cus
 	defer func() { _ = os.Remove(tmp) }()
 
 	if err := rt.DownloadFile(ctx, outputFile, tmp); err != nil {
-		logging.WarnContextf(ctx, "CustomAgent: cannot read output_file %s, falling back to stdout: %v", outputFile, err)
+		logging.WarnContextf(ctx, "CustomAgent: cannot read output_file %s, falling back to stdout: %s", a.maskAPIKey(outputFile), a.maskAPIKey(err.Error()))
 		return result.Stdout, false
 	}
 	// The output file exists in the runtime; it is "produced" even if empty.
 	data, err := os.ReadFile(tmp)
 	if err != nil {
-		logging.WarnContextf(ctx, "CustomAgent: cannot read output_file %s, falling back to stdout: %v", outputFile, err)
+		logging.WarnContextf(ctx, "CustomAgent: cannot read output_file %s, falling back to stdout: %s", a.maskAPIKey(outputFile), a.maskAPIKey(err.Error()))
 		return result.Stdout, true
 	}
 	if strings.TrimSpace(string(data)) == "" {
