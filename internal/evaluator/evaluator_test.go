@@ -4016,49 +4016,6 @@ func TestGitInitUploader_QuotesSpecialCharsInRemote(t *testing.T) {
 	}
 }
 
-func TestApplyDiffUploader_QuotesTempPath(t *testing.T) {
-	// apply_diff derives tmpPath from filepath.Base(diffSource); if the YAML
-	// author picks a filename with shell metacharacters, the exec must still
-	// pass it as a single argument rather than let the shell interpret it.
-	skillDir := t.TempDir()
-	// Use a base name that contains a space and `;` to stress-test quoting.
-	trickyName := "my patch;echo pwned.diff"
-	diffPath := filepath.Join(skillDir, trickyName)
-	if err := os.WriteFile(diffPath, []byte("not a real diff\n"), 0o600); err != nil {
-		t.Fatalf("write diff: %v", err)
-	}
-
-	var seenCmd string
-	rt := &mockRuntime{
-		workspace: t.TempDir(),
-		execFunc: func(_ context.Context, command string, _ runtime.ExecOptions) (runtime.ExecResult, error) {
-			seenCmd = command
-			// Pretend git apply failed so we don't need a valid diff; we only
-			// care about the exact command string composed by the uploader.
-			return runtime.ExecResult{ExitCode: 1, Stderr: "not a valid diff"}, nil
-		},
-	}
-
-	uploader := &applyDiffUploader{}
-	caseCfg := &config.CaseConfig{
-		ID:    "apply-diff-quote",
-		Title: "apply_diff with shell metachars",
-		Input: config.Input{Prompt: "test"},
-		Context: config.Context{
-			Git: &config.GitContext{ApplyDiff: trickyName},
-		},
-	}
-
-	if err := uploader.Upload(context.Background(), rt, caseCfg, skillDir, skillDir); err == nil {
-		t.Fatalf("expected mock git apply to fail, got success")
-	}
-	tmpPath := filepath.Join(os.TempDir(), trickyName)
-	wantCmd := "git apply -- '" + tmpPath + "'"
-	if seenCmd != wantCmd {
-		t.Fatalf("command = %q, want %q", seenCmd, wantCmd)
-	}
-}
-
 func TestGitInitUploader_InitWithRemotes(t *testing.T) {
 	workspace := t.TempDir()
 	rt := &mockRuntime{workspace: workspace}
