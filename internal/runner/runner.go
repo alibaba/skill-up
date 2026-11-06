@@ -587,7 +587,7 @@ func (r *Runner) writeCaseArtifacts(ws *report.IterationWorkspace, res *evaluato
 			return err
 		}
 	}
-	if len(res.JudgeResults) > 0 {
+	if len(res.JudgeResults) > 0 || res.Execution != nil || res.Metrics != nil {
 		strategy := res.AggregationStrategy
 		if strategy == "" {
 			strategy = judge.DefaultOutcomeAggregator().Strategy()
@@ -596,7 +596,14 @@ func (r *Runner) writeCaseArtifacts(ws *report.IterationWorkspace, res *evaluato
 			Version:      1,
 			Gates:        res.ExpectResult,
 			JudgeResults: res.JudgeResults,
-			Aggregation:  report.GroupAggregation{Strategy: strategy, Status: res.Status},
+			Execution:    res.Execution,
+			Metrics:      res.Metrics,
+			Aggregation: report.GroupAggregation{
+				Strategy:   strategy,
+				Status:     res.Status,
+				Completion: res.GroupCompletion,
+				Cause:      res.GroupCause,
+			},
 		}
 		if err := ws.WriteEvaluation(res.CaseID, cfgName, grouped); err != nil {
 			return err
@@ -788,6 +795,8 @@ func evalResultToCaseResult(res *evaluator.EvalResult) report.CaseResult {
 		Grading:         res.Grading,
 		Gates:           res.ExpectResult,
 		JudgeResults:    res.JudgeResults,
+		Execution:       res.Execution,
+		Metrics:         res.Metrics,
 		JudgeSkills:     res.JudgeSkills,
 		Configuration:   res.Configuration,
 		Prompt:          res.Prompt,

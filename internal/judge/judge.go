@@ -148,6 +148,15 @@ type Result struct {
 	// agent call returned an error. It is carried into report.json separately so
 	// grading.json remains compatible with the Anthropic grading contract.
 	Recovery *RecoveryMetadata `json:"-"`
+
+	// Metrics carries the materialized named-metric slots (#317). It is additive:
+	// judges without a configured metrics registry leave this nil, and no legacy
+	// field changes meaning.
+	Metrics *MetricsEnvelope `json:"metrics,omitempty"`
+
+	// Execution is evaluator-facing metadata copied to the case record rather
+	// than nested in the legacy grading payload.
+	Execution *ExecutionMetadata `json:"-"`
 }
 
 // RecoveryMetadata describes a recovered judge result without exposing the
@@ -158,6 +167,10 @@ type RecoveryMetadata struct {
 }
 
 // Outcome preserves one independent judge's result and diagnostic session.
+//
+// Execution and Metrics are additive #317 metadata. They exist even when Result
+// is nil, so a judge that was prevented from running, interrupted, or stopped by
+// the expect gate never loses its execution facts or its planned metric slots.
 type Outcome struct {
 	ID         string               `json:"id"`
 	Type       string               `json:"type"`
@@ -170,6 +183,8 @@ type Outcome struct {
 	Recovery   *RecoveryMetadata    `json:"recovery,omitempty"`
 	Session    *agent.SessionResult `json:"-"`
 	Skills     []SkillInfo          `json:"judge_skills,omitempty"`
+	Execution  *ExecutionMetadata   `json:"execution,omitempty"`
+	Metrics    *MetricsEnvelope     `json:"metrics,omitempty"`
 }
 
 // ContextMetadata is report-facing metadata for agent_judge context
