@@ -1,10 +1,12 @@
 package report
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -29,20 +31,67 @@ func (r *HTMLReporter) Write(_ context.Context, in Input) error {
 		return err
 	}
 
+	return writeToOutput(r.OutputPath, "html report", func(w io.Writer) error { return executeHTMLReport(w, data) })
+}
+
+func executeHTMLReport(w io.Writer, data htmlReportData) error {
 	funcMap := SharedTemplateFuncs()
 	funcMap["statusIcon"] = statusIcon
-
 	tmpl, err := template.New("report").Funcs(funcMap).Parse(htmlTemplate)
 	if err != nil {
 		return fmt.Errorf("parse html template: %w", err)
 	}
+	if err := tmpl.Execute(w, data); err != nil {
+		return fmt.Errorf("execute html template: %w", err)
+	}
+	return nil
+}
 
-	return writeToOutput(r.OutputPath, "html report", func(w io.Writer) error {
-		if err := tmpl.Execute(w, data); err != nil {
-			return fmt.Errorf("execute html template: %w", err)
+// ComparisonRun supplies a full original report for the comparison run selector.
+type ComparisonRun struct {
+	Label string
+	Input Input
+}
+
+// RenderComparisonHTML extends the existing report with a trusted, template-rendered
+// comparison section and a run selector. Each run retains its original case details.
+func RenderComparisonHTML(runs []ComparisonRun, section template.HTML) ([]byte, error) {
+	if len(runs) == 0 {
+		return nil, errors.New("comparison requires run details")
+	}
+	reporter := &HTMLReporter{}
+	data, err := reporter.buildTemplateData(runs[0].Input)
+	if err != nil {
+		return nil, err
+	}
+	type runPayload struct {
+		Label        string          `json:"label"`
+		Data         json.RawMessage `json:"data"`
+		PrimaryCases []embeddedCase  `json:"primary_cases"`
+	}
+	var payload []runPayload
+	for _, run := range runs {
+		runData, err := reporter.buildTemplateData(run.Input)
+		if err != nil {
+			return nil, err
 		}
-		return nil
-	})
+		primary := make([]embeddedCase, 0)
+		for _, cr := range run.Input.PrimaryCaseResults() {
+			primary = append(primary, caseResultToEmbeddedCase(cr))
+		}
+		payload = append(payload, runPayload{Label: run.Label, Data: json.RawMessage(runData.EmbeddedDataJSON), PrimaryCases: primary})
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encode comparison runs: %w", err)
+	}
+	data.ComparisonSection = section
+	data.ComparisonRuns = template.JS(encoded) //nolint:gosec // json.Marshal escapes untrusted strings, including script delimiters.
+	var b bytes.Buffer
+	if err := executeHTMLReport(&b, data); err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -50,9 +99,11 @@ func (r *HTMLReporter) Write(_ context.Context, in Input) error {
 // ---------------------------------------------------------------------------
 
 type htmlReportData struct {
-	SkillName        string
-	LogoDataURI      template.URL
-	EmbeddedDataJSON template.JS
+	ComparisonSection template.HTML
+	ComparisonRuns    template.JS
+	SkillName         string
+	LogoDataURI       template.URL
+	EmbeddedDataJSON  template.JS
 }
 
 // -- Embedded JSON types for JavaScript consumption --
