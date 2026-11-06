@@ -42,10 +42,19 @@ skill-up run [path] [flags]
 
 > **Validation scope.** `run` validates the eval-level config plus **only the
 > cases selected** after `--include-case-name` / `--exclude-case-name` filters.
-> An invalid case that is filtered out does not block the run — so a shared
-> eval can hold both a quick `smoke` subset and heavier cases without the latter
-> blocking a filtered smoke run. Use [`skill-up validate`](#skill-up-validate)
+> Semantic validation errors in excluded cases do not block the run. File and
+> metadata errors can still prevent filtering, as described below.
+> Use [`skill-up validate`](#skill-up-validate)
 > to validate the **whole** suite (every case) regardless of filters.
+
+YAML config loading rejects unknown fields, including nested struct fields and
+fields brought in by aliases or `<<` merges. Errors name the field and line.
+Free-form maps such as `engine.kwargs`, environment variables and `context.files`
+still accept arbitrary keys. `run` reads case IDs before strictly decoding selected
+cases, using the filename when an ID is absent. Unknown fields and field-type
+errors in excluded cases do not block the run; unreadable files, malformed YAML,
+and invalid IDs still fail before filtering. A merged `judge` or `judges` block
+counts as present for explicit-null and mutual-exclusion checks.
 
 > **Existing workspace state.** `--workspace` deliberately reuses the same
 > directory for every selected case, retry, and iteration. Runs are serialized,
@@ -171,6 +180,10 @@ The validator checks that:
 ## skill-up list-cases
 
 List every case referenced by an eval config — handy for quickly inspecting your suite.
+
+This command strictly decodes every referenced case: unknown YAML fields and
+field-type errors fail loading. It does not perform semantic validation or run
+judges. Use `validate` to check configuration semantics.
 
 ```bash
 skill-up list-cases [path to eval.yaml]

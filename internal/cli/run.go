@@ -195,12 +195,11 @@ func loadAndPrepareConfig(ctx context.Context, cmd *cobra.Command, args []string
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if len(cases) == 0 {
-		return nil, nil, nil, errors.New("no cases found")
-	}
-
 	includePatterns, _ := cmd.Flags().GetStringArray("include-case-name")
 	excludePatterns, _ := cmd.Flags().GetStringArray("exclude-case-name")
+	if len(cases) == 0 && len(includePatterns) == 0 && len(excludePatterns) == 0 {
+		return nil, nil, nil, errors.New("no cases found")
+	}
 	if len(includePatterns) > 0 || len(excludePatterns) > 0 {
 		cases = filterCases(cases, includePatterns, excludePatterns)
 	}
@@ -798,16 +797,16 @@ func resolveEvalPath(ctx context.Context, args []string) (string, error) {
 }
 
 func loadRunInputs(ctx context.Context, cmd *cobra.Command, args []string) ([]*config.CaseConfig, *config.EvalConfig, *config.Loader, error) {
+	include, _ := cmd.Flags().GetStringArray("include-case-name")
+	exclude, _ := cmd.Flags().GetStringArray("exclude-case-name")
+	selected := func(caseID string) bool {
+		return len(filterCases([]*config.CaseConfig{{ID: caseID}}, include, exclude)) == 1
+	}
 	autoMode, _ := cmd.Flags().GetBool("auto")
 	if autoMode {
 		autoRoot, err := resolveAutoEvalRoot(ctx, args)
 		if err != nil {
 			return nil, nil, nil, err
-		}
-		include, _ := cmd.Flags().GetStringArray("include-case-name")
-		exclude, _ := cmd.Flags().GetStringArray("exclude-case-name")
-		selected := func(caseID string) bool {
-			return len(filterCases([]*config.CaseConfig{{ID: caseID}}, include, exclude)) == 1
 		}
 		cases, evalCfg, loader, err := loadAutoModeEvaluation(ctx, autoRoot, selected)
 		if err != nil {
@@ -822,7 +821,7 @@ func loadRunInputs(ctx context.Context, cmd *cobra.Command, args []string) ([]*c
 		return nil, nil, nil, err
 	}
 
-	_, cases, evalCfg, loader, err := loadManualModeEvaluation(ctx, evalPathInput)
+	_, cases, evalCfg, loader, err := loadManualModeEvaluation(ctx, evalPathInput, selected)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -839,7 +838,7 @@ func loadAutoModeEvaluation(ctx context.Context, targetPath string, selected fun
 	switch {
 	case fileExists(evalYamlPath):
 		logging.InfoContextf(ctx, "Config: Auto-detected eval.yaml at %s", evalYamlPath)
-		_, cases, evalCfg, loader, err := loadFromEvalYAML(evalYamlPath)
+		_, cases, evalCfg, loader, err := loadFromEvalYAML(evalYamlPath, selected)
 		return cases, evalCfg, loader, err
 	case fileExists(evalsJSONPath):
 		logging.InfoContextf(ctx, "Config: Auto-detected Anthropic evals.json at %s", evalsJSONPath)
@@ -871,7 +870,7 @@ func discoverEvalYAMLFromSkillTree() (string, error) {
 }
 
 // loadManualModeEvaluation handles the manual mode for loading eval.yaml.
-func loadManualModeEvaluation(ctx context.Context, targetPath string) (string, []*config.CaseConfig, *config.EvalConfig, *config.Loader, error) {
+func loadManualModeEvaluation(ctx context.Context, targetPath string, selected func(string) bool) (string, []*config.CaseConfig, *config.EvalConfig, *config.Loader, error) {
 	var evalPath string
 
 	switch {
@@ -884,17 +883,21 @@ func loadManualModeEvaluation(ctx context.Context, targetPath string) (string, [
 	}
 	logging.InfoContextf(ctx, "Config: loading eval.yaml from %s", evalPath)
 
-	return loadFromEvalYAML(evalPath)
+	return loadFromEvalYAML(evalPath, selected)
 }
 
 // loadFromEvalYAML loads evaluation from an eval.yaml file.
-func loadFromEvalYAML(evalPath string) (string, []*config.CaseConfig, *config.EvalConfig, *config.Loader, error) {
+func loadFromEvalYAML(evalPath string, selected func(string) bool) (string, []*config.CaseConfig, *config.EvalConfig, *config.Loader, error) {
 	loader := config.NewLoader(evalPath)
-	result, err := loader.LoadAll()
+	evalCfg, err := loader.LoadEvalConfig()
 	if err != nil {
 		return "", nil, nil, nil, fmt.Errorf("failed to load config: %w", err)
 	}
-	applyImplicitSkills(result.Eval, loader)
+	cases, err := loader.LoadSelectedCases(evalCfg, selected)
+	if err != nil {
+		return "", nil, nil, nil, fmt.Errorf("failed to load config: %w", err)
+	}
+	applyImplicitSkills(evalCfg, loader)
 
 	// Validate eval-level (suite-wide) config now, but defer per-case
 	// validation to loadAndPrepareConfig, which runs it only over the cases
@@ -902,11 +905,11 @@ func loadFromEvalYAML(evalPath string) (string, []*config.CaseConfig, *config.Ev
 	// blocks a filtered run. `skill-up validate` still validates the whole
 	// suite (eval + every case) via ValidateAll.
 	validator := config.NewValidator()
-	if err := validator.ValidateEvalConfig(result.Eval); err != nil {
+	if err := validator.ValidateEvalConfig(evalCfg); err != nil {
 		return "", nil, nil, nil, fmt.Errorf("validation failed: %w", err)
 	}
 
-	return evalPath, result.Cases, result.Eval, loader, nil
+	return evalPath, cases, evalCfg, loader, nil
 }
 
 func fileExists(pathname string) bool {

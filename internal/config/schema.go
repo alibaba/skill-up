@@ -3,8 +3,6 @@ package config
 import (
 	"time"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/alibaba/skill-up/internal/customengine"
 	"github.com/alibaba/skill-up/internal/runtime"
 )
@@ -24,18 +22,6 @@ type EvalConfig struct {
 	Benchmark     BenchmarkConfig    `yaml:"benchmark"`
 	Report        ReportConfig       `yaml:"report"`
 	UserSimulator UserSimulatorModel `yaml:"user_simulator,omitempty"`
-}
-
-// UnmarshalYAML records judge field presence so empty or null blocks cannot be ignored.
-func (e *EvalConfig) UnmarshalYAML(node *yaml.Node) error {
-	type plain EvalConfig
-	var decoded plain
-	if err := node.Decode(&decoded); err != nil {
-		return err
-	}
-	*e = EvalConfig(decoded)
-	e.JudgeSet, e.JudgesSet = judgeFieldPresence(node)
-	return nil
 }
 
 // Environment defines the runtime environment for evaluation.
@@ -336,30 +322,6 @@ type CaseConfig struct {
 	// validation keys off it so the check is correct for any case subset (e.g.
 	// the filtered set `skill-up run` executes), not only the full suite.
 	SourceFile string `json:"-" yaml:"-"`
-}
-
-// UnmarshalYAML records judge field presence for case-level overrides.
-func (c *CaseConfig) UnmarshalYAML(node *yaml.Node) error {
-	type plain CaseConfig
-	var decoded plain
-	if err := node.Decode(&decoded); err != nil {
-		return err
-	}
-	*c = CaseConfig(decoded)
-	c.JudgeSet, c.JudgesSet = judgeFieldPresence(node)
-	return nil
-}
-
-func judgeFieldPresence(node *yaml.Node) (singular, plural bool) {
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		switch node.Content[i].Value {
-		case "judge":
-			singular = true
-		case "judges":
-			plural = true
-		}
-	}
-	return singular, plural
 }
 
 // Input describes the agent input (prompt or turns).
