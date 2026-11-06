@@ -258,7 +258,7 @@ func (j *AgentJudge) agentCallError(ctx context.Context, err error, sessionResul
 	}
 	recoverable := canRecoverAgentJudgeResult(err, sessionResult)
 	if j.OutputMode == agentJudgeFileMode {
-		recoverable = validResult && sessionResult != nil && !errors.Is(err, context.Canceled)
+		recoverable = validResult && sessionResult != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, agent.ErrRequestedModelUnavailable)
 	}
 	if !recoverable {
 		return nil, fmt.Errorf("agent_judge %s failed: %w", callLabel, err)
@@ -799,8 +799,8 @@ func canRecoverAgentJudgeResult(err error, sessionResult *agent.SessionResult) b
 	if strings.TrimSpace(sessionResult.FinalMessage) == "" {
 		return false
 	}
-	// Never recover from explicit cancellation.
-	if errors.Is(err, context.Canceled) {
+	// Never recover from cancellation or an unintended fallback model.
+	if errors.Is(err, context.Canceled) || errors.Is(err, agent.ErrRequestedModelUnavailable) {
 		return false
 	}
 	return true

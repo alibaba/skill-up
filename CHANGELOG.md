@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   DeepSeek Harness packages to 0.1.5-rc.3 while retaining the required cordis 4.0.2.
 
 ### Fixed
+- Reject Qoder CLI error envelopes and unfinished `tool_use` results even when
+  the process exits zero, retaining session artifacts for diagnosis and valid
+  file-verdict recovery. Reject reported model fallbacks and prevent agent judges
+  from accepting a verdict from an unavailable requested model. Update the file
+  judge example to the current Fast tier.
 - Use patched Vite/esbuild dependencies for the documentation site while
   retaining VitePress 1.x.
 - Remove overflow-prone runtime kwargs preallocation while preserving

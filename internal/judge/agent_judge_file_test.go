@@ -195,6 +195,7 @@ func TestAgentJudgeFileRecoveryWithoutChat(t *testing.T) {
 		{"deadline after valid file", []string{valid}, 1, context.DeadlineExceeded, false},
 		{"correction error after valid file", []string{"unchanged", valid}, 2, errors.New("exit status 1"), false},
 		{"explicit cancellation", []string{valid}, 1, context.Canceled, true},
+		{"model fallback cannot recover", []string{valid}, 1, agent.ErrRequestedModelUnavailable, true},
 		{"adapter error with invalid file", []string{"unchanged"}, 1, errors.New("exit status 1"), true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -255,5 +256,11 @@ func TestAgentJudgeFileRecoveryTransferContext(t *testing.T) {
 	_, err = j.readJudgeResults(canceled, &agent.SessionResult{}, file, context.Canceled)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("explicit cancellation lost: %v", err)
+	}
+}
+
+func TestAgentJudgeDoesNotRecoverModelFallback(t *testing.T) {
+	if canRecoverAgentJudgeResult(agent.ErrRequestedModelUnavailable, &agent.SessionResult{FinalMessage: `{"results":[]}`}) {
+		t.Fatal("a model fallback must not become a recovered verdict")
 	}
 }

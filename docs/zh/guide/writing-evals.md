@@ -1154,6 +1154,19 @@ engine:
 >
 > **注意**：`--api-key` 参数和 `eval.yaml` 中的 provider API key **不会**被用作 qodercli 的认证 token。鉴权来自所选版本对应的 PAT 或本地登录态。
 
+若 CLI 以退出码 0 返回空结果，但 `stop_reason` 为 `tool_use`，说明工具循环尚未完成。
+skill-up 会将其报告为引擎错误并保留原始输出。先检查 `qodercli --version`，
+通过 `qodercli update` 或官方安装器升级，再用原生命令确认，避免误判为 Judge JSON 格式问题。
+Qoder CLI 0.2.0 使用已退役的 `performance` 参数时曾复现此问题，而 `auto` 能正常完成。
+当前客户端 1.1.83 使用可用档位时可以正常完成同样的任务。
+文件输出模式仍允许已正常结束的 `end_turn` 没有聊天文本。
+
+Qoder 已[将 Performance 替换为 Fast](https://docs.qoder.com/product-overview/fast-mode-announcement)。
+先用 `qodercli --list-models` 检查账号可用模型，当前客户端可选择 `fast`。
+若 Qoder 明确警告已将不可用的指定模型降级为其他模型，skill-up 会返回引擎错误；
+即使结果文件合法，Agent Judge 也不会恢复并接受该非预期模型的评分。
+
+
 qodercli 的模型选择：
 
 - 非空的 `engine.model.name` 会去除首尾空白后传给 Qoder 的 `--model`，保留大小写和完整 ID。普通调用、stdin 提示词和恢复会话均遵循此规则。
@@ -1352,7 +1365,7 @@ judge:
     name: qodercli
     model:
       provider: qoder
-      name: performance
+      name: fast
   output:
     mode: file
   criteria:
