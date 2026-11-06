@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Add `skill-up compare <result.json> <result.json>...` for offline
+  comparison with self-contained HTML, shareable Markdown, text, and JSON
+  reports, an overview and case matrix across all runs, per-candidate baseline
+  comparisons, input paths as default labels, explicit label
+  overrides, and optional regression and token-growth gates. HTML extends the
+  existing report with a comparison tab and run selector, retaining the original
+  case details and leaving existing report output unchanged. Comparison supports
+  selecting any two input files and reviewing aligned prompts, responses, and
+  grades side by side without changing CI gate references. Color-code pass rates,
+  case statuses, and metric changes, with cost/time direction handled separately.
+  Document primary-result selection for cross-file comparisons; use canonical
+  primary cases in the interactive viewer, and keep dropdowns and multi-run
+  tables readable with padding, wrapping, and horizontal scrolling. Align the
+  Compare controls, collapse secondary explanations, and omit empty Benchmark
+  tabs in comparison mode.
+- Expose the framework-owned `SKILL_UP_VARIANT` execution group to setup and subsequent runtime commands across none, Docker, and OpenSandbox; reject the reserved name in `environment.env`.
+- Add opt-in `judge.output.mode: file` for agent judges, with per-attempt JSON
+  templates, strict validation, isolated correction retries, and result artifacts.
+
 ### Changed
 - Strengthen `skill-upper` evolution with original/candidate comparisons,
   evidence-based acceptance and reversion, and regression checks. Keep the
@@ -18,6 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Reject API keys in custom-engine local file paths and working directories before
   filesystem operations, and redact workspace validation errors returned to callers.
+- Reject Qoder CLI error envelopes and unfinished `tool_use` results even when
+  the process exits zero, retaining session artifacts for diagnosis and valid
+  file-verdict recovery. Reject reported model fallbacks and prevent agent judges
+  from accepting a verdict from an unavailable requested model. Update the file
+  judge example to the current Fast tier.
+- Preserve multi-turn post-condition failure reasons in the HTML cross-run case comparison when judging was not reached.
 - Use patched Vite/esbuild dependencies for the documentation site while
   retaining VitePress 1.x.
 - Remove overflow-prone runtime kwargs preallocation while preserving
@@ -26,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   output-file paths and errors without changing file operations or fallbacks.
 - Expand full-value `$VAR` references in real MCP headers and OpenCode endpoints, matching the existing `${VAR}` form.
 - Restore the Docker Action's temporary home ownership and owner permissions on exit so private engine state does not block self-hosted runner cleanup.
+- Isolate `context.git.apply_diff` uploads per invocation so parallel cases cannot overwrite patches with the same filename. Remove the uploaded patch after applying it, including on failures and cancellation.
 - Reject whitespace-only `input.prompt` and `input.turns[].content` during validation while preserving mutual-exclusion semantics and the original prompt bytes.
 - Clarify nested YAML comments and keep `skill-upper` scaffolding focused on
   the requested cases and scoring contract. Accept read-only checksum queries
@@ -35,6 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Keep MCP tool calls and shell commands in Codex transcripts built from the session file, so `tool_called` matches calls that newer Codex CLIs make from their code tool. A failed Codex MCP call now keeps its error message as the tool result.
 - Find Codex session files under `$CODEX_HOME/sessions` when `CODEX_HOME` is set, instead of always under `$HOME/.codex/sessions`.
 - Let Codex call the MCP servers skill-up installs on the `none` runtime. Codex rejected these calls under `--sandbox workspace-write` with "approval policy is never"; skill-up now approves tool calls for those servers only, with the sandbox kept. Server names outside `^[A-Za-z0-9_-]+$` are not covered.
+- Read the files listed in Anthropic `evals.json` entries from the Skill root during `skill-up import` and `skill-up run --auto`. Cases previously received each file's path as its content; a missing file or a path outside the Skill now fails with a clear error.
+- Reject unknown YAML fields in eval and case configs, including nested fields and merged keys, using strict decoding. Case-name filters run before strict case decoding; merged judge blocks retain presence checks. This prevents misspelled judge blocks from silently passing with zero checks.
 
 ## [0.14.0] - 2026-10-20
 

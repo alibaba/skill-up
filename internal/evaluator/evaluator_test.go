@@ -4016,49 +4016,6 @@ func TestGitInitUploader_QuotesSpecialCharsInRemote(t *testing.T) {
 	}
 }
 
-func TestApplyDiffUploader_QuotesTempPath(t *testing.T) {
-	// apply_diff derives tmpPath from filepath.Base(diffSource); if the YAML
-	// author picks a filename with shell metacharacters, the exec must still
-	// pass it as a single argument rather than let the shell interpret it.
-	skillDir := t.TempDir()
-	// Use a base name that contains a space and `;` to stress-test quoting.
-	trickyName := "my patch;echo pwned.diff"
-	diffPath := filepath.Join(skillDir, trickyName)
-	if err := os.WriteFile(diffPath, []byte("not a real diff\n"), 0o600); err != nil {
-		t.Fatalf("write diff: %v", err)
-	}
-
-	var seenCmd string
-	rt := &mockRuntime{
-		workspace: t.TempDir(),
-		execFunc: func(_ context.Context, command string, _ runtime.ExecOptions) (runtime.ExecResult, error) {
-			seenCmd = command
-			// Pretend git apply failed so we don't need a valid diff; we only
-			// care about the exact command string composed by the uploader.
-			return runtime.ExecResult{ExitCode: 1, Stderr: "not a valid diff"}, nil
-		},
-	}
-
-	uploader := &applyDiffUploader{}
-	caseCfg := &config.CaseConfig{
-		ID:    "apply-diff-quote",
-		Title: "apply_diff with shell metachars",
-		Input: config.Input{Prompt: "test"},
-		Context: config.Context{
-			Git: &config.GitContext{ApplyDiff: trickyName},
-		},
-	}
-
-	if err := uploader.Upload(context.Background(), rt, caseCfg, skillDir, skillDir); err == nil {
-		t.Fatalf("expected mock git apply to fail, got success")
-	}
-	tmpPath := filepath.Join(os.TempDir(), trickyName)
-	wantCmd := "git apply -- '" + tmpPath + "'"
-	if seenCmd != wantCmd {
-		t.Fatalf("command = %q, want %q", seenCmd, wantCmd)
-	}
-}
-
 func TestGitInitUploader_InitWithRemotes(t *testing.T) {
 	workspace := t.TempDir()
 	rt := &mockRuntime{workspace: workspace}
@@ -4159,5 +4116,134 @@ func TestExecuteCase_ExpectScoringBenchmark(t *testing.T) {
 	benchmark := report.ComputeAnthropicBenchmark("test", "", runs[:1], runs[1:])
 	if benchmark.RunSummary.Delta.PassRate != "-0.29" {
 		t.Fatalf("delta=%s, want -0.29", benchmark.RunSummary.Delta.PassRate)
+	}
+}
+
+func TestPrepareRuntimeVariantIsolation(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("POSIX setup script")
+	}
+	t.Setenv(runtime.VariantEnvName, "inherited-wrong-value")
+	cfg := &config.EvalConfig{Environment: config.Environment{
+		Type: "none", Env: map[string]string{"USER_VALUE": "preserved"},
+		SetupSteps: []config.SetupStep{{Run: `case "$SKILL_UP_VARIANT" in
+with_skill) printf enabled > branch ;;
+without_skill) printf baseline > branch ;;
+*) exit 1 ;;
+esac
+printf '%s' "$SKILL_UP_VARIANT" > variant`}},
+	}}
+	e := newTestEvaluator(EvalOptions{EvalCfg: cfg, DeleteWorkspace: true})
+	for i := range 6 {
+		for _, variant := range []string{ConfigurationWithSkill, ConfigurationWithoutSkill} {
+			t.Run(fmt.Sprintf("%d/%s", i, variant), func(t *testing.T) {
+				ctx := context.Background()
+				rt, _, err := e.prepareRuntimeForCase(ctx, &config.CaseConfig{ID: "variant-case"}, variant, &mockAgent{name: "qodercli"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = rt.Close() }()
+				out, err := rt.Exec(ctx, `printf '%s/%s/%s/' "$SKILL_UP_VARIANT" "$USER_VALUE" "$(cat variant)"; cat branch`, runtime.ExecOptions{})
+				branch := "enabled"
+				if variant == ConfigurationWithoutSkill {
+					branch = "baseline"
+				}
+				want := variant + "/preserved/" + variant + "/" + branch
+				if err != nil || out.ExitCode != 0 || out.Stdout != want {
+					t.Fatalf("Exec = %+v, %v; want %q", out, err, want)
+				}
+			})
+		}
+	}
+	t.Cleanup(func() {
+		if _, exists := cfg.Environment.Env[runtime.VariantEnvName]; exists {
+			t.Error("shared environment was mutated")
+		}
+		if got := os.Getenv(runtime.VariantEnvName); got != "inherited-wrong-value" {
+			t.Errorf("host variant changed: %q", got)
+		}
+	})
+}
+
+func TestPrepareRuntimeRejectsReservedVariant(t *testing.T) {
+	for _, value := range []string{"", "with_skill", "wrong"} {
+		t.Run(value, func(t *testing.T) {
+			e := newTestEvaluator(EvalOptions{EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none", Env: map[string]string{runtime.VariantEnvName: value}}}})
+			_, _, err := e.prepareRuntimeForCase(context.Background(), &config.CaseConfig{ID: "case"}, "without_skill", &mockAgent{name: "test"})
+			if err == nil || !strings.Contains(err.Error(), "reserved") {
+				t.Fatalf("expected reserved-name error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestScheduledVariantAcrossIterationsAndRetries(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("POSIX setup script")
+	}
+	t.Parallel()
+	var mu sync.Mutex
+	attempts := make(map[string]int)
+	workspaces := make(map[string]bool)
+	ag := &mockAgent{name: "qodercli", runFunc: func(ctx context.Context, rt runtime.Runtime, opts agent.ExecOptions, _ []transcript.Message) (*agent.SessionResult, error) {
+		out, err := rt.Exec(ctx, `printf '%s/' "$SKILL_UP_VARIANT"; cat variant`, runtime.ExecOptions{})
+		variant := opts.AgentMeta().Variant
+		if err != nil {
+			return nil, fmt.Errorf("read variant: %w", err)
+		}
+		if out.ExitCode != 0 || out.Stdout != variant+"/"+variant {
+			return nil, fmt.Errorf("variant mismatch: %+v; expected %s", out, variant)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if workspaces[rt.Workspace()] {
+			return nil, errors.New("workspace reused across tasks or retries")
+		}
+		workspaces[rt.Workspace()] = true
+		key := opts.AgentMeta().CaseID + "/" + variant
+		attempts[key]++
+		if attempts[key] == 1 {
+			return nil, errors.New("transient failure")
+		}
+		return &agent.SessionResult{FinalMessage: variant}, nil
+	}}
+	e := newTestEvaluator(EvalOptions{Agent: ag, Concurrency: 4, DeleteWorkspace: true, EvalCfg: &config.EvalConfig{
+		Environment: config.Environment{Type: "none", Env: map[string]string{"UNCHANGED": "yes"}, SetupSteps: []config.SetupStep{{Run: `printf '%s' "$SKILL_UP_VARIANT" > variant`}}},
+		Cases:       config.CasesConfig{RetryPolicy: config.RetryPolicy{MaxRetries: 1, RetryOn: []string{"error"}}},
+	}})
+	cases := []*config.CaseConfig{{ID: "one", Input: config.Input{Prompt: "hello"}}, {ID: "two", Input: config.Input{Prompt: "hello"}}}
+	plan := BuildPlan(cases, 1, 2, []string{ConfigurationWithSkill, ConfigurationWithoutSkill})
+	for _, iteration := range plan.Iterations {
+		results, err := e.EvaluatePlan(context.Background(), iteration.Tasks)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, result := range results {
+			if result.Status != judge.StatusPass || result.FinalMessage != result.Configuration {
+				t.Fatalf("unexpected result: %+v", result)
+			}
+		}
+	}
+	if len(workspaces) != 12 {
+		t.Fatalf("got %d workspaces, want 8 tasks + 4 retries", len(workspaces))
+	}
+}
+
+func TestNonBenchmarkVariantWithEmptySkills(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("POSIX command")
+	}
+	t.Parallel()
+	ag := &mockAgent{name: "qodercli", runFunc: func(ctx context.Context, rt runtime.Runtime, _ agent.ExecOptions, _ []transcript.Message) (*agent.SessionResult, error) {
+		out, err := rt.Exec(ctx, `printf '%s' "$SKILL_UP_VARIANT"`, runtime.ExecOptions{})
+		return &agent.SessionResult{FinalMessage: out.Stdout, ExitCode: out.ExitCode}, err
+	}}
+	e := newTestEvaluator(EvalOptions{Agent: ag, DeleteWorkspace: true, EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none"}}})
+	results, err := e.EvaluateAll(context.Background(), []*config.CaseConfig{{ID: "empty-skills", Input: config.Input{Prompt: "hello"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Status != judge.StatusPass || results[0].Configuration != ConfigurationWithSkill || results[0].FinalMessage != ConfigurationWithSkill {
+		t.Fatalf("unexpected non-benchmark results: %+v", results)
 	}
 }

@@ -68,12 +68,15 @@ type judgeResponse struct {
 // AgentJudge uses an agent.Agent to grade outputs against criteria.
 //
 // The agent receives the judge prompt (transcript + workspace diff + criteria)
-// and returns a JSON response with per-criterion pass/fail and evidence.
+// and submits JSON with per-criterion pass/fail and evidence through the selected channel.
 //
 // Design doc: "the judge agent emits pass/fail and concrete evidence for each
 // criterion; the overall result passes when passed_criteria / total_criteria
 // ≥ pass_threshold".
 type AgentJudge struct {
+	// OutputMode selects final_message (default) or file result delivery.
+	OutputMode string
+
 	// Agent is the agent used for judge evaluation.
 	Agent agent.Agent
 
@@ -151,8 +154,12 @@ func (j *AgentJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 		return nil, fmt.Errorf("agent_judge materialize context: %w", err)
 	}
 
+	delivery, err := j.prepareOutputFile(ctx, in.ArtifactDir, 1)
+	if err != nil {
+		return nil, err
+	}
 	// Build the judge prompt.
-	prompt := buildJudgePrompt(ctx, j.Criteria, materialized, j.JudgeSkills)
+	prompt := buildJudgePromptWithOutput(ctx, j.Criteria, materialized, delivery.runtimePath, j.JudgeSkills)
 	messages := []transcript.Message{{Role: transcript.RoleUser, Content: prompt, Turn: 1}}
 
 	// Snapshot parentCtx.Err() immediately after each call so a parent timer
@@ -162,13 +169,16 @@ func (j *AgentJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 		runErr = errors.New("agent returned no session result")
 	}
 	parentErr := parentCtx.Err()
+	if parentErr == nil {
+		runErr = j.annotateTimeoutError(ctx, runErr)
+	}
 	persistAgentJudgeAttemptArtifacts(ctx, j.Runtime, in.ArtifactDir, in.ArtifactDir, agentJudgeRawResponseAttempt1, firstSession)
-	recovery, callErr := j.agentCallError(ctx, runErr, firstSession, parentErr, "agent call")
+	criterionResults, validationErr := j.readJudgeResults(ctx, firstSession, delivery, runErr)
+	recovery, callErr := j.agentCallError(ctx, runErr, firstSession, parentErr, "agent call", validationErr == nil)
 	if callErr != nil {
 		return nil, &SessionResultError{Err: callErr, Session: firstSession}
 	}
 
-	criterionResults, validationErr := parseAgentJudgeResults(j.Criteria, firstSession.FinalMessage)
 	if validationErr == nil {
 		return j.buildResult(in, firstSession, materialized, prompt, criterionResults, recovery), nil
 	}
@@ -196,7 +206,11 @@ func (j *AgentJudge) correctInvalidResponse(
 ) (*Result, error) {
 	logging.WarnContextf(ctx, "agent_judge output failed validation; retrying once with correction guidance: %v", validationErr)
 
-	correctionPrompt := buildAgentJudgeCorrectionPrompt(j.Criteria, validationErr)
+	delivery, err := j.prepareOutputFile(ctx, in.ArtifactDir, 2)
+	if err != nil {
+		return nil, &SessionResultError{Err: err, Session: firstSession}
+	}
+	correctionPrompt := buildAgentJudgeCorrectionPrompt(j.Criteria, validationErr, delivery.runtimePath)
 	retryArtifactDir := ""
 	if in.ArtifactDir != "" {
 		retryArtifactDir = filepath.Join(in.ArtifactDir, agentJudgeRetryArtifactDir)
@@ -206,9 +220,13 @@ func (j *AgentJudge) correctInvalidResponse(
 		retryErr = errors.New("agent returned no session result")
 	}
 	parentErr := parentCtx.Err()
+	if parentErr == nil {
+		retryErr = j.annotateTimeoutError(ctx, retryErr)
+	}
 	persistAgentJudgeAttemptArtifacts(ctx, j.Runtime, retryArtifactDir, in.ArtifactDir, agentJudgeRawResponseAttempt2, retrySession)
 	aggregateSession := aggregateAgentJudgeSessions(firstSession, retrySession, correctionMode)
-	retryRecovery, callErr := j.agentCallError(ctx, retryErr, retrySession, parentErr, "correction call")
+	criterionResults, correctionErr := j.readJudgeResults(ctx, retrySession, delivery, retryErr)
+	retryRecovery, callErr := j.agentCallError(ctx, retryErr, retrySession, parentErr, "correction call", correctionErr == nil)
 	if callErr != nil {
 		return nil, &SessionResultError{
 			Err: fmt.Errorf(
@@ -220,7 +238,6 @@ func (j *AgentJudge) correctInvalidResponse(
 		}
 	}
 
-	criterionResults, correctionErr := parseAgentJudgeResults(j.Criteria, retrySession.FinalMessage)
 	if correctionErr != nil {
 		return nil, &SessionResultError{
 			Err: fmt.Errorf(
@@ -235,16 +252,16 @@ func (j *AgentJudge) correctInvalidResponse(
 	return j.buildResult(in, aggregateSession, materialized, prompt, criterionResults, retryRecovery), nil
 }
 
-func (j *AgentJudge) agentCallError(ctx context.Context, err error, sessionResult *agent.SessionResult, parentErr error, callLabel string) (*RecoveryMetadata, error) {
+func (j *AgentJudge) agentCallError(ctx context.Context, err error, sessionResult *agent.SessionResult, parentErr error, callLabel string, validResult bool) (*RecoveryMetadata, error) {
 	if err == nil {
 		return nil, nil
 	}
-	annotated := err
-	if parentErr == nil {
-		annotated = j.annotateTimeoutError(ctx, err)
+	recoverable := canRecoverAgentJudgeResult(err, sessionResult)
+	if j.OutputMode == agentJudgeFileMode {
+		recoverable = validResult && sessionResult != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, agent.ErrRequestedModelUnavailable)
 	}
-	if !canRecoverAgentJudgeResult(err, sessionResult) {
-		return nil, fmt.Errorf("agent_judge %s failed: %w", callLabel, annotated)
+	if !recoverable {
+		return nil, fmt.Errorf("agent_judge %s failed: %w", callLabel, err)
 	}
 	if callLabel == "agent call" {
 		logging.WarnContextf(
@@ -782,8 +799,8 @@ func canRecoverAgentJudgeResult(err error, sessionResult *agent.SessionResult) b
 	if strings.TrimSpace(sessionResult.FinalMessage) == "" {
 		return false
 	}
-	// Never recover from explicit cancellation.
-	if errors.Is(err, context.Canceled) {
+	// Never recover from cancellation or an unintended fallback model.
+	if errors.Is(err, context.Canceled) || errors.Is(err, agent.ErrRequestedModelUnavailable) {
 		return false
 	}
 	return true
@@ -794,7 +811,11 @@ func canRecoverAgentJudgeResult(err error, sessionResult *agent.SessionResult) b
 // ---------------------------------------------------------------------------
 
 // buildJudgePrompt constructs the system + user prompt for the judge agent.
-func buildJudgePrompt(_ context.Context, criteria []string, materialized *MaterializedContext, judgeSkills ...[]SkillInfo) string {
+func buildJudgePrompt(ctx context.Context, criteria []string, materialized *MaterializedContext, judgeSkills ...[]SkillInfo) string {
+	return buildJudgePromptWithOutput(ctx, criteria, materialized, "", judgeSkills...)
+}
+
+func buildJudgePromptWithOutput(_ context.Context, criteria []string, materialized *MaterializedContext, outputPath string, judgeSkills ...[]SkillInfo) string {
 	var sb strings.Builder
 	var skills []SkillInfo
 	if len(judgeSkills) > 0 {
@@ -809,7 +830,7 @@ func buildJudgePrompt(_ context.Context, criteria []string, materialized *Materi
 	sb.WriteString("- \"evidence\": a non-empty JSON array of concrete observations supporting your judgment\n")
 	sb.WriteString("- \"failures\": an empty JSON array when passed is true, otherwise a non-empty array of unmet requirements\n\n")
 	sb.WriteString("You MUST NOT pass a criterion without specific evidence.\n")
-	sb.WriteString("The exact output contract is stated near the end of this prompt under \"Required Output Contract\"; your final message MUST satisfy it verbatim.\n\n")
+	sb.WriteString("The exact output contract is stated near the end of this prompt under \"Required Output Contract\"; your submitted result MUST satisfy it verbatim.\n\n")
 
 	appendJudgeSkillInstructions(&sb, skills)
 
@@ -819,12 +840,12 @@ func buildJudgePrompt(_ context.Context, criteria []string, materialized *Materi
 	}
 
 	appendReviewMaterials(&sb, materialized)
-	appendStrictOutputRules(&sb)
+	appendStrictOutputRules(&sb, outputPath)
 	appendRequiredResponseFormat(&sb, criteria)
 	return sb.String()
 }
 
-func buildAgentJudgeCorrectionPrompt(criteria []string, validationErr error) string {
+func buildAgentJudgeCorrectionPrompt(criteria []string, validationErr error, outputPath ...string) string {
 	encodedError, err := json.Marshal(validationErr.Error())
 	if err != nil {
 		encodedError = []byte(`"agent_judge response validation failed"`)
@@ -836,7 +857,7 @@ func buildAgentJudgeCorrectionPrompt(criteria []string, validationErr error) str
 	sb.WriteString("Validation error (JSON string): ")
 	sb.Write(encodedError)
 	sb.WriteString("\n\n")
-	appendStrictOutputRules(&sb)
+	appendStrictOutputRules(&sb, outputPath...)
 	appendRequiredResponseFormat(&sb, criteria)
 	return sb.String()
 }
@@ -907,24 +928,21 @@ func appendReviewMaterials(sb *strings.Builder, materialized *MaterializedContex
 	}
 }
 
-// appendStrictOutputRules states the program-owned output contract shared
-// verbatim by the first-attempt judge prompt and the correction prompt, so the
-// two can never drift apart. decodeAgentJudgeResponse (via
-// agentJudgeJSONCandidate) accepts either a bare JSON object or a single
-// ```json code fence, but strips nothing else: any leading prose — e.g. a final
-// message that begins with "I ..." after the judge loaded Skills or read review
-// materials — makes the response unparseable and forces an avoidable correction
-// retry. The rules below therefore forbid any text around the JSON and are
-// emitted near the end of the prompt, where an agentic judge is most likely to
-// honor them after its tool-using turns.
-func appendStrictOutputRules(sb *strings.Builder) {
+// appendStrictOutputRules shares the strict result contract between initial and
+// correction prompts, with delivery instructions for chat or a runtime file.
+func appendStrictOutputRules(sb *strings.Builder, outputPath ...string) {
 	sb.WriteString("\n## Required Output Contract\n")
 	sb.WriteString("- Allowed root field: results.\n")
 	sb.WriteString("- Required result fields with exact casing: criterion_id, passed, evidence, failures.\n")
 	sb.WriteString("- Use every configured criterion_id exactly once.\n")
 	sb.WriteString("- Evidence must be a non-empty string array. Failures must be empty when passed is true and non-empty when passed is false.\n")
-	sb.WriteString("- Your FINAL message must contain ONLY the JSON object, even after you have invoked judge Skills or read the review materials. It must begin with '{' and end with '}'. Wrapping that single object in one ```json code fence is also accepted.\n")
-	sb.WriteString("- Do NOT begin the final message with any prose, preamble, acknowledgement, or narration (for example \"I\", \"Sure\", \"Here is\", \"Based on\"). Do NOT add any commentary, explanation, or extra fields before or after the JSON.\n")
+	if len(outputPath) > 0 && outputPath[0] != "" {
+		fmt.Fprintf(sb, "- Edit the pre-created JSON template at %q using your file tools. This is the ONLY result source; your final chat message is ignored and may be prose.\n", outputPath[0])
+		sb.WriteString("- Replace EVERY null passed value with a boolean and fill concrete evidence and failures according to your evaluation. Unchanged or partially filled templates are invalid. Write one pure JSON object without Markdown fences.\n")
+	} else {
+		sb.WriteString("- Your FINAL message must contain ONLY the JSON object, even after you have invoked judge Skills or read the review materials. It must begin with '{' and end with '}'. Wrapping that single object in one ```json code fence is also accepted.\n")
+		sb.WriteString("- Do NOT begin the final message with any prose, preamble, acknowledgement, or narration (for example \"I\", \"Sure\", \"Here is\", \"Based on\"). Do NOT add any commentary, explanation, or extra fields before or after the JSON.\n")
+	}
 	sb.WriteString("- Escape double quotes inside string values (e.g. \\\"example\\\").\n")
 }
 

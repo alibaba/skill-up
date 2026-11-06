@@ -23,6 +23,9 @@ import (
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
 
+// ErrRequestedModelUnavailable prevents accepting output from an unintended fallback model.
+var ErrRequestedModelUnavailable = errors.New("requested model unavailable")
+
 // ErrAgentNotFound is returned when the agent executable is not found.
 var ErrAgentNotFound = errors.New("agent not found in PATH")
 
