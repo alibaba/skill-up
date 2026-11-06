@@ -1159,3 +1159,184 @@ func TestExecuteCaseMultiTurnCancellationReachesSkippedJudgeCause(t *testing.T) 
 		t.Fatalf("status = %s, want ERROR", result.Status)
 	}
 }
+
+// evidenceGateCase runs one evidence payload through a real child script and the
+// full case lifecycle, with the opt-in evidence requirement set as asked.
+func evidenceGateCase(t *testing.T, evidence string, required bool) EvalResult {
+	t.Helper()
+	dir := t.TempDir()
+	payload := `{"schema_version":1,"invocation_id":"__INVOCATION__","metrics":[{"metric_id":"correctness",` +
+		`"availability":"AVAILABLE","value":1,"evidence":` + evidence + `}]}`
+	limit := 30
+	member := config.JudgeConfig{
+		ID: "scorer", Type: "script",
+		ScriptPath:     metricsPayloadScript(t, dir, payload),
+		TimeoutSeconds: &limit,
+		Metrics:        []config.MetricConfig{{ID: "correctness", Required: true, EvidenceRequired: required, MinScore: new(0.8)}},
+	}
+	e := newTestEvaluator(EvalOptions{
+		Agent: &mockAgent{name: "test", output: "done"}, OutputDir: t.TempDir(),
+		EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none"}, Judge: member},
+	})
+	return e.executeCase(context.Background(), &config.CaseConfig{
+		ID: "evidence-gate", Input: config.Input{Prompt: "hello"},
+	}, "with_skill", newScriptRuntime(t), nil)
+}
+
+// TestExecuteCaseEvidenceRequiredRejectsBlankEvidence drives the opt-in evidence
+// gate through a real child script. A JSON null element decodes to "" and
+// whitespace is not support, so a score carrying neither must not be accepted as
+// evidenced: the slot becomes ERROR/missing_evidence, quality turns UNKNOWN and the
+// verdict ERROR rather than PASS. Without the flag the same payload stays usable,
+// because the gate is opt-in.
+func TestExecuteCaseEvidenceRequiredRejectsBlankEvidence(t *testing.T) {
+	cases := []struct {
+		name         string
+		evidence     string
+		required     bool
+		wantAccepted bool
+	}{
+		{name: "a null element carries no support", evidence: `[null]`, required: true},
+		{name: "whitespace carries no support", evidence: `["   "]`, required: true},
+		{name: "an empty list carries no support", evidence: `[]`, required: true},
+		{name: "a cited line supports the score", evidence: `["line 12 matches"]`, required: true, wantAccepted: true},
+		{name: "blank evidence is the judge's own business without the flag", evidence: `["   "]`, wantAccepted: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wantStatus, wantAvailability := judge.StatusError, judge.Errored
+			wantReason, wantQuality := "missing_evidence", judge.QualityUnknown
+			if tc.wantAccepted {
+				wantStatus, wantAvailability, wantReason, wantQuality = judge.StatusPass, judge.Available, "", judge.QualityMet
+			}
+			result := evidenceGateCase(t, tc.evidence, tc.required)
+			if result.Status != wantStatus {
+				t.Fatalf("verdict = %s error=%v, want %s", result.Status, result.Error, wantStatus)
+			}
+			if result.Metrics == nil || result.Metrics.Quality != wantQuality {
+				t.Fatalf("metrics = %+v, want quality %s", result.Metrics, wantQuality)
+			}
+			slot := result.Metrics.Metrics[0]
+			if slot.Availability != wantAvailability || slot.Reason != wantReason {
+				t.Fatalf("slot = %+v, want %s/%q", slot, wantAvailability, wantReason)
+			}
+			if result.Grading != nil && result.Grading.Metrics != nil && result.Grading.Metrics.Quality != wantQuality {
+				t.Fatalf("grading envelope quality = %s, want %s", result.Grading.Metrics.Quality, wantQuality)
+			}
+		})
+	}
+}
+
+// assertResultlessExecutionFailure checks the facts a judge that failed before
+// grading anything must keep: it started, it failed, the cause is its own error,
+// no timeout was invented, and the registry still supplies the denominator.
+func assertResultlessExecutionFailure(t *testing.T, ex *judge.ExecutionMetadata, env *judge.MetricsEnvelope) {
+	t.Helper()
+	if ex == nil || ex.Stage != judge.StageStarted || ex.Completion != judge.CompletionFailed ||
+		ex.Cause != judge.CauseExecutionError || ex.Timeout != nil {
+		t.Fatalf("execution = %+v, want STARTED/FAILED/execution_error with no timeout", ex)
+	}
+	if !strings.Contains(ex.Detail, "upload script judge") {
+		t.Fatalf("execution detail = %q, want the upload failure", ex.Detail)
+	}
+	if env == nil || env.Coverage.Planned != 2 || env.Coverage.NotProduced != 2 {
+		t.Fatalf("metrics = %+v, want both planned slots NOT_PRODUCED", env)
+	}
+}
+
+// TestExecuteCaseGroupedResultlessExecutionErrorKeepsFailedCompletion covers the
+// grouped half of a judge that failed before grading anything, such as uploading a
+// missing script. That is a failure, not an interruption: the group must keep the
+// STARTED / FAILED / execution_error record the finalizer already derived instead of
+// rewriting it as an interruption, and the group state must fold to FAILED.
+func TestExecuteCaseGroupedResultlessExecutionErrorKeepsFailedCompletion(t *testing.T) {
+	limit := 30
+	missing := filepath.Join(t.TempDir(), "does-not-exist.sh")
+	members := []config.JudgeConfig{{ID: "scorer", Type: "script", ScriptPath: missing, TimeoutSeconds: &limit, Metrics: scoreRegistry()}}
+	e := newTestEvaluator(EvalOptions{
+		Agent: &mockAgent{name: "test", output: "done"}, OutputDir: t.TempDir(),
+		EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none"}, Judges: &members},
+	})
+	result := e.executeCase(context.Background(), &config.CaseConfig{
+		ID: "grouped-resultless-error", Input: config.Input{Prompt: "hello"},
+	}, "with_skill", newScriptRuntime(t), nil)
+
+	if len(result.JudgeResults) != 1 {
+		t.Fatalf("outcomes = %d", len(result.JudgeResults))
+	}
+	member := result.JudgeResults[0]
+	assertResultlessExecutionFailure(t, member.Execution, member.Metrics)
+	if result.Status != judge.StatusError || result.GroupCompletion != judge.CompletionFailed ||
+		result.GroupCause != judge.CauseExecutionError {
+		t.Fatalf("group = %s/%s/%s, want ERROR/FAILED/execution_error", result.Status, result.GroupCompletion, result.GroupCause)
+	}
+}
+
+// TestExecuteCaseSingleResultlessExecutionErrorAlreadyRecordsFailure is the control
+// the grouped fix is measured against: the single-judge path recorded this shape
+// before the grouped change and must still record it the same way.
+func TestExecuteCaseSingleResultlessExecutionErrorAlreadyRecordsFailure(t *testing.T) {
+	limit := 30
+	missing := filepath.Join(t.TempDir(), "does-not-exist.sh")
+	member := config.JudgeConfig{ID: "scorer", Type: "script", ScriptPath: missing, TimeoutSeconds: &limit, Metrics: scoreRegistry()}
+	e := newTestEvaluator(EvalOptions{
+		Agent: &mockAgent{name: "test", output: "done"}, OutputDir: t.TempDir(),
+		EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none"}, Judge: member},
+	})
+	result := e.executeCase(context.Background(), &config.CaseConfig{
+		ID: "single-resultless-error", Input: config.Input{Prompt: "hello"},
+	}, "with_skill", newScriptRuntime(t), nil)
+
+	assertResultlessExecutionFailure(t, result.Execution, result.Metrics)
+}
+
+// assertDeadlineStopRecorded checks that a member which hit a real deadline keeps
+// that deadline: the cause, the knob that armed it and the timeout object.
+func assertDeadlineStopRecorded(t *testing.T, ex *judge.ExecutionMetadata) {
+	t.Helper()
+	if ex == nil || ex.Stage != judge.StageStarted || ex.Completion != judge.CompletionInterrupted ||
+		ex.Cause != judge.CauseDeadlineExpiry || ex.DeadlineSource != judgeTimeoutSource {
+		t.Fatalf("execution = %+v, want STARTED/INTERRUPTED/deadline_expiry named by %s", ex, judgeTimeoutSource)
+	}
+	if ex.Timeout == nil || !ex.Timeout.Occurred || ex.Timeout.Source != judgeTimeoutSource {
+		t.Fatalf("timeout = %+v, want an occurred deadline named by %s", ex.Timeout, judgeTimeoutSource)
+	}
+}
+
+// TestExecuteCaseGroupedScriptDefaultTimeoutKeepsDeadline covers the grouped member
+// whose config omits timeout_seconds, so only ScriptJudge's own default deadline is
+// armed and the outer member context stays live. The pass must keep reporting the
+// deadline it actually hit instead of a generic execution error. That default is a
+// constant in the judge package, so nothing shorter reaches this state without
+// changing production code: the case waits it out and is skipped under -short.
+func TestExecuteCaseGroupedScriptDefaultTimeoutKeepsDeadline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits out judge.DefaultScriptTimeout")
+	}
+	scratch := metricsScratchDir(t)
+	body := "#!/bin/sh\nsleep 31\nexit 0\n"
+	if goruntime.GOOS == windowsGOOS {
+		body = "Start-Sleep -Seconds 31\nexit 0\n"
+	}
+	members := []config.JudgeConfig{{ID: "slow", Type: "script", ScriptPath: metricsScript(t, scratch, body), Metrics: scoreRegistry()}}
+	e := newTestEvaluator(EvalOptions{
+		Agent: &mockAgent{name: "test", output: "done"}, OutputDir: t.TempDir(),
+		EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none"}, Judges: &members},
+	})
+	result := e.executeCase(context.Background(), &config.CaseConfig{
+		ID: "grouped-default-timeout", Input: config.Input{Prompt: "hello"},
+	}, "with_skill", newScratchRuntime(t, scratch), nil)
+
+	if len(result.JudgeResults) != 1 {
+		t.Fatalf("outcomes = %d", len(result.JudgeResults))
+	}
+	member := result.JudgeResults[0]
+	assertDeadlineStopRecorded(t, member.Execution)
+	if member.Metrics == nil || member.Metrics.Coverage.NotProduced != 2 {
+		t.Fatalf("member metrics = %+v, want both planned slots NOT_PRODUCED", member.Metrics)
+	}
+	if result.Status != judge.StatusError || result.GroupCompletion != judge.CompletionInterrupted ||
+		result.GroupCause != judge.CauseDeadlineExpiry {
+		t.Fatalf("group = %s/%s/%s, want ERROR/INTERRUPTED/deadline_expiry", result.Status, result.GroupCompletion, result.GroupCause)
+	}
+}

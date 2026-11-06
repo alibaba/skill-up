@@ -256,6 +256,19 @@ func ValidScore(v *float64) bool {
 	return v != nil && !math.IsNaN(*v) && !math.IsInf(*v, 0) && *v >= 0 && *v <= 1
 }
 
+// hasNonblankEvidence reports whether an evidence list carries at least one
+// element with text. A JSON null element decodes to "" and whitespace carries no
+// support, so a length check alone would leave the opt-in evidence gate
+// bypassable by emitting ["null"] or ["   "].
+func hasNonblankEvidence(evidence []string) bool {
+	for _, item := range evidence {
+		if strings.TrimSpace(item) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // DeriveQuality applies the four threshold rules in order: thresholds plus all
 // thresholded values available gives MET/NOT_MET; thresholds plus any thresholded
 // value unavailable gives UNKNOWN; no thresholds plus any valid score gives
@@ -462,7 +475,7 @@ func resolveSlot(s MetricSlot, e EmittedMetric, production MetricProduction) Met
 			res.Availability, res.Reason = Errored, "invalid_value"
 			return res
 		}
-		if s.EvidenceRequired && len(e.Evidence) == 0 {
+		if s.EvidenceRequired && !hasNonblankEvidence(e.Evidence) {
 			res.Availability, res.Reason = Errored, "missing_evidence"
 			return res
 		}

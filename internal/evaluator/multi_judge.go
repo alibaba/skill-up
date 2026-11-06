@@ -221,8 +221,9 @@ func gradedMetrics(member config.JudgeConfig, graded EvalResult, decision Member
 }
 
 // memberExecution describes one member's execution facts. Accepted results report
-// their own completion; a stopped member without a final outcome is INTERRUPTED
-// whether or not it had started, with the stage recording which of the two it was.
+// their own completion. Otherwise the member keeps whatever its own scoring pass
+// already observed; a member that recorded nothing and was stopped by the outer
+// context is INTERRUPTED, with the stage recording whether it had started.
 func memberExecution(graded EvalResult, stop judge.Stop, decision MemberDecision, planned []judge.MetricSlot) *judge.ExecutionMetadata {
 	if decision != MemberAccepted && graded.Execution != nil && graded.Execution.Stage == judge.StageFinished {
 		// A completed scoring pass can still violate the metric contract. Preserve
@@ -239,6 +240,14 @@ func memberExecution(graded EvalResult, stop judge.Stop, decision MemberDecision
 	}
 	execution := interruptedExecution(stage, stop)
 	if execution.Cause == judge.CauseNone {
+		// The member may already know what ended its own pass while the outer
+		// context stayed live: ScriptJudge arms DefaultScriptTimeout itself when
+		// the config omits timeout_seconds, and a judge that failed before grading
+		// recorded a failure rather than an interruption. Keep those facts instead
+		// of relabelling them as a generic execution interruption.
+		if observed := observedMemberExecution(graded, stage); observed != nil {
+			return observed
+		}
 		execution.Cause = judge.CauseExecutionError
 		if graded.Error != nil {
 			execution.Detail = graded.Error.Error()
@@ -248,6 +257,23 @@ func memberExecution(graded EvalResult, stop judge.Stop, decision MemberDecision
 		}
 	}
 	return execution
+}
+
+// observedMemberExecution returns the execution facts the member's own scoring
+// pass recorded, when they say more than an empty interruption would. The stage
+// is the member's own, so a member that was never invoked cannot inherit a started
+// record. A record with neither a cause nor a failed completion carries no
+// information and is dropped so the caller keeps its generic fallback.
+func observedMemberExecution(graded EvalResult, stage judge.Stage) *judge.ExecutionMetadata {
+	if graded.Execution == nil {
+		return nil
+	}
+	observed := *graded.Execution
+	if observed.Cause == judge.CauseNone && observed.Completion != judge.CompletionFailed {
+		return nil
+	}
+	observed.Stage = stage
+	return &observed
 }
 
 func acceptedMemberExecution(graded EvalResult, stop judge.Stop, planned []judge.MetricSlot) *judge.ExecutionMetadata {

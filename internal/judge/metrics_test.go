@@ -334,6 +334,61 @@ func TestEvidenceRequirementIsPerSlot(t *testing.T) {
 	}
 }
 
+// TestEvidenceRequirementRejectsBlankElements pins what counts as evidence. A JSON
+// null element decodes into an empty string and padding is not support, so the gate
+// has to read the contents: only a slot carrying at least one nonblank element may
+// be AVAILABLE when evidence is required.
+func TestEvidenceRequirementRejectsBlankElements(t *testing.T) {
+	cases := []struct {
+		name     string
+		evidence []string
+		want     Availability
+	}{
+		{"no evidence at all", nil, Errored},
+		{"empty list", []string{}, Errored},
+		{"a null element decodes to an empty string", []string{""}, Errored},
+		{"whitespace is not support", []string{"   "}, Errored},
+		{"tabs and newlines are not support", []string{"\t\n "}, Errored},
+		{"one blank element beside a real one still supports the score", []string{"  ", "cited line 12"}, Available},
+		{"a real element", []string{"cited line 12"}, Available},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			planned := []MetricSlot{{ID: "correctness", Required: true, EvidenceRequired: true}}
+			env := MaterializeSlots("j1", planned, []EmittedMetric{
+				{MetricID: "correctness", Availability: "AVAILABLE", Value: new(0.9), Evidence: tc.evidence},
+			}, ProblemNone, MetricProduced)
+			got := env.Metrics[0]
+			if got.Availability != tc.want {
+				t.Fatalf("availability = %s reason = %q, want %s", got.Availability, got.Reason, tc.want)
+			}
+			if tc.want == Errored && got.Reason != "missing_evidence" {
+				t.Fatalf("reason = %q, want missing_evidence", got.Reason)
+			}
+		})
+	}
+}
+
+// TestEvidenceRequirementIsOptIn checks the other side: without the flag the same
+// blank evidence stays the judge's own business, so the gate cannot silently
+// become mandatory for every registry.
+func TestEvidenceRequirementIsOptIn(t *testing.T) {
+	planned := []MetricSlot{{ID: "correctness", Required: true}}
+	env := MaterializeSlots("j1", planned, []EmittedMetric{
+		{MetricID: "correctness", Availability: "AVAILABLE", Value: new(0.9), Evidence: []string{"   "}},
+	}, ProblemNone, MetricProduced)
+	if got := env.Metrics[0]; got.Availability != Available || got.Value == nil || *got.Value != 0.9 {
+		t.Fatalf("slot = %+v, want an AVAILABLE 0.9 without an evidence requirement", got)
+	}
+	// A declined slot never needed evidence, required or not.
+	declined := MaterializeSlots("j1", []MetricSlot{{ID: "correctness", EvidenceRequired: true}}, []EmittedMetric{
+		{MetricID: "correctness", Availability: "SKIP", Reason: "insufficient evidence"},
+	}, ProblemNone, MetricProduced)
+	if got := declined.Metrics[0]; got.Availability != Declined || got.Reason != "insufficient evidence" {
+		t.Fatalf("declined slot = %+v, want SKIP with its own reason", got)
+	}
+}
+
 func TestCoverageWithoutPlannedSlotsStaysNull(t *testing.T) {
 	env := MaterializeSlots("j1", nil, nil, ProblemNone, MetricProduced)
 	if env.Coverage.Planned != 0 || env.Coverage.Ratio != nil {
