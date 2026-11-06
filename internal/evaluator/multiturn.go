@@ -30,7 +30,7 @@ const (
 	TurnCompleted TurnStatus = "completed"
 	// TurnSkipped indicates the turn was skipped due to a prior post_condition failure.
 	TurnSkipped TurnStatus = "skipped"
-	// TurnFailed indicates the turn's post_condition failed with on_fail=fail.
+	// TurnFailed indicates the turn's post_condition failed.
 	TurnFailed TurnStatus = "failed"
 	// TurnError indicates a runtime or agent execution error.
 	TurnError TurnStatus = "error"
@@ -58,6 +58,8 @@ type TurnResult struct {
 	Reason string
 	// CapturedVars holds variables captured from the turn response.
 	CapturedVars map[string]string
+	// skipRemaining distinguishes a soft gate failure even when no later turn exists.
+	skipRemaining bool
 }
 
 // multiTurnState holds mutable state for a multi-turn execution.
@@ -858,6 +860,7 @@ func (e *defaultEvaluator) handlePostCondition(
 	}
 	tr.Status = TurnFailed
 	tr.Reason = reason
+	tr.skipRemaining = onFail == "skip_remaining"
 	state.turnResults = append(state.turnResults, *tr)
 	logging.DebugContextf(ctx, "Evaluator: case %s turn %d post_condition failed: %s (on_fail=%s)", caseID, turnNum, reason, onFail)
 
@@ -1003,22 +1006,12 @@ func lastCompletedResponse(results []TurnResult) string {
 
 // multiTurnStatus determines the overall case status from turn results.
 func multiTurnStatus(results []TurnResult) judge.Status {
-	for i, r := range results {
+	for _, r := range results {
 		switch r.Status {
 		case TurnError:
 			return judge.StatusError
 		case TurnFailed:
-			// Distinguish hard failure (on_fail=fail) from skip_remaining.
-			// on_fail=skip_remaining fills subsequent turns as TurnSkipped;
-			// if skipped entries follow the failure, proceed to judge.
-			hasSkippedAfter := false
-			for j := i + 1; j < len(results); j++ {
-				if results[j].Status == TurnSkipped {
-					hasSkippedAfter = true
-					break
-				}
-			}
-			if !hasSkippedAfter {
+			if !r.skipRemaining {
 				return judge.StatusFail
 			}
 			// skip_remaining: fall through to judge evaluation.

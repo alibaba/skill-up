@@ -1108,6 +1108,115 @@ func TestExecuteMultiTurn_PostConditionSkipRemaining(t *testing.T) {
 	}
 }
 
+type postConditionPolicyCase struct {
+	name       string
+	turnCount  int
+	gateTurn   int
+	onFail     string
+	judgeText  string
+	wantStatus judge.Status
+	wantJudged bool
+}
+
+func TestExecuteMultiTurn_PostConditionJudgePolicy(t *testing.T) {
+	t.Parallel()
+
+	tests := []postConditionPolicyCase{
+		{"skip_first", 3, 1, "skip_remaining", "response to turn 1", judge.StatusPass, true},
+		{"skip_middle", 3, 2, "skip_remaining", "response to turn 1", judge.StatusPass, true},
+		{"skip_last", 2, 2, "skip_remaining", "response to turn 1", judge.StatusPass, true},
+		{"skip_only_turn", 1, 1, "skip_remaining", "response to turn 1", judge.StatusPass, true},
+		{"skip_last_judge_fails", 2, 2, "skip_remaining", "missing output", judge.StatusFail, true},
+		{"fail_first", 3, 1, "fail", "response", judge.StatusFail, false},
+		{"fail_last", 2, 2, "fail", "response", judge.StatusFail, false},
+		{"default_last", 2, 2, "", "response", judge.StatusFail, false},
+	}
+	for _, tt := range tests {
+		for _, judgeCount := range []int{1, 2} {
+			t.Run(fmt.Sprintf("%s/judges=%d", tt.name, judgeCount), func(t *testing.T) {
+				t.Parallel()
+				runPostConditionPolicyCase(t, tt, judgeCount)
+			})
+		}
+	}
+}
+
+func runPostConditionPolicyCase(t *testing.T, tt postConditionPolicyCase, judgeCount int) {
+	t.Helper()
+	ag := &mockResumerAgent{mockAgent: mockAgent{name: "test-resumer"}}
+	judgeCfg := config.JudgeConfig{Type: "rule_based", Success: []config.Rule{
+		{OutputContains: &config.OutputContainsRule{All: []string{tt.judgeText}}},
+	}}
+	evalCfg := &config.EvalConfig{Judge: judgeCfg}
+	if judgeCount == 2 {
+		members := []config.JudgeConfig{judgeCfg, judgeCfg}
+		members[0].ID, members[1].ID = "first", "second"
+		evalCfg = &config.EvalConfig{Judges: &members}
+	}
+	turns := make([]config.Turn, tt.turnCount)
+	for i := range turns {
+		turns[i] = config.Turn{Role: "user", Content: fmt.Sprintf("turn %d", i+1)}
+	}
+	turns[tt.gateTurn-1].PostCondition = &config.PostCondition{
+		MustContainAll: []string{"missing gate keyword"}, OnFail: tt.onFail,
+	}
+	caseCfg := &config.CaseConfig{ID: "gate-policy", Input: config.Input{Turns: turns}}
+	e := newTestEvaluator(EvalOptions{Agent: ag, EvalCfg: evalCfg})
+	result := e.executeCase(context.Background(), caseCfg, ConfigurationWithSkill, &mockRuntime{workspace: t.TempDir()}, ag)
+	if result.Error != nil || result.Status != tt.wantStatus {
+		t.Fatalf("status=%s error=%v, want %s", result.Status, result.Error, tt.wantStatus)
+	}
+	if ag.turnCall != tt.gateTurn {
+		t.Fatalf("executed %d turns, want %d", ag.turnCall, tt.gateTurn)
+	}
+	if got := result.Grading != nil; got != tt.wantJudged {
+		t.Fatalf("judge ran=%t, want %t", got, tt.wantJudged)
+	}
+	if judgeCount == 2 {
+		wantOutcome := tt.wantStatus
+		if !tt.wantJudged {
+			wantOutcome = judge.StatusSkip
+		}
+		assertPostConditionJudgeOutcomes(t, result.JudgeResults, wantOutcome)
+	}
+	wantTurns := tt.gateTurn
+	if tt.onFail == "skip_remaining" {
+		wantTurns = tt.turnCount
+	}
+	if len(result.TurnResults) != wantTurns {
+		t.Fatalf("turn results=%d, want %d", len(result.TurnResults), wantTurns)
+	}
+	if result.TurnResults[tt.gateTurn-1].Status != TurnFailed {
+		t.Fatal("failed post-condition was not recorded on the turn")
+	}
+	for _, turn := range result.TurnResults[tt.gateTurn:] {
+		if turn.Status != TurnSkipped {
+			t.Fatalf("later turn status=%s, want skipped", turn.Status)
+		}
+	}
+}
+
+func assertPostConditionJudgeOutcomes(t *testing.T, outcomes []JudgeOutcome, status judge.Status) {
+	t.Helper()
+	if len(outcomes) != 2 {
+		t.Fatalf("judge outcomes=%d, want 2", len(outcomes))
+	}
+	for _, outcome := range outcomes {
+		if outcome.Status != status {
+			t.Fatalf("judge status=%s, want %s", outcome.Status, status)
+		}
+		if status == judge.StatusSkip {
+			if outcome.Result != nil || outcome.SkipReason != "post_condition_failed" {
+				t.Fatalf("unexpected skipped judge: %+v", outcome)
+			}
+		} else {
+			if outcome.Result == nil || outcome.SkipReason != "" {
+				t.Fatalf("unexpected judge outcome: %+v", outcome)
+			}
+		}
+	}
+}
+
 func TestExecuteMultiTurn_TemplateSubstitution(t *testing.T) {
 	t.Parallel()
 
