@@ -175,6 +175,7 @@ func init() {
 	rootCmd.AddCommand(validateCmd)
 	rootCmd.AddCommand(listCasesCmd)
 	rootCmd.AddCommand(reportCmd)
+	rootCmd.AddCommand(compareCmd)
 	rootCmd.AddCommand(debugCmd)
 	rootCmd.AddCommand(importCmd)
 }

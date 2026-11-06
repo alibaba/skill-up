@@ -921,3 +921,81 @@ func TestMarkdownReporter_DistinguishesSkippedAssertions(t *testing.T) {
 		t.Fatal("skipped assertion mislabeled as failed")
 	}
 }
+
+func TestHTMLReporter_ComparisonPreservesTurnFailureEvidence(t *testing.T) {
+	t.Parallel()
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node.js required to execute HTML report renderer")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, node, "-e", `
+ const assert = require('node:assert/strict');
+ const vm = require('node:vm');
+ const template = require('node:fs').readFileSync(0, 'utf8');
+ const elements = new Map();
+ function element() {
+   return {style: {}, innerHTML: '', classList: {remove() {}}, replaceChildren() {}, appendChild() {}};
+ }
+ const context = {
+   esc: text => String(text).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;'),
+   pairLabels: ['Reference', 'Compared'],
+   renderResponse() {},
+   document: {
+     getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); },
+     createElement: element,
+     createTextNode: text => text
+   }
+ };
+ vm.createContext(context);
+ const gradesStart = template.indexOf('function renderGrades(c)');
+ vm.runInContext(template.slice(gradesStart, template.indexOf('function toggleGrades()', gradesStart)), context);
+ const pairStart = template.indexOf('function renderPairDetails(c)');
+ vm.runInContext(template.slice(pairStart, template.indexOf('function selectComparisonRun(', pairStart)), context);
+ const failed = {status: 'FAIL', turn_results: [
+   {turn_number: 1, status: 'completed'},
+   {turn_number: 2, status: 'failed', reason: 'Missing <required> field'}
+ ]};
+ const errored = {status: 'ERROR', turn_results: [
+   {turn_number: 1, status: 'error', reason: 'Agent connection closed'}
+ ]};
+ context.renderGrades(failed);
+ const normal = elements.get('grades-content').innerHTML;
+ assert.match(normal, /Missing &lt;required&gt; field/);
+ for (const [left, right] of [[failed, errored], [errored, failed]]) {
+   context.renderPairDetails({pairLeft: left, pairRight: right});
+   const html = elements.get('grades-content').innerHTML;
+   const columns = html.split('<div class="config-col">').slice(1);
+   assert.equal(columns.length, 2);
+   for (const [i, side] of [left, right].entries()) {
+     assert.match(columns[i], /post-condition/);
+     assert.ok(columns[i].includes(context.renderCaseGrading(side)));
+     assert.doesNotMatch(columns[i], /No grading data/);
+   }
+   assert.match(html, /Turn 2 post-condition/);
+   assert.match(html, /Missing &lt;required&gt; field/);
+   assert.match(html, /Agent connection closed/);
+   assert.match(html, /1 passed, 1 failed of 2/);
+ }
+ const grading = {summary: {passed: 1, failed: 0, total: 1, pass_rate: 1}, expectations: [{text: 'Judge evidence', passed: true}]};
+ for (const scored of [
+   {...failed, grading},
+   {...failed, judge_results: [{id: 'quality', type: 'rule_based', status: 'PASS', result: {summary: grading.summary, assertion_results: grading.expectations}}]}
+ ]) {
+   context.renderPairDetails({pairLeft: failed, pairRight: scored});
+   const columns = elements.get('grades-content').innerHTML.split('<div class="config-col">').slice(1);
+   assert.match(columns[0], /Missing &lt;required&gt; field/);
+   assert.match(columns[1], /Judge evidence/);
+   assert.doesNotMatch(columns[1], /post-condition/);
+ }
+ context.renderPairDetails({pairLeft: {status: 'PASS', turn_results: [{turn_number: 1, status: 'completed'}]}});
+ const empty = elements.get('grades-content').innerHTML;
+ assert.match(empty, /No grading data/);
+ assert.match(empty, /Case absent from this run/);
+ `)
+	cmd.Stdin = strings.NewReader(htmlTemplate)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("renderer: %v\n%s", err, output)
+	}
+}

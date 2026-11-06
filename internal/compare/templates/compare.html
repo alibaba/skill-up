@@ -1,0 +1,32 @@
+{{define "comparison-body"}}
+
+<div class="summary-bar">
+<div class="summary-card"><div class="label">Shared cases</div><div class="value">{{.Result.Coverage.Shared}}</div></div>
+<div class="summary-card"><div class="label">Regressed</div><div class="value comparison-negative">{{len .Result.Cases.Regressed}}</div></div>
+<div class="summary-card"><div class="label">Fixed</div><div class="value comparison-positive">{{len .Result.Cases.Fixed}}</div></div>
+<div class="summary-card"><div class="label">Added</div><div class="value">{{.Result.Coverage.Added}}</div></div>
+<div class="summary-card"><div class="label">Removed</div><div class="value">{{.Result.Coverage.Removed}}</div></div>
+</div>
+<p class="comparison-note section-body">Comparison coverage: {{.Result.Coverage.Shared}} / {{.Result.Run.Old.CaseCount}} reference cases; {{.Result.Coverage.Shared}} / {{.Result.Run.New.CaseCount}} compared cases.</p>
+{{if or .Result.Coverage.Added .Result.Coverage.Removed}}<p class="comparison-note section-body">Different case sets: run-level deltas include unpaired cases. Only shared case IDs are classified as fixed or regressed.</p>{{end}}
+<section class="section"><h2 class="section-header">Run summary</h2><div class="section-body" style="overflow:auto;"><table class="benchmark-table">
+<thead><tr><th>Metric</th><th class="comparison-path" title="{{.Result.Baseline.Path}}">{{.Result.Baseline.Label}}</th><th class="comparison-path" title="{{.Result.Candidate.Path}}">{{.Result.Candidate.Label}}</th><th>Change</th></tr></thead>
+<tbody>{{range .Metrics}}<tr><td>{{.Name}}</td><td class="{{metricClass .Name .Old}}">{{.Old}}</td><td class="{{metricClass .Name .New}}">{{.New}}</td><td class="{{deltaClass .Name .Delta}}">{{.Delta}}</td></tr>{{end}}</tbody></table></div>
+<details class="section-body comparison-help"><summary>Metric definitions</summary><p class="comparison-note">Pass rates use one primary result per case ID. Total tokens cover all configurations; input/output tokens cover primary cases. Pass-rate changes are percentage points (pp). Missing measurements are unknown.</p></details>
+</section>
+<section class="section"><h2 class="section-header">Metadata differences</h2><div class="section-body" style="overflow:auto;"><table class="benchmark-table">
+<thead><tr><th>Field</th><th class="comparison-path" title="{{.Result.Baseline.Path}}">{{.Result.Baseline.Label}}</th><th class="comparison-path" title="{{.Result.Candidate.Path}}">{{.Result.Candidate.Label}}</th><th>Change</th></tr></thead>
+<tbody>{{range .Metadata}}<tr><td>{{.Name}}</td><td>{{.Old}}</td><td>{{.New}}</td><td class="{{changeClass .Delta}}">{{.Delta}}</td></tr>{{end}}</tbody></table></div>
+<details class="comparison-help section-body"><summary>Provenance and grading</summary><p class="comparison-note">Missing provenance is unknown. Matching case IDs do not prove identical prompts, suites, Skill revisions, or judge/rubric definitions. Scores are not regraded.</p></details>
+</section>
+<section class="section"><h2 class="section-header">Case transitions</h2>
+
+<div class="filters section-body comparison-toolbar"><label>Search cases <input class="case-search nav-btn" type="search"></label><label>Transition <select class="case-filter nav-btn"><option value="">All transitions</option>{{range .Groups}}<option>{{.Name}}</option>{{end}}</select></label><span class="match-count"></span></div>
+{{range .Groups}}<details class="case-group" data-group="{{.Name}}" open><summary class="section-header">{{.Name}} ({{len .Cases}})</summary>
+{{if .Cases}}<div class="section-body" style="overflow:auto;"><table class="benchmark-table"><thead><tr><th>Case ID</th><th>Reference title</th><th>Compared title</th><th>Reference status</th><th>Compared status</th><th>Reference configuration</th><th>Compared configuration</th><th>Prompt</th></tr></thead>
+<tbody>{{range .Cases}}<tr><td>{{.CaseID}}</td><td>{{if .OldTitle}}{{.OldTitle}}{{else}}—{{end}}</td><td>{{if .NewTitle}}{{.NewTitle}}{{else}}—{{end}}</td><td><span class="{{statusClass .OldStatus}}">{{if .OldStatus}}{{.OldStatus}}{{else}}absent{{end}}</span></td><td><span class="{{statusClass .NewStatus}}">{{if .NewStatus}}{{.NewStatus}}{{else}}absent{{end}}</span></td><td>{{if .OldConfiguration}}{{.OldConfiguration}}{{else}}—{{end}}</td><td>{{if .NewConfiguration}}{{.NewConfiguration}}{{else}}—{{end}}</td><td class="{{changeClass (promptChange .PromptChanged)}}">{{promptChange .PromptChanged}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="comparison-note section-body">None.</p>{{end}}</details>{{end}}
+</section>
+{{if not .Interactive}}<section class="section"><h2 class="section-header">Gates: {{if .Result.Gates.Passed}}<span class="comparison-positive">passed</span>{{else}}<span class="comparison-negative">failed</span>{{end}}</h2>
+<div class="section-body">{{if .Result.Gates.Passed}}<p>Configured checks passed. No checks are enforced unless requested.</p>{{else}}<ul>{{range .Result.Gates.Failures}}<li>{{.}}</li>{{end}}</ul>{{end}}</div></section>{{end}}
+
+{{end}}

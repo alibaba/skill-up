@@ -149,7 +149,9 @@ func TestJudgeFieldPresenceRejectsNullAndMixedYAML(t *testing.T) {
 		"judges: []\n",
 	} {
 		var eval EvalConfig
-		if err := yaml.Unmarshal([]byte(raw), &eval); err != nil {
+		var err error
+		eval.JudgeSet, eval.JudgesSet, err = decodeConfig([]byte(raw), &eval)
+		if err != nil {
 			t.Fatal(err)
 		}
 		if _, err := ResolveJudgePlan(&eval, &CaseConfig{}); err == nil {
