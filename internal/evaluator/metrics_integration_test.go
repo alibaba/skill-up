@@ -1184,11 +1184,12 @@ func evidenceGateCase(t *testing.T, evidence string, required bool) EvalResult {
 }
 
 // TestExecuteCaseEvidenceRequiredRejectsBlankEvidence drives the opt-in evidence
-// gate through a real child script. A JSON null element decodes to "" and
-// whitespace is not support, so a score carrying neither must not be accepted as
-// evidenced: the slot becomes ERROR/missing_evidence, quality turns UNKNOWN and the
-// verdict ERROR rather than PASS. Without the flag the same payload stays usable,
-// because the gate is opt-in.
+// gate through a real child script. Whitespace is not support, so a score whose
+// evidence is only blank must not be accepted: the slot becomes
+// ERROR/missing_evidence, quality turns UNKNOWN and the verdict ERROR rather than
+// PASS. A JSON null element is not tested here: it is the wrong kind and is
+// rejected while decoding, before this gate is consulted. Without the flag the
+// same payload stays usable, because the gate is opt-in.
 func TestExecuteCaseEvidenceRequiredRejectsBlankEvidence(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -1196,7 +1197,6 @@ func TestExecuteCaseEvidenceRequiredRejectsBlankEvidence(t *testing.T) {
 		required     bool
 		wantAccepted bool
 	}{
-		{name: "a null element carries no support", evidence: `[null]`, required: true},
 		{name: "whitespace carries no support", evidence: `["   "]`, required: true},
 		{name: "an empty list carries no support", evidence: `[]`, required: true},
 		{name: "a cited line supports the score", evidence: `["line 12 matches"]`, required: true, wantAccepted: true},
@@ -1338,5 +1338,140 @@ func TestExecuteCaseGroupedScriptDefaultTimeoutKeepsDeadline(t *testing.T) {
 	if result.Status != judge.StatusError || result.GroupCompletion != judge.CompletionInterrupted ||
 		result.GroupCause != judge.CauseDeadlineExpiry {
 		t.Fatalf("group = %s/%s/%s, want ERROR/INTERRUPTED/deadline_expiry", result.Status, result.GroupCompletion, result.GroupCause)
+	}
+}
+
+// evidenceKindPayload builds a two-metric payload so a whole-envelope defect stays
+// distinguishable from a single-slot one: completeness carries no evidence
+// requirement and would remain AVAILABLE if only the bad entry were rejected.
+func evidenceKindPayload(evidence string) string {
+	return `{"schema_version":1,"invocation_id":"__INVOCATION__","metrics":[` +
+		`{"metric_id":"correctness","availability":"AVAILABLE","value":1,"evidence":` + evidence + `},` +
+		`{"metric_id":"completeness","availability":"AVAILABLE","value":0.9,"evidence":["fine"]}]}`
+}
+
+// runEvidenceKindCase scores that payload through a real child script, with the
+// evidence requirement opt-in on correctness only.
+func runEvidenceKindCase(t *testing.T, evidence string) EvalResult {
+	t.Helper()
+	dir := t.TempDir()
+	limit := 30
+	member := config.JudgeConfig{
+		ID: "scorer", Type: "script",
+		ScriptPath:     metricsPayloadScript(t, dir, evidenceKindPayload(evidence)),
+		TimeoutSeconds: &limit,
+		Metrics: []config.MetricConfig{
+			{ID: "correctness", Required: true, EvidenceRequired: true, MinScore: new(0.8)},
+			{ID: "completeness"},
+		},
+	}
+	e := newTestEvaluator(EvalOptions{
+		Agent: &mockAgent{name: "test", output: "done"}, OutputDir: t.TempDir(),
+		EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none"}, Judge: member},
+	})
+	return e.executeCase(context.Background(), &config.CaseConfig{
+		ID: "evidence-kinds", Input: config.Input{Prompt: "hello"},
+	}, "with_skill", newScriptRuntime(t), nil)
+}
+
+// assertEvidenceKindOutcome checks the envelope boundary: a wrong-kind element
+// rejects the whole payload, so no sibling survives, while an emptiness problem
+// costs only its own slot.
+func assertEvidenceKindOutcome(t *testing.T, result EvalResult, wantAvailability, wantErrored int, wantReason string) {
+	t.Helper()
+	if result.Metrics == nil {
+		t.Fatal("no metrics envelope persisted")
+	}
+	coverage := result.Metrics.Coverage
+	if coverage.Available != wantAvailability || coverage.Errored != wantErrored || coverage.Planned != 2 {
+		t.Fatalf("coverage = %+v, want planned 2 available %d errored %d", coverage, wantAvailability, wantErrored)
+	}
+	var reasons []string
+	for _, slot := range result.Metrics.Metrics {
+		reasons = append(reasons, string(slot.Availability)+"/"+slot.Reason)
+		if wantReason != "" && slot.Availability == judge.Errored && slot.Reason != wantReason {
+			t.Fatalf("slot %s = %s/%q, want reason %q", slot.MetricID, slot.Availability, slot.Reason, wantReason)
+		}
+	}
+	if wantAvailability == 2 && result.Status != judge.StatusPass {
+		t.Fatalf("verdict = %s with slots %v, want PASS", result.Status, reasons)
+	}
+	if wantErrored > 0 && result.Status != judge.StatusError {
+		t.Fatalf("verdict = %s with slots %v, want ERROR", result.Status, reasons)
+	}
+}
+
+// TestExecuteCaseEvidenceElementKindsAreCheckedWhileDecoding pins the boundary the
+// evidence review asked about. Every evidence element has to be a string, and a
+// JSON null reaches the scorer as "" instead of failing to decode, so it is
+// rejected at the payload stage: like a number in the same array, it costs the
+// whole envelope rather than one slot. A blank string is a different defect and
+// stays a nonblank-evidence question rather than becoming a type error, and a null
+// *field* still means absent, which leaves the sibling score usable.
+func TestExecuteCaseEvidenceElementKindsAreCheckedWhileDecoding(t *testing.T) {
+	cases := []struct {
+		name        string
+		evidence    string
+		wantAvail   int
+		wantErrored int
+		wantReason  string
+		wantQuality judge.Quality
+	}{
+		{
+			name:        "a null element beside real evidence is the wrong kind",
+			evidence:    `[null, "valid evidence"]`,
+			wantAvail:   0,
+			wantErrored: 2,
+			wantReason:  "top_level_shape",
+			wantQuality: judge.QualityUnknown,
+		},
+		{
+			name:        "a lone null element is the wrong kind too",
+			evidence:    `[null]`,
+			wantAvail:   0,
+			wantErrored: 2,
+			wantReason:  "top_level_shape",
+			wantQuality: judge.QualityUnknown,
+		},
+		{
+			name:        "a number element was already the wrong kind",
+			evidence:    `[123, "valid evidence"]`,
+			wantAvail:   0,
+			wantErrored: 2,
+			wantReason:  "top_level_shape",
+			wantQuality: judge.QualityUnknown,
+		},
+		{
+			name:        "a blank element beside real evidence is not a type error",
+			evidence:    `["  ", "valid evidence"]`,
+			wantAvail:   2,
+			wantErrored: 0,
+			wantQuality: judge.QualityMet,
+		},
+		{
+			name:        "a null field means absent, not malformed",
+			evidence:    `null`,
+			wantAvail:   1,
+			wantErrored: 1,
+			wantReason:  "missing_evidence",
+			wantQuality: judge.QualityUnknown,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := runEvidenceKindCase(t, tc.evidence)
+			assertEvidenceKindOutcome(t, result, tc.wantAvail, tc.wantErrored, tc.wantReason)
+			if result.Metrics.Quality != tc.wantQuality {
+				t.Fatalf("quality = %s, want %s", result.Metrics.Quality, tc.wantQuality)
+			}
+			first := result.Metrics.Metrics[0]
+			wantSlot := judge.Available
+			if tc.wantErrored > 0 {
+				wantSlot = judge.Errored
+			}
+			if first.Availability != wantSlot {
+				t.Fatalf("correctness slot = %s/%q, want %s", first.Availability, first.Reason, wantSlot)
+			}
+		})
 	}
 }

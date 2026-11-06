@@ -415,6 +415,10 @@ func TestParseMetricsPayloadRejections(t *testing.T) {
 		{"trailing second value", `{"schema_version":1,"invocation_id":"i","metrics":[]} {}`, "i", ProblemTopLevelShape, 0},
 		{"unknown entry field", `{"schema_version":1,"invocation_id":"i","metrics":[{"metric_id":"a","bogus":1}]}`, "i", ProblemUnknownTopField, 0},
 		{"non numeric value stays a slot problem", `{"schema_version":1,"invocation_id":"i","metrics":[{"metric_id":"a","availability":"AVAILABLE","value":"0.5"}]}`, "i", ProblemNone, 1},
+		{"null evidence element is the wrong kind", `{"schema_version":1,"invocation_id":"i","metrics":[{"metric_id":"a","availability":"AVAILABLE","value":0.5,"evidence":[null,"note"]}]}`, "i", ProblemTopLevelShape, 0},
+		{"number evidence element was already the wrong kind", `{"schema_version":1,"invocation_id":"i","metrics":[{"metric_id":"a","availability":"AVAILABLE","value":0.5,"evidence":[1,"note"]}]}`, "i", ProblemTopLevelShape, 0},
+		{"blank evidence element is not a type error", `{"schema_version":1,"invocation_id":"i","metrics":[{"metric_id":"a","availability":"AVAILABLE","value":0.5,"evidence":["  ","note"]}]}`, "i", ProblemNone, 1},
+		{"null evidence field means absent", `{"schema_version":1,"invocation_id":"i","metrics":[{"metric_id":"a","availability":"AVAILABLE","value":0.5,"evidence":null}]}`, "i", ProblemNone, 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

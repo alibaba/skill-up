@@ -102,6 +102,14 @@ func decodeMetricsEntry(entry map[string]json.RawMessage) (EmittedMetric, Payloa
 			return EmittedMetric{}, ProblemTopLevelShape
 		}
 	}
+	// Evidence elements are strings. decoding the whole array into []string already
+	// rejects a number or an object, but a null element becomes "" instead, which
+	// would look like a blank string rather than the wrong kind, so the raw tokens
+	// are checked here and a null is the same payload defect any other wrong kind
+	// already is. A null *field* stays "absent", matching how value treats null.
+	if raw, ok := entry["evidence"]; ok && hasNullArrayElement(raw) {
+		return EmittedMetric{}, ProblemTopLevelShape
+	}
 	if raw, ok := entry["value"]; ok && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		var value float64
 		if err := json.Unmarshal(raw, &value); err != nil {
@@ -113,6 +121,21 @@ func decodeMetricsEntry(entry map[string]json.RawMessage) (EmittedMetric, Payloa
 		metric.Value = &value
 	}
 	return metric, ProblemNone
+}
+
+// hasNullArrayElement reports whether a JSON array carries a null element. A value
+// that is not an array returns false: the field decoder reports that shape itself.
+func hasNullArrayElement(raw []byte) bool {
+	var elements []json.RawMessage
+	if err := json.Unmarshal(raw, &elements); err != nil {
+		return false
+	}
+	for _, element := range elements {
+		if bytes.Equal(bytes.TrimSpace(element), []byte("null")) {
+			return true
+		}
+	}
+	return false
 }
 
 // checkTopLevelKeys reports duplicate JSON keys at any nesting level and a

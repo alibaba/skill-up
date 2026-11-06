@@ -346,7 +346,7 @@ func TestEvidenceRequirementRejectsBlankElements(t *testing.T) {
 	}{
 		{"no evidence at all", nil, Errored},
 		{"empty list", []string{}, Errored},
-		{"a null element decodes to an empty string", []string{""}, Errored},
+		{"an empty string element carries no support", []string{""}, Errored},
 		{"whitespace is not support", []string{"   "}, Errored},
 		{"tabs and newlines are not support", []string{"\t\n "}, Errored},
 		{"one blank element beside a real one still supports the score", []string{"  ", "cited line 12"}, Available},

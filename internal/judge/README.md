@@ -367,8 +367,9 @@ Accepted grammar (`schema_version` must be `1`):
 `availability` is one of `AVAILABLE`, `MISSING`, `SKIP`, `ERROR`. `AVAILABLE`
 requires a finite number in `[0,1]` — an explicit `0` is a real score. Unknown
 entry fields, unknown top-level fields, duplicate JSON keys at any level, a wrong
-schema version, a mismatched invocation id, a non-object top level, trailing
-content and an oversized file are all rejected.
+schema version, a mismatched invocation id, a non-object top level, an `evidence`
+array holding a non-string element (a JSON `null` counts as the wrong kind, not as
+a blank), trailing content and an oversized file are all rejected.
 
 Rejection semantics:
 
