@@ -7,7 +7,7 @@ skills:
 engine:
   name: qodercli
   model:
-    name: performance
+    name: fast
 cases:
   files:
     - evals/cases/agent-judge-file.yaml
@@ -19,7 +19,7 @@ judge:
     name: qodercli
     model:
       provider: qoder
-      name: performance
+      name: fast
   output:
     mode: file
   timeout_seconds: 300

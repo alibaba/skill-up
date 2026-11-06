@@ -1302,6 +1302,22 @@ engine:
 >
 > **Note:** the `--api-key` flag and any provider API key declared in `eval.yaml` are **not** used as the qodercli auth token. Authentication comes from the selected edition's PAT or local login state.
 
+If a run returns an empty result with `stop_reason: tool_use`, the CLI has not
+finished its tool loop even if it exits zero. skill-up reports this as an engine
+error and retains the raw output. Check `qodercli --version` and update the CLI
+with `qodercli update` or the official installer. A native-CLI reproduction
+separates this issue from judge JSON formatting. Qoder CLI 0.2.0 reproduced it
+with the retired `performance` argument while `auto` completed normally. The
+current client (1.1.83) completed the same tasks with available tiers.
+A completed `end_turn` with empty chat is still allowed for file-based judges.
+
+Qoder has [replaced Performance with Fast](https://docs.qoder.com/product-overview/fast-mode-announcement).
+Use `qodercli --list-models` to check account availability and select `fast` on
+current clients. If Qoder explicitly warns that an unavailable requested model
+was replaced with a fallback, skill-up returns an engine error. Agent judges do
+not recover a verdict from that unintended model, even from a valid result file.
+
+
 qodercli model selection:
 
 - A non-empty `engine.model.name` is passed to Qoder's `--model` after trimming
@@ -1521,7 +1537,7 @@ judge:
     name: qodercli
     model:
       provider: qoder
-      name: performance
+      name: fast
   output:
     mode: file
   criteria:
