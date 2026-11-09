@@ -1374,9 +1374,9 @@ func runEvidenceKindCase(t *testing.T, evidence string) EvalResult {
 	}, "with_skill", newScriptRuntime(t), nil)
 }
 
-// assertEvidenceKindOutcome checks the envelope boundary: a wrong-kind element
-// rejects the whole payload, so no sibling survives, while an emptiness problem
-// costs only its own slot.
+// assertEvidenceKindOutcome checks which side of the boundary an outcome belongs
+// to: a payload shape defect leaves no slot usable, while an entry or emptiness
+// defect costs only its own slot.
 func assertEvidenceKindOutcome(t *testing.T, result EvalResult, wantAvailability, wantErrored int, wantReason string) {
 	t.Helper()
 	if result.Metrics == nil {
@@ -1401,14 +1401,15 @@ func assertEvidenceKindOutcome(t *testing.T, result EvalResult, wantAvailability
 	}
 }
 
-// TestExecuteCaseEvidenceElementKindsAreCheckedWhileDecoding pins the boundary the
-// evidence review asked about. Every evidence element has to be a string, and a
-// JSON null reaches the scorer as "" instead of failing to decode, so it is
-// rejected at the payload stage: like a number in the same array, it costs the
-// whole envelope rather than one slot. A blank string is a different defect and
-// stays a nonblank-evidence question rather than becoming a type error, and a null
-// *field* still means absent, which leaves the sibling score usable.
-func TestExecuteCaseEvidenceElementKindsAreCheckedWhileDecoding(t *testing.T) {
+// TestExecuteCaseNullEvidencePoisonsOnlyItsSlot pins the boundary the evidence
+// review settled. A JSON null reaches the scorer as "" instead of failing to
+// decode, so it is caught from the raw tokens and invalidates only its own metric:
+// that slot becomes ERROR/invalid_evidence while a sibling entry keeps its score,
+// exactly as any other single-entry defect does. A number in the same array is a
+// whole-envelope shape defect and still rejects the payload, a blank string beside
+// real evidence satisfies an opt-in evidence_required, and a null *field* means
+// absent rather than malformed.
+func TestExecuteCaseNullEvidencePoisonsOnlyItsSlot(t *testing.T) {
 	cases := []struct {
 		name        string
 		evidence    string
@@ -1418,23 +1419,23 @@ func TestExecuteCaseEvidenceElementKindsAreCheckedWhileDecoding(t *testing.T) {
 		wantQuality judge.Quality
 	}{
 		{
-			name:        "a null element beside real evidence is the wrong kind",
+			name:        "a null element beside real evidence costs only that slot",
 			evidence:    `[null, "valid evidence"]`,
-			wantAvail:   0,
-			wantErrored: 2,
-			wantReason:  "top_level_shape",
+			wantAvail:   1,
+			wantErrored: 1,
+			wantReason:  "invalid_evidence",
 			wantQuality: judge.QualityUnknown,
 		},
 		{
-			name:        "a lone null element is the wrong kind too",
+			name:        "a lone null element costs only that slot",
 			evidence:    `[null]`,
-			wantAvail:   0,
-			wantErrored: 2,
-			wantReason:  "top_level_shape",
+			wantAvail:   1,
+			wantErrored: 1,
+			wantReason:  "invalid_evidence",
 			wantQuality: judge.QualityUnknown,
 		},
 		{
-			name:        "a number element was already the wrong kind",
+			name:        "a number element is a payload shape defect",
 			evidence:    `[123, "valid evidence"]`,
 			wantAvail:   0,
 			wantErrored: 2,
@@ -1442,7 +1443,7 @@ func TestExecuteCaseEvidenceElementKindsAreCheckedWhileDecoding(t *testing.T) {
 			wantQuality: judge.QualityUnknown,
 		},
 		{
-			name:        "a blank element beside real evidence is not a type error",
+			name:        "a blank element beside real evidence is not a defect",
 			evidence:    `["  ", "valid evidence"]`,
 			wantAvail:   2,
 			wantErrored: 0,
@@ -1471,6 +1472,12 @@ func TestExecuteCaseEvidenceElementKindsAreCheckedWhileDecoding(t *testing.T) {
 			}
 			if first.Availability != wantSlot {
 				t.Fatalf("correctness slot = %s/%q, want %s", first.Availability, first.Reason, wantSlot)
+			}
+			if tc.wantAvail > 0 {
+				sibling := result.Metrics.Metrics[1]
+				if sibling.Availability != judge.Available || sibling.Value == nil || *sibling.Value != 0.9 {
+					t.Fatalf("sibling slot = %+v, want AVAILABLE 0.9 preserved", sibling)
+				}
 			}
 		})
 	}

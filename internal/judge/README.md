@@ -368,13 +368,18 @@ Accepted grammar (`schema_version` must be `1`):
 requires a finite number in `[0,1]` — an explicit `0` is a real score. Unknown
 entry fields, unknown top-level fields, duplicate JSON keys at any level, a wrong
 schema version, a mismatched invocation id, a non-object top level, an `evidence`
-array holding a non-string element (a JSON `null` counts as the wrong kind, not as
-a blank), trailing content and an oversized file are all rejected.
+array holding an element that is neither a string nor `null`, trailing content and
+an oversized file are all rejected.
 
 Rejection semantics:
 
 - Whole-envelope defect ⇒ every planned slot `ERROR` with that reason; nothing is usable.
 - One bad entry ⇒ only that slot `ERROR`; independently valid siblings stay `AVAILABLE`.
+- A `null` element inside `evidence` is one entry's defect, not the payload's: that
+  slot becomes `ERROR` with reason `invalid_evidence`, and a sibling carrying a
+  valid score keeps it. A blank string element is not a defect on its own —
+  `evidence_required` asks for at least one nonblank string, so
+  `["valid evidence", "   "]` supports the score.
 - The path is `Lstat`-ed and must be a regular, non-symlink file, and its size is
   checked before it is read. A directory, symlink or device is never collected.
 - A file that never appeared because evaluation was interrupted ⇒ `NOT_PRODUCED`.

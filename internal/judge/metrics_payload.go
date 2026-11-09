@@ -102,13 +102,17 @@ func decodeMetricsEntry(entry map[string]json.RawMessage) (EmittedMetric, Payloa
 			return EmittedMetric{}, ProblemTopLevelShape
 		}
 	}
-	// Evidence elements are strings. decoding the whole array into []string already
-	// rejects a number or an object, but a null element becomes "" instead, which
-	// would look like a blank string rather than the wrong kind, so the raw tokens
-	// are checked here and a null is the same payload defect any other wrong kind
-	// already is. A null *field* stays "absent", matching how value treats null.
+	// A JSON null is not a string, and decoding the array into []string turns it
+	// into "" instead of failing, so it has to be caught from the raw tokens.
+	// Per the per-entry isolation contract it invalidates only its own slot: the
+	// entry becomes an errored metric and independently valid siblings keep their
+	// scores. A blank string is not this defect - emptiness is the evidence
+	// requirement's own question - and a null *field* still means absent.
 	if raw, ok := entry["evidence"]; ok && hasNullArrayElement(raw) {
-		return EmittedMetric{}, ProblemTopLevelShape
+		metric.Availability = "ERROR"
+		metric.Reason = "invalid_evidence"
+		metric.Value = nil
+		return metric, ProblemNone
 	}
 	if raw, ok := entry["value"]; ok && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		var value float64

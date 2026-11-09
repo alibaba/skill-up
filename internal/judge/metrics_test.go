@@ -389,6 +389,38 @@ func TestEvidenceRequirementIsOptIn(t *testing.T) {
 	}
 }
 
+// TestNullEvidenceElementPoisonsOnlyItsSlot pins the boundary the payload grammar
+// documents: one entry's defect never rejects the envelope. A null in one entry's
+// evidence makes that slot ERROR/invalid_evidence with no value, while a sibling
+// entry keeps its score and the coverage counts show both halves.
+func TestNullEvidenceElementPoisonsOnlyItsSlot(t *testing.T) {
+	raw := []byte(`{"schema_version":1,"invocation_id":"i","metrics":[` +
+		`{"metric_id":"correctness","availability":"AVAILABLE","value":1,"evidence":[null,"valid evidence"]},` +
+		`{"metric_id":"completeness","availability":"AVAILABLE","value":0.9,"evidence":["fine"]}]}`)
+	emitted, problem := ParseMetricsPayload(raw, "i")
+	if problem != ProblemNone || len(emitted) != 2 {
+		t.Fatalf("problem = %q emissions = %d, want no envelope problem and 2 entries", problem, len(emitted))
+	}
+	planned := []MetricSlot{
+		{ID: "correctness", Required: true, EvidenceRequired: true, MinScore: new(0.8)},
+		{ID: "completeness"},
+	}
+	env := MaterializeSlots("j1", planned, emitted, problem, MetricProduced)
+	first, second := env.Metrics[0], env.Metrics[1]
+	if first.Availability != Errored || first.Reason != "invalid_evidence" || first.Value != nil {
+		t.Fatalf("null-evidence slot = %+v, want ERROR/invalid_evidence carrying no value", first)
+	}
+	if second.Availability != Available || second.Value == nil || *second.Value != 0.9 {
+		t.Fatalf("sibling slot = %+v, want AVAILABLE 0.9 unchanged", second)
+	}
+	if env.Coverage.Available != 1 || env.Coverage.Errored != 1 || env.Coverage.Planned != 2 {
+		t.Fatalf("coverage = %+v, want 1 available and 1 errored of 2 planned", env.Coverage)
+	}
+	if env.Quality != QualityUnknown {
+		t.Fatalf("quality = %s, want UNKNOWN while a thresholded slot is unusable", env.Quality)
+	}
+}
+
 func TestCoverageWithoutPlannedSlotsStaysNull(t *testing.T) {
 	env := MaterializeSlots("j1", nil, nil, ProblemNone, MetricProduced)
 	if env.Coverage.Planned != 0 || env.Coverage.Ratio != nil {

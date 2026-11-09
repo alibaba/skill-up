@@ -163,3 +163,85 @@ func TestWriteCaseArtifactsPersistsSingleJudgeMetricsAndExecution(t *testing.T) 
 		t.Fatalf("explicit zero lost: %+v", saved.Metrics.Metrics[0])
 	}
 }
+
+// nullEvidenceJudgeScript writes a judge script whose payload carries one metric
+// whose evidence contains a JSON null and one metric with a plain valid score, so
+// the persisted artifact shows both halves of the per-entry isolation contract.
+func nullEvidenceJudgeScript(t *testing.T) string {
+	t.Helper()
+	const payload = `{"schema_version":1,"invocation_id":"__INVOCATION__","metrics":[` +
+		`{"metric_id":"correctness","availability":"AVAILABLE","value":1,"evidence":[null,"valid evidence"]},` +
+		`{"metric_id":"completeness","availability":"AVAILABLE","value":0.9,"evidence":["fine"]}]}`
+	name, body := "judge.sh", "#!/bin/sh\ncat > \"$EVAL_METRICS_RESULT_PATH\" <<JSON\n"+
+		strings.ReplaceAll(payload, "__INVOCATION__", "$EVAL_METRICS_INVOCATION_ID")+"\nJSON\nexit 0\n"
+	if runtime.GOOS == "windows" {
+		name = "judge.ps1"
+		body = "$body = '" + payload + "' -replace '__INVOCATION__', $env:EVAL_METRICS_INVOCATION_ID\n" +
+			"Set-Content -LiteralPath $env:EVAL_METRICS_RESULT_PATH -Value $body\nexit 0\n"
+	}
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write judge script: %v", err)
+	}
+	return path
+}
+
+// TestNullEvidencePersistsSlotErrorWithSiblingScore reads evaluation.json back from
+// disk after a real script judge run: the null-evidence slot must persist as
+// ERROR/invalid_evidence carrying no value, the sibling must persist AVAILABLE with
+// its 0.9 intact, and the case verdict and quality must say ERROR and UNKNOWN.
+func TestNullEvidencePersistsSlotErrorWithSiblingScore(t *testing.T) {
+	limit := 30
+	member := config.JudgeConfig{
+		ID:             "configured-script-id",
+		Type:           "script",
+		ScriptPath:     nullEvidenceJudgeScript(t),
+		TimeoutSeconds: &limit,
+		Metrics: []config.MetricConfig{
+			{ID: "correctness", Required: true, EvidenceRequired: true, MinScore: new(0.8)},
+			{ID: "completeness"},
+		},
+	}
+	e := evaluator.NewEvaluator(evaluator.EvalOptions{
+		Agent:     metricsPersistenceAgent{},
+		OutputDir: t.TempDir(),
+		EvalCfg:   &config.EvalConfig{Environment: config.Environment{Type: "none"}, Judge: member},
+	})
+	results, err := e.EvaluateAll(context.Background(), []*config.CaseConfig{{ID: "null-evidence", Input: config.Input{Prompt: "hello"}}})
+	if err != nil || len(results) != 1 {
+		t.Fatalf("evaluate: results=%d err=%v", len(results), err)
+	}
+	if results[0].Status != judge.StatusError {
+		t.Fatalf("verdict = %s, want ERROR", results[0].Status)
+	}
+
+	saved := persistedSingleScriptEvaluation(t, &results[0])
+	assertNullEvidencePersistence(t, saved)
+}
+
+// assertNullEvidencePersistence checks what a consumer loads back from
+// evaluation.json: the case still says ERROR, but the two slots differ - the
+// null-evidence metric errored on its own account and the sibling kept its score.
+func assertNullEvidencePersistence(t *testing.T, saved report.GroupedEvaluation) {
+	t.Helper()
+	if saved.Aggregation.Status != judge.StatusError {
+		t.Fatalf("persisted status = %s, want ERROR", saved.Aggregation.Status)
+	}
+	if saved.Metrics == nil {
+		t.Fatal("no persisted metrics envelope")
+	}
+	if saved.Metrics.Quality != judge.QualityUnknown {
+		t.Fatalf("persisted quality = %s, want UNKNOWN", saved.Metrics.Quality)
+	}
+	coverage := saved.Metrics.Coverage
+	if coverage.Planned != 2 || coverage.Errored != 1 || coverage.Available != 1 {
+		t.Fatalf("persisted coverage = %+v, want 1 errored and 1 available of 2 planned", coverage)
+	}
+	broken, sibling := saved.Metrics.Metrics[0], saved.Metrics.Metrics[1]
+	if broken.Availability != judge.Errored || broken.Reason != "invalid_evidence" || broken.Value != nil {
+		t.Fatalf("persisted null-evidence slot = %+v, want ERROR/invalid_evidence with no value", broken)
+	}
+	if sibling.Availability != judge.Available || sibling.Value == nil || *sibling.Value != 0.9 {
+		t.Fatalf("persisted sibling slot = %+v, want AVAILABLE 0.9", sibling)
+	}
+}
