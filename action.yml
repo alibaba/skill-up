@@ -43,7 +43,7 @@ inputs:
   skill-up-version:
     description: 'Fallback skill-up version for custom images without skill-up. The official image preinstalls a pinned version and ignores this input.'
     required: false
-    default: '0.7.0'
+    default: '0.15.0'
   skill-up-command:
     description: 'The skill-up command itself; must start with `skill-up`.'
     required: false

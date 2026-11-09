@@ -345,7 +345,10 @@ Step 7 without modifying it.
    model, environment, inputs, and judges. Reuse existing runs only when those
    conditions match. `--baseline` compares with and without a Skill; it does not
    compare old and new Skill versions. Use separate output directories for the
-   two versions. For uncertain or intermittent outcomes, repeat both versions
+   two versions, then use `skill-up compare <original-result.json>
+   <candidate-result.json> --format html --output compare.html` to inspect their
+   aligned cases offline; see [comparison flags](references/cli.md#skill-up-compare).
+   For uncertain or intermittent outcomes, repeat both versions
    within the user's budget; `--iteration N` samples one version, not N revisions.
 5. Run the full eval suite for a promising candidate. Accept it only when the
    evidence supports the intended improvement without regressions in important
@@ -368,6 +371,7 @@ Step 7 without modifying it.
 | `skill-up run [eval.yaml]`                    | Run evals.                        |
 | `skill-up run --auto`                         | Run from `evals/evals.json`.      |
 | `skill-up report <result.json> --format html` | Re-render reports.                |
+| `skill-up compare <old.json> <new.json>`     | Compare preserved runs offline.  |
 | `skill-up import <evals.json>`                | Convert Anthropic format to YAML. |
 | `skill-up init`                               | Write user-config template.       |
 | `skill-up debug judge <input.json>`           | Debug judge.                      |

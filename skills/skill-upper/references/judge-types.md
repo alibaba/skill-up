@@ -77,6 +77,36 @@ judge:
 
 The block uses the run engine schema, with required `name`, `model.provider`, and `model.name`. It does not inherit runner model, kwargs, version, custom config, or connection. Resolve credentials by its provider/protocol; never infer an engine from the provider. Case-level engine/model selections replace the eval selection. In `none`, preinstall the judge CLI. Docker/OpenSandbox install and check it during judging. Multiple judges reuse the same case runtime sequentially with fresh sessions and shared filesystem state.
 
+### Optional file verdict delivery (v0.15.0+)
+
+Use this only for an `agent_judge` that can write workspace files:
+
+```yaml
+judge:
+  type: agent_judge
+  engine:
+    name: qodercli
+    model:
+      provider: qoder
+      name: fast
+  output:
+    mode: file
+  criteria: ["The report is supported by workspace evidence"]
+```
+
+The default remains `final_message`. File mode supplies a fresh JSON template
+and an exact output path for each attempt. The judge must fill the provided
+criterion IDs and verdict fields; printing JSON to chat does not replace the
+file. Templates that were not completed and malformed verdicts fail validation;
+a protocol correction retry uses a new path. A valid FAIL is a grading outcome,
+not a reason to retry. Inspect retained judge artifacts and
+`case_results[].judge_recovery` when a verdict was recovered after a call error.
+
+Qoder error envelopes, unfinished `tool_use` results and reported fallbacks from
+a requested model now fail even when the process exits zero. File verdict
+recovery does not accept an unavailable requested model. Check session artifacts
+and available models; do not weaken criteria to hide an engine failure.
+
 ## script: custom check
 
 ```yaml
