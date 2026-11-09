@@ -133,11 +133,26 @@ Zizmor 在 Model E2E 中报告的四个 `adhoc-packages` 属于已接受的低�
 ## Release 发布
 
 1. 确认发布 commit 位于 `main` 且 CI 全部通过。
-2. 创建受 tag Ruleset 保护、已签名的 `v*` 语义化版本 tag。
+2. 创建受 tag Ruleset 保护、已签名的 `v*` 语义化版本 tag。推送前使用受信任的签名者配置运行 `git verify-tag <tag>`，并确认 `git rev-parse <tag>^{}` 指向已评审提交；有权限推送 tag 不等于签名有效。
 3. 等待无发布权限的构建 Job 生成 GoReleaser 文件，并上传保留一天的候选发布 Artifact。
 4. 检查 tag、commit、变更日志和构建摘要后，批准 `release` Environment 部署。
 5. 验证发布 Job 对同一批候选归档和校验和生成了 Attestation 并完成上传，期间没有重新构建。
 6. 发布失败时修复后发布新版本，不要改写已经发布的 tag。
+
+### v0.15.0 签名审计
+
+已发布的 `v0.15.0` annotated tag 指向 `ffba9031129271260026dbb2a823af23d0505100`，但未签名，不符合上述第 2 步。当前 tag Ruleset 允许维护者创建；发布工作流只校验 SemVer 与 main 可达性，没有验证 tag 签名。CI 成功和推送权限均不能补上签名者身份保证。
+
+本次对 Darwin arm64 归档的 checksum 和 GitHub provenance 验证通过，签发工作流与源码提交均匹配：
+
+```bash
+gh attestation verify skill-up_0.15.0_darwin_arm64.tar.gz \
+  --repo alibaba/skill-up \
+  --signer-workflow alibaba/skill-up/.github/workflows/release.yml
+```
+
+这证明产物来源，不会使原 tag 变成已签名。保留已发布 tag 和产物；维护者可另行授权为现有版本签署审计/校验和声明，下一版本使用新的 signed tag。未来自动门禁应在构建前按明确的签名者信任配置拒绝未签名或不可信 tag；不要默默加入信任密钥或重写既有 tag。
+
 
 CLI Release 成功后，继续执行“人工同步 skill-up 版本”。只有 Runner Image digest 更新完成测试并合并后，才能认为该 CLI 版本已经可通过官方 GitHub Action 使用。
 
