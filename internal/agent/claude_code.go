@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -271,38 +272,45 @@ func sessionAPIErrorText(sessionResult *SessionResult) string {
 	return last.Content
 }
 
+// claudeAPIErrorPrefix starts the line Claude Code prints in place of an
+// answer when the provider request fails.
+const claudeAPIErrorPrefix = "API Error:"
+
 // isClaudeErrorReport reports whether answer text is an error report rather
-// than the agent's prose: Claude Code's own "API Error" line at the start or
-// end, a structured error payload, or the provider gateway's rate-limit notice.
+// than the agent's prose: Claude Code's own "API Error:" line at the start or
+// end, a JSON result flagged is_error, or the provider gateway's rate-limit
+// notice in place of an answer.
 func isClaudeErrorReport(text string) bool {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
 		return false
 	}
-	lastLine := trimmed[strings.LastIndexByte(trimmed, '\n')+1:]
-	if hasAPIErrorPrefix(trimmed) || hasAPIErrorPrefix(strings.TrimSpace(lastLine)) {
-		return true
-	}
-	if strings.Contains(trimmed, claudeGatewayRateLimitNotice) {
-		return true
-	}
-	return hasStructuredAuthFailure(strings.ToLower(trimmed))
+	lastLine := strings.TrimSpace(trimmed[strings.LastIndexByte(trimmed, '\n')+1:])
+	return strings.HasPrefix(trimmed, claudeAPIErrorPrefix) ||
+		strings.HasPrefix(lastLine, claudeAPIErrorPrefix) ||
+		strings.HasPrefix(trimmed, claudeGatewayRateLimitNotice) ||
+		isClaudeErrorEnvelope(trimmed)
 }
 
-func hasAPIErrorPrefix(text string) bool {
-	const prefix = "api error"
-	return len(text) >= len(prefix) && strings.EqualFold(text[:len(prefix)], prefix)
-}
-
-// hasStructuredAuthFailure matches the machine-readable auth failure fields of
-// a Claude Code result payload. lower must already be lower-cased.
-func hasStructuredAuthFailure(lower string) bool {
-	// Remove spaces around colons so JSON like `"key": 403` and `"key":403` both match.
-	compact := strings.ReplaceAll(lower, ": ", ":")
-	compact = strings.ReplaceAll(compact, " :", ":")
-	return strings.Contains(lower, "authentication_failed") ||
-		strings.Contains(compact, "\"api_error_status\":403") ||
-		strings.Contains(compact, "\"error_status\":403")
+// isClaudeErrorEnvelope reports whether text is a Claude Code JSON result, a
+// single object or an event array, that is flagged is_error.
+func isClaudeErrorEnvelope(text string) bool {
+	type envelope struct {
+		IsError bool `json:"is_error"`
+	}
+	switch text[0] {
+	case '{':
+		var event envelope
+		return json.Unmarshal([]byte(text), &event) == nil && event.IsError
+	case '[':
+		var events []envelope
+		if json.Unmarshal([]byte(text), &events) != nil {
+			return false
+		}
+		return slices.ContainsFunc(events, func(e envelope) bool { return e.IsError })
+	default:
+		return false
+	}
 }
 
 func sessionDiagnosticText(sessionResult *SessionResult) string {
@@ -362,10 +370,18 @@ func providerAuthFailureText(text string) (string, bool) {
 		scanText = scanText[len(scanText)-providerAuthScanWindow:]
 	}
 	lower := strings.ToLower(scanText)
-	if hasStructuredAuthFailure(lower) || strings.Contains(lower, "authentication error") {
+	// Remove spaces around colons so JSON like `"key": 403` and `"key":403` both match.
+	compact := strings.ReplaceAll(lower, ": ", ":")
+	compact = strings.ReplaceAll(compact, " :", ":")
+	switch {
+	case strings.Contains(lower, "authentication_failed"),
+		strings.Contains(compact, "\"api_error_status\":403"),
+		strings.Contains(compact, "\"error_status\":403"),
+		strings.Contains(lower, "authentication error"):
 		return trimmed, true
+	default:
+		return "", false
 	}
-	return "", false
 }
 
 func buildClaudePrintCmd(sessionID, model, instruction string) string {

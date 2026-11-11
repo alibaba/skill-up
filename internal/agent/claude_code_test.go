@@ -939,6 +939,32 @@ func TestClaudeCodeAgent_SuccessfulAnswerIsNotProviderFailure(t *testing.T) {
 	}
 }
 
+// TestClaudeProviderSignals_SessionAPIError uses a synthetic session file in
+// the shape Claude Code writes for a failed provider request.
+func TestClaudeProviderSignals_SessionAPIError(t *testing.T) {
+	t.Parallel()
+
+	sessionFile := filepath.Join(t.TempDir(), "550e8400-e29b-41d4-a716-446655440000.jsonl")
+	lines := []string{
+		`{"type":"user","message":{"role":"user","content":"task"}}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Working on it."}]}}`,
+		`{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"Request rejected (429) · too many requests"}]}}`,
+	}
+	if err := os.WriteFile(sessionFile, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	trans, finalMsg, _, _ := parseSessionFile(sessionFile)
+	session := &SessionResult{Transcript: trans, FinalMessage: finalMsg}
+
+	msg, ok := providerRateLimitSignal(ExecResult{Stdout: "Request rejected (429) · too many requests"}, session)
+	if !ok || !strings.Contains(msg, "too many requests") {
+		t.Fatalf("rate limit signal = %q, %v; want the session's API error", msg, ok)
+	}
+	if _, ok := providerAuthFailureSignal(ExecResult{}, session); ok {
+		t.Fatal("unexpected auth failure signal")
+	}
+}
+
 func TestClaudeProviderSignals_AnswerText(t *testing.T) {
 	t.Parallel()
 
@@ -966,7 +992,12 @@ func TestClaudeProviderSignals_AnswerText(t *testing.T) {
 		{"api error as last line", ExecResult{Stdout: "Partial work.\nAPI Error: 429 Too Many Requests"}, &SessionResult{}, true, false},
 		{"api error in final message", ExecResult{}, &SessionResult{FinalMessage: "API Error: 401 authentication error"}, false, true},
 		{"gateway notice", ExecResult{Stdout: "模型提供方限流，请稍后重试"}, &SessionResult{}, true, false},
-		{"structured auth payload", ExecResult{Stdout: `{"is_error":true,"api_error_status": 403,"result":"Authentication error"}`}, &SessionResult{}, false, true},
+		{"error envelope", ExecResult{Stdout: `{"is_error":true,"api_error_status": 403,"result":"Authentication error"}`}, &SessionResult{}, false, true},
+		{"error envelope array", ExecResult{Stdout: `[{"type":"result","is_error":true,"result":"rate limit"}]`}, &SessionResult{}, true, false},
+		{"json answer that is not an error", ExecResult{Stdout: `{"is_error":false,"result":"added a rate limit"}`}, &SessionResult{}, false, false},
+		{"error code named in prose", ExecResult{Stdout: "Renamed authentication_failed to login_failed."}, &SessionResult{}, false, false},
+		{"prose starting with API errors", ExecResult{Stdout: "API errors need rate limit handling, so I added a retry."}, &SessionResult{}, false, false},
+		{"gateway notice named in prose", ExecResult{Stdout: "已为模型提供方限流场景添加重试。"}, &SessionResult{}, false, false},
 		{"session ends with api error", ExecResult{Stdout: "Authentication error"}, apiErrorSession, false, true},
 		{"session recovered from api error", ExecResult{Stdout: prose}, recoveredSession, false, false},
 		{"nil session", ExecResult{Stdout: prose}, nil, false, false},
