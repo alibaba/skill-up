@@ -7,16 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Run judges when `post_condition.on_fail: skip_remaining` fails on the final conversation turn, including single-turn conversations.
+
+## [0.15.0] - 2026-11-09
+
+### Added
+- Add `skill-up compare <result.json> <result.json>...` for offline
+  comparison with self-contained HTML, shareable Markdown, text, and JSON
+  reports, an overview and case matrix across all runs, per-candidate baseline
+  comparisons, input paths as default labels, explicit label
+  overrides, and optional regression and token-growth gates. HTML extends the
+  existing report with a comparison tab and run selector, retaining the original
+  case details and leaving existing report output unchanged. Comparison supports
+  selecting any two input files and reviewing aligned prompts, responses, and
+  grades side by side without changing CI gate references. Color-code pass rates,
+  case statuses, and metric changes, with cost/time direction handled separately.
+  Document primary-result selection for cross-file comparisons; use canonical
+  primary cases in the interactive viewer, and keep dropdowns and multi-run
+  tables readable with padding, wrapping, and horizontal scrolling. Align the
+  Compare controls, collapse secondary explanations, and omit empty Benchmark
+  tabs in comparison mode.
+- Expose the framework-owned `SKILL_UP_VARIANT` execution group to setup and subsequent runtime commands across none, Docker, and OpenSandbox; reject the reserved name in `environment.env`.
+- Add opt-in `judge.output.mode: file` for agent judges, with per-attempt JSON
+  templates, strict validation, isolated correction retries, and result artifacts.
+
 ### Changed
 - Strengthen `skill-upper` evolution with original/candidate comparisons,
   evidence-based acceptance and reversion, and regression checks. Keep the
   English and Chinese Quick Start prompts linked to that canonical workflow.
 - Require Go 1.26 or later for source builds and update the Go CI toolchain.
-- Update the OpenAI Go SDK to 3.77.0, OpenTelemetry to 1.47.0, and
-  DeepSeek Harness packages to 0.1.5-rc.3 while retaining the required cordis 4.0.2.
+- Update the OpenAI Go SDK to 3.86.0, Anthropic Go SDK to 1.84.0,
+  OpenSandbox Go SDK to 1.1.1, OpenTelemetry to 1.47.0, and DeepSeek Harness
+  packages to 0.1.5-rc.3 while retaining the required cordis 4.0.2.
 
 ### Fixed
-- Run judges when `post_condition.on_fail: skip_remaining` fails on the final conversation turn, including single-turn conversations.
+- Reject API keys in custom-engine local file paths and working directories before
+  filesystem operations, and redact workspace validation errors returned to callers.
+- Reject Qoder CLI error envelopes and unfinished `tool_use` results even when
+  the process exits zero, retaining session artifacts for diagnosis and valid
+  file-verdict recovery. Reject reported model fallbacks and prevent agent judges
+  from accepting a verdict from an unavailable requested model. Update the file
+  judge example to the current Fast tier.
+- Preserve multi-turn post-condition failure reasons in the HTML cross-run case comparison when judging was not reached.
 - Use patched Vite/esbuild dependencies for the documentation site while
   retaining VitePress 1.x.
 - Remove overflow-prone runtime kwargs preallocation while preserving
@@ -25,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   output-file paths and errors without changing file operations or fallbacks.
 - Expand full-value `$VAR` references in real MCP headers and OpenCode endpoints, matching the existing `${VAR}` form.
 - Restore the Docker Action's temporary home ownership and owner permissions on exit so private engine state does not block self-hosted runner cleanup.
+- Isolate `context.git.apply_diff` uploads per invocation so parallel cases cannot overwrite patches with the same filename. Remove the uploaded patch after applying it, including on failures and cancellation.
 - Reject whitespace-only `input.prompt` and `input.turns[].content` during validation while preserving mutual-exclusion semantics and the original prompt bytes.
 - Clarify nested YAML comments and keep `skill-upper` scaffolding focused on
   the requested cases and scoring contract. Accept read-only checksum queries
@@ -34,6 +68,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Keep MCP tool calls and shell commands in Codex transcripts built from the session file, so `tool_called` matches calls that newer Codex CLIs make from their code tool. A failed Codex MCP call now keeps its error message as the tool result.
 - Find Codex session files under `$CODEX_HOME/sessions` when `CODEX_HOME` is set, instead of always under `$HOME/.codex/sessions`.
 - Let Codex call the MCP servers skill-up installs on the `none` runtime. Codex rejected these calls under `--sandbox workspace-write` with "approval policy is never"; skill-up now approves tool calls for those servers only, with the sandbox kept. Server names outside `^[A-Za-z0-9_-]+$` are not covered.
+- Read the files listed in Anthropic `evals.json` entries from the Skill root during `skill-up import` and `skill-up run --auto`. Cases previously received each file's path as its content; a missing file or a path outside the Skill now fails with a clear error.
+- Reject unknown YAML fields in eval and case configs, including nested fields and merged keys, using strict decoding. Case-name filters run before strict case decoding; merged judge blocks retain presence checks. This prevents misspelled judge blocks from silently passing with zero checks.
+
+### Upgrade notes and known limitations
+- **Source builds:** Go 1.26 or later is now required. Prebuilt CLI archives do
+  not require a locally installed Go toolchain.
+- **Strict YAML validation:** unknown fields, including nested fields and merged
+  keys, now fail config loading. Remove obsolete keys and correct spelling before
+  upgrading. Run `skill-up validate` on each suite to check all cases; case-name
+  filters in `skill-up run` select cases before strict case decoding.
+- **Qoder execution and scores:** error envelopes, unfinished `tool_use` results,
+  and reported fallbacks from a requested model now fail even if the CLI exits
+  zero. Previously accepted runs may therefore fail after upgrading. Check the
+  retained artifacts, update the Qoder CLI, and select an available model as
+  appropriate. File-mode verdict recovery does not accept an unavailable
+  requested model.
+- **Multi-turn evaluation:** a failed `post_condition` with
+  `on_fail: skip_remaining` on the final turn (including a one-turn conversation)
+  still forces FAIL and skips judging. The fix proposed in
+  [#380](https://github.com/alibaba/skill-up/pull/380) is not included.
+- **GitHub Action availability:** this CLI release does not update the official
+  Action's pinned runner image, which still bundles skill-up `0.7.0`. Its
+  `skill-up-version` input does not override the preinstalled binary. Using these
+  CLI features in the Action requires a separately updated or custom image.
 
 ## [0.14.0] - 2026-10-20
 
@@ -802,7 +860,8 @@ The `v0.5.0` release tag is available at
   project and delivers the end-to-end capability to declare eval environments,
   run cases and emit structured reports as described in [README.md](README.md).
 
-[Unreleased]: https://github.com/alibaba/skill-up/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/alibaba/skill-up/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/alibaba/skill-up/releases/tag/v0.15.0
 [0.14.0]: https://github.com/alibaba/skill-up/releases/tag/v0.14.0
 [0.13.0]: https://github.com/alibaba/skill-up/releases/tag/v0.13.0
 [0.12.0]: https://github.com/alibaba/skill-up/releases/tag/v0.12.0

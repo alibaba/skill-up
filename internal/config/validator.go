@@ -69,6 +69,8 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 		errs = append(errs, "environment.type must be one of: none, opensandbox, docker")
 	}
 
+	errs = append(errs, validateReservedEnvironment(cfg.Environment)...)
+
 	// Docker-runtime fields that would otherwise silently pass `skill-up
 	// validate` and only fail later when NewDockerRuntime constructs the
 	// container — catch them at the preflight gate.
@@ -275,6 +277,14 @@ func validateJudgeTypeAndLocalFields(judge JudgeConfig) []string {
 	}
 	errs = append(errs, validateSkillRefs("judge.skills", judge.Skills)...)
 	errs = append(errs, validateJudgeEngine(judge)...)
+	if judge.Output != nil {
+		if judge.Type != "" && judge.Type != judgeTypeAgentJudge {
+			errs = append(errs, "judge.output is only supported when judge.type is agent_judge")
+		}
+		if mode := judge.Output.Mode; mode != "" && mode != "file" && mode != "final_message" {
+			errs = append(errs, "judge.output.mode must be one of: final_message, file")
+		}
+	}
 
 	errs = append(errs, validatePassThreshold(judge.PassThreshold)...)
 	errs = append(errs, validateJudgeContext(judge.Context)...)
@@ -661,6 +671,9 @@ func mergeJudgeConfigForValidation(global, caseLevel JudgeConfig) JudgeConfig {
 		return global
 	}
 	merged := caseLevel
+	if merged.Type == judgeTypeAgentJudge && merged.Output == nil {
+		merged.Output = global.Output
+	}
 	if merged.Model == "" && merged.Engine == nil {
 		merged.Model = global.Model
 		if merged.Type == judgeTypeAgentJudge {
@@ -835,6 +848,13 @@ func validateCustomHTTP(h *customengine.HTTPConfig) []string {
 
 func isValidRuntimeType(t string) bool {
 	return t == runtimeTypeNone || t == runtimeTypeOpenSandbox || t == runtimeTypeDocker
+}
+
+func validateReservedEnvironment(env Environment) []string {
+	if _, exists := env.Env["SKILL_UP_VARIANT"]; exists {
+		return []string{"environment.env.SKILL_UP_VARIANT is reserved for the framework"}
+	}
+	return nil
 }
 
 // validateDockerEnvironment collects preflight errors for fields the docker
