@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -902,6 +903,85 @@ func TestProviderRateLimitSignal_PrefersSessionFinalMessage(t *testing.T) {
 	}
 	if !strings.Contains(msg, "rate limit") {
 		t.Fatalf("expected rate limit message, got %q", msg)
+	}
+}
+
+func TestClaudeCodeAgent_SuccessfulAnswerIsNotProviderFailure(t *testing.T) {
+	t.Parallel()
+
+	answers := map[string]string{
+		"rate limit":           "Done. I added a rate limit of 100 requests per second to the API gateway and documented the 429 Too Many Requests response.\n",
+		"authentication error": "Fixed the authentication error handling in login.go\n",
+	}
+	for name, answer := range answers {
+		for _, resume := range []bool{false, true} {
+			t.Run(name+"/resume="+strconv.FormatBool(resume), func(t *testing.T) {
+				t.Parallel()
+				rt := &claudeCodeTestRuntime{workspace: t.TempDir(), execResult: runtime.ExecResult{Stdout: answer}}
+				ag := NewClaudeCodeAgent(Config{})
+				message := transcript.Message{Role: transcript.RoleUser, Content: "task", Turn: 1}
+
+				var res *SessionResult
+				var err error
+				if resume {
+					res, err = ag.RunTurn(context.Background(), rt, ExecOptions{}, message, "sess-1")
+				} else {
+					res, err = ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{message})
+				}
+				if err != nil {
+					t.Fatalf("successful answer reported as failure: %v", err)
+				}
+				if res == nil || res.ExitCode != 0 || res.FinalMessage != strings.TrimSpace(answer) {
+					t.Fatalf("unexpected session result: %+v", res)
+				}
+			})
+		}
+	}
+}
+
+func TestClaudeProviderSignals_AnswerText(t *testing.T) {
+	t.Parallel()
+
+	prose := "Done. I added a rate limit and fixed the authentication error handling."
+	apiErrorSession := &SessionResult{Transcript: transcript.Transcript{
+		{Role: transcript.RoleAssistant, Content: prose, Turn: 1},
+		{Role: transcript.RoleError, Content: "Authentication error", Turn: 1},
+	}}
+	recoveredSession := &SessionResult{FinalMessage: prose, Transcript: transcript.Transcript{
+		{Role: transcript.RoleError, Content: "API Error: 429 rate limit exceeded", Turn: 1},
+		{Role: transcript.RoleAssistant, Content: prose, Turn: 1},
+	}}
+
+	tests := []struct {
+		name          string
+		result        ExecResult
+		session       *SessionResult
+		wantRateLimit bool
+		wantAuth      bool
+	}{
+		{"prose on success", ExecResult{Stdout: prose}, &SessionResult{FinalMessage: prose}, false, false},
+		{"prose on failure", ExecResult{Stdout: prose, ExitCode: 1}, &SessionResult{}, true, true},
+		{"prose in stderr", ExecResult{Stderr: "provider rate limit hit"}, &SessionResult{}, true, false},
+		{"api error line", ExecResult{Stdout: "API Error: 429 rate limit exceeded"}, &SessionResult{}, true, false},
+		{"api error as last line", ExecResult{Stdout: "Partial work.\nAPI Error: 429 Too Many Requests"}, &SessionResult{}, true, false},
+		{"api error in final message", ExecResult{}, &SessionResult{FinalMessage: "API Error: 401 authentication error"}, false, true},
+		{"gateway notice", ExecResult{Stdout: "模型提供方限流，请稍后重试"}, &SessionResult{}, true, false},
+		{"structured auth payload", ExecResult{Stdout: `{"is_error":true,"api_error_status": 403,"result":"Authentication error"}`}, &SessionResult{}, false, true},
+		{"session ends with api error", ExecResult{Stdout: "Authentication error"}, apiErrorSession, false, true},
+		{"session recovered from api error", ExecResult{Stdout: prose}, recoveredSession, false, false},
+		{"nil session", ExecResult{Stdout: prose}, nil, false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if _, got := providerRateLimitSignal(tt.result, tt.session); got != tt.wantRateLimit {
+				t.Fatalf("rate limit signal = %v, want %v", got, tt.wantRateLimit)
+			}
+			if _, got := providerAuthFailureSignal(tt.result, tt.session); got != tt.wantAuth {
+				t.Fatalf("auth failure signal = %v, want %v", got, tt.wantAuth)
+			}
+		})
 	}
 }
 

@@ -226,11 +226,7 @@ func markSessionFailed(sessionResult *SessionResult) {
 }
 
 func providerRateLimitSignal(result ExecResult, sessionResult *SessionResult) (string, bool) {
-	for _, candidate := range []string{
-		result.Stderr,
-		result.Stdout,
-		sessionDiagnosticText(sessionResult),
-	} {
+	for _, candidate := range claudeDiagnosticTexts(result, sessionResult) {
 		if msg, ok := providerRateLimitText(candidate); ok {
 			return msg, true
 		}
@@ -239,16 +235,74 @@ func providerRateLimitSignal(result ExecResult, sessionResult *SessionResult) (s
 }
 
 func providerAuthFailureSignal(result ExecResult, sessionResult *SessionResult) (string, bool) {
-	for _, candidate := range []string{
-		result.Stderr,
-		result.Stdout,
-		sessionDiagnosticText(sessionResult),
-	} {
+	for _, candidate := range claudeDiagnosticTexts(result, sessionResult) {
 		if msg, ok := providerAuthFailureText(candidate); ok {
 			return msg, true
 		}
 	}
 	return "", false
+}
+
+// claudeDiagnosticTexts returns the texts to scan for a provider failure.
+// Stderr and an API error recorded in the session are always diagnostics.
+// Stdout and the session's final message are the agent's answer when the run
+// succeeded, where "rate limit" or "authentication error" is ordinary prose,
+// so they are scanned only when the run failed or the text is an error report.
+func claudeDiagnosticTexts(result ExecResult, sessionResult *SessionResult) []string {
+	texts := []string{result.Stderr, sessionAPIErrorText(sessionResult)}
+	for _, answer := range []string{result.Stdout, sessionDiagnosticText(sessionResult)} {
+		if result.ExitCode != 0 || isClaudeErrorReport(answer) {
+			texts = append(texts, answer)
+		}
+	}
+	return texts
+}
+
+// sessionAPIErrorText returns the last transcript message when Claude Code
+// recorded it as an API error (isApiErrorMessage in the session file).
+func sessionAPIErrorText(sessionResult *SessionResult) string {
+	if sessionResult == nil || len(sessionResult.Transcript) == 0 {
+		return ""
+	}
+	last := sessionResult.Transcript[len(sessionResult.Transcript)-1]
+	if last.Role != transcript.RoleError {
+		return ""
+	}
+	return last.Content
+}
+
+// isClaudeErrorReport reports whether answer text is an error report rather
+// than the agent's prose: Claude Code's own "API Error" line at the start or
+// end, a structured error payload, or the provider gateway's rate-limit notice.
+func isClaudeErrorReport(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return false
+	}
+	lastLine := trimmed[strings.LastIndexByte(trimmed, '\n')+1:]
+	if hasAPIErrorPrefix(trimmed) || hasAPIErrorPrefix(strings.TrimSpace(lastLine)) {
+		return true
+	}
+	if strings.Contains(trimmed, claudeGatewayRateLimitNotice) {
+		return true
+	}
+	return hasStructuredAuthFailure(strings.ToLower(trimmed))
+}
+
+func hasAPIErrorPrefix(text string) bool {
+	const prefix = "api error"
+	return len(text) >= len(prefix) && strings.EqualFold(text[:len(prefix)], prefix)
+}
+
+// hasStructuredAuthFailure matches the machine-readable auth failure fields of
+// a Claude Code result payload. lower must already be lower-cased.
+func hasStructuredAuthFailure(lower string) bool {
+	// Remove spaces around colons so JSON like `"key": 403` and `"key":403` both match.
+	compact := strings.ReplaceAll(lower, ": ", ":")
+	compact = strings.ReplaceAll(compact, " :", ":")
+	return strings.Contains(lower, "authentication_failed") ||
+		strings.Contains(compact, "\"api_error_status\":403") ||
+		strings.Contains(compact, "\"error_status\":403")
 }
 
 func sessionDiagnosticText(sessionResult *SessionResult) string {
@@ -264,6 +318,10 @@ func sessionDiagnosticText(sessionResult *SessionResult) string {
 	return ""
 }
 
+// claudeGatewayRateLimitNotice is the rate-limit notice a provider gateway
+// returns in place of a model answer.
+const claudeGatewayRateLimitNotice = "模型提供方限流"
+
 func providerRateLimitText(text string) (string, bool) {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
@@ -277,7 +335,7 @@ func providerRateLimitText(text string) (string, bool) {
 	}
 	lower := strings.ToLower(scanText)
 	switch {
-	case strings.Contains(scanText, "模型提供方限流"),
+	case strings.Contains(scanText, claudeGatewayRateLimitNotice),
 		strings.Contains(lower, "rate limit"),
 		strings.Contains(lower, "too many requests"),
 		strings.Contains(lower, "http 429"),
@@ -304,18 +362,10 @@ func providerAuthFailureText(text string) (string, bool) {
 		scanText = scanText[len(scanText)-providerAuthScanWindow:]
 	}
 	lower := strings.ToLower(scanText)
-	// Remove spaces around colons so JSON like `"key": 403` and `"key":403` both match.
-	compact := strings.ReplaceAll(lower, ": ", ":")
-	compact = strings.ReplaceAll(compact, " :", ":")
-	switch {
-	case strings.Contains(lower, "authentication_failed"),
-		strings.Contains(compact, "\"api_error_status\":403"),
-		strings.Contains(compact, "\"error_status\":403"),
-		strings.Contains(lower, "authentication error"):
+	if hasStructuredAuthFailure(lower) || strings.Contains(lower, "authentication error") {
 		return trimmed, true
-	default:
-		return "", false
 	}
+	return "", false
 }
 
 func buildClaudePrintCmd(sessionID, model, instruction string) string {
