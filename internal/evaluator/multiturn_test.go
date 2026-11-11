@@ -439,8 +439,42 @@ func TestMultiTurnStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := multiTurnStatus(tt.results)
+			got := multiTurnStatus(tt.results, nil)
 			if got != tt.want {
+				t.Fatalf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMultiTurnStatus_FailedTurnPolicy(t *testing.T) {
+	t.Parallel()
+
+	skip := config.Turn{PostCondition: &config.PostCondition{OnFail: "skip_remaining"}}
+	hard := config.Turn{PostCondition: &config.PostCondition{OnFail: "fail"}}
+	unset := config.Turn{PostCondition: &config.PostCondition{}}
+	failedAt := func(n int) TurnResult { return TurnResult{TurnNumber: n, Status: TurnFailed} }
+
+	tests := []struct {
+		name    string
+		results []TurnResult
+		turns   []config.Turn
+		want    judge.Status
+	}{
+		{"skip_remaining_final_turn", []TurnResult{{TurnNumber: 1, Status: TurnCompleted}, failedAt(2)}, []config.Turn{{}, skip}, ""},
+		{"skip_remaining_only_turn", []TurnResult{failedAt(1)}, []config.Turn{skip}, ""},
+		{"skip_remaining_then_skipped", []TurnResult{failedAt(1), {TurnNumber: 2, Status: TurnSkipped}}, []config.Turn{skip, {}}, ""},
+		{"on_fail_fail", []TurnResult{failedAt(1)}, []config.Turn{hard}, judge.StatusFail},
+		{"on_fail_unset", []TurnResult{failedAt(1)}, []config.Turn{unset}, judge.StatusFail},
+		{"no_post_condition", []TurnResult{failedAt(1)}, []config.Turn{{}}, judge.StatusFail},
+		{"turn_number_out_of_range", []TurnResult{failedAt(3)}, []config.Turn{skip}, judge.StatusFail},
+		{"turn_number_zero", []TurnResult{failedAt(0)}, []config.Turn{skip}, judge.StatusFail},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := multiTurnStatus(tt.results, tt.turns); got != tt.want {
 				t.Fatalf("got %q, want %q", got, tt.want)
 			}
 		})
