@@ -385,6 +385,11 @@ func TestBuildMockedServerScript_RejectsInvalidToolMetadata(t *testing.T) {
 			wantErr: schemaErr,
 		},
 		{
+			name:    "schema is an empty mapping",
+			tools:   map[string]mcpMockTool{"get_project": {InputSchema: map[string]any{}}},
+			wantErr: schemaErr,
+		},
+		{
 			name:    "schema without type",
 			tools:   map[string]mcpMockTool{"get_project": {InputSchema: map[string]any{"properties": map[string]any{}}}},
 			wantErr: schemaErr,

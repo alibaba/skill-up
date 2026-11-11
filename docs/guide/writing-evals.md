@@ -399,10 +399,10 @@ tool_responses:
 
 Rules for `tools`:
 
-- `description` and `input_schema` are both optional per tool; a missing or empty field keeps the default above. A fixture without `tools` behaves exactly as before.
+- `description` and `input_schema` are both optional per tool; a missing field keeps the default above, and so does an empty `description`. A fixture without `tools` behaves exactly as before.
 - A tool entry accepts only `description` and `input_schema`. Any other key, such as the MCP wire name `inputSchema`, is an error.
 - `tools` carries metadata only; responses stay under `tool_responses`, and every name under `tools` must also appear there.
-- `input_schema` must be a mapping with `type: object`, because MCP requires an object schema. Nothing deeper is validated.
+- `input_schema`, when present, must be a mapping with `type: object`, because MCP requires an object schema; an empty mapping (`{}`) is an error. Nothing deeper is validated.
 - The schema is advertised only. The mock does not check call arguments against it, so a call with missing or extra arguments still returns the `tool_responses` entry.
 
 Environment-variable references support both `${VAR}` and full-value `$VAR` forms; the variable name must match `[A-Za-z_][A-Za-z0-9_]*`. Variables listed in `required_env` are injected into the Agent process; full env-var references inside `headers` are also recorded by name so the Agent can pick the right transport mechanism when installing the MCP server.

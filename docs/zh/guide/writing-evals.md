@@ -363,10 +363,10 @@ tool_responses:
 
 `tools` 的规则：
 
-- `description` 和 `input_schema` 对每个工具都是可选的，缺省或为空的字段沿用上述默认值。不写 `tools` 的 fixture 行为与之前完全一致。
+- `description` 和 `input_schema` 对每个工具都是可选的，缺省的字段沿用上述默认值，空的 `description` 也是如此。不写 `tools` 的 fixture 行为与之前完全一致。
 - 工具条目只接受 `description` 和 `input_schema`；出现其他键（例如 MCP 协议里的 `inputSchema`）会报错。
 - `tools` 只放元数据，响应内容仍然写在 `tool_responses` 里，且 `tools` 中的每个名称都必须同时出现在 `tool_responses` 中。
-- `input_schema` 必须是 `type: object` 的映射，因为 MCP 要求输入 schema 是对象类型；更深层的 JSON Schema 不做校验。
+- `input_schema` 一旦填写，就必须是 `type: object` 的映射，因为 MCP 要求输入 schema 是对象类型；空映射（`{}`）会报错。更深层的 JSON Schema 不做校验。
 - schema 只用于声明，Mock Server 不会按它校验调用参数：参数缺失或多余的调用仍然返回 `tool_responses` 中的内容。
 
 环境变量引用支持 `${VAR}` 和完整值 `$VAR` 两种形式，变量名必须匹配 `[A-Za-z_][A-Za-z0-9_]*`。`required_env` 会把变量注入 Agent 运行环境；`headers` 中完整的环境变量引用会额外记录变量名，供 Agent 安装 MCP 时选择合适的传递方式。
