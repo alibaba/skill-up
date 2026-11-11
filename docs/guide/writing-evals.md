@@ -400,6 +400,7 @@ tool_responses:
 Rules for `tools`:
 
 - `description` and `input_schema` are both optional per tool; a missing or empty field keeps the default above. A fixture without `tools` behaves exactly as before.
+- A tool entry accepts only `description` and `input_schema`. Any other key, such as the MCP wire name `inputSchema`, is an error.
 - `tools` carries metadata only; responses stay under `tool_responses`, and every name under `tools` must also appear there.
 - `input_schema` must be a mapping with `type: object`, because MCP requires an object schema. Nothing deeper is validated.
 - The schema is advertised only. The mock does not check call arguments against it, so a call with missing or extra arguments still returns the `tool_responses` entry.

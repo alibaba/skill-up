@@ -68,13 +68,17 @@ func buildMockedServerScript(serverName string, fileCfg mcpServerFile) (string, 
 	return "", fmt.Errorf("mcp server %q mocked mode requires config_ref tool_responses or a built-in mock server name", serverName)
 }
 
-// validateMockedTools checks the optional tools map against tool_responses.
+// validateMockedTools checks the optional tools map against tool_responses
+// and rejects fields it does not know.
 // MCP requires an object input schema, so only the top-level type is checked;
 // the schema is advertised to the agent, never enforced on tools/call.
 func validateMockedTools(serverName string, fileCfg mcpServerFile) error {
 	for _, name := range slices.Sorted(maps.Keys(fileCfg.Tools)) {
 		if _, ok := fileCfg.ToolResponses[name]; !ok {
 			return fmt.Errorf("mcp server %q mock fixture tool %q is declared under tools but has no tool_responses entry", serverName, name)
+		}
+		if unknown := slices.Sorted(maps.Keys(fileCfg.Tools[name].Unknown)); len(unknown) > 0 {
+			return fmt.Errorf("mcp server %q mock fixture tool %q has unknown field %q; supported fields are description and input_schema", serverName, name, unknown[0])
 		}
 		schema := fileCfg.Tools[name].InputSchema
 		if schema == nil {

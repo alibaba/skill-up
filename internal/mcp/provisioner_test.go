@@ -367,6 +367,33 @@ func TestProvisioner_SameNameMockedServersDifferentFixtures(t *testing.T) {
 	}
 }
 
+func TestProvisioner_MockedServerRejectsUnknownToolField(t *testing.T) {
+	t.Parallel()
+
+	skillDir := t.TempDir()
+	content := `tools:
+  get_project:
+    description: Look up a project.
+    inputSchema:
+      type: object
+tool_responses:
+  get_project:
+    default:
+      status: OPEN
+`
+	if err := os.WriteFile(filepath.Join(skillDir, "mcp.yaml"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := (Provisioner{SkillDir: skillDir}).Provision(config.MCPConfig{
+		Servers: []config.MCPServer{{Name: "project-mgmt", Mode: "mocked", ConfigRef: "mcp.yaml"}},
+	})
+	want := `mcp server "project-mgmt" mock fixture tool "get_project" has unknown field "inputSchema"; supported fields are description and input_schema`
+	if err == nil || err.Error() != want {
+		t.Fatalf("Provision error = %v, want %q", err, want)
+	}
+}
+
 func TestProvisioner_MockedServerRejectsScalarInputSchema(t *testing.T) {
 	t.Parallel()
 

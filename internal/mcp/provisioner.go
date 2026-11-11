@@ -225,9 +225,12 @@ type mcpServerFile struct {
 // mcpMockTool is the metadata a mocked tool advertises in tools/list. Both
 // fields are optional. InputSchema is untyped so a scalar in the fixture is
 // reported as a named validation error instead of a YAML decode failure.
+// Unknown collects any other key so a misspelled field (for example the MCP
+// wire name inputSchema) is rejected instead of silently keeping the default.
 type mcpMockTool struct {
-	Description string `yaml:"description" json:"description,omitempty"`
-	InputSchema any    `yaml:"input_schema" json:"inputSchema,omitempty"`
+	Description string         `yaml:"description" json:"description,omitempty"`
+	InputSchema any            `yaml:"input_schema" json:"inputSchema,omitempty"`
+	Unknown     map[string]any `yaml:",inline" json:"-"`
 }
 
 func loadServerFile(path string) (mcpServerFile, error) {
