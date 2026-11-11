@@ -12,6 +12,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -860,6 +861,9 @@ func (e *defaultEvaluator) installJudgeSkills(ctx context.Context, rt runtime.Ru
 		return nil
 	}
 	skillDir := e.resolvedSkillDir()
+	if err := checkSkillDirCollisions(skillDir, "judge.skills", judgeCfg.Skills); err != nil {
+		return err
+	}
 	for i, ref := range judgeCfg.Skills {
 		if strings.TrimSpace(ref.Path) == "" {
 			return fmt.Errorf("judge.skills[%d].path is required", i)
@@ -1320,6 +1324,9 @@ func (e *defaultEvaluator) setupCaseEnvironment(ctx context.Context, rt runtime.
 	}
 
 	if configName != "without_skill" && e.loader != nil {
+		if err := checkSkillDirCollisions(e.loader.SkillDir(), "skills", e.evalCfg.Skills); err != nil {
+			return agent.RuntimeObservation{}, err
+		}
 		for _, skillRef := range e.evalCfg.Skills {
 			skillCfg := resolveSkillConfig(e.loader.SkillDir(), skillRef)
 			if err := ag.InstallSkill(ctx, rt, skillCfg); err != nil {
@@ -1353,15 +1360,49 @@ func resolveSkillConfig(skillDir string, ref config.SkillRef) runtime.SkillConfi
 	}
 }
 
+// skillDirNamePattern is the set of declared names that are safe to use as a
+// directory name on every supported filesystem.
+var skillDirNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+
+// windowsReservedNames are device names Windows refuses as a file or
+// directory name, in any letter case.
+var windowsReservedNames = []string{
+	"con", "prn", "aux", "nul",
+	"com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
+	"lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+}
+
 // declaredSkillDirName returns the name a skill declares in its SKILL.md when
 // that name can be used as a single directory name, and "" otherwise so the
 // caller falls back to the source folder's name.
 func declaredSkillDirName(source string) string {
 	name, ok := config.SkillNameInDir(source)
-	if !ok || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+	if !ok || !skillDirNamePattern.MatchString(name) || slices.Contains(windowsReservedNames, strings.ToLower(name)) {
 		return ""
 	}
 	return name
+}
+
+// checkSkillDirCollisions rejects a skills list in which two entries without
+// an explicit target would be installed into the same directory: the second
+// upload would overwrite some files of the first and keep the rest, leaving a
+// mix of both Skills.
+func checkSkillDirCollisions(skillDir, field string, refs []config.SkillRef) error {
+	seen := make(map[string]string, len(refs))
+	for _, ref := range refs {
+		if strings.TrimSpace(ref.Path) == "" || strings.TrimSpace(ref.Target) != "" {
+			continue
+		}
+		dir := resolveSkillConfig(skillDir, ref).DirName()
+		// Compare case-insensitively: macOS and Windows filesystems would
+		// merge names that differ only in case.
+		key := strings.ToLower(dir)
+		if prev, ok := seen[key]; ok {
+			return fmt.Errorf("%s: %q and %q would both be installed as %q; rename one Skill or set an explicit target", field, prev, ref.Path, dir)
+		}
+		seen[key] = ref.Path
+	}
+	return nil
 }
 
 func (e *defaultEvaluator) provisionMCPConfig() (runtime.MCPConfig, map[string]string, error) {

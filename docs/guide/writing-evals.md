@@ -139,8 +139,11 @@ remains a valid Skill. The same fields are supported by `judge.skills`.
 By default a Skill is installed into the Agent's skills directory under the
 `name` declared in its `SKILL.md` frontmatter. The Agent then sees it under
 the name its own text uses, even when the source folder is named differently
-(for example a snapshot copy). When `SKILL.md` declares no usable name, the
-source folder's name is used. `judge.skills` follows the same rule.
+(for example a snapshot copy). The declared name is used when it has only
+letters, digits, `-` and `_`, starts with a letter or digit, and is at most 64
+characters; otherwise the source folder's name is used. Two entries that would
+be installed into the same directory are rejected: rename one Skill or give it
+an explicit `target`. `judge.skills` follows the same rules.
 
 `cases.parallelism` is the file-level default. To override it for a single run, use `skill-up run --parallelism N` without modifying `eval.yaml`. Allowed range: **1 to 256**.
 

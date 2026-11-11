@@ -3028,7 +3028,13 @@ func TestResolveSkillConfig_DeclaredName(t *testing.T) {
 		{"name matches folder", "---\nname: snapshot\n---\n# Skill", "snapshot", "snapshot"},
 		{"no frontmatter", "# Skill", "", "snapshot"},
 		{"no SKILL.md", "", "", "snapshot"},
+		{"name with underscore and capitals", "---\nname: My_Skill-2\n---\n", "My_Skill-2", "My_Skill-2"},
 		{"name with a path separator", "---\nname: ../escape\n---\n", "", "snapshot"},
+		{"name with a space", "---\nname: my skill\n---\n", "", "snapshot"},
+		{"name with a dot", "---\nname: my.skill\n---\n", "", "snapshot"},
+		{"name with a control character", "---\nname: \"my\\0skill\"\n---\n", "", "snapshot"},
+		{"windows reserved name", "---\nname: CON\n---\n", "", "snapshot"},
+		{"name longer than 64 characters", "---\nname: " + strings.Repeat("a", 65) + "\n---\n", "", "snapshot"},
 		{"name with a backslash", "---\nname: 'a\\b'\n---\n", "", "snapshot"},
 		{"name is a parent reference", "---\nname: '..'\n---\n", "", "snapshot"},
 		{"name with padding", "---\nname: ' my-skill '\n---\n", "my-skill", "my-skill"},
@@ -3054,6 +3060,59 @@ func TestResolveSkillConfig_DeclaredName(t *testing.T) {
 				if got.Name != tt.wantName || got.DirName() != tt.wantDirName {
 					t.Fatalf("path %q: Name = %q, DirName = %q; want %q, %q", path, got.Name, got.DirName(), tt.wantName, tt.wantDirName)
 				}
+			}
+		})
+	}
+}
+
+func TestCheckSkillDirCollisions(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeSkill := func(folder, name string) {
+		dir := filepath.Join(root, folder)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := "# Skill"
+		if name != "" {
+			body = "---\nname: " + name + "\n---\n# Skill"
+		}
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeSkill("one", "shared")
+	writeSkill("two", "shared")
+	writeSkill("three", "Shared")
+	writeSkill("four", "other")
+	writeSkill("other", "")
+
+	tests := []struct {
+		name    string
+		refs    []config.SkillRef
+		wantErr string
+	}{
+		{"distinct names", []config.SkillRef{{Path: "one"}, {Path: "four"}}, ""},
+		{"same declared name", []config.SkillRef{{Path: "one"}, {Path: "two"}}, `skills: "one" and "two" would both be installed as "shared"`},
+		{"names differing only in case", []config.SkillRef{{Path: "one"}, {Path: "three"}}, `skills: "one" and "three" would both be installed as "Shared"`},
+		{"declared name equals another folder", []config.SkillRef{{Path: "four"}, {Path: "other"}}, `skills: "four" and "other" would both be installed as "other"`},
+		{"explicit target avoids the collision", []config.SkillRef{{Path: "one"}, {Path: "two", Target: "elsewhere"}}, ""},
+		{"empty path is left to its own check", []config.SkillRef{{Path: ""}, {Path: ""}}, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := checkSkillDirCollisions(root, "skills", tt.refs)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want containing %q", err, tt.wantErr)
 			}
 		})
 	}
