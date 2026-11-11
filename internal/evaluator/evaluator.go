@@ -1324,15 +1324,8 @@ func (e *defaultEvaluator) setupCaseEnvironment(ctx context.Context, rt runtime.
 	}
 
 	if configName != "without_skill" && e.loader != nil {
-		if err := checkSkillDirCollisions(e.loader.SkillDir(), "skills", e.evalCfg.Skills); err != nil {
+		if err := e.installRunSkills(ctx, rt, ag); err != nil {
 			return agent.RuntimeObservation{}, err
-		}
-		for _, skillRef := range e.evalCfg.Skills {
-			skillCfg := resolveSkillConfig(e.loader.SkillDir(), skillRef)
-			if err := ag.InstallSkill(ctx, rt, skillCfg); err != nil {
-				return agent.RuntimeObservation{}, fmt.Errorf("failed to install skill %s: %w", skillRef.Path, err)
-			}
-			logging.DebugContextf(ctx, "Evaluator: skill installed: %s", skillCfg.DirName())
 		}
 	}
 
@@ -1344,6 +1337,22 @@ func (e *defaultEvaluator) setupCaseEnvironment(ctx context.Context, rt runtime.
 	}
 
 	return observation, nil
+}
+
+// installRunSkills installs the evaluation's skills into the agent under test.
+func (e *defaultEvaluator) installRunSkills(ctx context.Context, rt runtime.Runtime, ag agent.Agent) error {
+	skillDir := e.loader.SkillDir()
+	if err := checkSkillDirCollisions(skillDir, "skills", e.evalCfg.Skills); err != nil {
+		return err
+	}
+	for _, skillRef := range e.evalCfg.Skills {
+		skillCfg := resolveSkillConfig(skillDir, skillRef)
+		if err := ag.InstallSkill(ctx, rt, skillCfg); err != nil {
+			return fmt.Errorf("failed to install skill %s: %w", skillRef.Path, err)
+		}
+		logging.DebugContextf(ctx, "Evaluator: skill installed: %s", skillCfg.DirName())
+	}
+	return nil
 }
 
 func resolveSkillConfig(skillDir string, ref config.SkillRef) runtime.SkillConfig {
