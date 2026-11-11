@@ -278,8 +278,8 @@ const claudeAPIErrorPrefix = "API Error:"
 
 // isClaudeErrorReport reports whether answer text is an error report rather
 // than the agent's prose: Claude Code's own "API Error:" line at the start or
-// end, a JSON result flagged is_error, or the provider gateway's rate-limit
-// notice in place of an answer.
+// end, a JSON result event flagged is_error, or the provider gateway's
+// rate-limit notice in place of an answer.
 func isClaudeErrorReport(text string) bool {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
@@ -292,22 +292,23 @@ func isClaudeErrorReport(text string) bool {
 		isClaudeErrorEnvelope(trimmed)
 }
 
-// isClaudeErrorEnvelope reports whether text is a Claude Code JSON result, a
-// single object or an event array, that is flagged is_error.
+// isClaudeErrorEnvelope reports whether text is a Claude Code JSON result
+// event, alone or inside an event array, that is flagged is_error. The
+// "result" type is required so a JSON answer that merely has an is_error
+// field is not taken for the CLI's own status.
 func isClaudeErrorEnvelope(text string) bool {
 	type envelope struct {
-		IsError bool `json:"is_error"`
+		Type    string `json:"type"`
+		IsError bool   `json:"is_error"`
 	}
+	failed := func(e envelope) bool { return e.Type == "result" && e.IsError } //nolint:goconst
 	switch text[0] {
 	case '{':
 		var event envelope
-		return json.Unmarshal([]byte(text), &event) == nil && event.IsError
+		return json.Unmarshal([]byte(text), &event) == nil && failed(event)
 	case '[':
 		var events []envelope
-		if json.Unmarshal([]byte(text), &events) != nil {
-			return false
-		}
-		return slices.ContainsFunc(events, func(e envelope) bool { return e.IsError })
+		return json.Unmarshal([]byte(text), &events) == nil && slices.ContainsFunc(events, failed)
 	default:
 		return false
 	}
