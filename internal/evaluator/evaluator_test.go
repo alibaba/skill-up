@@ -3015,6 +3015,50 @@ func TestEvaluateAll_WithBaseline(t *testing.T) {
 	}
 }
 
+func TestResolveSkillConfig_DeclaredName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		skillMD     string
+		wantName    string
+		wantDirName string
+	}{
+		{"name differs from folder", "---\nname: my-skill\n---\n# Skill", "my-skill", "my-skill"},
+		{"name matches folder", "---\nname: snapshot\n---\n# Skill", "snapshot", "snapshot"},
+		{"no frontmatter", "# Skill", "", "snapshot"},
+		{"no SKILL.md", "", "", "snapshot"},
+		{"name with a path separator", "---\nname: ../escape\n---\n", "", "snapshot"},
+		{"name with a backslash", "---\nname: 'a\\b'\n---\n", "", "snapshot"},
+		{"name is a parent reference", "---\nname: '..'\n---\n", "", "snapshot"},
+		{"name with padding", "---\nname: ' my-skill '\n---\n", "my-skill", "my-skill"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			skillDir := filepath.Join(root, "snapshot")
+			if err := os.MkdirAll(skillDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if tt.skillMD != "" {
+				if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(tt.skillMD), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			for _, path := range []string{".", skillDir} {
+				got := resolveSkillConfig(skillDir, config.SkillRef{Path: path})
+				if got.Name != tt.wantName || got.DirName() != tt.wantDirName {
+					t.Fatalf("path %q: Name = %q, DirName = %q; want %q, %q", path, got.Name, got.DirName(), tt.wantName, tt.wantDirName)
+				}
+			}
+		})
+	}
+}
+
 func TestResolveExpectConfig(t *testing.T) {
 	tests := []struct {
 		name     string

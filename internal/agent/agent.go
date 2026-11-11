@@ -316,7 +316,7 @@ func (a *BaseAgent) credentialEnvVars(apiKeyEnv, baseURLEnv string) map[string]s
 func (a *BaseAgent) installSkillDefault(ctx context.Context, rt Runtime, skillCfg runtime.SkillConfig) error {
 	target := skillCfg.Target
 	if target == "" && a.Cfg.SkillPath != "" {
-		target = filepath.Join(a.Cfg.SkillPath, filepath.Base(skillCfg.Source))
+		target = filepath.Join(a.Cfg.SkillPath, skillCfg.DirName())
 	}
 	return installSkill(ctx, rt, skillCfg.Source, target, skillCfg.Include, skillCfg.Exclude)
 }

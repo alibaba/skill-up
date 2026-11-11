@@ -233,6 +233,12 @@ func (l *Loader) SkillName() (string, bool) {
 	return parseSkillName(l.skillDir)
 }
 
+// SkillNameInDir returns the `name:` declared in the YAML frontmatter of
+// skillDir's SKILL.md, with the same ("", false) fallbacks as Loader.SkillName.
+func SkillNameInDir(skillDir string) (string, bool) {
+	return parseSkillName(skillDir)
+}
+
 // CasesDir returns the path to the cases directory.
 func (l *Loader) CasesDir() string {
 	return filepath.Join(l.skillDir, evalsSubdir, casesSubdir)

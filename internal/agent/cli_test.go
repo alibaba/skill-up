@@ -297,6 +297,37 @@ func TestCLIAgent_InstallSkillDefault(t *testing.T) {
 	}
 }
 
+func TestCLIAgent_InstallSkillDefaultUsesDeclaredName(t *testing.T) {
+	t.Parallel()
+
+	rt := &runtime.NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	skillDir := filepath.Join(t.TempDir(), "snapshot")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: my-skill\n---\n# Skill"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ag := &CLIAgent{BaseAgent: BaseAgent{Cfg: Config{Name: "test-agent", SkillPath: ".claude/skills"}}}
+	if err := ag.InstallSkill(context.Background(), rt, runtime.SkillConfig{Source: skillDir, Name: "my-skill"}); err != nil {
+		t.Fatalf("InstallSkill failed: %v", err)
+	}
+
+	skillsDir := filepath.Join(rt.Workspace(), ".claude", "skills")
+	if _, err := os.Stat(filepath.Join(skillsDir, "my-skill", "SKILL.md")); err != nil {
+		t.Errorf("skill should be installed under its declared name: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "snapshot")); !os.IsNotExist(err) {
+		t.Errorf("skill should not be installed under its folder name, stat err = %v", err)
+	}
+}
+
 func TestCLIAgent_InstallSkillWithCmd(t *testing.T) {
 	skipIfNoPOSIXShell(t)
 	t.Parallel()

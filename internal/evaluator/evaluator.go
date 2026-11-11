@@ -871,7 +871,7 @@ func (e *defaultEvaluator) installJudgeSkills(ctx context.Context, rt runtime.Ru
 		if err := judgeAgent.InstallSkill(ctx, rt, skillCfg); err != nil {
 			return fmt.Errorf("failed to install judge skill judge.skills[%d].path=%q: %w", i, ref.Path, err)
 		}
-		logging.DebugContextf(ctx, "Evaluator: judge skill installed: %s", filepath.Base(skillCfg.Source))
+		logging.DebugContextf(ctx, "Evaluator: judge skill installed: %s", skillCfg.DirName())
 	}
 	return nil
 }
@@ -901,7 +901,7 @@ func (e *defaultEvaluator) removeDefaultRunSkillsBeforeJudge(
 		if strings.TrimSpace(skillCfg.Source) == "" {
 			continue
 		}
-		target := filepath.Join(skillPath, filepath.Base(skillCfg.Source))
+		target := filepath.Join(skillPath, skillCfg.DirName())
 		if !isDefaultAgentSkillTarget(skillPath, target) {
 			continue
 		}
@@ -1325,7 +1325,7 @@ func (e *defaultEvaluator) setupCaseEnvironment(ctx context.Context, rt runtime.
 			if err := ag.InstallSkill(ctx, rt, skillCfg); err != nil {
 				return agent.RuntimeObservation{}, fmt.Errorf("failed to install skill %s: %w", skillRef.Path, err)
 			}
-			logging.DebugContextf(ctx, "Evaluator: skill installed: %s", filepath.Base(skillCfg.Source))
+			logging.DebugContextf(ctx, "Evaluator: skill installed: %s", skillCfg.DirName())
 		}
 	}
 
@@ -1347,9 +1347,21 @@ func resolveSkillConfig(skillDir string, ref config.SkillRef) runtime.SkillConfi
 	return runtime.SkillConfig{
 		Source:  source,
 		Target:  ref.Target,
+		Name:    declaredSkillDirName(source),
 		Include: slices.Clone(ref.Include),
 		Exclude: slices.Clone(ref.Exclude),
 	}
+}
+
+// declaredSkillDirName returns the name a skill declares in its SKILL.md when
+// that name can be used as a single directory name, and "" otherwise so the
+// caller falls back to the source folder's name.
+func declaredSkillDirName(source string) string {
+	name, ok := config.SkillNameInDir(source)
+	if !ok || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return ""
+	}
+	return name
 }
 
 func (e *defaultEvaluator) provisionMCPConfig() (runtime.MCPConfig, map[string]string, error) {

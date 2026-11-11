@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Install a Skill under the `name` declared in its `SKILL.md` frontmatter
+  instead of its source folder's name, so the Agent lists and invokes it by its
+  own name when the folder is named differently (for example a snapshot copy).
+  A Skill without a usable declared name keeps the folder name.
+
 ## [0.15.0] - 2026-11-09
 
 ### Added
