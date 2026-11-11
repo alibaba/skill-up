@@ -292,6 +292,10 @@ func isClaudeErrorReport(text string) bool {
 		isClaudeErrorEnvelope(trimmed)
 }
 
+// claudeResultEventType is the type of the event that carries a Claude Code
+// run's final result.
+const claudeResultEventType = "result"
+
 // isClaudeErrorEnvelope reports whether text is a Claude Code JSON result
 // event, alone or inside an event array, that is flagged is_error. The
 // "result" type is required so a JSON answer that merely has an is_error
@@ -301,7 +305,7 @@ func isClaudeErrorEnvelope(text string) bool {
 		Type    string `json:"type"`
 		IsError bool   `json:"is_error"`
 	}
-	failed := func(e envelope) bool { return e.Type == "result" && e.IsError } //nolint:goconst
+	failed := func(e envelope) bool { return e.Type == claudeResultEventType && e.IsError }
 	switch text[0] {
 	case '{':
 		var event envelope
