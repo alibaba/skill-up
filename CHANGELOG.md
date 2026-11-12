@@ -17,9 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove the Claude Code project directory a run creates under
   `~/.claude/projects` when `environment.cleanup_sessions: true` or
   `--cleanup-sessions` asks for it and the workspace is deleted, so eval
-  sessions stop accumulating in the user's own history. Off by default;
-  `--no-delete` keeps both and reports the skip, and an agent without support
-  for cleanup is reported instead of silently skipped.
+  sessions stop accumulating in the user's own history. Off by default; an
+  explicit `--cleanup-sessions=false` overrides `cleanup_sessions: true`, and
+  `--no-delete` keeps both and reports the skip. A directory is removed only
+  when every transcript in it records this workspace, parsed from its identity
+  fields rather than string-matched, and directories whose ownership is unclear
+  are kept. An agent without support for cleanup is reported instead of
+  silently skipped.
 
 ## [0.15.0] - 2026-11-09
 

@@ -426,6 +426,9 @@ func evaluateOptionsFromFlags(cmd *cobra.Command) (runner.EvaluateOptions, error
 	if err != nil {
 		return runner.EvaluateOptions{}, fmt.Errorf("read --cleanup-sessions: %w", err)
 	}
+	// An explicit --cleanup-sessions=false overrides a YAML cleanup_sessions:
+	// true; only an unset flag falls back to the config.
+	cleanupSessionsSet := cmd.Flags().Changed("cleanup-sessions")
 	outputDir, err := cmd.Flags().GetString("output-dir")
 	if err != nil {
 		return runner.EvaluateOptions{}, fmt.Errorf("read --output-dir: %w", err)
@@ -460,12 +463,13 @@ func evaluateOptionsFromFlags(cmd *cobra.Command) (runner.EvaluateOptions, error
 	}
 
 	return runner.EvaluateOptions{
-		DeleteWorkspace: !noDelete,
-		CleanupSessions: cleanupSessions,
-		OutputDir:       outputDir,
-		WorkspaceDir:    workspaceDir,
-		Iteration:       iteration,
-		Formats:         formats,
+		DeleteWorkspace:    !noDelete,
+		CleanupSessions:    cleanupSessions,
+		CleanupSessionsSet: cleanupSessionsSet,
+		OutputDir:          outputDir,
+		WorkspaceDir:       workspaceDir,
+		Iteration:          iteration,
+		Formats:            formats,
 	}, nil
 }
 

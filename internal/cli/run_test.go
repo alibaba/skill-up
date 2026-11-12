@@ -1455,6 +1455,9 @@ func TestEvaluateOptionsFromFlags(t *testing.T) {
 	if !opts.CleanupSessions {
 		t.Fatal("CleanupSessions = false, want true when --cleanup-sessions is set; --no-delete precedence applies where the workspace is deleted")
 	}
+	if !opts.CleanupSessionsSet {
+		t.Fatal("CleanupSessionsSet = false, want true when the flag is given")
+	}
 	if opts.OutputDir != "/tmp/custom-output" {
 		t.Fatalf("OutputDir = %q, want /tmp/custom-output", opts.OutputDir)
 	}

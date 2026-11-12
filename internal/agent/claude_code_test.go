@@ -1099,6 +1099,13 @@ func (r *claudeCodeTestRuntime) Shell() platform.Shell {
 	return platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
 }
 
+type claudeCleanupCase struct {
+	name     string
+	dirName  string
+	sessions map[string]string
+	wantKept bool
+}
+
 func TestClaudeCodeCleanupSessionDir(t *testing.T) {
 	if goruntime.GOOS == platform.GOOSWindows {
 		// The workspace-key path layout embeds a POSIX workspace path, which
@@ -1107,12 +1114,7 @@ func TestClaudeCodeCleanupSessionDir(t *testing.T) {
 	}
 
 	session := func(cwd string) string { return `{"cwd":"` + cwd + `"}` }
-
-	for _, tc := range []struct {
-		name     string
-		sessions map[string]string
-		wantKept bool
-	}{
+	for _, tc := range []claudeCleanupCase{
 		{
 			name:     "removes the directory whose sessions record this workspace",
 			sessions: map[string]string{"a.jsonl": session("{{workspace}}")},
@@ -1130,51 +1132,71 @@ func TestClaudeCodeCleanupSessionDir(t *testing.T) {
 			sessions: map[string]string{"a.jsonl": `{}`},
 			wantKept: true,
 		},
+		{
+			name:     "keeps a directory whose transcript does not parse",
+			sessions: map[string]string{"a.jsonl": "not json"},
+			wantKept: true,
+		},
+		{
+			// The lookup can find a directory whose name does not match the
+			// workspace key; cleanup must not silently skip it.
+			name:     "removes a directory whose name does not match the workspace key",
+			dirName:  "-hashed-9f2c7a",
+			sessions: map[string]string{"a.jsonl": session("{{workspace}}")},
+		},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			tmpHome := t.TempDir()
-			t.Setenv("HOME", tmpHome)
+		t.Run(tc.name, func(t *testing.T) { assertClaudeCleanupCase(t, tc) })
+	}
+}
 
-			rt, err := runtime.NewRuntime(runtime.Config{Type: "none"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := rt.Create(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = rt.Close() }()
+func assertClaudeCleanupCase(t *testing.T, tc claudeCleanupCase) {
+	t.Helper()
 
-			workspace := workspaceForRuntime(rt)
-			projectDir := filepath.Join(tmpHome, ".claude", "projects", canonicalWorkspaceKey(workspace))
-			if err := os.MkdirAll(filepath.Join(projectDir, "memory"), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			for name, body := range tc.sessions {
-				body = strings.ReplaceAll(body, "{{workspace}}", workspace)
-				if err := os.WriteFile(filepath.Join(projectDir, name), []byte(body), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			unrelated := filepath.Join(tmpHome, ".claude", "projects", "-another-workspace")
-			if err := os.MkdirAll(unrelated, 0o755); err != nil {
-				t.Fatal(err)
-			}
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
 
-			ag := &ClaudeCodeAgent{}
-			if err := ag.CleanupSessionDir(context.Background(), rt); err != nil {
-				t.Fatalf("CleanupSessionDir: %v", err)
-			}
+	rt, err := runtime.NewRuntime(runtime.Config{Type: "none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
 
-			_, statErr := os.Stat(projectDir)
-			if kept := statErr == nil; kept != tc.wantKept {
-				t.Fatalf("project directory kept = %t, want %t (stat err=%v)", kept, tc.wantKept, statErr)
-			}
-			if _, err := os.Stat(unrelated); err != nil {
-				t.Fatalf("unrelated project directory was removed: %v", err)
-			}
-			if err := ag.CleanupSessionDir(context.Background(), rt); err != nil {
-				t.Fatalf("CleanupSessionDir is not idempotent: %v", err)
-			}
-		})
+	workspace := workspaceForRuntime(rt)
+	dirName := tc.dirName
+	if dirName == "" {
+		dirName = canonicalWorkspaceKey(workspace)
+	}
+	projectDir := filepath.Join(tmpHome, ".claude", "projects", dirName)
+	if err := os.MkdirAll(filepath.Join(projectDir, "memory"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range tc.sessions {
+		body = strings.ReplaceAll(body, "{{workspace}}", workspace)
+		if err := os.WriteFile(filepath.Join(projectDir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unrelated := filepath.Join(tmpHome, ".claude", "projects", "-another-workspace")
+	if err := os.MkdirAll(unrelated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ag := &ClaudeCodeAgent{}
+	if err := ag.CleanupSessionDir(context.Background(), rt); err != nil {
+		t.Fatalf("CleanupSessionDir: %v", err)
+	}
+
+	_, statErr := os.Stat(projectDir)
+	if kept := statErr == nil; kept != tc.wantKept {
+		t.Fatalf("project directory kept = %t, want %t (stat err=%v)", kept, tc.wantKept, statErr)
+	}
+	if _, err := os.Stat(unrelated); err != nil {
+		t.Fatalf("unrelated project directory was removed: %v", err)
+	}
+	if err := ag.CleanupSessionDir(context.Background(), rt); err != nil {
+		t.Fatalf("CleanupSessionDir is not idempotent: %v", err)
 	}
 }

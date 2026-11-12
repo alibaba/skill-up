@@ -49,23 +49,29 @@ type IterationObserver interface {
 // workspace being deleted and the agent supporting it; that decision lives in
 // the evaluator so every caller of it applies the same precedence.
 func cleanupSessionsEnabled(opts EvaluateOptions, evalCfg *config.EvalConfig) bool {
-	if opts.CleanupSessions {
-		return true
+	// The flag wins when it was set, in either direction; an unset flag falls
+	// back to the eval config. OR-ing them would make an explicit `false`
+	// unable to turn off `cleanup_sessions: true`.
+	if opts.CleanupSessionsSet {
+		return opts.CleanupSessions
 	}
 	return evalCfg != nil && evalCfg.Environment.CleanupSessions
 }
 
 // EvaluateOptions controls evaluation behavior.
 type EvaluateOptions struct {
-	DeleteWorkspace   bool
-	CleanupSessions   bool
-	OutputDir         string
-	WorkspaceDir      string
-	Iteration         int
-	Formats           []string
-	Observer          evaluator.ProgressObserver
-	TaskObserver      evaluator.TaskObserver
-	IterationObserver IterationObserver
+	DeleteWorkspace bool
+	// CleanupSessions is the flag value; CleanupSessionsSet records whether the
+	// flag was given at all, so an explicit false can override the config.
+	CleanupSessions    bool
+	CleanupSessionsSet bool
+	OutputDir          string
+	WorkspaceDir       string
+	Iteration          int
+	Formats            []string
+	Observer           evaluator.ProgressObserver
+	TaskObserver       evaluator.TaskObserver
+	IterationObserver  IterationObserver
 }
 
 // ExecutionPlan contains the immutable invocation metadata and expanded tasks.
