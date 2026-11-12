@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Stop reporting a successful Claude Code answer as a provider rate-limit or
+  authentication failure when its text mentions phrases such as "rate limit" or
+  "authentication error". Answer text is scanned for these failures only when
+  the run exits non-zero or the text is an error report; stderr, Claude Code
+  `API Error:` output, JSON result events flagged `is_error`, and API errors
+  recorded in the session are still detected.
+
 ## [0.15.0] - 2026-11-09
 
 ### Added

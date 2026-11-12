@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -902,6 +903,117 @@ func TestProviderRateLimitSignal_PrefersSessionFinalMessage(t *testing.T) {
 	}
 	if !strings.Contains(msg, "rate limit") {
 		t.Fatalf("expected rate limit message, got %q", msg)
+	}
+}
+
+func TestClaudeCodeAgent_SuccessfulAnswerIsNotProviderFailure(t *testing.T) {
+	t.Parallel()
+
+	answers := map[string]string{
+		"rate limit":           "Done. I added a rate limit of 100 requests per second to the API gateway and documented the 429 Too Many Requests response.\n",
+		"authentication error": "Fixed the authentication error handling in login.go\n",
+	}
+	for name, answer := range answers {
+		for _, resume := range []bool{false, true} {
+			t.Run(name+"/resume="+strconv.FormatBool(resume), func(t *testing.T) {
+				t.Parallel()
+				rt := &claudeCodeTestRuntime{workspace: t.TempDir(), execResult: runtime.ExecResult{Stdout: answer}}
+				ag := NewClaudeCodeAgent(Config{})
+				message := transcript.Message{Role: transcript.RoleUser, Content: "task", Turn: 1}
+
+				var res *SessionResult
+				var err error
+				if resume {
+					res, err = ag.RunTurn(context.Background(), rt, ExecOptions{}, message, "sess-1")
+				} else {
+					res, err = ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{message})
+				}
+				if err != nil {
+					t.Fatalf("successful answer reported as failure: %v", err)
+				}
+				if res == nil || res.ExitCode != 0 || res.FinalMessage != strings.TrimSpace(answer) {
+					t.Fatalf("unexpected session result: %+v", res)
+				}
+			})
+		}
+	}
+}
+
+// TestClaudeProviderSignals_SessionAPIError uses a synthetic session file in
+// the shape Claude Code writes for a failed provider request.
+func TestClaudeProviderSignals_SessionAPIError(t *testing.T) {
+	t.Parallel()
+
+	sessionFile := filepath.Join(t.TempDir(), "550e8400-e29b-41d4-a716-446655440000.jsonl")
+	lines := []string{
+		`{"type":"user","message":{"role":"user","content":"task"}}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Working on it."}]}}`,
+		`{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"Request rejected (429) · too many requests"}]}}`,
+	}
+	if err := os.WriteFile(sessionFile, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	trans, finalMsg, _, _ := parseSessionFile(sessionFile)
+	session := &SessionResult{Transcript: trans, FinalMessage: finalMsg}
+
+	msg, ok := providerRateLimitSignal(ExecResult{Stdout: "Request rejected (429) · too many requests"}, session)
+	if !ok || !strings.Contains(msg, "too many requests") {
+		t.Fatalf("rate limit signal = %q, %v; want the session's API error", msg, ok)
+	}
+	if _, ok := providerAuthFailureSignal(ExecResult{}, session); ok {
+		t.Fatal("unexpected auth failure signal")
+	}
+}
+
+func TestClaudeProviderSignals_AnswerText(t *testing.T) {
+	t.Parallel()
+
+	prose := "Done. I added a rate limit and fixed the authentication error handling."
+	apiErrorSession := &SessionResult{Transcript: transcript.Transcript{
+		{Role: transcript.RoleAssistant, Content: prose, Turn: 1},
+		{Role: transcript.RoleError, Content: "Authentication error", Turn: 1},
+	}}
+	recoveredSession := &SessionResult{FinalMessage: prose, Transcript: transcript.Transcript{
+		{Role: transcript.RoleError, Content: "API Error: 429 rate limit exceeded", Turn: 1},
+		{Role: transcript.RoleAssistant, Content: prose, Turn: 1},
+	}}
+
+	tests := []struct {
+		name          string
+		result        ExecResult
+		session       *SessionResult
+		wantRateLimit bool
+		wantAuth      bool
+	}{
+		{"prose on success", ExecResult{Stdout: prose}, &SessionResult{FinalMessage: prose}, false, false},
+		{"prose on failure", ExecResult{Stdout: prose, ExitCode: 1}, &SessionResult{}, true, true},
+		{"prose in stderr", ExecResult{Stderr: "provider rate limit hit"}, &SessionResult{}, true, false},
+		{"api error line", ExecResult{Stdout: "API Error: 429 rate limit exceeded"}, &SessionResult{}, true, false},
+		{"api error as last line", ExecResult{Stdout: "Partial work.\nAPI Error: 429 Too Many Requests"}, &SessionResult{}, true, false},
+		{"api error in final message", ExecResult{}, &SessionResult{FinalMessage: "API Error: 401 authentication error"}, false, true},
+		{"gateway notice", ExecResult{Stdout: "模型提供方限流，请稍后重试"}, &SessionResult{}, true, false},
+		{"result event with is_error", ExecResult{Stdout: `{"type":"result","is_error":true,"api_error_status": 403,"result":"Authentication error"}`}, &SessionResult{}, false, true},
+		{"result event array with is_error", ExecResult{Stdout: `[{"type":"system"},{"type":"result","is_error":true,"result":"rate limit"}]`}, &SessionResult{}, true, false},
+		{"result event without is_error", ExecResult{Stdout: `{"type":"result","is_error":false,"result":"added a rate limit"}`}, &SessionResult{}, false, false},
+		{"json answer with an is_error field", ExecResult{Stdout: `{"is_error":true,"result":"authentication error"}`}, &SessionResult{}, false, false},
+		{"error code named in prose", ExecResult{Stdout: "Renamed authentication_failed to login_failed."}, &SessionResult{}, false, false},
+		{"prose starting with API errors", ExecResult{Stdout: "API errors need rate limit handling, so I added a retry."}, &SessionResult{}, false, false},
+		{"gateway notice named in prose", ExecResult{Stdout: "已为模型提供方限流场景添加重试。"}, &SessionResult{}, false, false},
+		{"session ends with api error", ExecResult{Stdout: "Authentication error"}, apiErrorSession, false, true},
+		{"session recovered from api error", ExecResult{Stdout: prose}, recoveredSession, false, false},
+		{"nil session", ExecResult{Stdout: prose}, nil, false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if _, got := providerRateLimitSignal(tt.result, tt.session); got != tt.wantRateLimit {
+				t.Fatalf("rate limit signal = %v, want %v", got, tt.wantRateLimit)
+			}
+			if _, got := providerAuthFailureSignal(tt.result, tt.session); got != tt.wantAuth {
+				t.Fatalf("auth failure signal = %v, want %v", got, tt.wantAuth)
+			}
+		})
 	}
 }
 
