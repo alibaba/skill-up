@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -226,11 +227,7 @@ func markSessionFailed(sessionResult *SessionResult) {
 }
 
 func providerRateLimitSignal(result ExecResult, sessionResult *SessionResult) (string, bool) {
-	for _, candidate := range []string{
-		result.Stderr,
-		result.Stdout,
-		sessionDiagnosticText(sessionResult),
-	} {
+	for _, candidate := range claudeDiagnosticTexts(result, sessionResult) {
 		if msg, ok := providerRateLimitText(candidate); ok {
 			return msg, true
 		}
@@ -239,16 +236,86 @@ func providerRateLimitSignal(result ExecResult, sessionResult *SessionResult) (s
 }
 
 func providerAuthFailureSignal(result ExecResult, sessionResult *SessionResult) (string, bool) {
-	for _, candidate := range []string{
-		result.Stderr,
-		result.Stdout,
-		sessionDiagnosticText(sessionResult),
-	} {
+	for _, candidate := range claudeDiagnosticTexts(result, sessionResult) {
 		if msg, ok := providerAuthFailureText(candidate); ok {
 			return msg, true
 		}
 	}
 	return "", false
+}
+
+// claudeDiagnosticTexts returns the texts to scan for a provider failure.
+// Stderr and an API error recorded in the session are always diagnostics.
+// Stdout and the session's final message are the agent's answer when the run
+// succeeded, where "rate limit" or "authentication error" is ordinary prose,
+// so they are scanned only when the run failed or the text is an error report.
+func claudeDiagnosticTexts(result ExecResult, sessionResult *SessionResult) []string {
+	texts := []string{result.Stderr, sessionAPIErrorText(sessionResult)}
+	for _, answer := range []string{result.Stdout, sessionDiagnosticText(sessionResult)} {
+		if result.ExitCode != 0 || isClaudeErrorReport(answer) {
+			texts = append(texts, answer)
+		}
+	}
+	return texts
+}
+
+// sessionAPIErrorText returns the last transcript message when Claude Code
+// recorded it as an API error (isApiErrorMessage in the session file).
+func sessionAPIErrorText(sessionResult *SessionResult) string {
+	if sessionResult == nil || len(sessionResult.Transcript) == 0 {
+		return ""
+	}
+	last := sessionResult.Transcript[len(sessionResult.Transcript)-1]
+	if last.Role != transcript.RoleError {
+		return ""
+	}
+	return last.Content
+}
+
+// claudeAPIErrorPrefix starts the line Claude Code prints in place of an
+// answer when the provider request fails.
+const claudeAPIErrorPrefix = "API Error:"
+
+// isClaudeErrorReport reports whether answer text is an error report rather
+// than the agent's prose: Claude Code's own "API Error:" line at the start or
+// end, a JSON result event flagged is_error, or the provider gateway's
+// rate-limit notice in place of an answer.
+func isClaudeErrorReport(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return false
+	}
+	lastLine := strings.TrimSpace(trimmed[strings.LastIndexByte(trimmed, '\n')+1:])
+	return strings.HasPrefix(trimmed, claudeAPIErrorPrefix) ||
+		strings.HasPrefix(lastLine, claudeAPIErrorPrefix) ||
+		strings.HasPrefix(trimmed, claudeGatewayRateLimitNotice) ||
+		isClaudeErrorEnvelope(trimmed)
+}
+
+// claudeResultEventType is the type of the event that carries a Claude Code
+// run's final result.
+const claudeResultEventType = "result"
+
+// isClaudeErrorEnvelope reports whether text is a Claude Code JSON result
+// event, alone or inside an event array, that is flagged is_error. The
+// "result" type is required so a JSON answer that merely has an is_error
+// field is not taken for the CLI's own status.
+func isClaudeErrorEnvelope(text string) bool {
+	type envelope struct {
+		Type    string `json:"type"`
+		IsError bool   `json:"is_error"`
+	}
+	failed := func(e envelope) bool { return e.Type == claudeResultEventType && e.IsError }
+	switch text[0] {
+	case '{':
+		var event envelope
+		return json.Unmarshal([]byte(text), &event) == nil && failed(event)
+	case '[':
+		var events []envelope
+		return json.Unmarshal([]byte(text), &events) == nil && slices.ContainsFunc(events, failed)
+	default:
+		return false
+	}
 }
 
 func sessionDiagnosticText(sessionResult *SessionResult) string {
@@ -264,6 +331,10 @@ func sessionDiagnosticText(sessionResult *SessionResult) string {
 	return ""
 }
 
+// claudeGatewayRateLimitNotice is the rate-limit notice a provider gateway
+// returns in place of a model answer.
+const claudeGatewayRateLimitNotice = "模型提供方限流"
+
 func providerRateLimitText(text string) (string, bool) {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
@@ -277,7 +348,7 @@ func providerRateLimitText(text string) (string, bool) {
 	}
 	lower := strings.ToLower(scanText)
 	switch {
-	case strings.Contains(scanText, "模型提供方限流"),
+	case strings.Contains(scanText, claudeGatewayRateLimitNotice),
 		strings.Contains(lower, "rate limit"),
 		strings.Contains(lower, "too many requests"),
 		strings.Contains(lower, "http 429"),
@@ -576,14 +647,25 @@ func buildClaudeTextSessionResult(engine, instruction string, start time.Time, r
 	return sessionResult
 }
 
+// claudeSessionLookup describes where Claude Code keeps its per-workspace
+// session directories. The lookup and the post-run cleanup share it so they
+// cannot disagree about which directory belongs to this run.
+var claudeSessionLookup = agentSessionLookup{
+	projectsRootTmpl: "$home/.claude/projects",
+	sessionDepth:     1,
+}
+
 // findClaudeSessionFile resolves the newest session JSONL under the Claude
 // projects tree (~/.claude/projects/<workspace-key>/) for this workspace.
 func findClaudeSessionFile(ctx context.Context, rt Runtime) string {
-	return findAgentSessionJSONL(ctx, rt, agentSessionLookup{
-		projectsRootTmpl: "$home/.claude/projects",
-		sessionDepth:     1,
-		findExtra:        "",
-	})
+	return findAgentSessionJSONL(ctx, rt, claudeSessionLookup)
+}
+
+// CleanupSessionDir removes the project directory Claude Code created for this
+// workspace. Without it, every run deposits a transcript into the user's own
+// session history even though the workspace itself is deleted.
+func (a *ClaudeCodeAgent) CleanupSessionDir(ctx context.Context, rt Runtime) error {
+	return removeAgentSessionDir(ctx, rt, claudeSessionLookup)
 }
 
 // buildStreamJSON converts messages to stream-json format for input.

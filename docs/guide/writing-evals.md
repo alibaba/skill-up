@@ -450,6 +450,22 @@ Rules and constraints:
 
 > **Tip:** if your Skill does not touch the filesystem, `none` avoids sandbox provisioning and is significantly faster.
 
+#### Session cleanup
+
+An evaluation deletes its workspace, but an agent CLI may keep per-workspace state outside it. Claude Code writes a project directory under `~/.claude/projects/<workspace-key>/` with the session transcript and a `memory/` folder, so repeated runs add up in the user's own session history.
+
+`environment.cleanup_sessions: true` (or `--cleanup-sessions`) removes that directory together with the workspace. It is off by default because it deletes user-visible history, and only `claude_code` implements it today:
+
+```yaml
+environment:
+  type: none
+  cleanup_sessions: true
+```
+
+An explicit `--cleanup-sessions=false` overrides `cleanup_sessions: true`; only an unset flag falls back to the config.
+
+`--no-delete` wins: the workspace and the sessions are both preserved, and the run reports that cleanup was skipped. Cleanup also does not run for an externally owned workspace (`--workspace`), when the runtime keeps the workspace, or when ownership cannot be proven. Ownership is parsed from each transcript's recorded working directory, not searched for as a string, so a path inside a tool argument never counts; a directory is removed only when every transcript in it records this workspace, and it is kept when the transcripts disagree, do not parse, or record nothing. Two workspaces whose paths differ only in punctuation share one project directory, so it is left untouched. For an agent that does not implement cleanup, the run reports that it is unsupported.
+
 #### Branching setup by experiment group
 
 The framework injects `SKILL_UP_VARIANT` before setup and keeps it available to subsequent runtime commands in `none`, Docker, and OpenSandbox. It identifies the scheduled execution configuration: currently `with_skill` or `without_skill`. Non-benchmark runs use `with_skill`, even when the Skill list is empty; this does not prove that a Skill was installed or invoked. Future configurations may use other names (for example, `v1.0` or `v1.1`); custom groups are not enabled by this variable alone.
