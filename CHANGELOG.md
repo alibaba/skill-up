@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fields rather than string-matched, and directories whose ownership is unclear
   are kept. An agent without support for cleanup is reported instead of
   silently skipped.
+- Run judges when `post_condition.on_fail: skip_remaining` fails on the final conversation turn, including single-turn conversations.
 
 ## [0.15.0] - 2026-11-09
 
