@@ -402,6 +402,12 @@ func (e *defaultEvaluator) cleanupSessionDir(ctx context.Context, ag agent.Agent
 	if !e.deleteWorkspace {
 		return
 	}
+	// DeleteWorkspace only says the evaluator asked. A runtime handed a
+	// workspace it does not own preserves it, and the project directory has to
+	// survive with it.
+	if owner, ok := rt.(runtime.WorkspaceOwner); ok && !owner.OwnsWorkspace() {
+		return
+	}
 	cleaner, ok := ag.(agent.SessionDirCleaner)
 	if !ok {
 		return

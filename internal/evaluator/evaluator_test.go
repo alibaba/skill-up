@@ -4263,17 +4263,20 @@ func (m *cleanupRecordingAgent) CleanupSessionDir(context.Context, runtime.Runti
 
 func TestExecuteCaseCleansAgentSessionDirOnlyWhenWorkspaceDeleted(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		deleteWS bool
-		want     int32
+		name         string
+		deleteWS     bool
+		workspaceDir string
+		want         int32
 	}{
 		{name: "workspace deleted", deleteWS: true, want: 1},
 		{name: "workspace kept", deleteWS: false, want: 0},
+		{name: "externally owned workspace kept", deleteWS: true, workspaceDir: t.TempDir(), want: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ag := &cleanupRecordingAgent{mockAgent: &mockAgent{name: "claude_code", output: "ok"}}
 			e := newTestEvaluator(EvalOptions{
 				DeleteWorkspace: tc.deleteWS,
+				WorkspaceDir:    tc.workspaceDir,
 				SkillDir:        t.TempDir(),
 				EvalCfg: &config.EvalConfig{
 					Environment: config.Environment{Type: "none"},

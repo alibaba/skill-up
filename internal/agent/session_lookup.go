@@ -240,23 +240,35 @@ func buildWindowsSessionLookupScript(lookup agentSessionLookup) string {
 }
 
 // buildSessionCleanupScript renders the snippet that removes the project
-// directories belonging to this run's workspace.
+// directory belonging to this run's workspace.
 //
-// It matches a directory by the same canonical-name rule the lookup uses, so
-// the directory the adapter read its transcript from is the directory this
-// deletes; a CLI changing its naming rule moves both together.
+// Two conditions must both hold before a directory is removed, because the
+// canonical name match is lossy: workspaces whose paths differ only in
+// punctuation share one directory (see canonicalWorkspaceKey). A match is only a
+// candidate; it is removed only when every session file in it records this
+// workspace, so a directory shared with another workspace is left alone.
+// Matching the encoded form keeps Windows paths working and cannot be satisfied
+// by a path that merely appears in the conversation.
 func buildSessionCleanupScript(lookup agentSessionLookup, paths pathComparison) string {
 	return fmt.Sprintf(`home=$(printenv HOME); [ -n "$home" ] || exit 0
 root="%s"; [ -d "$root" ] || exit 0
 wskey=$(printenv %s); [ -n "$wskey" ] || exit 0
 tmp=$(mktemp) || exit 1
-trap 'rm -f "$tmp" "$tmp.match"' 0
+trap 'rm -f "$tmp" "$tmp.match" "$tmp.marks"' 0
+printenv %s >"$tmp.marks" || true
+[ -s "$tmp.marks" ] || exit 0
 find "$root" -mindepth 1 -maxdepth 1 -type d 2>/dev/null >"$tmp" || true
 awk -v key="$wskey" '{n=$0; sub(/.*\//,"",n); gsub(/[^a-zA-Z0-9]/,"-",n); if (%s) print}' "$tmp" >"$tmp.match" || true
 while IFS= read -r d || [ -n "$d" ]; do
-  rm -rf -- "$d"
+  ours=1; seen=0
+  for f in "$d"/*.jsonl; do
+    [ -f "$f" ] || continue
+    seen=1
+    if ! head -c 65536 "$f" 2>/dev/null | grep %s "$tmp.marks" >/dev/null; then ours=0; break; fi
+  done
+  if [ "$ours" = 1 ] && [ "$seen" = 1 ]; then rm -rf -- "$d"; fi
 done <"$tmp.match"
-`, lookup.projectsRootTmpl, envSessionWorkspaceKey, paths.awkNameMatch)
+`, lookup.projectsRootTmpl, envSessionWorkspaceKey, envSessionCwdMarkers, paths.awkNameMatch, paths.grepFlags)
 }
 
 // removeAgentSessionDir deletes the project directory the agent CLI created for
@@ -278,6 +290,7 @@ func removeAgentSessionDir(ctx context.Context, rt Runtime, lookup agentSessionL
 	result, err := rt.Exec(cleanupCtx, buildSessionCleanupScript(lookup, paths), ExecOptions{
 		Env: map[string]string{
 			envSessionWorkspaceKey: workspaceKey,
+			envSessionCwdMarkers:   strings.Join(workspaceCwdMarkers(workspace), "\n"),
 		},
 	})
 	if err != nil {

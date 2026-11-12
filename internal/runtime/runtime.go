@@ -158,6 +158,14 @@ type Runtime interface {
 	Shell() platform.Shell
 }
 
+// WorkspaceOwner is implemented by runtimes that can be handed a workspace they
+// did not create. Close preserves such a workspace even when deletion is
+// requested, so callers that remove per-workspace state elsewhere (for example
+// an agent's session directory) must check this before doing so.
+type WorkspaceOwner interface {
+	OwnsWorkspace() bool
+}
+
 // FileReadSeeker combines io.ReadSeeker for file access.
 type FileReadSeeker interface {
 	io.ReadSeeker
