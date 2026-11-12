@@ -381,7 +381,7 @@ Each entry under `tools` defines one tool:
 
 - `response` is required. Every call to the tool returns the value under its `default` key, or the whole value when there is no `default` key. String values can insert call arguments with the `params` template used in the example's `name` field, with an optional `| default:'<value>'` fallback. `response: null` returns null.
 - `description` and `input_schema` are optional and set what the Agent sees in `tools/list`. Without them the Agent sees the description `Mocked MCP tool <name>` and an input schema that accepts any object, not the real server's descriptions and parameters, so it may pick tools differently than against the real server. An empty `description` also keeps the placeholder.
-- `input_schema`, when present, must be a mapping with `type: object`, because MCP requires an object schema; an empty mapping (`{}`) is an error. Nothing deeper is validated. The schema is advertised only: the mock does not check call arguments against it, so a call with missing or extra arguments still returns the response.
+- `input_schema`, when set, must be a mapping with `type: object`, because MCP requires an object schema; an empty mapping (`{}`) is an error, while `input_schema: null` keeps the default. Nothing deeper is validated. The schema is advertised only: the mock does not check call arguments against it, so a call with missing or extra arguments still returns the response.
 - A tool entry accepts only `description`, `input_schema` and `response`. Any other key, such as the MCP wire name `inputSchema`, is an error.
 
 Fixtures that use the `tool_responses` map keep working unchanged. Each entry there is the tool's `response`, and the tool gets the default metadata:

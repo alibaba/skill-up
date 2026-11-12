@@ -393,6 +393,43 @@ tool_responses:
 	}
 }
 
+// TestMockedToolDefinitions_Normalizes checks the normalized definitions
+// without starting node: an explicit null response is kept, a null schema
+// keeps the default, and legacy entries carry only their response.
+func TestMockedToolDefinitions_Normalizes(t *testing.T) {
+	t.Parallel()
+
+	defs, err := mockedToolDefinitions("project-mgmt", parseMockFixture(t, `tools:
+  null_response:
+    description: Returns null.
+    input_schema: null
+    response: null
+  with_default:
+    input_schema: {type: object}
+    response: {default: ok}
+tool_responses:
+  legacy: {default: old}
+`))
+	if err != nil {
+		t.Fatalf("mockedToolDefinitions: %v", err)
+	}
+	want := map[string]mockedToolDefinition{
+		"null_response": {Description: "Returns null.", Response: nil},
+		"with_default":  {InputSchema: map[string]any{"type": "object"}, Response: map[string]any{"default": "ok"}},
+		"legacy":        {Response: map[string]any{"default": "old"}},
+	}
+	if !reflect.DeepEqual(defs, want) {
+		t.Fatalf("definitions = %#v, want %#v", defs, want)
+	}
+	encoded, err := json.Marshal(defs["null_response"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(encoded) != `{"description":"Returns null.","response":null}` {
+		t.Fatalf("encoded null response = %s, want the response key kept as null", encoded)
+	}
+}
+
 func TestBuildMockedServerScript_RejectsInvalidTools(t *testing.T) {
 	t.Parallel()
 
