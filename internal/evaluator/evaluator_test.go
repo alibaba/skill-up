@@ -3125,6 +3125,33 @@ func TestExecuteCase_JudgePromptNamesDeclaredSkillName(t *testing.T) {
 	}
 }
 
+func TestWithJudgeSkillInstallNames_FallsBackToFolderName(t *testing.T) {
+	t.Parallel()
+
+	skillDir := filepath.Join(t.TempDir(), "rubric-folder")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: not a dir name\n---\n# Rubric"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e := newTestEvaluator(EvalOptions{SkillDir: skillDir, EvalCfg: &config.EvalConfig{}})
+
+	got := e.withJudgeSkillInstallNames(config.JudgeConfig{Skills: []config.SkillRef{
+		{Source: "local_path", Path: "."},
+		{Source: "local_path", Path: ".", Target: "~/.claude/skills/explicit"},
+	}})
+	if got.Skills[0].InstallName != "rubric-folder" {
+		t.Fatalf("InstallName = %q, want the folder name rubric-folder", got.Skills[0].InstallName)
+	}
+	if got.Skills[1].InstallName != "" {
+		t.Fatalf("an explicit target must keep its existing name, got %q", got.Skills[1].InstallName)
+	}
+	if infos := judge.SkillInfosFromRefs(got.Skills); infos[0].Name != "rubric-folder" {
+		t.Fatalf("judge prompt name = %q, want rubric-folder", infos[0].Name)
+	}
+}
+
 func TestCheckSkillDirCollisions(t *testing.T) {
 	t.Parallel()
 
