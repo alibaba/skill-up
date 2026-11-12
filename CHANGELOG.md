@@ -8,11 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Mocked MCP fixtures accept an optional `tools` map that sets the
-  `description` and `input_schema` each tool advertises in `tools/list`, so
-  Agents see the same tool metadata as against the real server. A tool that
-  leaves a field out keeps the previous placeholder description and open
-  object schema; the schema is advertised only, not enforced on calls.
+- Mocked MCP fixtures accept a `tools` map that defines each tool in one
+  place: a required `response`, plus an optional `description` and
+  `input_schema` advertised in `tools/list`, so Agents see the same tool
+  metadata as against the real server. A tool that leaves the metadata out
+  keeps the placeholder description and open object schema; the schema is
+  advertised only, not enforced on calls. Existing `tool_responses` fixtures
+  keep working unchanged and may sit beside `tools` for other tool names.
 
 ### Fixed
 - Stop reporting a successful Claude Code answer as a provider rate-limit or

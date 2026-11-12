@@ -350,7 +350,7 @@ mcp:
       mode: mocked
 ```
 
-Or define tool responses through `config_ref`:
+Or define the mocked tools through `config_ref`:
 
 ```yaml
 mcp:
@@ -359,25 +359,6 @@ mcp:
       mode: mocked
       config_ref: evals/fixtures/mcp/project-mgmt.yaml
 ```
-
-```yaml
-tool_responses:
-  create_publish_plan_simple:
-    default:
-      id: 999
-      name: "{{params.name}}"
-      status: ONGOING
-```
-
-A mocked server built from `tool_responses` behaves as follows:
-
-- It uses stdio only. For `mode: mocked`, skill-up rejects `transport: http`, `endpoint`, `command`, and `args`.
-- skill-up starts it with `node`, so `node` must be on `PATH` in the runtime. skill-up sets up Node.js only when it installs Claude Code, Codex, Qwen Code, or OpenCode itself. A preinstalled engine CLI or the Qoder CLI does not bring Node.js with it.
-- Every call to a tool returns that tool's `default` response. If a tool has no `default` key, the whole entry is the response. String values can insert call arguments with the `params` template used in the example's `name` field, with an optional `| default:'<value>'` fallback.
-- Unless the fixture sets `tools` (see below), the Agent sees each tool with the description `Mocked MCP tool <name>` and an input schema that accepts any object, not the real server's descriptions or parameter schemas.
-- A call to a tool that is not listed under `tool_responses` returns an MCP error.
-
-By default the mock advertises every tool in `tools/list` with a placeholder description (`Mocked MCP tool <name>`) and an open input schema (`{"type": "object", "additionalProperties": true}`), so the Agent may pick tools differently than it would against the real server. An optional `tools` map restores the real metadata per tool:
 
 ```yaml
 tools:
@@ -389,6 +370,23 @@ tools:
         name: {type: string}
         planReleaseDate: {type: string}
       required: [name]
+    response:
+      default:
+        id: 999
+        name: "{{params.name}}"
+        status: ONGOING
+```
+
+Each entry under `tools` defines one tool:
+
+- `response` is required. Every call to the tool returns the value under its `default` key, or the whole value when there is no `default` key. String values can insert call arguments with the `params` template used in the example's `name` field, with an optional `| default:'<value>'` fallback. `response: null` returns null.
+- `description` and `input_schema` are optional and set what the Agent sees in `tools/list`. Without them the Agent sees the description `Mocked MCP tool <name>` and an input schema that accepts any object, not the real server's descriptions and parameters, so it may pick tools differently than against the real server. An empty `description` also keeps the placeholder.
+- `input_schema`, when present, must be a mapping with `type: object`, because MCP requires an object schema; an empty mapping (`{}`) is an error. Nothing deeper is validated. The schema is advertised only: the mock does not check call arguments against it, so a call with missing or extra arguments still returns the response.
+- A tool entry accepts only `description`, `input_schema` and `response`. Any other key, such as the MCP wire name `inputSchema`, is an error.
+
+Fixtures that use the `tool_responses` map keep working unchanged. Each entry there is the tool's `response`, and the tool gets the default metadata:
+
+```yaml
 tool_responses:
   create_publish_plan_simple:
     default:
@@ -397,13 +395,13 @@ tool_responses:
       status: ONGOING
 ```
 
-Rules for `tools`:
+One fixture may use both maps for different tools. A tool name declared under both `tools` and `tool_responses` is an error.
 
-- `description` and `input_schema` are both optional per tool; a missing field keeps the default above, and so does an empty `description`. A fixture without `tools` behaves exactly as before.
-- A tool entry accepts only `description` and `input_schema`. Any other key, such as the MCP wire name `inputSchema`, is an error.
-- `tools` carries metadata only; responses stay under `tool_responses`, and every name under `tools` must also appear there.
-- `input_schema`, when present, must be a mapping with `type: object`, because MCP requires an object schema; an empty mapping (`{}`) is an error. Nothing deeper is validated.
-- The schema is advertised only. The mock does not check call arguments against it, so a call with missing or extra arguments still returns the `tool_responses` entry.
+A mocked server built from a fixture behaves as follows:
+
+- It uses stdio only. For `mode: mocked`, skill-up rejects `transport: http`, `endpoint`, `command`, and `args`.
+- skill-up starts it with `node`, so `node` must be on `PATH` in the runtime. skill-up sets up Node.js only when it installs Claude Code, Codex, Qwen Code, or OpenCode itself. A preinstalled engine CLI or the Qoder CLI does not bring Node.js with it.
+- A call to a tool that the fixture does not declare returns an MCP error.
 
 Environment-variable references support both `${VAR}` and full-value `$VAR` forms; the variable name must match `[A-Za-z_][A-Za-z0-9_]*`. Variables listed in `required_env` are injected into the Agent process; full env-var references inside `headers` are also recorded by name so the Agent can pick the right transport mechanism when installing the MCP server.
 

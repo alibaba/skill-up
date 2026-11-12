@@ -377,13 +377,18 @@ func TestProvisioner_MockedServerRejectsInvalidToolMetadata(t *testing.T) {
 	}{
 		{
 			name: "unknown field",
-			tool: "    description: Look up a project.\n    inputSchema:\n      type: object\n",
-			want: `has unknown field "inputSchema"; supported fields are description and input_schema`,
+			tool: "    description: Look up a project.\n    inputSchema:\n      type: object\n    response: {status: OPEN}\n",
+			want: `has unknown field "inputSchema"; supported fields are description, input_schema and response`,
 		},
 		{
 			name: "scalar input schema",
-			tool: "    input_schema: object\n",
+			tool: "    input_schema: object\n    response: {status: OPEN}\n",
 			want: "input_schema must be a mapping with type: object",
+		},
+		{
+			name: "missing response",
+			tool: "    description: Look up a project.\n",
+			want: "has no response; set response (null is allowed)",
 		},
 	}
 
@@ -392,7 +397,7 @@ func TestProvisioner_MockedServerRejectsInvalidToolMetadata(t *testing.T) {
 			t.Parallel()
 
 			skillDir := t.TempDir()
-			content := "tools:\n  get_project:\n" + tt.tool + "tool_responses:\n  get_project:\n    default:\n      status: OPEN\n"
+			content := "tools:\n  get_project:\n" + tt.tool
 			if err := os.WriteFile(filepath.Join(skillDir, "mcp.yaml"), []byte(content), 0o600); err != nil {
 				t.Fatal(err)
 			}

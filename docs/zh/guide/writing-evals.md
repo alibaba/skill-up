@@ -314,7 +314,7 @@ mcp:
       mode: mocked
 ```
 
-也可以通过 `config_ref` 定义工具响应：
+或者通过 `config_ref` 定义 mocked 工具：
 
 ```yaml
 mcp:
@@ -323,25 +323,6 @@ mcp:
       mode: mocked
       config_ref: evals/fixtures/mcp/project-mgmt.yaml
 ```
-
-```yaml
-tool_responses:
-  create_publish_plan_simple:
-    default:
-      id: 999
-      name: "{{params.name}}"
-      status: ONGOING
-```
-
-基于 `tool_responses` 的 Mock Server 行为如下：
-
-- 仅支持 stdio。`mode: mocked` 时，skill-up 会拒绝 `transport: http`、`endpoint`、`command` 和 `args`。
-- skill-up 使用 `node` 启动 Mock Server，因此运行环境的 `PATH` 中必须有 `node`。只有当 skill-up 自行安装 Claude Code、Codex、Qwen Code 或 OpenCode 时才会准备 Node.js；预先安装的引擎 CLI 或 Qoder CLI 不会附带 Node.js。
-- 每次调用某个工具都返回该工具的 `default` 响应；若没有 `default` 键，则整个条目即为响应。字符串值可以像示例中的 `name` 字段那样用 `params` 模板引用调用参数，并可用 `| default:'<value>'` 指定缺省值。
-- 除非 fixture 设置了 `tools`（见下文），Agent 看到的每个工具描述均为 `Mocked MCP tool <name>`，输入 schema 接受任意对象，而不是真实 Server 的描述和参数 schema。
-- 调用未在 `tool_responses` 中声明的工具会返回 MCP 错误。
-
-默认情况下，Mock Server 在 `tools/list` 中为每个工具返回占位描述（`Mocked MCP tool <name>`）和开放的输入 schema（`{"type": "object", "additionalProperties": true}`），Agent 据此选择工具的方式可能与面对真实 Server 时不同。可选的 `tools` 映射可以为每个工具补回真实的元数据：
 
 ```yaml
 tools:
@@ -353,6 +334,23 @@ tools:
         name: {type: string}
         planReleaseDate: {type: string}
       required: [name]
+    response:
+      default:
+        id: 999
+        name: "{{params.name}}"
+        status: ONGOING
+```
+
+`tools` 下的每个条目定义一个工具：
+
+- `response` 必填。每次调用该工具都返回其 `default` 键下的值；若没有 `default` 键，则整个值即为响应。字符串值可以像示例中的 `name` 字段那样用 `params` 模板引用调用参数，并可用 `| default:'<value>'` 指定缺省值。`response: null` 返回 null。
+- `description` 和 `input_schema` 可选，决定 Agent 在 `tools/list` 中看到的内容。不填写时，Agent 看到的描述为 `Mocked MCP tool <name>`，输入 schema 接受任意对象，而不是真实 Server 的描述和参数，因此选择工具的方式可能与面对真实 Server 时不同。空的 `description` 同样沿用占位描述。
+- `input_schema` 一旦填写，就必须是 `type: object` 的映射，因为 MCP 要求输入 schema 是对象类型；空映射（`{}`）会报错。更深层的 JSON Schema 不做校验。schema 只用于声明：Mock Server 不会按它校验调用参数，参数缺失或多余的调用仍然返回该响应。
+- 工具条目只接受 `description`、`input_schema` 和 `response`；出现其他键（例如 MCP 协议里的 `inputSchema`）会报错。
+
+使用 `tool_responses` 映射的 fixture 无需修改，行为不变。其中每个条目即为该工具的 `response`，工具使用默认元数据：
+
+```yaml
 tool_responses:
   create_publish_plan_simple:
     default:
@@ -361,13 +359,13 @@ tool_responses:
       status: ONGOING
 ```
 
-`tools` 的规则：
+同一个 fixture 可以用两种映射声明不同的工具；同一个工具名同时出现在 `tools` 和 `tool_responses` 中会报错。
 
-- `description` 和 `input_schema` 对每个工具都是可选的，缺省的字段沿用上述默认值，空的 `description` 也是如此。不写 `tools` 的 fixture 行为与之前完全一致。
-- 工具条目只接受 `description` 和 `input_schema`；出现其他键（例如 MCP 协议里的 `inputSchema`）会报错。
-- `tools` 只放元数据，响应内容仍然写在 `tool_responses` 里，且 `tools` 中的每个名称都必须同时出现在 `tool_responses` 中。
-- `input_schema` 一旦填写，就必须是 `type: object` 的映射，因为 MCP 要求输入 schema 是对象类型；空映射（`{}`）会报错。更深层的 JSON Schema 不做校验。
-- schema 只用于声明，Mock Server 不会按它校验调用参数：参数缺失或多余的调用仍然返回 `tool_responses` 中的内容。
+基于 fixture 的 Mock Server 行为如下：
+
+- 仅支持 stdio。`mode: mocked` 时，skill-up 会拒绝 `transport: http`、`endpoint`、`command` 和 `args`。
+- skill-up 使用 `node` 启动 Mock Server，因此运行环境的 `PATH` 中必须有 `node`。只有当 skill-up 自行安装 Claude Code、Codex、Qwen Code 或 OpenCode 时才会准备 Node.js；预先安装的引擎 CLI 或 Qoder CLI 不会附带 Node.js。
+- 调用 fixture 中未声明的工具会返回 MCP 错误。
 
 环境变量引用支持 `${VAR}` 和完整值 `$VAR` 两种形式，变量名必须匹配 `[A-Za-z_][A-Za-z0-9_]*`。`required_env` 会把变量注入 Agent 运行环境；`headers` 中完整的环境变量引用会额外记录变量名，供 Agent 安装 MCP 时选择合适的传递方式。
 

@@ -222,15 +222,19 @@ type mcpServerFile struct {
 	ToolResponses map[string]any         `yaml:"tool_responses"`
 }
 
-// mcpMockTool is the metadata a mocked tool advertises in tools/list. Both
-// fields are optional. InputSchema is untyped so a scalar in the fixture is
-// reported as a named validation error instead of a YAML decode failure.
-// Unknown collects any other key so a misspelled field (for example the MCP
-// wire name inputSchema) is rejected instead of silently keeping the default.
+// mcpMockTool is one tool in a fixture's tools map: the metadata it advertises
+// in tools/list and the response tools/call returns. Description and
+// InputSchema are optional; Response is required. InputSchema is untyped so a
+// scalar in the fixture is reported as a named validation error instead of a
+// YAML decode failure. Response is kept as a node so a missing response can be
+// told apart from an explicit null. Unknown collects any other key so a
+// misspelled field (for example the MCP wire name inputSchema) is rejected
+// instead of silently ignored.
 type mcpMockTool struct {
-	Description string         `yaml:"description" json:"description,omitempty"`
-	InputSchema any            `yaml:"input_schema" json:"inputSchema,omitempty"`
-	Unknown     map[string]any `yaml:",inline" json:"-"`
+	Description string         `yaml:"description"`
+	InputSchema any            `yaml:"input_schema"`
+	Response    yaml.Node      `yaml:"response"`
+	Unknown     map[string]any `yaml:",inline"`
 }
 
 func loadServerFile(path string) (mcpServerFile, error) {

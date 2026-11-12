@@ -253,25 +253,26 @@ func listTools(t *testing.T, proc *mockProc) []any {
 	return tools
 }
 
-// TestBuildMockedServerScript_OmitsToolsWhenUnset pins the embedded fixture
-// JSON for a fixture without a tools map, so such fixtures keep generating the
-// script they did before tool metadata existed.
-func TestBuildMockedServerScript_OmitsToolsWhenUnset(t *testing.T) {
-	t.Parallel()
+func parseMockFixture(t *testing.T, text string) mcpServerFile {
+	t.Helper()
+	var fileCfg mcpServerFile
+	if err := yaml.Unmarshal([]byte(text), &fileCfg); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+	return fileCfg
+}
 
-	script, err := buildMockedServerScript("echo-server", mcpServerFile{
-		ToolResponses: map[string]any{"echo": map[string]any{"default": "ok"}},
+func callTool(t *testing.T, proc *mockProc, id int, name string, args map[string]any) string {
+	t.Helper()
+	proc.writeFramed(t, map[string]any{
+		"jsonrpc": "2.0", "id": id, "method": "tools/call",
+		"params": map[string]any{"name": name, "arguments": args},
 	})
-	if err != nil {
-		t.Fatalf("buildMockedServerScript: %v", err)
-	}
-	if !strings.Contains(script, `const fixtures = {"toolResponses":{"echo":{"default":"ok"}}};`) {
-		t.Fatal("fixture without tools must embed only toolResponses")
-	}
+	return toolCallText(t, proc.readFramed(t))
 }
 
 // TestMockedGenericServer_ToolsListDefaultMetadata pins the placeholder
-// description and open schema a fixture without a tools map advertises.
+// description and open schema a legacy tool_responses fixture advertises.
 func TestMockedGenericServer_ToolsListDefaultMetadata(t *testing.T) {
 	fileCfg := mcpServerFile{ToolResponses: map[string]any{"echo": map[string]any{"default": "ok"}}}
 
@@ -285,11 +286,35 @@ func TestMockedGenericServer_ToolsListDefaultMetadata(t *testing.T) {
 	}
 }
 
-// TestMockedGenericServer_ToolsListAdvertisesMetadata decodes the fixture
-// from YAML so the tools and input_schema keys are exercised end to end, then
+// TestMockedGenericServer_LegacyToolResponsesUnchanged keeps the response
+// semantics of the tool_responses format: a default key, a whole entry, and
+// an explicit null.
+func TestMockedGenericServer_LegacyToolResponsesUnchanged(t *testing.T) {
+	proc := startGenericMockServer(t, parseMockFixture(t, `tool_responses:
+  with_default:
+    default: {name: "{{params.name}}"}
+  whole_entry: {status: OPEN}
+  null_response: null
+`))
+	for _, tc := range []struct {
+		tool string
+		want string
+	}{
+		{"with_default", `{"name":"alpha"}`},
+		{"whole_entry", `{"status":"OPEN"}`},
+		{"null_response", "null"},
+	} {
+		if got := callTool(t, proc, 3, tc.tool, map[string]any{"name": "alpha"}); got != tc.want {
+			t.Fatalf("%s returned %q, want %q", tc.tool, got, tc.want)
+		}
+	}
+}
+
+// TestMockedGenericServer_ToolsFormat decodes the tools format from YAML, so
+// the tools, input_schema and response keys are exercised end to end, then
 // confirms the advertised schema is not enforced on tools/call.
-func TestMockedGenericServer_ToolsListAdvertisesMetadata(t *testing.T) {
-	const fixture = `tools:
+func TestMockedGenericServer_ToolsFormat(t *testing.T) {
+	proc := startGenericMockServer(t, parseMockFixture(t, `tools:
   create_publish_plan_simple:
     description: Create a publish plan for a project release.
     input_schema:
@@ -297,15 +322,9 @@ func TestMockedGenericServer_ToolsListAdvertisesMetadata(t *testing.T) {
       properties:
         name: {type: string}
       required: [name]
-tool_responses:
-  create_publish_plan_simple:
-    default: {id: 999, name: "{{params.name}}"}
-`
-	var fileCfg mcpServerFile
-	if err := yaml.Unmarshal([]byte(fixture), &fileCfg); err != nil {
-		t.Fatalf("unmarshal fixture: %v", err)
-	}
-	proc := startGenericMockServer(t, fileCfg)
+    response:
+      default: {id: 999, name: "{{params.name}}"}
+`))
 
 	want := []any{map[string]any{
 		"name":        "create_publish_plan_simple",
@@ -319,29 +338,29 @@ tool_responses:
 	if got := listTools(t, proc); !reflect.DeepEqual(got, want) {
 		t.Fatalf("tools/list = %#v, want %#v", got, want)
 	}
-
-	proc.writeFramed(t, map[string]any{
-		"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-		"params": map[string]any{
-			"name":      "create_publish_plan_simple",
-			"arguments": map[string]any{"unexpected": true},
-		},
-	})
-	if got := toolCallText(t, proc.readFramed(t)); got != `{"id":999,"name":""}` {
+	if got := callTool(t, proc, 3, "create_publish_plan_simple", map[string]any{"name": "v2"}); got != `{"id":999,"name":"v2"}` {
+		t.Fatalf("tools/call returned %q", got)
+	}
+	if got := callTool(t, proc, 4, "create_publish_plan_simple", map[string]any{"unexpected": true}); got != `{"id":999,"name":""}` {
 		t.Fatalf("tools/call with off-schema arguments returned %q, want the fixture response", got)
 	}
 }
 
-// TestMockedGenericServer_ToolsListPartialMetadata keeps the default for
-// whichever field a tools entry leaves out.
-func TestMockedGenericServer_ToolsListPartialMetadata(t *testing.T) {
-	fileCfg := mcpServerFile{
-		Tools: map[string]mcpMockTool{
-			"described": {Description: "Only a description."},
-			"typed":     {InputSchema: map[string]any{"type": "object", "properties": map[string]any{}}},
-		},
-		ToolResponses: map[string]any{"described": "ok", "typed": "ok"},
-	}
+// TestMockedGenericServer_MixedFormats lets the two formats declare different
+// tools in one fixture; omitted metadata keeps the defaults, and an explicit
+// null response is returned as null.
+func TestMockedGenericServer_MixedFormats(t *testing.T) {
+	proc := startGenericMockServer(t, parseMockFixture(t, `tools:
+  described:
+    description: Only a description.
+    response: described-ok
+  typed:
+    input_schema: {type: object, properties: {}}
+    response: null
+tool_responses:
+  legacy:
+    default: legacy-ok
+`))
 
 	want := []any{
 		map[string]any{
@@ -350,48 +369,72 @@ func TestMockedGenericServer_ToolsListPartialMetadata(t *testing.T) {
 			"inputSchema": map[string]any{"type": "object", "additionalProperties": true},
 		},
 		map[string]any{
+			"name":        "legacy",
+			"description": "Mocked MCP tool legacy",
+			"inputSchema": map[string]any{"type": "object", "additionalProperties": true},
+		},
+		map[string]any{
 			"name":        "typed",
 			"description": "Mocked MCP tool typed",
 			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
 		},
 	}
-	if got := listTools(t, startGenericMockServer(t, fileCfg)); !reflect.DeepEqual(got, want) {
+	if got := listTools(t, proc); !reflect.DeepEqual(got, want) {
 		t.Fatalf("tools/list = %#v, want %#v", got, want)
+	}
+	for i, tc := range []struct{ tool, want string }{
+		{"described", "described-ok"},
+		{"typed", "null"},
+		{"legacy", "legacy-ok"},
+	} {
+		if got := callTool(t, proc, 3+i, tc.tool, map[string]any{}); got != tc.want {
+			t.Fatalf("%s returned %q, want %q", tc.tool, got, tc.want)
+		}
 	}
 }
 
-func TestBuildMockedServerScript_RejectsInvalidToolMetadata(t *testing.T) {
+func TestBuildMockedServerScript_RejectsInvalidTools(t *testing.T) {
 	t.Parallel()
 
 	const schemaErr = `tool "get_project" input_schema must be a mapping with type: object`
 	tests := []struct {
 		name    string
-		tools   map[string]mcpMockTool
+		fixture string
 		wantErr string
 	}{
 		{
-			name:    "tool without response",
-			tools:   map[string]mcpMockTool{"missing": {Description: "No response."}},
-			wantErr: `tool "missing" is declared under tools but has no tool_responses entry`,
+			name:    "missing response",
+			fixture: "tools:\n  get_project:\n    description: No response.\n",
+			wantErr: `tool "get_project" has no response; set response (null is allowed)`,
+		},
+		{
+			name:    "declared in both maps",
+			fixture: "tools:\n  get_project:\n    response: new\ntool_responses:\n  get_project: old\n",
+			wantErr: `tool "get_project" is declared under both tools and tool_responses; keep one`,
+		},
+		{
+			name:    "unknown field",
+			fixture: "tools:\n  get_project:\n    inputSchema: {type: object}\n    response: ok\n",
+			wantErr: `tool "get_project" has unknown field "inputSchema"; supported fields are description, input_schema and response`,
 		},
 		{
 			name:    "schema is not a mapping",
-			tools:   map[string]mcpMockTool{"get_project": {InputSchema: "object"}},
+			fixture: "tools:\n  get_project:\n    input_schema: object\n    response: ok\n",
 			wantErr: schemaErr,
 		},
 		{
 			name:    "schema type is not object",
-			tools:   map[string]mcpMockTool{"get_project": {InputSchema: map[string]any{"type": "string"}}},
+			fixture: "tools:\n  get_project:\n    input_schema: {type: string}\n    response: ok\n",
 			wantErr: schemaErr,
 		},
 		{
 			name:    "schema is an empty mapping",
-			tools:   map[string]mcpMockTool{"get_project": {InputSchema: map[string]any{}}},
+			fixture: "tools:\n  get_project:\n    input_schema: {}\n    response: ok\n",
 			wantErr: schemaErr,
 		},
 		{
 			name:    "schema without type",
-			tools:   map[string]mcpMockTool{"get_project": {InputSchema: map[string]any{"properties": map[string]any{}}}},
+			fixture: "tools:\n  get_project:\n    input_schema: {properties: {}}\n    response: ok\n",
 			wantErr: schemaErr,
 		},
 	}
@@ -400,10 +443,7 @@ func TestBuildMockedServerScript_RejectsInvalidToolMetadata(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := buildMockedServerScript("project-mgmt", mcpServerFile{
-				Tools:         tt.tools,
-				ToolResponses: map[string]any{"get_project": map[string]any{"default": "ok"}},
-			})
+			_, err := buildMockedServerScript("project-mgmt", parseMockFixture(t, tt.fixture))
 			if err == nil || !strings.Contains(err.Error(), `"project-mgmt"`) || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("buildMockedServerScript error = %v, want containing %q", err, tt.wantErr)
 			}
