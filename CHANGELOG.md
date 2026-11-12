@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Stop reporting a successful Claude Code answer as a provider rate-limit or
+  authentication failure when its text mentions phrases such as "rate limit" or
+  "authentication error". Answer text is scanned for these failures only when
+  the run exits non-zero or the text is an error report; stderr, Claude Code
+  `API Error:` output, JSON result events flagged `is_error`, and API errors
+  recorded in the session are still detected.
+- Remove the Claude Code project directory a run creates under
+  `~/.claude/projects` when `environment.cleanup_sessions: true` or
+  `--cleanup-sessions` asks for it and the workspace is deleted, so eval
+  sessions stop accumulating in the user's own history. Off by default; an
+  explicit `--cleanup-sessions=false` overrides `cleanup_sessions: true`, and
+  `--no-delete` keeps both and reports the skip. A directory is removed only
+  when every transcript in it records this workspace, parsed from its identity
+  fields rather than string-matched, and directories whose ownership is unclear
+  are kept. An agent without support for cleanup is reported instead of
+  silently skipped.
 - Install a Skill under the `name` declared in its `SKILL.md` frontmatter
   instead of its source folder's name, so the Agent lists and invokes it by its
   own name when the folder is named differently (for example a snapshot copy).

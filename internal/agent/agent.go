@@ -109,6 +109,17 @@ type RuntimeInspector interface {
 	InspectRuntime(ctx context.Context, rt Runtime) (RuntimeObservation, error)
 }
 
+// SessionDirCleaner is implemented by agents that keep per-workspace state
+// outside the workspace itself — Claude Code writes a project directory under
+// $HOME/.claude/projects for every workspace it runs in. Deleting the workspace
+// leaves that directory behind, which is what this removes.
+//
+// The evaluator calls it only when the workspace is deleted, so --no-delete
+// keeps both.
+type SessionDirCleaner interface {
+	CleanupSessionDir(ctx context.Context, rt Runtime) error
+}
+
 // Preflight checks executable availability and then collects optional static
 // runtime metadata. It never probes authentication or makes a model request.
 func Preflight(ctx context.Context, rt Runtime, ag Agent) (RuntimeObservation, error) {

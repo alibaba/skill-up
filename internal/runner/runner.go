@@ -44,16 +44,34 @@ type IterationObserver interface {
 	OnIterationComplete(ctx context.Context, iteration evaluator.IterationPlan, results []evaluator.EvalResult)
 }
 
+// cleanupSessionsEnabled reports whether session cleanup was requested, by the
+// flag or by the eval config. Whether it actually runs also depends on the
+// workspace being deleted and the agent supporting it; that decision lives in
+// the evaluator so every caller of it applies the same precedence.
+func cleanupSessionsEnabled(opts EvaluateOptions, evalCfg *config.EvalConfig) bool {
+	// The flag wins when it was set, in either direction; an unset flag falls
+	// back to the eval config. OR-ing them would make an explicit `false`
+	// unable to turn off `cleanup_sessions: true`.
+	if opts.CleanupSessionsSet {
+		return opts.CleanupSessions
+	}
+	return evalCfg != nil && evalCfg.Environment.CleanupSessions
+}
+
 // EvaluateOptions controls evaluation behavior.
 type EvaluateOptions struct {
-	DeleteWorkspace   bool
-	OutputDir         string
-	WorkspaceDir      string
-	Iteration         int
-	Formats           []string
-	Observer          evaluator.ProgressObserver
-	TaskObserver      evaluator.TaskObserver
-	IterationObserver IterationObserver
+	DeleteWorkspace bool
+	// CleanupSessions is the flag value; CleanupSessionsSet records whether the
+	// flag was given at all, so an explicit false can override the config.
+	CleanupSessions    bool
+	CleanupSessionsSet bool
+	OutputDir          string
+	WorkspaceDir       string
+	Iteration          int
+	Formats            []string
+	Observer           evaluator.ProgressObserver
+	TaskObserver       evaluator.TaskObserver
+	IterationObserver  IterationObserver
 }
 
 // ExecutionPlan contains the immutable invocation metadata and expanded tasks.
@@ -225,6 +243,7 @@ func (r *Runner) EvaluatePlan(ctx context.Context, plan ExecutionPlan, ag agent.
 			WorkspaceDir:    opts.WorkspaceDir,
 			Concurrency:     r.evalCfg.Cases.Parallelism,
 			DeleteWorkspace: opts.DeleteWorkspace,
+			CleanupSessions: cleanupSessionsEnabled(opts, r.evalCfg),
 			WithBaseline:    r.evalCfg.Benchmark.Enabled,
 			Observer:        opts.Observer,
 			TaskObserver:    opts.TaskObserver,
