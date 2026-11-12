@@ -160,16 +160,17 @@ func (a *CodexAgent) InstallMCP(ctx context.Context, rt Runtime, mcpCfg runtime.
 	}
 	var defined, installed []runtime.MCPServerConfig
 	for _, server := range mcpCfg.Servers {
-		if isCodexCommandLineServer(server) {
-			defined = append(defined, server)
-		} else {
+		if server.Mode != mcpModeMocked {
 			installed = append(installed, server)
+			continue
 		}
-	}
-	for _, server := range defined {
-		if err := checkCodexMCPNameFree(ctx, rt, server.Name); err != nil {
+		if err := checkCodexCommandLineServer(server); err != nil {
 			return err
 		}
+		defined = append(defined, server)
+	}
+	if err := checkCodexMCPNamesFree(ctx, rt, defined); err != nil {
+		return err
 	}
 	if err := installMCPServers(ctx, rt, runtime.MCPConfig{Servers: installed}, buildCodexMCPInstallCmd); err != nil {
 		return err
@@ -178,26 +179,51 @@ func (a *CodexAgent) InstallMCP(ctx context.Context, rt Runtime, mcpCfg runtime.
 	return nil
 }
 
-// isCodexCommandLineServer reports whether a server is defined with -c flags on
-// each codex exec command instead of being installed with codex mcp add, which
-// writes into the user's global Codex config and leaves the entry there after
-// the run. Mocked servers qualify: skill-up generates their stdio command and
-// they carry no environment values or headers.
-func isCodexCommandLineServer(server runtime.MCPServerConfig) bool {
-	return server.Mode == mcpModeMocked && server.Transport == mcpTransportStdio && server.Command != "" &&
-		len(server.Env) == 0 && len(server.Headers) == 0 && codexConfigKeyPattern.MatchString(server.Name)
+// checkCodexCommandLineServer rejects a mocked server that cannot be defined
+// with -c flags on the codex exec command. Mocked servers are never installed
+// with codex mcp add, which writes into the user's global Codex config and
+// leaves the entry there after the run.
+func checkCodexCommandLineServer(server runtime.MCPServerConfig) error {
+	if !codexConfigKeyPattern.MatchString(server.Name) {
+		return fmt.Errorf("mocked MCP server %q cannot be used with codex: the name must match %s", server.Name, codexConfigKeyPattern)
+	}
+	if server.Transport != mcpTransportStdio || server.Command == "" || len(server.Env) > 0 || len(server.Headers) > 0 {
+		return fmt.Errorf("mocked MCP server %q cannot be used with codex: only a generated stdio command without env or headers is supported", server.Name)
+	}
+	return nil
 }
 
-// checkCodexMCPNameFree fails when the user's Codex config already has a
-// server with this name. A server defined with -c flags is merged into a
-// same-named entry rather than replacing it, so the mock would inherit the
-// user's settings, or Codex would fail to load its config.
-func checkCodexMCPNameFree(ctx context.Context, rt Runtime, name string) error {
-	result, err := rt.Exec(ctx, "codex mcp get "+shellQuote(name)+" >/dev/null 2>&1", ExecOptions{})
-	if err != nil || result.ExitCode != 0 {
+// checkCodexMCPNamesFree fails when the user's Codex config already has a
+// server with one of these names. A server defined with -c flags is merged
+// into a same-named entry rather than replacing it, so the mock would inherit
+// the user's settings, or Codex would fail to load its config.
+func checkCodexMCPNamesFree(ctx context.Context, rt Runtime, servers []runtime.MCPServerConfig) error {
+	if len(servers) == 0 {
 		return nil
 	}
-	return fmt.Errorf("codex already has an MCP server named %q in its config, so skill-up cannot add its mocked server under that name; rename the mocked server, or remove the entry with `codex mcp remove %s` if an earlier skill-up run left it there", name, name)
+	result, err := rt.Exec(ctx, "codex mcp list --json", ExecOptions{})
+	if err != nil {
+		return fmt.Errorf("list the MCP servers in the Codex config: %w", err)
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("list the MCP servers in the Codex config: exit %d: %s", result.ExitCode, strings.TrimSpace(result.Stderr))
+	}
+	var configured []struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(result.Stdout)), &configured); err != nil {
+		return fmt.Errorf("read the MCP servers in the Codex config: %w", err)
+	}
+	for _, server := range servers {
+		if slices.ContainsFunc(configured, func(c struct {
+			Name string `json:"name"`
+		}) bool {
+			return c.Name == server.Name
+		}) {
+			return fmt.Errorf("codex already has an MCP server named %q in its config, so skill-up cannot add its mocked server under that name; rename the mocked server, or remove the entry with `codex mcp remove %s` if an earlier skill-up run left it there", server.Name, server.Name)
+		}
+	}
+	return nil
 }
 
 // rememberMCPServers replaces the server sets recorded for a workspace: the
@@ -234,22 +260,32 @@ func (a *CodexAgent) rememberMCPServers(ctx context.Context, workspace string, s
 	a.mcpServers[workspace] = names
 }
 
-// mcpDefinitionFlags defines the workspace's command-line MCP servers with -c
+// mcpDefinitionFlags defines the workspace's mocked MCP servers with -c
 // overrides. Codex reads them for this invocation only, so nothing is written
-// to its config; a resumed turn needs the same flags again.
-func (a *CodexAgent) mcpDefinitionFlags(workspace string) (string, error) {
+// to its config; a resumed turn needs the same flags again. A generated
+// `node -e <script>` server has its script written into the run's artifact
+// directory first, so several mocks do not lengthen the command line.
+func (a *CodexAgent) mcpDefinitionFlags(ctx context.Context, rt Runtime, runArtifactDir string) (string, error) {
 	a.mcpMu.Lock()
-	servers := a.mcpDefined[workspace]
+	servers := a.mcpDefined[rt.Workspace()]
 	a.mcpMu.Unlock()
 
 	var flags strings.Builder
 	for _, server := range servers {
+		args := server.Args
+		if len(args) == 2 && args[0] == "-e" {
+			scriptPath := targetPathJoin(rt.Shell().GOOS, runArtifactDir, "mcp-"+server.Name+".js")
+			if err := persistRuntimeArtifact(ctx, rt, scriptPath, args[1]); err != nil {
+				return "", fmt.Errorf("write mocked MCP server %q script: %w", server.Name, err)
+			}
+			args = []string{scriptPath}
+		}
 		command, err := json.Marshal(server.Command)
 		if err != nil {
 			return "", fmt.Errorf("mcp server %q command is invalid: %w", server.Name, err)
 		}
 		// A JSON array of strings is also a valid TOML array of basic strings.
-		args, err := json.Marshal(append([]string{}, server.Args...))
+		argList, err := json.Marshal(append([]string{}, args...))
 		if err != nil {
 			return "", fmt.Errorf("mcp server %q args are invalid: %w", server.Name, err)
 		}
@@ -257,7 +293,7 @@ func (a *CodexAgent) mcpDefinitionFlags(workspace string) (string, error) {
 		flags.WriteString(" -c ")
 		flags.WriteString(shellQuote(prefix + ".command=" + string(command)))
 		flags.WriteString(" -c ")
-		flags.WriteString(shellQuote(prefix + ".args=" + string(args)))
+		flags.WriteString(shellQuote(prefix + ".args=" + string(argList)))
 	}
 	return flags.String(), nil
 }
@@ -447,8 +483,9 @@ func (a *CodexAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, 
 	if err != nil {
 		return nil, err
 	}
-	mcpFlags, err := a.mcpDefinitionFlags(rt.Workspace())
+	mcpFlags, err := a.mcpDefinitionFlags(ctx, rt, runArtifactDir)
 	if err != nil {
+		cleanupCodexRunArtifacts(ctx, rt, runArtifactDir)
 		return nil, err
 	}
 	cmd := buildCodexResumeCmdWithLastMessage(sessionID, instruction, a.appliedModelName(ctx), a.runProviderConfig(ctx), lastMessagePath, mcpFlags) +
@@ -501,11 +538,6 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 	if rt.RequiresProcessSandbox() && !EngineKwargBool(a.Cfg.Kwargs, KwargBypassSandbox) {
 		sandboxFlag = codexProcessSandbox + a.mcpApprovalFlags(rt.Workspace())
 	}
-	mcpFlags, err := a.mcpDefinitionFlags(rt.Workspace())
-	if err != nil {
-		return nil, err
-	}
-	sandboxFlag += mcpFlags
 	envVars := a.credentialEnvVars(credential.EnvOpenAIAPIKey, credential.EnvOpenAIBaseURL)
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))
 	ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, opts.Env)
@@ -522,6 +554,12 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 	if err != nil {
 		return nil, err
 	}
+	mcpFlags, err := a.mcpDefinitionFlags(ctx, rt, runArtifactDir)
+	if err != nil {
+		cleanupCodexRunArtifacts(ctx, rt, runArtifactDir)
+		return nil, err
+	}
+	sandboxFlag += mcpFlags
 	runCmd, promptDelivery, err := deliverPrompt(ctx, rt, opts, instruction, promptCommandBuilder{
 		Inline: func(prompt string) string {
 			return buildCodexRunCmdWithLastMessage(prompt, a.appliedModelName(ctx), a.runProviderConfig(ctx), sandboxFlag, lastMessagePath)

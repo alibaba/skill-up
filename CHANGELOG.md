@@ -12,9 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `codex` engine now defines each mocked server on the `codex exec` command,
   including resumed turns, with `-c mcp_servers.<name>...` overrides, instead
   of running `codex mcp add`, which replaced a same-named server of the user's
-  and left the mock in `~/.codex/config.toml` after the run. A run fails early
-  when that config already has a server with the mocked server's name. Real
-  MCP servers are still installed with `codex mcp add`.
+  and left the mock in `~/.codex/config.toml` after the run. The mock's script
+  is written to a temporary file per run. A run fails early when that config
+  already has a server with the mocked server's name, when the config cannot
+  be listed, or when the name is not a valid Codex config key. Real MCP servers
+  are still installed with `codex mcp add`.
 
 ### Fixed
 - Stop reporting a successful Claude Code answer as a provider rate-limit or
