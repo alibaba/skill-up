@@ -305,7 +305,7 @@ See `docs/design/custom-engine.md` for the full SessionInput / SessionResult sch
 
 ### MCP configuration
 
-MCP supports `mode: real` and `mode: mocked`. `real` installs a real MCP server into Agents such as `claude_code`, `qodercli`, `codex`, or `qwen_code`; `mocked` makes `internal/mcp` generate a local stdio mock server that is then installed into the Agent like any other MCP server.
+MCP supports `mode: real` and `mode: mocked`. `real` installs a real MCP server into Agents such as `claude_code`, `qodercli`, `codex`, or `qwen_code`; `mocked` makes `internal/mcp` generate a local stdio mock server that is then installed into the Agent like any other MCP server. For `codex`, a mocked server is instead defined on each `codex exec` command with `-c mcp_servers.<name>...` overrides, so nothing is written to the user's Codex config (`~/.codex/config.toml`); a run fails early if that config already has a server with the same name.
 
 HTTP MCP servers can be declared inline or pulled in via `config_ref`:
 
