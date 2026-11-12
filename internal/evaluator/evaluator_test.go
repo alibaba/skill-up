@@ -3065,6 +3065,66 @@ func TestResolveSkillConfig_DeclaredName(t *testing.T) {
 	}
 }
 
+func TestExecuteCase_JudgePromptNamesDeclaredSkillName(t *testing.T) {
+	skillDir := t.TempDir()
+	snapshot := filepath.Join(skillDir, "evals", "fixtures", "snapshot")
+	if err := os.MkdirAll(snapshot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapshot, "SKILL.md"), []byte("---\nname: rubric-skill\n---\n# Rubric"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	judgeAgent := &mockAgent{
+		name:   "judge",
+		output: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["rubric applied"],"failures":[]}]}`,
+	}
+	runAgent := &mockAgent{name: "run", output: "main response"}
+
+	origDetect := agentDetectWithResolvedConfig
+	agentDetectWithResolvedConfig = func(_ credential.ResolvedAgentConfig) (agent.Agent, error) {
+		return judgeAgent, nil
+	}
+	defer func() { agentDetectWithResolvedConfig = origDetect }()
+
+	skills := []config.SkillRef{{Source: "local_path", Path: "evals/fixtures/snapshot"}}
+	e := newTestEvaluator(EvalOptions{
+		SkillDir: skillDir,
+		Agent:    runAgent,
+		EvalCfg: &config.EvalConfig{
+			Engine: config.EngineConfig{Name: "mock"},
+			Judge:  config.JudgeConfig{Type: "agent_judge", Model: "judge-model", Criteria: []string{"uses rubric"}, Skills: skills},
+		},
+	})
+
+	result := e.executeCase(
+		context.Background(),
+		&config.CaseConfig{ID: "case-judge-skill-name", Input: config.Input{Prompt: "hello"}},
+		"without_skill",
+		&mockRuntime{workspace: t.TempDir()},
+		runAgent,
+	)
+
+	if result.Status != judge.StatusPass {
+		t.Fatalf("status = %s, err=%v", result.Status, result.Error)
+	}
+	if len(judgeAgent.skills) != 1 || judgeAgent.skills[0].DirName() != "rubric-skill" {
+		t.Fatalf("judge skill installed as %#v, want directory rubric-skill", judgeAgent.skills)
+	}
+	if len(judgeAgent.lastMessages) != 1 {
+		t.Fatalf("judge messages = %#v", judgeAgent.lastMessages)
+	}
+	prompt := judgeAgent.lastMessages[0].Content
+	if !strings.Contains(prompt, `invoke Skill tool with name "rubric-skill"`) || strings.Contains(prompt, `"snapshot"`) {
+		t.Fatalf("judge prompt does not name the installed Skill:\n%s", prompt)
+	}
+	if len(result.JudgeSkills) != 1 || result.JudgeSkills[0].Name != "rubric-skill" || result.JudgeSkills[0].Path != "evals/fixtures/snapshot" {
+		t.Fatalf("result JudgeSkills = %#v", result.JudgeSkills)
+	}
+	if skills[0].InstallName != "" || e.evalCfg.Judge.Skills[0].InstallName != "" {
+		t.Fatal("the shared eval config must not be modified")
+	}
+}
+
 func TestCheckSkillDirCollisions(t *testing.T) {
 	t.Parallel()
 

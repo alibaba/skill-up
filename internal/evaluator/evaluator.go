@@ -777,6 +777,7 @@ func (e *defaultEvaluator) runJudgePhaseWithSpan(
 	logging.DebugContextf(ctx, "Judge: case %s using %s", caseCfg.ID, judgeLabel(judgeCfg))
 	logging.DebugContextf(ctx, "Judge: case %s generated_files=%d workspace_diff=%t", caseCfg.ID, len(judgeInput.GeneratedFiles), judgeInput.WorkspaceDiff != "")
 	if judgeCfg.Type == judgeTypeAgentJudge {
+		judgeCfg = e.withJudgeSkillInstallNames(judgeCfg)
 		result.JudgeSkills = judge.SkillInfosFromRefs(judgeCfg.Skills)
 	}
 
@@ -1386,6 +1387,29 @@ func (e *defaultEvaluator) setupCaseEnvironment(ctx context.Context, rt runtime.
 	}
 
 	return observation, nil
+}
+
+// withJudgeSkillInstallNames returns judgeCfg with each judge Skill's default
+// install directory name filled in, so the judge prompt names the Skill the
+// way it was installed. The Skills slice is copied because judgeCfg is shared
+// between cases that run in parallel.
+func (e *defaultEvaluator) withJudgeSkillInstallNames(judgeCfg config.JudgeConfig) config.JudgeConfig {
+	if len(judgeCfg.Skills) == 0 {
+		return judgeCfg
+	}
+	skillDir := e.resolvedSkillDir()
+	skills := slices.Clone(judgeCfg.Skills)
+	for i, ref := range skills {
+		if strings.TrimSpace(ref.Target) != "" || strings.TrimSpace(ref.Path) == "" {
+			continue
+		}
+		if !filepath.IsAbs(ref.Path) && strings.TrimSpace(skillDir) == "" {
+			continue
+		}
+		skills[i].InstallName = resolveSkillConfig(skillDir, ref).DirName()
+	}
+	judgeCfg.Skills = skills
+	return judgeCfg
 }
 
 // installRunSkills installs the evaluation's skills into the agent under test.
