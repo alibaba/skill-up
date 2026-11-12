@@ -239,6 +239,57 @@ func buildWindowsSessionLookupScript(lookup agentSessionLookup) string {
 	)
 }
 
+// buildSessionCleanupScript renders the snippet that removes the project
+// directories belonging to this run's workspace.
+//
+// It matches a directory by the same canonical-name rule the lookup uses, so
+// the directory the adapter read its transcript from is the directory this
+// deletes; a CLI changing its naming rule moves both together.
+func buildSessionCleanupScript(lookup agentSessionLookup, paths pathComparison) string {
+	return fmt.Sprintf(`home=$(printenv HOME); [ -n "$home" ] || exit 0
+root="%s"; [ -d "$root" ] || exit 0
+wskey=$(printenv %s); [ -n "$wskey" ] || exit 0
+tmp=$(mktemp) || exit 1
+trap 'rm -f "$tmp" "$tmp.match"' 0
+find "$root" -mindepth 1 -maxdepth 1 -type d 2>/dev/null >"$tmp" || true
+awk -v key="$wskey" '{n=$0; sub(/.*\//,"",n); gsub(/[^a-zA-Z0-9]/,"-",n); if (%s) print}' "$tmp" >"$tmp.match" || true
+while IFS= read -r d || [ -n "$d" ]; do
+  rm -rf -- "$d"
+done <"$tmp.match"
+`, lookup.projectsRootTmpl, envSessionWorkspaceKey, paths.awkNameMatch)
+}
+
+// removeAgentSessionDir deletes the project directory the agent CLI created for
+// this workspace under its projects root. It is the counterpart of the lookup:
+// the run's transcript lives there, and deleting the workspace would otherwise
+// leave that directory in the user's home.
+func removeAgentSessionDir(ctx context.Context, rt Runtime, lookup agentSessionLookup) error {
+	workspace := workspaceForRuntime(rt)
+	workspaceKey := canonicalWorkspaceKey(workspace)
+	if workspaceKey == "" {
+		return nil
+	}
+	paths := caseSensitivePaths
+	if rt.Shell().GOOS == platform.GOOSWindows {
+		paths = caseInsensitivePaths
+	}
+	cleanupCtx, cancel := context.WithTimeout(ctx, sessionCleanupTimeout)
+	defer cancel()
+	result, err := rt.Exec(cleanupCtx, buildSessionCleanupScript(lookup, paths), ExecOptions{
+		Env: map[string]string{
+			envSessionWorkspaceKey: workspaceKey,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("remove agent session directory: %w", err)
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("remove agent session directory: exit %d: %s",
+			result.ExitCode, strings.TrimSpace(result.Stderr))
+	}
+	return nil
+}
+
 // buildSessionLookupScriptWithPrinter renders the shared lookup script.
 //
 // The workspace directory is located without reproducing any CLI's naming rule:

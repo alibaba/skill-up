@@ -4247,3 +4247,52 @@ func TestNonBenchmarkVariantWithEmptySkills(t *testing.T) {
 		t.Fatalf("unexpected non-benchmark results: %+v", results)
 	}
 }
+
+// cleanupRecordingAgent wraps mockAgent with the optional SessionDirCleaner
+// hook so a test can see whether the evaluator called it.
+type cleanupRecordingAgent struct {
+	*mockAgent
+
+	cleanupCalls atomic.Int32
+}
+
+func (m *cleanupRecordingAgent) CleanupSessionDir(context.Context, runtime.Runtime) error {
+	m.cleanupCalls.Add(1)
+	return nil
+}
+
+func TestExecuteCaseCleansAgentSessionDirOnlyWhenWorkspaceDeleted(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		deleteWS bool
+		want     int32
+	}{
+		{name: "workspace deleted", deleteWS: true, want: 1},
+		{name: "workspace kept", deleteWS: false, want: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ag := &cleanupRecordingAgent{mockAgent: &mockAgent{name: "claude_code", output: "ok"}}
+			e := newTestEvaluator(EvalOptions{
+				DeleteWorkspace: tc.deleteWS,
+				SkillDir:        t.TempDir(),
+				EvalCfg: &config.EvalConfig{
+					Environment: config.Environment{Type: "none"},
+					Judge: config.JudgeConfig{
+						Type:    "rule_based",
+						Success: []config.Rule{{OutputContains: &config.OutputContainsRule{All: []string{"ok"}}}},
+					},
+				},
+			})
+			caseCfg := &config.CaseConfig{ID: "cleanup", Input: config.Input{Prompt: "hi"}}
+
+			result := e.executeCase(context.Background(), caseCfg, "with_skill", nil, ag)
+			if result.Error != nil {
+				t.Fatalf("case failed before the cleanup check: %v", result.Error)
+			}
+
+			if got := ag.cleanupCalls.Load(); got != tc.want {
+				t.Fatalf("CleanupSessionDir calls = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}

@@ -393,6 +393,24 @@ func (e *defaultEvaluator) executeCase(ctx context.Context, caseCfg *config.Case
 	return result
 }
 
+// cleanupSessionDir removes per-workspace state an agent keeps outside the
+// workspace, such as the Claude Code project directory under
+// $HOME/.claude/projects. It runs only when the workspace is deleted too, so
+// --no-delete keeps both. A failure is logged, never fatal: the case result is
+// already decided at this point.
+func (e *defaultEvaluator) cleanupSessionDir(ctx context.Context, ag agent.Agent, rt runtime.Runtime) {
+	if !e.deleteWorkspace {
+		return
+	}
+	cleaner, ok := ag.(agent.SessionDirCleaner)
+	if !ok {
+		return
+	}
+	if err := cleaner.CleanupSessionDir(context.WithoutCancel(ctx), rt); err != nil {
+		logging.DebugContextf(ctx, "cleanup of agent session directory failed: %v", err)
+	}
+}
+
 func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.CaseConfig, configName string, overrideRT runtime.Runtime, overrideAgent agent.Agent) EvalResult { //nolint:cyclop,gocyclo,funlen // orchestrates the full case lifecycle (runtime prep → agent run → judge → finalize); splitting further would obscure the linear flow
 	ctx, span := observability.Tracer().Start(ctx, "evaluator.case")
 	defer span.End()
@@ -460,7 +478,10 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 			result.Configuration = configName
 			return result
 		}
-		defer func() { _ = rt.Close() }()
+		defer func() {
+			e.cleanupSessionDir(ctx, runAgent, rt)
+			_ = rt.Close()
+		}()
 	}
 
 	logging.DebugContextf(ctx, "Runner: case %s (%s): %s", caseCfg.ID, configName, caseCfg.Title)

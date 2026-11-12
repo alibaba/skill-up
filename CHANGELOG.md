@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the run exits non-zero or the text is an error report; stderr, Claude Code
   `API Error:` output, JSON result events flagged `is_error`, and API errors
   recorded in the session are still detected.
+- Remove the Claude Code project directory a run creates under
+  `~/.claude/projects` when its workspace is deleted, so eval sessions no
+  longer accumulate in the user's own session history; `--no-delete` keeps
+  both.
 
 ## [0.15.0] - 2026-11-09
 

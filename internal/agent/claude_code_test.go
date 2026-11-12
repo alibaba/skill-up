@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -1096,4 +1097,51 @@ func (r *claudeCodeTestRuntime) MergeEnv(env map[string]string) {
 
 func (r *claudeCodeTestRuntime) Shell() platform.Shell {
 	return platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
+}
+
+func TestClaudeCodeCleanupSessionDir(t *testing.T) {
+	if goruntime.GOOS == platform.GOOSWindows {
+		// The workspace-key path layout embeds a POSIX workspace path, which
+		// cannot be a directory component on Windows.
+		t.Skip("claude workspace-key path layout is POSIX-only")
+	}
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	rt, err := runtime.NewRuntime(runtime.Config{Type: "none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	workspaceKey := canonicalWorkspaceKey(workspaceForRuntime(rt))
+	projectDir := filepath.Join(tmpHome, ".claude", "projects", workspaceKey)
+	if err := os.MkdirAll(filepath.Join(projectDir, "memory"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "session.jsonl"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	unrelated := filepath.Join(tmpHome, ".claude", "projects", "-some-other-workspace")
+	if err := os.MkdirAll(unrelated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ag := &ClaudeCodeAgent{}
+	if err := ag.CleanupSessionDir(context.Background(), rt); err != nil {
+		t.Fatalf("CleanupSessionDir: %v", err)
+	}
+
+	if _, err := os.Stat(projectDir); !os.IsNotExist(err) {
+		t.Fatalf("project directory %s still exists (stat err=%v)", projectDir, err)
+	}
+	if _, err := os.Stat(unrelated); err != nil {
+		t.Fatalf("unrelated project directory was removed: %v", err)
+	}
+	if err := ag.CleanupSessionDir(context.Background(), rt); err != nil {
+		t.Fatalf("CleanupSessionDir is not idempotent: %v", err)
+	}
 }
