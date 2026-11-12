@@ -4319,10 +4319,10 @@ func TestExecuteCaseReportsWhyRequestedSessionCleanupDidNotRun(t *testing.T) {
 		{
 			name:     "agent without the hook",
 			deleteWS: true,
-			agent:    &mockAgent{name: "qoder_cli", output: "ok"},
+			agent:    &mockAgent{name: "qwen_code", output: "ok"},
 			// slog quotes the agent name, so match the pieces rather than the
 			// escaped rendering.
-			wantOutputs: []string{"qoder_cli", "does not support it"},
+			wantOutputs: []string{"qwen_code", "does not support it"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

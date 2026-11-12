@@ -36,7 +36,7 @@ skill-up run [path] [flags]
 | `--baseline`          | 配置文件中的值                | 为本次运行覆盖 `benchmark.enabled` 为 `true`                                                                                                                |
 | `--api-key`           | —                            | 传入 API Key（优先级高于环境变量）                                                                                                                          |
 | `--no-delete`         | `false`                      | 评测后保留由 skill-up 创建的 workspace 或容器，便于调试。                                                                                                   |
-| `--cleanup-sessions`  | `false`                      | 评测后同时删除 agent 为该 workspace 保存的会话目录。目前仅支持 `claude_code`：删除其 `~/.claude/projects/<workspace-key>/` 目录，包含会话记录与 memory。默认关闭，因为它会删除今天在评测后仍会保留的历史；显式的 `--cleanup-sessions=false` 会覆盖 `environment.cleanup_sessions: true`，`--no-delete` 优先级最高。 |
+| `--cleanup-sessions`  | `false`                      | 评测后同时删除 agent 为该 workspace 保存的会话目录。目前 `claude_code` 与 `qodercli` 支持：分别删除 `~/.claude/projects/<workspace-key>/` 与 `~/.qoder/projects/<workspace-key>/`（CN 版为 `~/.qoder-cn/projects/<workspace-key>/`）目录，包含会话记录与 memory。默认关闭，因为它会删除今天在评测后仍会保留的历史；显式的 `--cleanup-sessions=false` 会覆盖 `environment.cleanup_sessions: true`，`--no-delete` 优先级最高。 |
 | `-v, --verbose`       | `0`                          | 增加日志详细程度。默认输出 `info`；`-v`/`--verbose`/`--verbose=true` 输出 `debug`；`-vv`/`--verbose=2` 输出 `trace`；`--verbose=false` 关闭附加详细日志        |
 
 > **校验范围。** `run` 校验 eval 级配置，以及经过 `--include-case-name` /

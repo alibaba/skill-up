@@ -412,6 +412,22 @@ mcp:
 
 > **建议**：如果你的 Skill 不涉及文件操作，使用 `none` 可以省去沙箱准备时间。
 
+#### 会话清理
+
+评测会删除它创建的 workspace，但 agent CLI 可能在 workspace 之外保留按 workspace 保存的状态。Claude Code 会写入 `~/.claude/projects/<workspace-key>/`，其中包含会话记录与 `memory/` 目录；qodercli 会写入 `~/.qoder/projects/<workspace-key>/`（CN 版为 `~/.qoder-cn/`），其中包含会话记录、`<sessionID>/subagents/` 下的子代理记录以及 `*-session.json` 元数据。重复评测会不断堆积在用户自己的会话历史里。
+
+`environment.cleanup_sessions: true`（或 `--cleanup-sessions`）会在删除 workspace 的同时删除该目录。它默认关闭，因为会删除用户可见的历史；目前由 `claude_code` 与 `qodercli` 实现：
+
+```yaml
+environment:
+  type: none
+  cleanup_sessions: true
+```
+
+显式的 `--cleanup-sessions=false` 会覆盖 `cleanup_sessions: true`；只有未显式设置时才会回落到配置。
+
+`--no-delete` 优先：workspace 与会话都会保留，并报告跳过清理。清理也不会在以下情况运行：workspace 由外部拥有（`--workspace`）、runtime 会保留 workspace、或无法证明归属。归属通过解析每份会话记录中的工作目录来判定，而不是字符串搜索，因此工具参数里出现的路径不会被当作身份；只有目录内每份记录都指向本 workspace 才会删除，记录互相冲突、无法解析或没有记录身份时保留。路径仅标点不同的两个 workspace 会共用一个项目目录，此时同样保留。对未实现清理的 agent，运行时会报告不支持；`qwen_code` 属于这一类，因为它的会话文件不记录工作目录，无法证明归属。
+
 #### 按实验分组执行初始化
 
 框架在 setup 前注入 `SKILL_UP_VARIANT`，并让 `none`、Docker 和 OpenSandbox 的后续 runtime 命令都能读取。它标识任务实际使用的执行配置，当前为 `with_skill` 或 `without_skill`。非 benchmark 运行即使 Skill 列表为空也使用 `with_skill`；这个值不代表 Skill 已安装或被调用。未来配置名可以是 `v1.0`、`v1.1` 等，但这个变量本身不会启用自定义分组。
