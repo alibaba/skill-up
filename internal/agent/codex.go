@@ -193,6 +193,12 @@ func checkCodexCommandLineServer(server runtime.MCPServerConfig) error {
 	return nil
 }
 
+// codexConfiguredMCPServer is the part of a `codex mcp list --json` entry
+// skill-up reads.
+type codexConfiguredMCPServer struct {
+	Name string `json:"name"`
+}
+
 // checkCodexMCPNamesFree fails when the user's Codex config already has a
 // server with one of these names. A server defined with -c flags is merged
 // into a same-named entry rather than replacing it, so the mock would inherit
@@ -208,18 +214,12 @@ func checkCodexMCPNamesFree(ctx context.Context, rt Runtime, servers []runtime.M
 	if result.ExitCode != 0 {
 		return fmt.Errorf("list the MCP servers in the Codex config: exit %d: %s", result.ExitCode, strings.TrimSpace(result.Stderr))
 	}
-	var configured []struct {
-		Name string `json:"name"`
-	}
+	var configured []codexConfiguredMCPServer
 	if err := json.Unmarshal([]byte(strings.TrimSpace(result.Stdout)), &configured); err != nil {
 		return fmt.Errorf("read the MCP servers in the Codex config: %w", err)
 	}
 	for _, server := range servers {
-		if slices.ContainsFunc(configured, func(c struct {
-			Name string `json:"name"`
-		}) bool {
-			return c.Name == server.Name
-		}) {
+		if slices.ContainsFunc(configured, func(c codexConfiguredMCPServer) bool { return c.Name == server.Name }) {
 			return fmt.Errorf("codex already has an MCP server named %q in its config, so skill-up cannot add its mocked server under that name; rename the mocked server, or remove the entry with `codex mcp remove %s` if an earlier skill-up run left it there", server.Name, server.Name)
 		}
 	}
@@ -271,10 +271,13 @@ func (a *CodexAgent) mcpDefinitionFlags(ctx context.Context, rt Runtime, runArti
 	a.mcpMu.Unlock()
 
 	var flags strings.Builder
-	for _, server := range servers {
+	for i, server := range servers {
 		args := server.Args
 		if len(args) == 2 && args[0] == "-e" {
-			scriptPath := targetPathJoin(rt.Shell().GOOS, runArtifactDir, "mcp-"+server.Name+".js")
+			// Numbered rather than named: names that differ only in case would
+			// share a file on case-insensitive disks. .cjs keeps the script
+			// CommonJS even under a package.json that sets "type": "module".
+			scriptPath := targetPathJoin(rt.Shell().GOOS, runArtifactDir, fmt.Sprintf("mcp-server-%d.cjs", i))
 			if err := persistRuntimeArtifact(ctx, rt, scriptPath, args[1]); err != nil {
 				return "", fmt.Errorf("write mocked MCP server %q script: %w", server.Name, err)
 			}
