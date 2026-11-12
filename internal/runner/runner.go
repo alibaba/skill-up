@@ -44,9 +44,21 @@ type IterationObserver interface {
 	OnIterationComplete(ctx context.Context, iteration evaluator.IterationPlan, results []evaluator.EvalResult)
 }
 
+// cleanupSessionsEnabled reports whether session cleanup was requested, by the
+// flag or by the eval config. Whether it actually runs also depends on the
+// workspace being deleted and the agent supporting it; that decision lives in
+// the evaluator so every caller of it applies the same precedence.
+func cleanupSessionsEnabled(opts EvaluateOptions, evalCfg *config.EvalConfig) bool {
+	if opts.CleanupSessions {
+		return true
+	}
+	return evalCfg != nil && evalCfg.Environment.CleanupSessions
+}
+
 // EvaluateOptions controls evaluation behavior.
 type EvaluateOptions struct {
 	DeleteWorkspace   bool
+	CleanupSessions   bool
 	OutputDir         string
 	WorkspaceDir      string
 	Iteration         int
@@ -225,6 +237,7 @@ func (r *Runner) EvaluatePlan(ctx context.Context, plan ExecutionPlan, ag agent.
 			WorkspaceDir:    opts.WorkspaceDir,
 			Concurrency:     r.evalCfg.Cases.Parallelism,
 			DeleteWorkspace: opts.DeleteWorkspace,
+			CleanupSessions: cleanupSessionsEnabled(opts, r.evalCfg),
 			WithBaseline:    r.evalCfg.Benchmark.Enabled,
 			Observer:        opts.Observer,
 			TaskObserver:    opts.TaskObserver,

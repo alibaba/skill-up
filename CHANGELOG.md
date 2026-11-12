@@ -15,9 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `API Error:` output, JSON result events flagged `is_error`, and API errors
   recorded in the session are still detected.
 - Remove the Claude Code project directory a run creates under
-  `~/.claude/projects` when its workspace is deleted, so eval sessions no
-  longer accumulate in the user's own session history; `--no-delete` keeps
-  both.
+  `~/.claude/projects` when `environment.cleanup_sessions: true` or
+  `--cleanup-sessions` asks for it and the workspace is deleted, so eval
+  sessions stop accumulating in the user's own history. Off by default;
+  `--no-delete` keeps both and reports the skip, and an agent without support
+  for cleanup is reported instead of silently skipped.
 
 ## [0.15.0] - 2026-11-09
 

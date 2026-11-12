@@ -4261,21 +4261,24 @@ func (m *cleanupRecordingAgent) CleanupSessionDir(context.Context, runtime.Runti
 	return nil
 }
 
-func TestExecuteCaseCleansAgentSessionDirOnlyWhenWorkspaceDeleted(t *testing.T) {
+func TestExecuteCaseCleansAgentSessionDirOnlyWhenRequested(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		deleteWS     bool
+		cleanup      bool
 		workspaceDir string
 		want         int32
 	}{
-		{name: "workspace deleted", deleteWS: true, want: 1},
-		{name: "workspace kept", deleteWS: false, want: 0},
-		{name: "externally owned workspace kept", deleteWS: true, workspaceDir: t.TempDir(), want: 0},
+		{name: "requested and workspace deleted", deleteWS: true, cleanup: true, want: 1},
+		{name: "not requested", deleteWS: true, want: 0},
+		{name: "requested but --no-delete keeps the workspace", deleteWS: false, cleanup: true, want: 0},
+		{name: "requested on an externally owned workspace", deleteWS: true, cleanup: true, workspaceDir: t.TempDir(), want: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ag := &cleanupRecordingAgent{mockAgent: &mockAgent{name: "claude_code", output: "ok"}}
 			e := newTestEvaluator(EvalOptions{
 				DeleteWorkspace: tc.deleteWS,
+				CleanupSessions: tc.cleanup,
 				WorkspaceDir:    tc.workspaceDir,
 				SkillDir:        t.TempDir(),
 				EvalCfg: &config.EvalConfig{
@@ -4295,6 +4298,55 @@ func TestExecuteCaseCleansAgentSessionDirOnlyWhenWorkspaceDeleted(t *testing.T) 
 
 			if got := ag.cleanupCalls.Load(); got != tc.want {
 				t.Fatalf("CleanupSessionDir calls = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestExecuteCaseReportsWhyRequestedSessionCleanupDidNotRun(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		deleteWS    bool
+		agent       agent.Agent
+		wantOutputs []string
+	}{
+		{
+			name:        "no-delete wins",
+			deleteWS:    false,
+			agent:       &cleanupRecordingAgent{mockAgent: &mockAgent{name: "claude_code", output: "ok"}},
+			wantOutputs: []string{"--no-delete keeps both the workspace and its sessions"},
+		},
+		{
+			name:     "agent without the hook",
+			deleteWS: true,
+			agent:    &mockAgent{name: "qoder_cli", output: "ok"},
+			// slog quotes the agent name, so match the pieces rather than the
+			// escaped rendering.
+			wantOutputs: []string{"qoder_cli", "does not support it"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newTestEvaluator(EvalOptions{
+				DeleteWorkspace: tc.deleteWS,
+				CleanupSessions: true,
+				SkillDir:        t.TempDir(),
+				EvalCfg: &config.EvalConfig{
+					Environment: config.Environment{Type: "none"},
+					Judge: config.JudgeConfig{
+						Type:    "rule_based",
+						Success: []config.Rule{{OutputContains: &config.OutputContainsRule{All: []string{"ok"}}}},
+					},
+				},
+			})
+			caseCfg := &config.CaseConfig{ID: "cleanup", Input: config.Input{Prompt: "hi"}}
+
+			out := captureStdout(t, func() {
+				_ = e.executeCase(context.Background(), caseCfg, "with_skill", nil, tc.agent)
+			})
+			for _, want := range tc.wantOutputs {
+				if !strings.Contains(out, want) {
+					t.Fatalf("output does not report %q: %q", want, out)
+				}
 			}
 		})
 	}
