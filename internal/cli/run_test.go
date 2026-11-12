@@ -1421,6 +1421,7 @@ func TestEvaluateOptionsFromFlags(t *testing.T) {
 
 	cmd := &cobra.Command{}
 	cmd.Flags().Bool("no-delete", false, "")
+	cmd.Flags().Bool("cleanup-sessions", false, "")
 	cmd.Flags().String("output-dir", "", "")
 	cmd.Flags().String("workspace", "", "")
 	cmd.Flags().Int("iteration", 1, "")
@@ -1428,6 +1429,9 @@ func TestEvaluateOptionsFromFlags(t *testing.T) {
 
 	if err := cmd.Flags().Set("no-delete", testFlagBoolTrue); err != nil {
 		t.Fatalf("set no-delete: %v", err)
+	}
+	if err := cmd.Flags().Set("cleanup-sessions", testFlagBoolTrue); err != nil {
+		t.Fatalf("set cleanup-sessions: %v", err)
 	}
 	if err := cmd.Flags().Set("output-dir", "/tmp/custom-output"); err != nil {
 		t.Fatalf("set output-dir: %v", err)
@@ -1447,6 +1451,12 @@ func TestEvaluateOptionsFromFlags(t *testing.T) {
 
 	if opts.DeleteWorkspace {
 		t.Fatal("DeleteWorkspace = true, want false when --no-delete is set")
+	}
+	if !opts.CleanupSessions {
+		t.Fatal("CleanupSessions = false, want true when --cleanup-sessions is set; --no-delete precedence applies where the workspace is deleted")
+	}
+	if !opts.CleanupSessionsSet {
+		t.Fatal("CleanupSessionsSet = false, want true when the flag is given")
 	}
 	if opts.OutputDir != "/tmp/custom-output" {
 		t.Fatalf("OutputDir = %q, want /tmp/custom-output", opts.OutputDir)
@@ -1518,6 +1528,7 @@ func TestEvaluateOptionsFromFlags_RejectsNegativeIteration(t *testing.T) {
 
 	cmd := &cobra.Command{}
 	cmd.Flags().Bool("no-delete", false, "")
+	cmd.Flags().Bool("cleanup-sessions", false, "")
 	cmd.Flags().String("output-dir", "", "")
 	cmd.Flags().String("workspace", "", "")
 	cmd.Flags().Int("iteration", 0, "")

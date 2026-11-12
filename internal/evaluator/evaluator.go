@@ -64,6 +64,7 @@ type EvalOptions struct {
 	WorkspaceDir    string
 	Concurrency     int
 	DeleteWorkspace bool
+	CleanupSessions bool
 	Loader          *config.Loader
 	Resolver        *credential.Resolver
 	Agent           agent.Agent
@@ -161,6 +162,8 @@ type defaultEvaluator struct {
 	simulator       usersimulator.Simulator
 	fixtures        *fixtureRegistry
 	deleteWorkspace bool
+	cleanupSessions bool
+	cleanupNotice   sync.Once
 	observer        ProgressObserver
 	taskObserver    TaskObserver
 	mcpOnce         sync.Once
@@ -196,6 +199,7 @@ func NewEvaluator(opts EvalOptions) Evaluator {
 		simulator:       opts.Simulator,
 		fixtures:        newFixtureRegistry(),
 		deleteWorkspace: opts.DeleteWorkspace,
+		cleanupSessions: opts.CleanupSessions,
 		observer:        opts.Observer,
 		taskObserver:    opts.TaskObserver,
 	}
@@ -393,6 +397,48 @@ func (e *defaultEvaluator) executeCase(ctx context.Context, caseCfg *config.Case
 	return result
 }
 
+// cleanupSessionDir removes per-workspace state an agent keeps outside the
+// workspace, such as the Claude Code project directory under
+// $HOME/.claude/projects. It is opt-in: nothing is deleted unless
+// --cleanup-sessions or environment.cleanup_sessions asked for it, because the
+// sessions are user-visible history that today survives an evaluation.
+//
+// --no-delete wins over the request, and every reason a requested cleanup did
+// not run is announced once. A failure is logged, never fatal: the case result
+// is already decided at this point.
+func (e *defaultEvaluator) cleanupSessionDir(ctx context.Context, ag agent.Agent, rt runtime.Runtime) {
+	if !e.cleanupSessions {
+		return
+	}
+	if !e.deleteWorkspace {
+		e.announceCleanupSkip(ctx, "--no-delete keeps both the workspace and its sessions")
+		return
+	}
+	// DeleteWorkspace only says the evaluator asked. A runtime handed a
+	// workspace it does not own preserves it, and the project directory has to
+	// survive with it.
+	if owner, ok := rt.(runtime.WorkspaceOwner); ok && !owner.OwnsWorkspace() {
+		e.announceCleanupSkip(ctx, "the workspace is externally owned and preserved")
+		return
+	}
+	cleaner, ok := ag.(agent.SessionDirCleaner)
+	if !ok {
+		e.announceCleanupSkip(ctx, fmt.Sprintf("agent %q does not support it (supported today: claude_code)", ag.Name()))
+		return
+	}
+	if err := cleaner.CleanupSessionDir(context.WithoutCancel(ctx), rt); err != nil {
+		logging.WarnContextf(ctx, "session cleanup failed: %v", err)
+	}
+}
+
+// announceCleanupSkip reports a skipped cleanup once per evaluator rather than
+// once per case; the reason is the same for every case in a run.
+func (e *defaultEvaluator) announceCleanupSkip(ctx context.Context, reason string) {
+	e.cleanupNotice.Do(func() {
+		logging.WarnContextf(ctx, "session cleanup requested but not run: %s", reason)
+	})
+}
+
 func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.CaseConfig, configName string, overrideRT runtime.Runtime, overrideAgent agent.Agent) EvalResult { //nolint:cyclop,gocyclo,funlen // orchestrates the full case lifecycle (runtime prep → agent run → judge → finalize); splitting further would obscure the linear flow
 	ctx, span := observability.Tracer().Start(ctx, "evaluator.case")
 	defer span.End()
@@ -460,7 +506,10 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 			result.Configuration = configName
 			return result
 		}
-		defer func() { _ = rt.Close() }()
+		defer func() {
+			e.cleanupSessionDir(ctx, runAgent, rt)
+			_ = rt.Close()
+		}()
 	}
 
 	logging.DebugContextf(ctx, "Runner: case %s (%s): %s", caseCfg.ID, configName, caseCfg.Title)
