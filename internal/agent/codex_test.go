@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -1526,6 +1527,43 @@ func TestCodexRun_CaseVariantMockNamesGetSeparateScripts(t *testing.T) {
 	assertCodexMockDefined(t, rt, runCmd, lower, 1)
 }
 
+// A failed script upload stops the run before Codex starts and removes the
+// run's artifact directory.
+func TestCodexRun_ScriptUploadFailureCleansUp(t *testing.T) {
+	t.Parallel()
+
+	for _, resume := range []bool{false, true} {
+		t.Run("resume="+strconv.FormatBool(resume), func(t *testing.T) {
+			t.Parallel()
+			rt := &codexTestRuntime{workspace: t.TempDir(), failUploadSuffix: "mcp-server-1.cjs"}
+			ag := NewCodexAgent(Config{})
+			servers := []runtime.MCPServerConfig{mockedCodexServer("shop"), mockedCodexServer("docs")}
+			if err := ag.InstallMCP(context.Background(), rt, runtime.MCPConfig{Servers: servers}); err != nil {
+				t.Fatalf("InstallMCP failed: %v", err)
+			}
+			message := transcript.Message{Role: transcript.RoleUser, Content: "hi", Turn: 1}
+			var err error
+			if resume {
+				_, err = ag.RunTurn(context.Background(), rt, ExecOptions{}, message, "sess-1")
+			} else {
+				_, err = ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{message})
+			}
+			if err == nil || !strings.Contains(err.Error(), `write mocked MCP server "docs" script`) {
+				t.Fatalf("error = %v, want the upload failure", err)
+			}
+			if containsCommand(rt.commands, "codex exec") {
+				t.Fatalf("codex must not run after a failed upload: %v", rt.commands)
+			}
+			rt.mu.Lock()
+			removed := slices.Contains(rt.removed, rt.runArtifactDir)
+			rt.mu.Unlock()
+			if !removed {
+				t.Fatalf("run artifact directory %q was not removed: %v", rt.runArtifactDir, rt.removed)
+			}
+		})
+	}
+}
+
 func TestCodexInstallMCP_RejectsNameAlreadyInCodexConfig(t *testing.T) {
 	t.Parallel()
 
@@ -1936,6 +1974,8 @@ type codexTestRuntime struct {
 	existingMCP         []string // server names `codex mcp list --json` reports as configured
 	listMCPFails        bool
 	uploads             map[string]string // target path -> uploaded content
+	failUploadSuffix    string            // UploadFile fails for a target path with this suffix
+	removed             []string          // paths removed with rm -rf
 	mu                  sync.Mutex
 	lastCommand         string
 	lastExecEnv         map[string]string
@@ -1949,6 +1989,9 @@ func (r *codexTestRuntime) Close() error                 { return nil }
 func (r *codexTestRuntime) Start(context.Context) error  { return nil }
 func (r *codexTestRuntime) Stop(context.Context) error   { return nil }
 func (r *codexTestRuntime) UploadFile(_ context.Context, sourcePath, targetPath string) error {
+	if r.failUploadSuffix != "" && strings.HasSuffix(targetPath, r.failUploadSuffix) {
+		return errors.New("disk full")
+	}
 	data, err := os.ReadFile(sourcePath)
 	if err != nil {
 		return err
@@ -2003,7 +2046,10 @@ func (r *codexTestRuntime) Exec(_ context.Context, command string, opts runtime.
 		r.runArtifactDir = strings.Trim(dir, "'")
 		return runtime.ExecResult{ExitCode: 0}, nil
 	}
-	if strings.HasPrefix(command, "rm -rf -- ") {
+	if dir, ok := strings.CutPrefix(command, "rm -rf -- "); ok {
+		r.mu.Lock()
+		r.removed = append(r.removed, strings.Trim(dir, "'"))
+		r.mu.Unlock()
 		return runtime.ExecResult{ExitCode: 0}, nil
 	}
 	if strings.HasPrefix(command, "wc -c <") {

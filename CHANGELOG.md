@@ -17,8 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already has a server with the mocked server's name, when the config cannot
   be listed, or when the name is not a valid Codex config key. Real MCP servers
   are still installed with `codex mcp add`.
-
-### Fixed
 - Stop reporting a successful Claude Code answer as a provider rate-limit or
   authentication failure when its text mentions phrases such as "rate limit" or
   "authentication error". Answer text is scanned for these failures only when
