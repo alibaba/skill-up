@@ -367,6 +367,52 @@ func TestProvisioner_SameNameMockedServersDifferentFixtures(t *testing.T) {
 	}
 }
 
+func TestProvisioner_MockedServerRejectsInvalidToolMetadata(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		tool string
+		want string
+	}{
+		{
+			name: "unknown field",
+			tool: "    description: Look up a project.\n    inputSchema:\n      type: object\n    response: {status: OPEN}\n",
+			want: `has unknown field "inputSchema"; supported fields are description, input_schema and response`,
+		},
+		{
+			name: "scalar input schema",
+			tool: "    input_schema: object\n    response: {status: OPEN}\n",
+			want: "input_schema must be a mapping with type: object",
+		},
+		{
+			name: "missing response",
+			tool: "    description: Look up a project.\n",
+			want: "has no response; set response (null is allowed)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			skillDir := t.TempDir()
+			content := "tools:\n  get_project:\n" + tt.tool
+			if err := os.WriteFile(filepath.Join(skillDir, "mcp.yaml"), []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, _, err := (Provisioner{SkillDir: skillDir}).Provision(config.MCPConfig{
+				Servers: []config.MCPServer{{Name: "project-mgmt", Mode: "mocked", ConfigRef: "mcp.yaml"}},
+			})
+			want := `mcp server "project-mgmt" mock fixture tool "get_project" ` + tt.want
+			if err == nil || err.Error() != want {
+				t.Fatalf("Provision error = %v, want %q", err, want)
+			}
+		})
+	}
+}
+
 func TestProvisionerValidationAndTransportErrors(t *testing.T) {
 	t.Parallel()
 
