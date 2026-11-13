@@ -1,0 +1,15 @@
+id: unrelated
+title: A request that no installed Skill covers
+tag: routing
+input:
+  prompt: "What is 17 * 23? Reply with the number only."
+constraints:
+  timeout_seconds: 180
+  max_turns: 3
+expect:
+  files_not_exist: [".canary-relevant", ".canary-decoy"]
+judge:
+  type: rule_based
+  success:
+    - output_contains:
+        all: ["391"]
