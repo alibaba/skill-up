@@ -101,6 +101,10 @@ type SkillRef struct {
 	Target  string   `yaml:"target,omitempty"`
 	Include []string `yaml:"include,omitempty"`
 	Exclude []string `yaml:"exclude,omitempty"`
+	// InstallName is the directory name the Skill is installed under when
+	// Target is empty, resolved by the evaluator from SKILL.md. It is not
+	// configurable.
+	InstallName string `yaml:"-" json:"-"`
 }
 
 // EngineConfig defines the Agent Engine configuration.

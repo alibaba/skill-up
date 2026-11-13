@@ -12,6 +12,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -776,6 +777,7 @@ func (e *defaultEvaluator) runJudgePhaseWithSpan(
 	logging.DebugContextf(ctx, "Judge: case %s using %s", caseCfg.ID, judgeLabel(judgeCfg))
 	logging.DebugContextf(ctx, "Judge: case %s generated_files=%d workspace_diff=%t", caseCfg.ID, len(judgeInput.GeneratedFiles), judgeInput.WorkspaceDiff != "")
 	if judgeCfg.Type == judgeTypeAgentJudge {
+		judgeCfg = e.withJudgeSkillInstallNames(judgeCfg)
 		result.JudgeSkills = judge.SkillInfosFromRefs(judgeCfg.Skills)
 	}
 
@@ -909,6 +911,9 @@ func (e *defaultEvaluator) installJudgeSkills(ctx context.Context, rt runtime.Ru
 		return nil
 	}
 	skillDir := e.resolvedSkillDir()
+	if err := checkSkillDirCollisions(skillDir, "judge.skills", judgeCfg.Skills); err != nil {
+		return err
+	}
 	for i, ref := range judgeCfg.Skills {
 		if strings.TrimSpace(ref.Path) == "" {
 			return fmt.Errorf("judge.skills[%d].path is required", i)
@@ -920,7 +925,7 @@ func (e *defaultEvaluator) installJudgeSkills(ctx context.Context, rt runtime.Ru
 		if err := judgeAgent.InstallSkill(ctx, rt, skillCfg); err != nil {
 			return fmt.Errorf("failed to install judge skill judge.skills[%d].path=%q: %w", i, ref.Path, err)
 		}
-		logging.DebugContextf(ctx, "Evaluator: judge skill installed: %s", filepath.Base(skillCfg.Source))
+		logging.DebugContextf(ctx, "Evaluator: judge skill installed: %s", skillCfg.DirName())
 	}
 	return nil
 }
@@ -950,7 +955,7 @@ func (e *defaultEvaluator) removeDefaultRunSkillsBeforeJudge(
 		if strings.TrimSpace(skillCfg.Source) == "" {
 			continue
 		}
-		target := filepath.Join(skillPath, filepath.Base(skillCfg.Source))
+		target := filepath.Join(skillPath, skillCfg.DirName())
 		if !isDefaultAgentSkillTarget(skillPath, target) {
 			continue
 		}
@@ -1369,12 +1374,8 @@ func (e *defaultEvaluator) setupCaseEnvironment(ctx context.Context, rt runtime.
 	}
 
 	if configName != "without_skill" && e.loader != nil {
-		for _, skillRef := range e.evalCfg.Skills {
-			skillCfg := resolveSkillConfig(e.loader.SkillDir(), skillRef)
-			if err := ag.InstallSkill(ctx, rt, skillCfg); err != nil {
-				return agent.RuntimeObservation{}, fmt.Errorf("failed to install skill %s: %w", skillRef.Path, err)
-			}
-			logging.DebugContextf(ctx, "Evaluator: skill installed: %s", filepath.Base(skillCfg.Source))
+		if err := e.installRunSkills(ctx, rt, ag); err != nil {
+			return agent.RuntimeObservation{}, err
 		}
 	}
 
@@ -1388,6 +1389,45 @@ func (e *defaultEvaluator) setupCaseEnvironment(ctx context.Context, rt runtime.
 	return observation, nil
 }
 
+// withJudgeSkillInstallNames returns judgeCfg with each judge Skill's default
+// install directory name filled in, so the judge prompt names the Skill the
+// way it was installed. The Skills slice is copied because judgeCfg is shared
+// between cases that run in parallel.
+func (e *defaultEvaluator) withJudgeSkillInstallNames(judgeCfg config.JudgeConfig) config.JudgeConfig {
+	if len(judgeCfg.Skills) == 0 {
+		return judgeCfg
+	}
+	skillDir := e.resolvedSkillDir()
+	skills := slices.Clone(judgeCfg.Skills)
+	for i, ref := range skills {
+		if strings.TrimSpace(ref.Target) != "" || strings.TrimSpace(ref.Path) == "" {
+			continue
+		}
+		if !filepath.IsAbs(ref.Path) && strings.TrimSpace(skillDir) == "" {
+			continue
+		}
+		skills[i].InstallName = resolveSkillConfig(skillDir, ref).DirName()
+	}
+	judgeCfg.Skills = skills
+	return judgeCfg
+}
+
+// installRunSkills installs the evaluation's skills into the agent under test.
+func (e *defaultEvaluator) installRunSkills(ctx context.Context, rt runtime.Runtime, ag agent.Agent) error {
+	skillDir := e.loader.SkillDir()
+	if err := checkSkillDirCollisions(skillDir, "skills", e.evalCfg.Skills); err != nil {
+		return err
+	}
+	for _, skillRef := range e.evalCfg.Skills {
+		skillCfg := resolveSkillConfig(skillDir, skillRef)
+		if err := ag.InstallSkill(ctx, rt, skillCfg); err != nil {
+			return fmt.Errorf("failed to install skill %s: %w", skillRef.Path, err)
+		}
+		logging.DebugContextf(ctx, "Evaluator: skill installed: %s", skillCfg.DirName())
+	}
+	return nil
+}
+
 func resolveSkillConfig(skillDir string, ref config.SkillRef) runtime.SkillConfig {
 	source := ref.Path
 	if source != "" && !filepath.IsAbs(source) {
@@ -1396,9 +1436,55 @@ func resolveSkillConfig(skillDir string, ref config.SkillRef) runtime.SkillConfi
 	return runtime.SkillConfig{
 		Source:  source,
 		Target:  ref.Target,
+		Name:    declaredSkillDirName(source),
 		Include: slices.Clone(ref.Include),
 		Exclude: slices.Clone(ref.Exclude),
 	}
+}
+
+// skillDirNamePattern is the set of declared names that are safe to use as a
+// directory name on every supported filesystem.
+var skillDirNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+
+// windowsReservedNames are device names Windows refuses as a file or
+// directory name, in any letter case.
+var windowsReservedNames = []string{
+	"con", "prn", "aux", "nul",
+	"com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
+	"lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+}
+
+// declaredSkillDirName returns the name a skill declares in its SKILL.md when
+// that name can be used as a single directory name, and "" otherwise so the
+// caller falls back to the source folder's name.
+func declaredSkillDirName(source string) string {
+	name, ok := config.SkillNameInDir(source)
+	if !ok || !skillDirNamePattern.MatchString(name) || slices.Contains(windowsReservedNames, strings.ToLower(name)) {
+		return ""
+	}
+	return name
+}
+
+// checkSkillDirCollisions rejects a skills list in which two entries without
+// an explicit target would be installed into the same directory: the second
+// upload would overwrite some files of the first and keep the rest, leaving a
+// mix of both Skills.
+func checkSkillDirCollisions(skillDir, field string, refs []config.SkillRef) error {
+	seen := make(map[string]string, len(refs))
+	for _, ref := range refs {
+		if strings.TrimSpace(ref.Path) == "" || strings.TrimSpace(ref.Target) != "" {
+			continue
+		}
+		dir := resolveSkillConfig(skillDir, ref).DirName()
+		// Compare case-insensitively: macOS and Windows filesystems would
+		// merge names that differ only in case.
+		key := strings.ToLower(dir)
+		if prev, ok := seen[key]; ok {
+			return fmt.Errorf("%s: %q and %q would both be installed as %q; rename one Skill or set an explicit target", field, prev, ref.Path, dir)
+		}
+		seen[key] = ref.Path
+	}
+	return nil
 }
 
 func (e *defaultEvaluator) provisionMCPConfig() (runtime.MCPConfig, map[string]string, error) {

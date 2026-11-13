@@ -7,6 +7,7 @@ import (
 	"io"
 	"maps"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -225,10 +226,23 @@ type MCPConfig struct {
 
 // SkillConfig identifies a skill source and its target install location.
 type SkillConfig struct {
-	Source  string
-	Target  string
+	Source string
+	Target string
+	// Name is the skill's declared name (SKILL.md frontmatter), when it is
+	// known and usable as a directory name.
+	Name    string
 	Include []string
 	Exclude []string
+}
+
+// DirName returns the directory a skill is installed under when Target is not
+// set: its declared Name, so the agent sees the skill under the name its own
+// text uses, or the source directory's basename when no name is known.
+func (c SkillConfig) DirName() string {
+	if c.Name != "" {
+		return c.Name
+	}
+	return filepath.Base(c.Source)
 }
 
 // NewRuntime creates a Runtime based on the config type.
