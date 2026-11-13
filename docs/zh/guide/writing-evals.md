@@ -234,11 +234,15 @@ engine:
 - `${api_key}` 以及任何看起来像凭据的 kwarg key（`token` / `secret` / `api_key` / `apiKey` / `bearerToken` 等）都不允许出现在 `command` / `args` / `cwd` / `input_file` / `output_file` 中，必须经由 `engine.custom.env` 注入到子进程环境变量里。
 - `${SOMEVAR:-...}` 默认值如果匹配常见凭据特征（`sk-...`、`sk-ant-...`、`ghp_...`、`AIza...`、`AKIA...`、JWT 等），同样会在命令行场景被拒。
 
-**local 适配器的两个常见坑。** 适配器启动 agent CLI 时，除非协议本身要通过 stdin
+**local 适配器的三个常见坑。** 适配器启动 agent CLI 时，除非协议本身要通过 stdin
 传帧，否则应关闭或重定向子进程的 stdin——部分 CLI 会把"打开的 stdin 管道"当作在等
 用户输入，一直阻塞到用例 deadline 且没有任何输出，看起来像 agent 很慢。其次要让 agent
 以非交互方式运行：使用它最自治的权限档，并在 CLI 支持时禁用交互式问询 / 审批工具，
-因为无头评测没有人应答，只有会经过审批点的用例才会挂住。调用超时时，把子进程 stdout
+因为无头评测没有人应答，只有会经过审批点的用例才会挂住。自治权限档只有在运行时隔离了
+agent 时才安全：默认的 `environment.type: none` 会让 CLI 直接在你的宿主机上执行，因此
+`--mode yolo` 这类开关要配合 `environment.type: docker` / `opensandbox`，或显式的工具
+白名单——两者都没有时，它只是移除了审批提示，宿主机权限依然敞开（`qwen_code` 一节有
+同样的提醒）。调用超时时，把子进程 stdout
 的尾部保留到失败信息里；空白超时是最难排查的报告。一个完整的 local 传输示例（ZCode
 CLI）见 [docs/design/custom-engine.md](../../design/custom-engine.md#example-zcode-cli)。
 
