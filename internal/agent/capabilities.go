@@ -36,6 +36,11 @@ const (
 	ModelPolicyPassthrough ModelPolicy = "passthrough"
 	// ModelPolicyCodexProvider requires a usable Codex provider configuration.
 	ModelPolicyCodexProvider ModelPolicy = "codex_provider"
+	// ModelPolicyJoinLegacySplit rejoins a legacy "provider/model" reference the
+	// credential layer split to pick credentials, when its ModelSplit flag holds.
+	// It is for adapters that resolve their models by the full id, where a
+	// provider prefix may have been split off only to select credentials.
+	ModelPolicyJoinLegacySplit ModelPolicy = "join_legacy_split"
 )
 
 // Capabilities declares the configuration surface consumed by an adapter.
@@ -82,7 +87,9 @@ func CapabilitiesForEngine(engineName string) Capabilities {
 			SupportedKwargs: slices.Clone(qoderKwargs),
 		}
 	case agentkind.QwenCode, agentkind.QwenCodeAlias, agentkind.QwenAlias:
-		return Capabilities{Protocol: ProtocolOpenAI, ModelPolicy: ModelPolicyPassthrough, SupportsBaseURL: true, SupportsVersion: agentkind.SupportsVersion(engineName)}
+		// Qwen Code resolves modelProviders entries by their full id, so a
+		// requested "provider/model" ref must reach the adapter unchanged (#383).
+		return Capabilities{Protocol: ProtocolOpenAI, ModelPolicy: ModelPolicyJoinLegacySplit, SupportsBaseURL: true, SupportsVersion: agentkind.SupportsVersion(engineName)}
 	default:
 		return Capabilities{
 			Protocol:    ProtocolCustom,
@@ -266,6 +273,11 @@ func resolveAppliedModel(params *credential.ResolvedAgentConfig, capabilities Ca
 	requested := strings.TrimSpace(params.Model)
 	if requested == "" {
 		return ""
+	}
+	if capabilities.ModelPolicy == ModelPolicyJoinLegacySplit && params.ModelSplit && params.Provider != "" {
+		// The adapter resolves the model by its full id, so it rejoins the
+		// legacy split instead of forwarding the bare half.
+		return params.Provider + "/" + params.Model
 	}
 
 	if capabilities.ModelPolicy == ModelPolicyCodexProvider {
