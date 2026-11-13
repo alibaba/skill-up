@@ -1584,10 +1584,19 @@ func TestCodexRun_SameWorkspacePathKeepsCasesApart(t *testing.T) {
 		t.Fatalf("InstallMCP B failed: %v", err)
 	}
 	message := []transcript.Message{{Role: transcript.RoleUser, Content: "hi", Turn: 1}}
-	if _, err := ag.Run(context.Background(), rtA, ExecOptions{}, message); err != nil {
-		t.Fatalf("Run A failed: %v", err)
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i, rt := range []*codexTestRuntime{rtA, rtB} {
+		wg.Go(func() {
+			_, errs[i] = ag.Run(context.Background(), rt, ExecOptions{}, message)
+		})
+	}
+	wg.Wait()
+	if err := errors.Join(errs...); err != nil {
+		t.Fatalf("concurrent Run failed: %v", err)
 	}
 	assertCodexMockDefined(t, rtA, codexRunCommand(t, rtA), caseA, 0)
+	assertCodexMockDefined(t, rtB, codexRunCommand(t, rtB), caseB, 0)
 
 	// A case without mocks on another runtime with that path gets none.
 	rtC := &codexTestRuntime{workspace: "opensandbox", execResult: runtime.ExecResult{Stdout: stdout, ExitCode: 0}}
@@ -1634,6 +1643,29 @@ func TestCodexJudgeAdapter_SeesTheCasesMockedServers(t *testing.T) {
 	}
 	if got := codexMCPForRuntime(rt); len(got.defined) != 0 || len(got.approve) != 0 {
 		t.Fatalf("record after reset = %+v, want empty", got)
+	}
+}
+
+func TestCodexReleaseRuntime_DropsTheCasesServers(t *testing.T) {
+	t.Parallel()
+
+	stdout := `{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"OK"}}`
+	rt := &codexTestRuntime{workspace: t.TempDir(), execResult: runtime.ExecResult{Stdout: stdout, ExitCode: 0}}
+	ag := NewCodexAgent(Config{})
+	if err := ag.InstallMCP(context.Background(), rt, runtime.MCPConfig{Servers: []runtime.MCPServerConfig{mockedCodexServer("shop")}}); err != nil {
+		t.Fatalf("InstallMCP failed: %v", err)
+	}
+
+	ag.ReleaseRuntime(rt)
+
+	if got := codexMCPForRuntime(rt); len(got.defined) != 0 || len(got.approve) != 0 || got.owner != nil {
+		t.Fatalf("record after release = %+v, want none", got)
+	}
+	if _, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{Role: transcript.RoleUser, Content: "hi", Turn: 1}}); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if runCmd := codexRunCommand(t, rt); strings.Contains(runCmd, "mcp_servers.") {
+		t.Fatalf("a released runtime still received servers: %s", runCmd)
 	}
 }
 

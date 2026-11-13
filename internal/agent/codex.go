@@ -47,12 +47,14 @@ type codexRuntimeMCP struct {
 // judge, which runs in the case's runtime and must see the case's servers.
 var codexMCPByRuntime = struct {
 	sync.Mutex
+
 	entries map[string]codexRuntimeMCP
 }{entries: make(map[string]codexRuntimeMCP)}
 
 // codexRuntimeKey identifies a runtime. Docker and OpenSandbox runtimes of
 // concurrent cases report the same workspace path, so the path alone would mix
-// their servers.
+// their servers. The address is safe to use because the evaluator releases the
+// entry before the runtime is closed and can be collected.
 func codexRuntimeKey(rt Runtime) string {
 	if v := reflect.ValueOf(rt); v.Kind() == reflect.Pointer {
 		return fmt.Sprintf("%T@%x:%s", rt, v.Pointer(), rt.Workspace())
@@ -277,6 +279,13 @@ func (a *CodexAgent) rememberMCPServers(ctx context.Context, rt Runtime, servers
 		return
 	}
 	codexMCPByRuntime.entries[key] = codexRuntimeMCP{owner: a, approve: names, defined: slices.Clone(defined)}
+}
+
+// ReleaseRuntime drops the MCP servers recorded for rt once its case is done.
+func (a *CodexAgent) ReleaseRuntime(rt Runtime) {
+	codexMCPByRuntime.Lock()
+	defer codexMCPByRuntime.Unlock()
+	delete(codexMCPByRuntime.entries, codexRuntimeKey(rt))
 }
 
 // mcpDefinitionFlags defines the workspace's mocked MCP servers with -c
