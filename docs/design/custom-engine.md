@@ -140,7 +140,10 @@ Before completing an integration, confirm each item:
   offers, and disable interactive question/approval tools when the CLI has a flag
   for that. A headless run has nobody to answer a prompt, so only the cases that
   cross an approval point hang while simple cases pass — easily misdiagnosed as
-  the task being too slow.
+  the task being too slow. That mode is only safe under a runtime that isolates:
+  the default `environment.type: none` runs the CLI on your host, so pair it with
+  `environment.type: docker` / `opensandbox` or an explicit tool allowlist.
+  Otherwise the mode removes the approval prompt without removing host privileges.
 - When the invocation fails or times out, return the tail of the child's stdout in
   the failure message or `final_message`; an empty timeout is the hardest failure
   to diagnose from a report.
@@ -596,7 +599,7 @@ engine:
       ZCODE_CLI: ${ZCODE_CLI}
       ZCODE_MODE: ${kwargs.mode}
     kwargs:
-      mode: yolo
+      mode: yolo  # needs an isolating runtime; see the notes below
     local:
       command: node
       args:
@@ -608,8 +611,12 @@ engine:
       cwd: ${workspace}
 ```
 
-Two behaviours are worth knowing before copying it:
+Three behaviours are worth knowing before copying it:
 
+- `--mode yolo` removes ZCode's approval prompts, so it belongs under an isolating
+  runtime (`environment.type: docker` / `opensandbox`). With the default `none`
+  runtime ZCode executes shell and file tools on your host with your privileges; on
+  `none`, use `--mode build` (or `guarded`) and narrow `--disallowed-tools` instead.
 - Tool calls that would wait for a human must not: run in the CLI's most autonomous
   permission mode (`--mode yolo` above) and, where the CLI supports it, disallow the
   interactive question tool (`--disallowed-tools AskUserQuestion`). Otherwise cases
