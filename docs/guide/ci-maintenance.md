@@ -135,11 +135,36 @@ Do not rebuild or move an old digest. To roll back, create a pull request that r
 ## Release procedure
 
 1. Ensure the release commit is on `main` and CI is green.
-2. Create a signed `v*` semantic-version tag covered by the tag ruleset.
+2. Create a signed `v*` semantic-version tag covered by the tag ruleset. Before pushing, run `git verify-tag <tag>` with the trusted signer configuration and check `git rev-parse <tag>^{}` against the reviewed commit. A permitted tag push alone does not establish a valid signature.
 3. Let the unprivileged build job generate the GoReleaser files and upload the one-day release-candidate artifact.
 4. Inspect the tag, commit, changelog, and build summary, then approve the `release` environment deployment.
 5. Verify that the publish job attested and uploaded the exact release-candidate archives and checksums without rebuilding them.
 6. If publication fails, fix forward and create a new version; do not rewrite a published tag.
+
+### v0.15.0 signature audit
+
+The published `v0.15.0` annotated tag points to
+`ffba9031129271260026dbb2a823af23d0505100` but is unsigned. This deviates from
+step 2 above: the active tag ruleset permitted its creation by an allowed
+maintainer, and the workflow validated SemVer and main ancestry without checking
+a tag signature. Neither a green release workflow nor tag-write permission
+substitutes for that signature.
+
+The released Darwin arm64 archive checksum and GitHub provenance were verified
+against this repository's release workflow and the same source commit:
+
+```bash
+gh attestation verify skill-up_0.15.0_darwin_arm64.tar.gz \
+  --repo alibaba/skill-up \
+  --signer-workflow alibaba/skill-up/.github/workflows/release.yml
+```
+
+This verifies artifact origin; it does not retroactively sign the tag. Preserve
+the published tag and assets. A maintainer may authorize a separately signed
+audit/checksum statement for the existing release, and the next release should
+use a new signed tag. Future automated signature enforcement should reject
+unsigned or untrusted tag signatures before building, using an explicitly
+configured signer trust policy; do not silently add trust keys or rewrite tags.
 
 After the CLI Release succeeds, continue with **Manual skill-up version synchronization**. The CLI release is not considered available through the official GitHub Action until the runner-image digest update has been tested and merged.
 

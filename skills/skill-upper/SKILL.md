@@ -1,6 +1,6 @@
 ---
 name: skill-upper
-description: "Capture and review Agent Skill observations, and create, run, diagnose, or iteratively improve Skill evaluations (evals) with the skill-up CLI. Use when the user asks to record explicitly attributed Skill usage or feedback; review observations or user-supplied traces/transcripts; turn an approved observation into a regression case; evaluate, test, regress, verify, fix, improve, iterate, or evolve a Skill; add or strengthen eval cases; write eval.yaml/case.yaml; run skill-up run/validate/list-cases/report/import/init; or migrate from Anthropic evals.json. Plugin observation capture/review require either the Codex skill-up plugin or an observer-enabled DSH skill-up plugin. User-supplied external evidence can be reviewed without a plugin; evaluation remains multi-engine."
+description: "skill-upper workflow for evaluating and evolving Agent Skills, including credential-probe authoring within the caller's command and filesystem limits. Use the registered Skill name shown by the host, even if it differs from skill-upper; do not discover it by scanning protected engine directories. Capture and review observations and run or diagnose evals with skill-up. Use when the user asks to record explicitly attributed Skill usage or feedback; review observations or user-supplied traces/transcripts; turn an approved observation into a regression case; evaluate, test, regress, verify, fix, improve, iterate, or evolve a Skill; add or strengthen eval cases; write eval.yaml/case.yaml; run skill-up run/validate/list-cases/report/import/init; or migrate from Anthropic evals.json. Plugin observation capture/review require either the Codex skill-up plugin or an observer-enabled DSH skill-up plugin. User-supplied external evidence can be reviewed without a plugin; evaluation remains multi-engine."
 ---
 
 # use-skill-up-cli
@@ -190,6 +190,12 @@ Precedence (low → high): embedded empty defaults < user config < project `.ski
 
 ### Step 1: Locate the target Skill
 
+When the caller restricts commands or filesystem access, apply those limits to
+Skill discovery and setup as well as the final probe. Use the host's registered
+Skill invocation or an already known permitted file path. Do not enumerate an
+engine's home or credential directories to locate this guide. If it cannot be
+loaded within the allowed access, explain that limit instead of searching there.
+
 1. Identify the root directory of the target Skill (the directory containing `SKILL.md`). Search in this priority: user path → nearest `SKILL.md` upward from CWD → recently viewed files.
 2. Read the target `SKILL.md` for scope, triggers, and dependencies. Preserve localized behavior and expected literals when designing cases.
 3. Check `evals/`:
@@ -218,7 +224,7 @@ Selection guidelines:
 - `engine.name` + `engine.model`: default `claude_code`; `model` is optional. For `qodercli`, often omit `model`.
 - `judge.type`: `rule_based` (preferred), `script`, `agent_judge` (expensive) — see `references/judge-types.md`.
 - Case ID = filename without `.yaml`; prompts should exercise real Skill value.
-- For interactive cases, preserve fixed `input.turns[].content` where the user message is known. Use `input.turns[].respond` only for a reply that must react to the agent, or `input.prompt` plus case-level `user_simulator.scenario` when the simulator should choose all later replies and when to stop. Set an independent eval-level `user_simulator` model and a bounded `max_turns`; see both YAML references. Do not reuse `engine.model` or `judge.model` as an implicit simulator model.
+- For interactive cases, preserve fixed `input.turns[].content` where the user message is known. Use `input.turns[].respond` only for a reply that must react to the agent, or `input.prompt` plus case-level `user_simulator.scenario` when the simulator should choose all later replies and when to stop. Set an independent eval-level `user_simulator` model and a bounded `max_turns`; see both YAML references. When explaining run prerequisites, state that the evaluator enforces the turn limit and the judge decides the final verdict; a simulator stop alone is not a pass. Do not reuse `engine.model` or `judge.model` as an implicit simulator model.
 
 See `references/eval-yaml.md` and `references/case-yaml.md`.
 
@@ -279,7 +285,9 @@ existing engine login. If the selected authentication path is unavailable,
 secret into the conversation or write secrets into YAML without consent.
 
 When asked to author a credential probe, respect the user's allowed command
-profile during verification too. Writing a script does not authorize launching
+and filesystem profile throughout discovery, authoring, and verification. Do
+not traverse protected engine or credential-store directories to find this
+Skill or check authentication. Writing a script does not authorize launching
 it with `sh`, `sh -x`, or sourcing it when that profile excludes script execution.
 Inspect the written probe instead and report that execution was not performed;
 do not add an unsupported launcher just to test it. Check shell-tracing behavior
@@ -345,7 +353,10 @@ Step 7 without modifying it.
    model, environment, inputs, and judges. Reuse existing runs only when those
    conditions match. `--baseline` compares with and without a Skill; it does not
    compare old and new Skill versions. Use separate output directories for the
-   two versions. For uncertain or intermittent outcomes, repeat both versions
+   two versions, then use `skill-up compare <original-result.json>
+   <candidate-result.json> --format html --output compare.html` to inspect their
+   aligned cases offline; see [comparison flags](references/cli.md#skill-up-compare).
+   For uncertain or intermittent outcomes, repeat both versions
    within the user's budget; `--iteration N` samples one version, not N revisions.
 5. Run the full eval suite for a promising candidate. Accept it only when the
    evidence supports the intended improvement without regressions in important
@@ -368,6 +379,7 @@ Step 7 without modifying it.
 | `skill-up run [eval.yaml]`                    | Run evals.                        |
 | `skill-up run --auto`                         | Run from `evals/evals.json`.      |
 | `skill-up report <result.json> --format html` | Re-render reports.                |
+| `skill-up compare <old.json> <new.json>`     | Compare preserved runs offline.  |
 | `skill-up import <evals.json>`                | Convert Anthropic format to YAML. |
 | `skill-up init`                               | Write user-config template.       |
 | `skill-up debug judge <input.json>`           | Debug judge.                      |
