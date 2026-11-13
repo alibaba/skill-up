@@ -70,7 +70,7 @@ the next section.
 | Engine | Native evidence | Strongest claim it supports | Identity in the evidence |
 | --- | --- | --- | --- |
 | `claude_code` | Structured `Skill` tool call with a result | **loaded / invoked** — the engine reports launching a named Skill body | Install directory name (`skill`, `decoy`), not the frontmatter `name` |
-| `codex` | No Skill event; the session starts with an injected `<skills_instructions>` catalog, and activation appears as an explicit file read | **loaded** (weaker) — the model opened `SKILL.md`; no engine-level selection confirmation | Catalog lists the frontmatter `name` plus the install path |
+| `codex` | No Skill event; the session starts with an injected `<skills_instructions>` catalog, and activation appears as a command that references the Skill file | **loaded** (weaker) — the command opened `SKILL.md`; no engine-level selection confirmation | Catalog lists the frontmatter `name` plus the install path |
 | `opencode` | Unknown | — | — |
 
 ### claude_code
@@ -115,19 +115,39 @@ that contains the installed Skill catalog:
 ...
 ```
 
-Activation is then observable only as an ordinary command call that reads the
-body:
+Activation is then observable only as an ordinary command call that references
+the body:
 
 ```json
 {"type": "function_call", "name": "exec_command", "arguments": "{\"cmd\": \"cat .../.codex/skills/skill/SKILL.md\"}"}
 ```
 
-This is weaker than the Claude Code event. It proves the file was opened; it does
-not prove the engine's router selected the Skill, nor that the complete body was
-loaded in one step. For a routing assertion it would have to be combined with
+This is weaker than the Claude Code event. The call names the file, and the
+engine's result shows the command succeeded, but the summary deliberately does
+not infer more than that: the same "SKILL.md in the payload" signal is also
+produced by a listing or a failed read. Confirming a read needs the paired tool
+result, which is engine specific and out of scope for the schema-agnostic
+summary. Nor does this prove the engine's router selected the Skill, or that the
+complete body was loaded in one step. For a routing assertion it would have to be combined with
 the injected catalog and the behavior markers — which is exactly the kind of
 "looks like routing" inference that #166 asks us not to promote to an assertion
 prematurely.
+
+## Reading the summary
+
+`scripts/routing-canary/summarize.py` prints one row per case and keeps cases
+whose transcript is missing instead of dropping them, so "no transcript" cannot
+be mistaken for "no activation":
+
+| Column | Meaning |
+| --- | --- |
+| `execution` | Case status from the iteration `result.json` (`PASS`/`FAIL`/`ERROR`), independent of transcript availability |
+| `graded` | Grading outcome from the case `grading.json` |
+| `transcript` | `present` or `missing` |
+| `skill tool call` | Tool names in the transcript that look like a Skill tool (e.g. Claude Code's `Skill`) |
+| `skill file reference` | A tool-call payload contains `SKILL.md`. A listing or failed read also matches, so this is a reference, not a confirmed read |
+| `markers` | Canary marker files referenced by a call |
+| `catalog` | The injected `<skills_instructions>` catalog is present |
 
 ## Confounders found while measuring
 

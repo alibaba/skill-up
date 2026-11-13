@@ -7,6 +7,8 @@
 #   ITERATIONS=3 scripts/routing-canary/run.sh    # repeat for stability
 #
 # Artifacts are written to ./out/<engine>/ (relative to the current directory).
+# The script exits nonzero if any engine failed to produce a passing run, so a
+# missing measurement cannot look like a clean result.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -14,6 +16,7 @@ example="$root/examples/routing-canary"
 work="$(mktemp -d "${TMPDIR:-/tmp}/routing-canary.XXXXXX")"
 artifacts="${OUT:-out}"
 iterations="${ITERATIONS:-1}"
+failed=""
 
 if [ "$#" -gt 0 ]; then
   engines=("$@")
@@ -42,15 +45,30 @@ for engine in "${engines[@]}"; do
     --output-dir "$work/$engine/reports" \
     --no-delete \
     --iteration "$iterations"; then
-    echo "!! $engine did not complete; its artifacts (if any) are kept under $artifacts/$engine"
+    echo "!! $engine did not finish with a passing result"
+    failed="$failed $engine"
   fi
 
+  # Replace the previous run for this engine instead of overlaying it: an older
+  # iteration-2/ would otherwise survive a later ITERATIONS=1 run and be read as
+  # part of the latest result.
+  rm -rf "${artifacts:?}/$engine"
   mkdir -p "$artifacts/$engine"
   if [ -d "$work/$engine/reports" ]; then
     cp -R "$work/$engine/reports/." "$artifacts/$engine/"
-    "$root/scripts/routing-canary/summarize.py" "$artifacts/$engine" || true
+    if ! "$root/scripts/routing-canary/summarize.py" "$artifacts/$engine"; then
+      echo "!! $engine summary failed"
+      failed="$failed $engine-summary"
+    fi
+  else
+    echo "!! $engine produced no artifacts"
+    failed="$failed $engine-artifacts"
   fi
 done
 
 echo
 echo "artifacts: $(cd "$artifacts" && pwd)"
+if [ -n "$failed" ]; then
+  echo "FAILED:$failed"
+  exit 1
+fi
