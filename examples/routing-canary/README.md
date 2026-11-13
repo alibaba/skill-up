@@ -48,6 +48,13 @@ artifacts do not land inside the repository, runs `skill-up run` with
 directory. `scripts/routing-canary/summarize.py out/<engine>` prints the
 Skill-related events found in each transcript.
 
+The script replaces `out/<engine>/` on every run (so an older `iteration-2/`
+cannot be read as part of the latest result) and exits nonzero if an engine
+failed or produced no artifacts. The summary keeps cases whose transcript is
+missing, reporting them as `transcript missing` next to the execution status
+from `result.json`. The `skill file reference` column is deliberately weaker
+than "read": a directory listing or a failed `cat` also contains `SKILL.md`.
+
 The versions used for the investigation were:
 
 | Engine | Version | Runtime |
