@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
@@ -115,6 +116,60 @@ func TestBuildQwenCodeRunCmd(t *testing.T) {
 	noModel := buildQwenCodeRunCmd("do it", "")
 	if strings.Contains(noModel, "-m ") {
 		t.Fatalf("expected no -m flag when model empty, got %q", noModel)
+	}
+}
+
+func TestBuildQwenCodeRunCmdKeepsSlashedModelID(t *testing.T) {
+	t.Parallel()
+
+	// Qwen Code resolves models by the full id its modelProviders registered
+	// (for example zcode/GLM-5.3-Flash), so a slashed id must reach -m intact
+	// (#383).
+	cmd := buildQwenCodeRunCmd("do it", "zcode/GLM-5.3-Flash")
+	if !strings.Contains(cmd, "-m 'zcode/GLM-5.3-Flash'") {
+		t.Fatalf("run cmd did not keep the full model id:\n%s", cmd)
+	}
+}
+
+func TestQwenCodeRun_ForwardsResolvedSlashedModel(t *testing.T) {
+	t.Setenv("ZCODE_API_KEY", "sk-test")
+
+	// Full path: credential resolution splits the provider prefix only to pick
+	// credentials, the adapter contract keeps the requested ref, and both -m and
+	// OPENAI_MODEL must receive it (#383).
+	resolved := credential.ResolveRunnerConfig(
+		config.EngineConfig{Name: "qwen_code"}, nil,
+		credential.CLIOverrides{Model: "zcode/GLM-5.3-Flash"},
+	)
+	applied := ResolveAdapterConfig(resolved, nil)
+	if applied.AppliedProvider != "zcode" || applied.AppliedModel != "zcode/GLM-5.3-Flash" {
+		t.Fatalf("applied provider/model = %q/%q, want zcode/zcode/GLM-5.3-Flash", applied.AppliedProvider, applied.AppliedModel)
+	}
+	ag, err := DetectAgentWithResolvedConfig(applied)
+	if err != nil {
+		t.Fatalf("detect agent: %v", err)
+	}
+
+	rt := &qwenTestRuntime{
+		workspace:  t.TempDir(),
+		execResult: runtime.ExecResult{Stdout: "ok\n", ExitCode: 0},
+	}
+	result, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{
+		Role:    transcript.RoleUser,
+		Content: "hi",
+		Turn:    1,
+	}})
+	if err != nil {
+		t.Fatalf("run qwen_code: %v", err)
+	}
+	if !strings.Contains(rt.runCommand, "-m 'zcode/GLM-5.3-Flash'") {
+		t.Fatalf("run cmd did not forward the full model id: %s", rt.runCommand)
+	}
+	if got := rt.lastExecEnv[credential.EnvOpenAIModel]; got != "zcode/GLM-5.3-Flash" {
+		t.Fatalf("OPENAI_MODEL = %q, want the full id", got)
+	}
+	if result.AppliedModel != "zcode/GLM-5.3-Flash" {
+		t.Fatalf("reported applied model = %q, want the full id", result.AppliedModel)
 	}
 }
 

@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keep working unchanged and may sit beside `tools` for other tool names.
 
 ### Fixed
+- Keep the complete model ID for the `qwen_code` engine when `--model
+  provider/name` names a configured provider: the credential layer still splits
+  the prefix to select provider-scoped credentials, but now records the
+  reference the user wrote, and the `qwen_code` adapter contract forwards it
+  verbatim to `-m` and `OPENAI_MODEL`. Qwen Code's own `modelProviders` lookup
+  therefore still matches the registered id (for example
+  `zcode/GLM-5.3-Flash`) instead of receiving a bare name and falling back to
+  `OPENAI_API_KEY`. A model ID that the user wrote without a prefix is passed
+  through unchanged, and `opencode` keeps such IDs opaque as before. The applied
+  model reported for the run is the same value the adapter forwards.
 - Stop reporting a successful Claude Code answer as a provider rate-limit or
   authentication failure when its text mentions phrases such as "rate limit" or
   "authentication error". Answer text is scanned for these failures only when

@@ -50,8 +50,15 @@ type ResolvedAgentConfig struct {
 	AppliedVersion string
 	Protocol       string
 
-	Provider          string
-	Model             string
+	Provider string
+	Model    string
+	// ModelRef is the model reference as written by the user, before any
+	// legacy "provider/model" split selected provider-scoped credentials.
+	// Adapters that resolve models by their full id can forward it unchanged.
+	ModelRef string
+	// ModelSplit records that Model differs from ModelRef because the legacy
+	// split ran. It is derived after all overrides are applied.
+	ModelSplit        bool
 	AppliedProvider   string
 	AppliedModel      string
 	AppliedAPIKey     string
@@ -84,6 +91,7 @@ type agentResolveInput struct {
 	engine      config.EngineConfig
 	provider    string
 	model       string
+	modelRef    string
 	baseURL     string
 	valueSource ValueSource
 	fallback    *ResolvedAgentConfig
@@ -98,6 +106,7 @@ func ResolveRunnerConfig(engine config.EngineConfig, resolver *Resolver, cli CLI
 		engine:      engine,
 		provider:    engine.Model.Provider,
 		model:       engine.Model.Name,
+		modelRef:    engine.Model.Name,
 		baseURL:     engine.Model.BaseURL,
 		valueSource: ValueSourceConfig,
 		resolver:    resolver,
@@ -114,7 +123,8 @@ func ResolveJudgeConfig(judgeCfg config.JudgeConfig, runner ResolvedAgentConfig,
 		return resolveResolvedAgentConfig(agentResolveInput{
 			role: AgentRoleJudge, engine: engine,
 			provider: engine.Model.Provider, model: engine.Model.Name,
-			baseURL: engine.Model.BaseURL, valueSource: ValueSourceJudge,
+			modelRef: engine.Model.Name,
+			baseURL:  engine.Model.BaseURL, valueSource: ValueSourceJudge,
 			resolver: resolver,
 		})
 	}
@@ -134,6 +144,7 @@ func ResolveJudgeConfig(judgeCfg config.JudgeConfig, runner ResolvedAgentConfig,
 		},
 		provider:    provider,
 		model:       model,
+		modelRef:    judgeCfg.Model,
 		valueSource: ValueSourceJudge,
 		fallback:    fallback,
 		resolver:    resolver,
@@ -167,6 +178,7 @@ func resolveResolvedAgentConfig(in agentResolveInput) ResolvedAgentConfig {
 		Version:  in.engine.Version,
 		Provider: in.provider,
 		Model:    in.model,
+		ModelRef: in.modelRef,
 		BaseURL:  in.baseURL,
 		Kwargs:   maps.Clone(in.engine.Kwargs),
 		Custom:   custom,
@@ -199,6 +211,7 @@ func resolveResolvedAgentConfig(in agentResolveInput) ResolvedAgentConfig {
 	if in.cli.Provider == "" || in.cli.Model == "" {
 		normalizeLegacyModel(&params)
 	}
+	params.ModelSplit = params.ModelRef != "" && params.Model != "" && params.ModelRef != params.Model
 	logResolvedAgentConfig(params)
 
 	return params
@@ -214,6 +227,8 @@ func applyFallback(params *ResolvedAgentConfig, fallback *ResolvedAgentConfig) {
 	}
 	if params.Model == "" && fallback.Model != "" {
 		params.Model = fallback.Model
+		params.ModelRef = fallback.ModelRef
+		params.ModelSplit = fallback.ModelSplit
 		params.ModelSource = ValueSourceRunner
 	}
 	// Connection values belong to a provider namespace, unlike engine lifecycle.
@@ -239,6 +254,7 @@ func applyCLIModelOverride(params *ResolvedAgentConfig, cliProvider, cliModel st
 		params.ProviderSource = ValueSourceCLI
 		if cliModel != "" {
 			params.Model = cliModel
+			params.ModelRef = cliModel
 			params.ModelSource = ValueSourceCLI
 		}
 		return
@@ -252,7 +268,7 @@ func applyCLIModelOverride(params *ResolvedAgentConfig, cliProvider, cliModel st
 		params.ModelSource = ValueSourceCLI
 		return
 	}
-
+	params.ModelRef = cliModel
 	params.Provider, params.Model = ResolveModelRef(cliModel, resolver)
 	if params.Provider != "" {
 		params.ProviderSource = ValueSourceCLI

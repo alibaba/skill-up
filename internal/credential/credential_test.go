@@ -99,6 +99,100 @@ func TestResolveRunnerConfig_OpenCodeDoesNotInferProviderFromModel(t *testing.T)
 	}
 }
 
+func TestResolveRunnerConfig_QwenKeepsRequestedModelRefFromCLI(t *testing.T) {
+	t.Setenv("ZCODE_API_KEY", "sk-test")
+
+	for _, engine := range []string{"qwen_code", "qwen-code", "qwen"} {
+		t.Run(engine, func(t *testing.T) {
+			resolved := ResolveRunnerConfig(config.EngineConfig{Name: engine}, nil, CLIOverrides{Model: "zcode/GLM-5.3-Flash"})
+
+			// The legacy split still selects provider-scoped credentials, but the
+			// reference the user wrote is preserved for the adapter.
+			if resolved.Provider != "zcode" || resolved.Model != "GLM-5.3-Flash" {
+				t.Fatalf("resolved provider/model = %q/%q, want zcode/GLM-5.3-Flash", resolved.Provider, resolved.Model)
+			}
+			if resolved.ModelRef != "zcode/GLM-5.3-Flash" || !resolved.ModelSplit {
+				t.Fatalf("requested ref not preserved: ref=%q split=%v", resolved.ModelRef, resolved.ModelSplit)
+			}
+			if resolved.ProviderSource != ValueSourceCLI || resolved.ModelSource != ValueSourceCLI {
+				t.Fatalf("CLI sources not retained: %#v", resolved)
+			}
+			if resolved.APIKey != "sk-test" {
+				t.Fatalf("provider-scoped credentials were not resolved: %#v", resolved)
+			}
+		})
+	}
+}
+
+func TestResolveRunnerConfig_QwenExplicitProviderKeepsBareModel(t *testing.T) {
+	t.Parallel()
+
+	resolved := ResolveRunnerConfig(config.EngineConfig{Name: "qwen_code"}, nil, CLIOverrides{
+		Provider: "openai",
+		Model:    "qwen3-coder-plus",
+	})
+
+	if resolved.Provider != "openai" || resolved.Model != "qwen3-coder-plus" {
+		t.Fatalf("resolved provider/model = %q/%q, want openai/qwen3-coder-plus", resolved.Provider, resolved.Model)
+	}
+	if resolved.ModelRef != "qwen3-coder-plus" || resolved.ModelSplit {
+		t.Fatalf("bare model must not be treated as a split ref: ref=%q split=%v", resolved.ModelRef, resolved.ModelSplit)
+	}
+}
+
+func TestResolveRunnerConfig_QwenSlashedYAMLModelStaysOpaque(t *testing.T) {
+	t.Parallel()
+
+	resolved := ResolveRunnerConfig(config.EngineConfig{
+		Name:  "qwen_code",
+		Model: config.ModelConfig{Name: "zcode/GLM-5.3-Flash"},
+	}, nil, CLIOverrides{})
+
+	if resolved.Provider != "" || resolved.Model != "zcode/GLM-5.3-Flash" {
+		t.Fatalf("unconfigured YAML ref split unexpectedly: %q/%q", resolved.Provider, resolved.Model)
+	}
+	if resolved.ModelRef != resolved.Model || resolved.ModelSplit {
+		t.Fatalf("ref should be unchanged: ref=%q model=%q split=%v", resolved.ModelRef, resolved.Model, resolved.ModelSplit)
+	}
+}
+
+func TestResolveRunnerConfig_QwenYAMLProviderSplitKeepsBareModel(t *testing.T) {
+	t.Setenv("ZCODE_API_KEY", "sk-test")
+
+	resolved := ResolveRunnerConfig(config.EngineConfig{
+		Name:  "qwen_code",
+		Model: config.ModelConfig{Provider: "zcode", Name: "GLM-5.3-Flash"},
+	}, nil, CLIOverrides{})
+
+	if resolved.Provider != "zcode" || resolved.Model != "GLM-5.3-Flash" || resolved.ModelSplit {
+		t.Fatalf("explicit YAML provider changed: provider=%q model=%q split=%v", resolved.Provider, resolved.Model, resolved.ModelSplit)
+	}
+}
+
+func TestResolveJudgeConfig_LegacySlashedModelKeepsRequestedRef(t *testing.T) {
+	t.Setenv("ZCODE_API_KEY", "sk-test")
+
+	runner := ResolveRunnerConfig(config.EngineConfig{Name: "qwen_code"}, nil, CLIOverrides{})
+	judge := ResolveJudgeConfig(config.JudgeConfig{Model: "zcode/GLM-5.3-Flash"}, runner, nil)
+
+	if judge.Provider != "zcode" || judge.Model != "GLM-5.3-Flash" {
+		t.Fatalf("judge provider/model = %q/%q, want zcode/GLM-5.3-Flash", judge.Provider, judge.Model)
+	}
+	if judge.ModelRef != "zcode/GLM-5.3-Flash" || !judge.ModelSplit {
+		t.Fatalf("judge requested ref not preserved: ref=%q split=%v", judge.ModelRef, judge.ModelSplit)
+	}
+}
+
+func TestResolveRunnerConfig_QwenBareCLIModelStaysBare(t *testing.T) {
+	t.Parallel()
+
+	resolved := ResolveRunnerConfig(config.EngineConfig{Name: "qwen_code"}, nil, CLIOverrides{Model: "qwen3-coder-plus"})
+
+	if resolved.Provider != "" || resolved.Model != "qwen3-coder-plus" {
+		t.Fatalf("resolved provider/model = %q/%q, want bare qwen3-coder-plus", resolved.Provider, resolved.Model)
+	}
+}
+
 func TestDefaultConfPath(t *testing.T) {
 	t.Parallel()
 
