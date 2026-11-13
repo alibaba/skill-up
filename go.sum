@@ -8,8 +8,8 @@ github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.2 h1:utpeoEeZjd+A8J41zvoLsOOr
 github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.2/go.mod h1:iptorS+VYKFL2N6PnebpS91dubG35eAOEERnT4PJbQU=
 github.com/Azure/azure-sdk-for-go/sdk/internal v1.12.0 h1:fhqpLE3UEXi9lPaBRpQ6XuRW0nU7hgg4zlmZZa+a9q4=
 github.com/Azure/azure-sdk-for-go/sdk/internal v1.12.0/go.mod h1:7dCRMLwisfRH3dBupKeNCioWYUZ4SS09Z14H+7i8ZoY=
-github.com/alibaba/OpenSandbox/sdks/sandbox/go v1.1.1 h1:HnFZPmnUOUDhCn5aUqQcTwsPgIDlhENWoWpD71g4sqs=
-github.com/alibaba/OpenSandbox/sdks/sandbox/go v1.1.1/go.mod h1:c3C+dMDq0EdnZAgui4ot4hiZhQKUb57/tK97TQO5aHk=
+github.com/alibaba/OpenSandbox/sdks/sandbox/go v1.2.0 h1:v7RtBCO4cO2Xc60wcxhtjRJSjeZbTn2Bm8ql2GHXrpI=
+github.com/alibaba/OpenSandbox/sdks/sandbox/go v1.2.0/go.mod h1:c3C+dMDq0EdnZAgui4ot4hiZhQKUb57/tK97TQO5aHk=
 github.com/anthropics/anthropic-sdk-go v1.84.0 h1:mnAhggc5H5A98JYmhQELT+j4J89PYBFKnnSvUTNwNd8=
 github.com/anthropics/anthropic-sdk-go v1.84.0/go.mod h1:GThfYqPJoaQ/6pmibCI98Cr4y5su2FXMUHn3NrSSnIc=
 github.com/aws/aws-sdk-go-v2 v1.47.3 h1:HRoT/MkNi3bjO5xF4dCzLzvVmkvRGHj3/cLINDnJejk=
