@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -204,5 +206,59 @@ func TestMultiJudgeValidatesSimulatorBeforeJudgeBranch(t *testing.T) {
 	eval.UserSimulator = UserSimulatorModel{Provider: "simulation", Protocol: "openai", Model: "test"}
 	if err := v.ValidateCasesWithEvalDefaults(eval, []*CaseConfig{c}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCaseJudgeWithoutTypeIsRejected(t *testing.T) {
+	t.Parallel()
+	evalJudge := JudgeConfig{Type: "rule_based", Success: []Rule{{OutputContains: &OutputContainsRule{All: []string{"eval rule"}}}}}
+	for _, test := range []struct {
+		name     string
+		caseDoc  string
+		wantErr  string
+		wantRule string
+	}{
+		{name: "rules without type", caseDoc: "judge:\n  success:\n    - output_contains:\n        all: [case rule]\n", wantErr: "case judge.type is required"},
+		{name: "timeout only", caseDoc: "judge:\n  timeout_seconds: 30\n", wantErr: "case judge.type is required"},
+		{name: "empty block", caseDoc: "judge:\n", wantErr: "case judge.type is required"},
+		{name: "typed block", caseDoc: "judge:\n  type: rule_based\n  success:\n    - output_contains:\n        all: [case rule]\n", wantRule: "case rule"},
+		{name: "no block inherits the eval judge", wantRule: "eval rule"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			evalsDir := filepath.Join(t.TempDir(), "evals")
+			if err := os.MkdirAll(evalsDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(evalsDir, "case.yaml"), []byte("input:\n  prompt: task\n"+test.caseDoc), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			caseCfg, err := NewLoader(filepath.Join(evalsDir, "eval.yaml")).LoadCaseConfig("evals/case.yaml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			eval := &EvalConfig{Judge: evalJudge, JudgeSet: true}
+
+			err = NewValidator().ValidateCasesWithEvalDefaults(eval, []*CaseConfig{caseCfg})
+			if test.wantErr == "" {
+				if err != nil {
+					t.Fatalf("validate error = %v", err)
+				}
+				plan, err := ResolveJudgePlan(eval, caseCfg)
+				if err != nil {
+					t.Fatalf("ResolveJudgePlan error = %v", err)
+				}
+				if got := plan.Judges[0].Success[0].OutputContains.All[0]; got != test.wantRule {
+					t.Fatalf("resolved rule = %q, want %q", got, test.wantRule)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("validate error = %v, want %q", err, test.wantErr)
+			}
+			if _, err := ResolveJudgePlan(eval, caseCfg); err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("ResolveJudgePlan error = %v, want %q", err, test.wantErr)
+			}
+		})
 	}
 }

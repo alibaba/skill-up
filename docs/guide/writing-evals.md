@@ -1099,6 +1099,10 @@ set, the eval's engine/model selection is inherited. `judges` lists retain their
 existing full-list replacement semantics; members do not inherit a singular
 judge's defaults.
 
+A case-level `judge` must set `type`. A block without one is rejected by
+`validate` and `run`, because the eval judge would otherwise grade the case
+and ignore every field in the block.
+
 The judge continues to use the case runtime; there is no `judge.environment`.
 An independent judge's CLI is installed and checked in Docker/OpenSandbox during
 the judge phase, after the evaluated agent completes. In `none`, install all
