@@ -135,6 +135,11 @@ report:
 评测框架目录 `evals/` 始终排除。配置 include 列表时，应显式包含
 `SKILL.md`，确保安装后的目录仍是有效 Skill。`judge.skills` 同样支持这两个字段。
 
+未配置 `skills[].target` 时，默认安装目录使用 `SKILL.md` frontmatter 中声明的
+`name:`；当 `SKILL.md` 缺失或没有声明 name 时，回退为源目录名。这样安装后的
+Skill 与它自己文本中使用的名字一致——例如快照目录 `snap/` 中 `name: my-skill`
+会安装为 `my-skill` 而不是 `snap`。显式配置的 `skills[].target` 始终优先。
+
 `cases.parallelism` 是配置文件中的默认用例并行数；临时运行时可以用 `skill-up run --parallelism N` 覆盖它，不需要修改 `eval.yaml`。命令行覆盖值必须在 1 到 256 之间。
 
 ### Engine 版本生命周期

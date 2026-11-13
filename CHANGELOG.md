@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keep working unchanged and may sit beside `tools` for other tool names.
 
 ### Fixed
+- Install a `local_path` skill under the name declared in its `SKILL.md`
+  frontmatter instead of the source folder name when `skills[].target` is not
+  set, so an Agent addresses the skill by the name its own text uses and a
+  snapshot folder (for example `snap/` holding `name: my-skill`) installs as
+  `my-skill`. Explicit targets are unchanged, and the declared name also drives
+  the default skill cleanup performed before an Agent judge starts.
 - Stop reporting a successful Claude Code answer as a provider rate-limit or
   authentication failure when its text mentions phrases such as "rate limit" or
   "authentication error". Answer text is scanned for these failures only when

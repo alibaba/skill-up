@@ -1414,6 +1414,46 @@ func TestRemoveDefaultRunSkillsBeforeJudge_RemovesOnlyDefaultTargets(t *testing.
 	}
 }
 
+func TestRemoveDefaultRunSkillsBeforeJudge_UsesDeclaredName(t *testing.T) {
+	var commands []string
+	rt := &mockRuntime{
+		workspace: t.TempDir(),
+		execFunc: func(_ context.Context, command string, _ runtime.ExecOptions) (runtime.ExecResult, error) {
+			commands = append(commands, command)
+			return runtime.ExecResult{ExitCode: 0}, nil
+		},
+	}
+	runAgent := &mockAgent{name: "run", skillPath: ".codex/skills"}
+
+	// Folder name "snap" differs from the name declared in SKILL.md.
+	skillDir := t.TempDir()
+	snapDir := filepath.Join(skillDir, "snap")
+	if err := os.MkdirAll(snapDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapDir, "SKILL.md"), []byte("---\nname: my-skill\n---\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	e := newTestEvaluator(EvalOptions{
+		SkillDir: skillDir,
+		EvalCfg: &config.EvalConfig{
+			Skills: []config.SkillRef{{Source: "local_path", Path: "snap"}},
+		},
+	})
+
+	err := e.removeDefaultRunSkillsBeforeJudge(context.Background(), rt, "with_skill", config.JudgeConfig{Type: "agent_judge"}, runAgent)
+	if err != nil {
+		t.Fatalf("removeDefaultRunSkillsBeforeJudge() error = %v", err)
+	}
+	if len(commands) != 1 {
+		t.Fatalf("cleanup commands = %#v, want one default-target cleanup", commands)
+	}
+	if !strings.Contains(commands[0], "'.codex/skills/my-skill'") {
+		t.Fatalf("cleanup command should use the declared skill name, got %q", commands[0])
+	}
+}
+
 func TestExecuteCase_NoJudge_DefaultPass(t *testing.T) {
 	ag := &mockAgent{
 		name:        "test",

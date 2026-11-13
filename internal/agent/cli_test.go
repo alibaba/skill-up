@@ -297,6 +297,118 @@ func TestCLIAgent_InstallSkillDefault(t *testing.T) {
 	}
 }
 
+func TestCLIAgent_InstallSkillDefaultUsesDeclaredName(t *testing.T) {
+	t.Parallel()
+
+	rt := &runtime.NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	// The folder name (snap) differs from the name declared in SKILL.md.
+	skillDir := filepath.Join(t.TempDir(), "snap")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	skillMD := "---\nname: my-skill\n---\n\n# Skill\n"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillMD), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ag := &CLIAgent{
+		BaseAgent: BaseAgent{
+			Cfg: Config{
+				Name:      "test-agent",
+				SkillPath: ".claude/skills",
+			},
+		},
+	}
+
+	err := ag.InstallSkill(context.Background(), rt, runtime.SkillConfig{Source: skillDir, Name: "my-skill"})
+	if err != nil {
+		t.Fatalf("InstallSkill failed: %v", err)
+	}
+
+	declared := filepath.Join(rt.Workspace(), ".claude", "skills", "my-skill", "SKILL.md")
+	if _, err := os.ReadFile(declared); err != nil {
+		t.Errorf("skill should be installed under its declared name at %s: %v", declared, err)
+	}
+	if _, err := os.Stat(filepath.Join(rt.Workspace(), ".claude", "skills", "snap")); !os.IsNotExist(err) {
+		t.Errorf("source folder name should not be used when SKILL.md declares a name: %v", err)
+	}
+}
+
+func TestCLIAgent_InstallSkillWithCmdDefaultTargetUsesDeclaredName(t *testing.T) {
+	t.Parallel()
+
+	rt := &runtime.NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	ag := &CLIAgent{
+		BaseAgent: BaseAgent{
+			Cfg: Config{
+				Name:            "test-agent",
+				InstallSkillCmd: "printf '%s' '{{.Target}}' > '{{.Workspace}}/target.txt'",
+			},
+		},
+	}
+
+	err := ag.InstallSkill(context.Background(), rt, runtime.SkillConfig{Source: "snap", Name: "my-skill"})
+	if err != nil {
+		t.Fatalf("InstallSkill failed: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(rt.Workspace(), "target.txt"))
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	want := filepath.Join(rt.Workspace(), "skills", "my-skill")
+	if string(got) != want {
+		t.Fatalf("template target = %q, want %q", got, want)
+	}
+}
+
+func TestCLIAgent_InstallSkillExplicitTargetWinsOverDeclaredName(t *testing.T) {
+	t.Parallel()
+
+	rt := &runtime.NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	skillDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Skill"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ag := &CLIAgent{
+		BaseAgent: BaseAgent{
+			Cfg: Config{
+				Name:      "test-agent",
+				SkillPath: ".claude/skills",
+			},
+		},
+	}
+
+	explicit := filepath.Join(rt.Workspace(), ".claude", "skills", "explicit")
+	err := ag.InstallSkill(context.Background(), rt, runtime.SkillConfig{
+		Source: skillDir,
+		Name:   "my-skill",
+		Target: explicit,
+	})
+	if err != nil {
+		t.Fatalf("InstallSkill failed: %v", err)
+	}
+	if _, err := os.ReadFile(filepath.Join(explicit, "SKILL.md")); err != nil {
+		t.Errorf("explicit target should win over the declared name: %v", err)
+	}
+}
+
 func TestCLIAgent_InstallSkillWithCmd(t *testing.T) {
 	skipIfNoPOSIXShell(t)
 	t.Parallel()

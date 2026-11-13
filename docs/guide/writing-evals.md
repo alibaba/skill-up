@@ -136,6 +136,13 @@ The evaluation harness directory `evals/` is always excluded. If an include
 list is provided, include `SKILL.md` explicitly so the installed directory
 remains a valid Skill. The same fields are supported by `judge.skills`.
 
+When `skills[].target` is not set, the default install directory is named after
+the skill's declared `name:` in the `SKILL.md` frontmatter, falling back to the
+source directory name when `SKILL.md` is missing or declares no name. This keeps
+the installed skill addressable by the name its own text uses — a snapshot
+folder `snap/` holding `name: my-skill` installs as `my-skill` instead of `snap`.
+An explicit `skills[].target` always wins.
+
 `cases.parallelism` is the file-level default. To override it for a single run, use `skill-up run --parallelism N` without modifying `eval.yaml`. Allowed range: **1 to 256**.
 
 ### Engine version lifecycle

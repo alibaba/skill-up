@@ -1065,6 +1065,56 @@ func TestLoader_SkillName(t *testing.T) {
 	}
 }
 
+func TestSkillNameInDir(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		skillMD   *string
+		wantName  string
+		wantFound bool
+	}{
+		{
+			name:      "declared name",
+			skillMD:   new("---\nname: my-skill\ndescription: stuff\n---\n\n# Body\n"),
+			wantName:  "my-skill",
+			wantFound: true,
+		},
+		{
+			name:      "missing SKILL.md",
+			skillMD:   nil,
+			wantName:  "",
+			wantFound: false,
+		},
+		{
+			name:      "no frontmatter fence",
+			skillMD:   new("# Just a heading\n"),
+			wantName:  "",
+			wantFound: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dir := filepath.Join(t.TempDir(), "snap")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("failed to create dir: %v", err)
+			}
+			if tt.skillMD != nil {
+				if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(*tt.skillMD), 0o600); err != nil {
+					t.Fatalf("failed to write SKILL.md: %v", err)
+				}
+			}
+
+			gotName, gotFound := SkillNameInDir(dir)
+			if gotName != tt.wantName || gotFound != tt.wantFound {
+				t.Errorf("SkillNameInDir() = (%q, %t), want (%q, %t)", gotName, gotFound, tt.wantName, tt.wantFound)
+			}
+		})
+	}
+}
+
 // writeUnknownKeySkill lays out a Skill with eval.yaml and one case file and
 // returns a loader for it.
 func writeUnknownKeySkill(t *testing.T, evalContent, caseContent string) *Loader {

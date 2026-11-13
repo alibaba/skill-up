@@ -7,6 +7,7 @@ import (
 	"io"
 	"maps"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -225,10 +226,27 @@ type MCPConfig struct {
 
 // SkillConfig identifies a skill source and its target install location.
 type SkillConfig struct {
-	Source  string
+	Source string
+	// Name is the skill's declared name from SKILL.md frontmatter. Installers
+	// that derive a default target directory use it so the installed skill is
+	// addressed by the name its own text uses; empty falls back to the source
+	// directory name (see DirName).
+	Name    string
 	Target  string
 	Include []string
 	Exclude []string
+}
+
+// DirName returns the directory name a default install target should use:
+// the declared SKILL.md name when it is a safe single path element, otherwise
+// the source directory's base name.
+func (c SkillConfig) DirName() string {
+	name := strings.TrimSpace(c.Name)
+	if name != "" && name != "." && name != ".." && !strings.ContainsAny(name, `/\`) {
+		return name
+	}
+
+	return filepath.Base(c.Source)
 }
 
 // NewRuntime creates a Runtime based on the config type.

@@ -950,7 +950,7 @@ func (e *defaultEvaluator) removeDefaultRunSkillsBeforeJudge(
 		if strings.TrimSpace(skillCfg.Source) == "" {
 			continue
 		}
-		target := filepath.Join(skillPath, filepath.Base(skillCfg.Source))
+		target := filepath.Join(skillPath, skillCfg.DirName())
 		if !isDefaultAgentSkillTarget(skillPath, target) {
 			continue
 		}
@@ -1393,8 +1393,14 @@ func resolveSkillConfig(skillDir string, ref config.SkillRef) runtime.SkillConfi
 	if source != "" && !filepath.IsAbs(source) {
 		source = filepath.Join(skillDir, source)
 	}
+	name := ""
+	if source != "" {
+		name, _ = config.SkillNameInDir(source)
+	}
+
 	return runtime.SkillConfig{
 		Source:  source,
+		Name:    name,
 		Target:  ref.Target,
 		Include: slices.Clone(ref.Include),
 		Exclude: slices.Clone(ref.Exclude),
