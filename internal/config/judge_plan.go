@@ -40,8 +40,13 @@ func chooseJudgeConfig(eval *EvalConfig, caseCfg *CaseConfig) (*[]JudgeConfig, J
 		}
 		return caseCfg.Judges, JudgeConfig{}, nil
 	case caseCfg.JudgeSet || caseCfg.Judge.Type != "":
-		if eval.Judges != nil && caseCfg.Judge.Type == "" {
-			return nil, JudgeConfig{}, errors.New("case judge.type is required when overriding eval judges")
+		if caseCfg.Judge.Type == "" {
+			if eval.Judges != nil {
+				return nil, JudgeConfig{}, errors.New("case judge.type is required when overriding eval judges")
+			}
+			// Without a type the eval judge would grade the case and silently
+			// ignore every field in this block.
+			return nil, JudgeConfig{}, errors.New("case judge.type is required when overriding the eval judge")
 		}
 		legacy := caseCfg.Judge
 		if eval.Judges == nil {

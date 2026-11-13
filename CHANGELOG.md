@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keep working unchanged and may sit beside `tools` for other tool names.
 
 ### Fixed
+- Reject a case-level `judge` block that has no `type`. The eval judge used to
+  grade such a case and every field in the block, rules included, was ignored
+  without a warning. `validate` and `run` now report
+  `case judge.type is required when overriding the eval judge`, matching the
+  error already given when a case overrides an eval-level `judges` list.
 - Stop reporting a successful Claude Code answer as a provider rate-limit or
   authentication failure when its text mentions phrases such as "rate limit" or
   "authentication error". Answer text is scanned for these failures only when
