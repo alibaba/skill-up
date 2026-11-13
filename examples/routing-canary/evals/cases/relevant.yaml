@@ -1,0 +1,16 @@
+id: relevant
+title: A request that only the relevant Skill matches
+tag: routing
+input:
+  prompt: "What is the canary routing code word? Follow the Skill that covers it."
+constraints:
+  timeout_seconds: 180
+  max_turns: 3
+expect:
+  files_exist: [".canary-relevant"]
+  files_not_exist: [".canary-decoy"]
+judge:
+  type: rule_based
+  success:
+    - output_contains:
+        all: ["CANARY-ROUTING-OK"]
