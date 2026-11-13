@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -31,14 +32,38 @@ import (
 // CodexAgent implements Agent for codex CLI.
 type CodexAgent struct {
 	CLIAgent
+}
 
-	// mcpServers holds, per runtime workspace, the MCP servers InstallMCP added
-	// for that case. Cases share one agent and run concurrently.
-	mcpMu      sync.Mutex
-	mcpServers map[string][]string
-	// mcpDefined holds, per runtime workspace, the mocked MCP servers that are
-	// defined on each codex exec command line instead of being installed.
-	mcpDefined map[string][]runtime.MCPServerConfig
+// codexRuntimeMCP is what InstallMCP recorded for one runtime: the server names
+// to approve, and the mocked servers to define on each codex exec command.
+type codexRuntimeMCP struct {
+	owner   *CodexAgent
+	approve []string
+	defined []runtime.MCPServerConfig
+}
+
+// codexMCPByRuntime is shared by every CodexAgent. Cases share one agent and
+// run concurrently, and the evaluator creates a separate adapter for an agent
+// judge, which runs in the case's runtime and must see the case's servers.
+var codexMCPByRuntime = struct {
+	sync.Mutex
+	entries map[string]codexRuntimeMCP
+}{entries: make(map[string]codexRuntimeMCP)}
+
+// codexRuntimeKey identifies a runtime. Docker and OpenSandbox runtimes of
+// concurrent cases report the same workspace path, so the path alone would mix
+// their servers.
+func codexRuntimeKey(rt Runtime) string {
+	if v := reflect.ValueOf(rt); v.Kind() == reflect.Pointer {
+		return fmt.Sprintf("%T@%x:%s", rt, v.Pointer(), rt.Workspace())
+	}
+	return rt.Workspace()
+}
+
+func codexMCPForRuntime(rt Runtime) codexRuntimeMCP {
+	codexMCPByRuntime.Lock()
+	defer codexMCPByRuntime.Unlock()
+	return codexMCPByRuntime.entries[codexRuntimeKey(rt)]
 }
 
 // codexConfigKeyPattern matches the server names a dotted `-c mcp_servers.<name>...`
@@ -151,7 +176,7 @@ func (a *CodexAgent) Install(ctx context.Context, rt Runtime) error {
 
 // InstallMCP installs MCP servers with the Codex CLI.
 func (a *CodexAgent) InstallMCP(ctx context.Context, rt Runtime, mcpCfg runtime.MCPConfig) error {
-	a.rememberMCPServers(ctx, rt.Workspace(), nil, nil)
+	a.rememberMCPServers(ctx, rt, nil, nil)
 	if len(mcpCfg.Servers) == 0 {
 		return nil
 	}
@@ -175,7 +200,7 @@ func (a *CodexAgent) InstallMCP(ctx context.Context, rt Runtime, mcpCfg runtime.
 	if err := installMCPServers(ctx, rt, runtime.MCPConfig{Servers: installed}, buildCodexMCPInstallCmd); err != nil {
 		return err
 	}
-	a.rememberMCPServers(ctx, rt.Workspace(), mcpCfg.Servers, defined)
+	a.rememberMCPServers(ctx, rt, mcpCfg.Servers, defined)
 	return nil
 }
 
@@ -226,9 +251,10 @@ func checkCodexMCPNamesFree(ctx context.Context, rt Runtime, servers []runtime.M
 	return nil
 }
 
-// rememberMCPServers replaces the server sets recorded for a workspace: the
-// names to approve, and the servers to define on the command line.
-func (a *CodexAgent) rememberMCPServers(ctx context.Context, workspace string, servers, defined []runtime.MCPServerConfig) {
+// rememberMCPServers replaces what is recorded for a runtime. An empty install
+// by another adapter, such as an agent judge preparing its own config, keeps
+// the case's servers; the adapter that recorded them can clear them.
+func (a *CodexAgent) rememberMCPServers(ctx context.Context, rt Runtime, servers, defined []runtime.MCPServerConfig) {
 	var names []string
 	for _, server := range servers {
 		if !codexConfigKeyPattern.MatchString(server.Name) {
@@ -240,24 +266,17 @@ func (a *CodexAgent) rememberMCPServers(ctx context.Context, workspace string, s
 	slices.Sort(names)
 	names = slices.Compact(names)
 
-	a.mcpMu.Lock()
-	defer a.mcpMu.Unlock()
-	if len(defined) == 0 {
-		delete(a.mcpDefined, workspace)
-	} else {
-		if a.mcpDefined == nil {
-			a.mcpDefined = make(map[string][]runtime.MCPServerConfig)
+	key := codexRuntimeKey(rt)
+	codexMCPByRuntime.Lock()
+	defer codexMCPByRuntime.Unlock()
+	if len(servers) == 0 {
+		if current, ok := codexMCPByRuntime.entries[key]; ok && current.owner != a {
+			return
 		}
-		a.mcpDefined[workspace] = slices.Clone(defined)
-	}
-	if len(names) == 0 {
-		delete(a.mcpServers, workspace)
+		delete(codexMCPByRuntime.entries, key)
 		return
 	}
-	if a.mcpServers == nil {
-		a.mcpServers = make(map[string][]string)
-	}
-	a.mcpServers[workspace] = names
+	codexMCPByRuntime.entries[key] = codexRuntimeMCP{owner: a, approve: names, defined: slices.Clone(defined)}
 }
 
 // mcpDefinitionFlags defines the workspace's mocked MCP servers with -c
@@ -266,9 +285,7 @@ func (a *CodexAgent) rememberMCPServers(ctx context.Context, workspace string, s
 // `node -e <script>` server has its script written into the run's artifact
 // directory first, so several mocks do not lengthen the command line.
 func (a *CodexAgent) mcpDefinitionFlags(ctx context.Context, rt Runtime, runArtifactDir string) (string, error) {
-	a.mcpMu.Lock()
-	servers := a.mcpDefined[rt.Workspace()]
-	a.mcpMu.Unlock()
+	servers := codexMCPForRuntime(rt).defined
 
 	var flags strings.Builder
 	for i, server := range servers {
@@ -305,10 +322,8 @@ func (a *CodexAgent) mcpDefinitionFlags(ctx context.Context, rt Runtime, runArti
 // codex exec runs with approval policy "never", so under --sandbox
 // workspace-write Codex rejects every MCP call that needs approval. Only these
 // servers are approved, not other servers in the user's Codex config.
-func (a *CodexAgent) mcpApprovalFlags(workspace string) string {
-	a.mcpMu.Lock()
-	names := a.mcpServers[workspace]
-	a.mcpMu.Unlock()
+func (a *CodexAgent) mcpApprovalFlags(rt Runtime) string {
+	names := codexMCPForRuntime(rt).approve
 
 	var flags strings.Builder
 	for _, name := range names {
@@ -539,7 +554,7 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 	// (e.g. CI containers that block Landlock syscalls).
 	sandboxFlag := codexBypassSandbox
 	if rt.RequiresProcessSandbox() && !EngineKwargBool(a.Cfg.Kwargs, KwargBypassSandbox) {
-		sandboxFlag = codexProcessSandbox + a.mcpApprovalFlags(rt.Workspace())
+		sandboxFlag = codexProcessSandbox + a.mcpApprovalFlags(rt)
 	}
 	envVars := a.credentialEnvVars(credential.EnvOpenAIAPIKey, credential.EnvOpenAIBaseURL)
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))

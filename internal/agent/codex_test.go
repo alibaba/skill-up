@@ -1564,6 +1564,79 @@ func TestCodexRun_ScriptUploadFailureCleansUp(t *testing.T) {
 	}
 }
 
+// Docker and OpenSandbox runtimes of concurrent cases report the same
+// workspace path; each case must still get only its own mocked servers.
+func TestCodexRun_SameWorkspacePathKeepsCasesApart(t *testing.T) {
+	t.Parallel()
+
+	stdout := `{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"OK"}}`
+	caseA, caseB := mockedCodexServer("shop"), mockedCodexServer("shop")
+	caseA.Args = []string{"-e", "console.log('case A');"}
+	caseB.Args = []string{"-e", "console.log('case B');"}
+	rtA := &codexTestRuntime{workspace: "opensandbox", execResult: runtime.ExecResult{Stdout: stdout, ExitCode: 0}}
+	rtB := &codexTestRuntime{workspace: "opensandbox", execResult: runtime.ExecResult{Stdout: stdout, ExitCode: 0}}
+	ag := NewCodexAgent(Config{})
+
+	if err := ag.InstallMCP(context.Background(), rtA, runtime.MCPConfig{Servers: []runtime.MCPServerConfig{caseA}}); err != nil {
+		t.Fatalf("InstallMCP A failed: %v", err)
+	}
+	if err := ag.InstallMCP(context.Background(), rtB, runtime.MCPConfig{Servers: []runtime.MCPServerConfig{caseB}}); err != nil {
+		t.Fatalf("InstallMCP B failed: %v", err)
+	}
+	message := []transcript.Message{{Role: transcript.RoleUser, Content: "hi", Turn: 1}}
+	if _, err := ag.Run(context.Background(), rtA, ExecOptions{}, message); err != nil {
+		t.Fatalf("Run A failed: %v", err)
+	}
+	assertCodexMockDefined(t, rtA, codexRunCommand(t, rtA), caseA, 0)
+
+	// A case without mocks on another runtime with that path gets none.
+	rtC := &codexTestRuntime{workspace: "opensandbox", execResult: runtime.ExecResult{Stdout: stdout, ExitCode: 0}}
+	if err := ag.InstallMCP(context.Background(), rtC, runtime.MCPConfig{}); err != nil {
+		t.Fatalf("InstallMCP C failed: %v", err)
+	}
+	if _, err := ag.Run(context.Background(), rtC, ExecOptions{}, message); err != nil {
+		t.Fatalf("Run C failed: %v", err)
+	}
+	if runCmd := codexRunCommand(t, rtC); strings.Contains(runCmd, "mcp_servers.") {
+		t.Fatalf("a case without mocks received another case's servers: %s", runCmd)
+	}
+}
+
+// The evaluator creates a separate adapter for an agent judge and gives it an
+// empty MCP config; it runs in the case's runtime and must see the case's mocks.
+func TestCodexJudgeAdapter_SeesTheCasesMockedServers(t *testing.T) {
+	t.Parallel()
+
+	stdout := `{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"OK"}}`
+	rt := &codexTestRuntime{workspace: t.TempDir(), execResult: runtime.ExecResult{Stdout: stdout, ExitCode: 0}}
+	mocked := mockedCodexServer("shop")
+	runAgent := NewCodexAgent(Config{})
+	if err := runAgent.InstallMCP(context.Background(), rt, runtime.MCPConfig{Servers: []runtime.MCPServerConfig{mocked}}); err != nil {
+		t.Fatalf("InstallMCP failed: %v", err)
+	}
+
+	judgeAgent := NewCodexAgent(Config{})
+	if err := judgeAgent.InstallMCP(context.Background(), rt, runtime.MCPConfig{}); err != nil {
+		t.Fatalf("judge InstallMCP failed: %v", err)
+	}
+	if _, err := judgeAgent.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{Role: transcript.RoleUser, Content: "grade", Turn: 1}}); err != nil {
+		t.Fatalf("judge Run failed: %v", err)
+	}
+	judgeCmd := codexRunCommand(t, rt)
+	assertCodexMockDefined(t, rt, judgeCmd, mocked, 0)
+	if !strings.Contains(judgeCmd, codexApprovalFlag("shop")) {
+		t.Fatalf("judge run should approve the case's mocked server: %s", judgeCmd)
+	}
+
+	// The run adapter clears its own record for the next case on this runtime.
+	if err := runAgent.InstallMCP(context.Background(), rt, runtime.MCPConfig{}); err != nil {
+		t.Fatalf("InstallMCP reset failed: %v", err)
+	}
+	if got := codexMCPForRuntime(rt); len(got.defined) != 0 || len(got.approve) != 0 {
+		t.Fatalf("record after reset = %+v, want empty", got)
+	}
+}
+
 func TestCodexInstallMCP_RejectsNameAlreadyInCodexConfig(t *testing.T) {
 	t.Parallel()
 
