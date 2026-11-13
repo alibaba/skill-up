@@ -328,6 +328,72 @@ func TestCLIAgent_InstallSkillDefaultUsesDeclaredName(t *testing.T) {
 	}
 }
 
+func TestCLIAgent_InstallSkillWithCmdDefaultTargetUsesDeclaredName(t *testing.T) {
+	t.Parallel()
+
+	rt := &runtime.NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	ag := &CLIAgent{
+		BaseAgent: BaseAgent{
+			Cfg: Config{
+				Name:            "test-agent",
+				InstallSkillCmd: "printf '%s' '{{.Target}}' > '{{.Workspace}}/target.txt'",
+			},
+		},
+	}
+
+	err := ag.InstallSkill(context.Background(), rt, runtime.SkillConfig{Source: "snap", Name: "my-skill"})
+	if err != nil {
+		t.Fatalf("InstallSkill failed: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(rt.Workspace(), "target.txt"))
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if want := filepath.Join(rt.Workspace(), "skills", "my-skill"); string(got) != want {
+		t.Fatalf("template target = %q, want %q", got, want)
+	}
+}
+
+func TestCLIAgent_InstallSkillExplicitTargetWinsOverDeclaredName(t *testing.T) {
+	t.Parallel()
+
+	rt := &runtime.NoneRuntime{}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	skillDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Skill"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ag := &CLIAgent{
+		BaseAgent: BaseAgent{
+			Cfg: Config{Name: "test-agent", SkillPath: ".claude/skills"},
+		},
+	}
+
+	explicit := filepath.Join(rt.Workspace(), ".claude", "skills", "explicit")
+	err := ag.InstallSkill(context.Background(), rt, runtime.SkillConfig{
+		Source: skillDir,
+		Name:   "my-skill",
+		Target: explicit,
+	})
+	if err != nil {
+		t.Fatalf("InstallSkill failed: %v", err)
+	}
+	if _, err := os.ReadFile(filepath.Join(explicit, "SKILL.md")); err != nil {
+		t.Errorf("explicit target should win over the declared name: %v", err)
+	}
+}
+
 func TestCLIAgent_InstallSkillWithCmd(t *testing.T) {
 	skipIfNoPOSIXShell(t)
 	t.Parallel()
