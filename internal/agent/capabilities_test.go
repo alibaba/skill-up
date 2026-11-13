@@ -13,7 +13,10 @@ import (
 	"github.com/alibaba/skill-up/internal/logging"
 )
 
-const testDashscopeProvider = "dashscope"
+const (
+	testDashscopeProvider = "dashscope"
+	qwenSlashedModelID    = "zcode/GLM-5.3-Flash"
+)
 
 func TestValidateJudgeAdapterConfig(t *testing.T) {
 	t.Parallel()
@@ -66,6 +69,71 @@ func TestIndependentJudgeUsesProtocolScopedConnection(t *testing.T) {
 	}
 }
 
+func TestResolveAdapterConfig_KeepsRequestedModelRefForQwen(t *testing.T) {
+	t.Setenv("ZCODE_API_KEY", "sk-test")
+
+	for _, tt := range []struct {
+		name        string
+		engine      config.EngineConfig
+		cli         credential.CLIOverrides
+		wantProv    string
+		wantRef     string
+		wantApplied string
+	}{
+		{
+			name:     "CLI slashed ref keeps the full id",
+			engine:   config.EngineConfig{Name: "qwen_code"},
+			cli:      credential.CLIOverrides{Model: qwenSlashedModelID},
+			wantProv: "zcode", wantRef: qwenSlashedModelID, wantApplied: qwenSlashedModelID,
+		},
+		{
+			name:     "explicit provider with a bare model is not prefixed",
+			engine:   config.EngineConfig{Name: "qwen_code"},
+			cli:      credential.CLIOverrides{Provider: "openai", Model: "qwen3-coder-plus"},
+			wantProv: "openai", wantRef: "qwen3-coder-plus", wantApplied: "qwen3-coder-plus",
+		},
+		{
+			name:    "YAML slashed model is already opaque",
+			engine:  config.EngineConfig{Name: "qwen_code", Model: config.ModelConfig{Name: qwenSlashedModelID}},
+			wantRef: qwenSlashedModelID, wantApplied: qwenSlashedModelID,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			resolved := credential.ResolveRunnerConfig(tt.engine, nil, tt.cli)
+			applied := ResolveAdapterConfig(resolved, nil)
+			if applied.AppliedProvider != tt.wantProv || applied.ModelRef != tt.wantRef || applied.AppliedModel != tt.wantApplied {
+				t.Fatalf("provider/ref/applied = %q/%q/%q, want %q/%q/%q",
+					applied.AppliedProvider, applied.ModelRef, applied.AppliedModel, tt.wantProv, tt.wantRef, tt.wantApplied)
+			}
+			agent, err := DetectAgentWithResolvedConfig(applied)
+			if err != nil {
+				t.Fatal(err)
+			}
+			qwen, ok := agent.(*QwenCodeAgent)
+			if !ok {
+				t.Fatalf("agent type = %T, want *QwenCodeAgent", agent)
+			}
+			if got := qwen.Cfg.ModelName; got != tt.wantApplied {
+				t.Fatalf("adapter model name = %q, want %q", got, tt.wantApplied)
+			}
+		})
+	}
+}
+
+func TestResolveAdapterConfig_QwenJudgeKeepsLegacySlashedModelRef(t *testing.T) {
+	t.Setenv("ZCODE_API_KEY", "sk-test")
+
+	runner := credential.ResolveRunnerConfig(config.EngineConfig{Name: "qwen_code"}, nil, credential.CLIOverrides{})
+	judge := credential.ResolveJudgeConfig(config.JudgeConfig{Model: qwenSlashedModelID}, runner, nil)
+	applied := ResolveAdapterConfig(judge, nil)
+	if applied.AppliedModel != qwenSlashedModelID {
+		t.Fatalf("judge applied model = %q, want zcode/GLM-5.3-Flash", applied.AppliedModel)
+	}
+	if applied.AppliedProvider != "zcode" {
+		t.Fatalf("judge applied provider = %q, want zcode", applied.AppliedProvider)
+	}
+}
+
 func TestCapabilitiesForEngine(t *testing.T) {
 	t.Parallel()
 
@@ -82,7 +150,7 @@ func TestCapabilitiesForEngine(t *testing.T) {
 		{engine: "codex", protocol: ProtocolOpenAI, modelPolicy: ModelPolicyCodexProvider, supportsBaseURL: true, supportsVersion: true, kwarg: KwargBypassSandbox},
 		{engine: "opencode", protocol: ProtocolOpenAI, modelPolicy: ModelPolicyPassthrough, supportsBaseURL: true, supportsVersion: true},
 		{engine: "qoder-cli", protocol: ProtocolQoder, modelPolicy: ModelPolicyPassthrough, kwarg: KwargEdition},
-		{engine: "qwen", protocol: ProtocolOpenAI, modelPolicy: ModelPolicyPassthrough, supportsBaseURL: true, supportsVersion: true},
+		{engine: "qwen", protocol: ProtocolOpenAI, modelPolicy: ModelPolicyRequestedRef, supportsBaseURL: true, supportsVersion: true},
 		{engine: "custom-agent", protocol: ProtocolCustom, modelPolicy: ModelPolicyPassthrough},
 	}
 	for _, tt := range tests {
