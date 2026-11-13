@@ -4303,6 +4303,57 @@ func TestExecuteCaseCleansAgentSessionDirOnlyWhenRequested(t *testing.T) {
 	}
 }
 
+// releaseRecordingAgent wraps mockAgent with the optional RuntimeReleaser hook.
+type releaseRecordingAgent struct {
+	*mockAgent
+
+	released atomic.Int32
+}
+
+func (m *releaseRecordingAgent) ReleaseRuntime(runtime.Runtime) {
+	m.released.Add(1)
+}
+
+func TestExecuteCaseReleasesTheRuntimeFromTheAgent(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		skillErr error
+		wantErr  bool
+	}{
+		{name: "case completes"},
+		{name: "setup fails after MCP install", skillErr: errors.New("install unsupported"), wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ag := &releaseRecordingAgent{mockAgent: &mockAgent{name: "codex", output: "ok", skillErr: tc.skillErr}}
+			e := newTestEvaluator(EvalOptions{
+				DeleteWorkspace: true,
+				SkillDir:        t.TempDir(),
+				Loader:          config.NewLoader(filepath.Join(t.TempDir(), "eval.yaml")),
+				EvalCfg: &config.EvalConfig{
+					Environment: config.Environment{Type: "none"},
+					Skills:      []config.SkillRef{{Source: "local_path", Path: "skill"}},
+					Judge: config.JudgeConfig{
+						Type:    "rule_based",
+						Success: []config.Rule{{OutputContains: &config.OutputContainsRule{All: []string{"ok"}}}},
+					},
+				},
+			})
+			caseCfg := &config.CaseConfig{ID: "release", Input: config.Input{Prompt: "hi"}}
+
+			result := e.executeCase(context.Background(), caseCfg, "with_skill", nil, ag)
+			if (result.Error != nil) != tc.wantErr {
+				t.Fatalf("case error = %v, want error: %v", result.Error, tc.wantErr)
+			}
+			if got := ag.mcpCall.Load(); got != 1 {
+				t.Fatalf("InstallMCP calls = %d, want 1", got)
+			}
+			if got := ag.released.Load(); got != 1 {
+				t.Fatalf("ReleaseRuntime calls = %d, want 1", got)
+			}
+		})
+	}
+}
+
 func TestExecuteCaseReportsWhyRequestedSessionCleanupDidNotRun(t *testing.T) {
 	for _, tc := range []struct {
 		name        string

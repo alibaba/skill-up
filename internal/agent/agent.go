@@ -120,6 +120,21 @@ type SessionDirCleaner interface {
 	CleanupSessionDir(ctx context.Context, rt Runtime) error
 }
 
+// RuntimeReleaser is implemented by agents that keep in-process state for a
+// runtime between InstallMCP and Run. The evaluator calls it once a case is
+// done with its runtime, before closing it, whether or not the case succeeded.
+type RuntimeReleaser interface {
+	ReleaseRuntime(rt Runtime)
+}
+
+// ReleaseRuntime lets ag drop any state it keeps for rt. Agents without such
+// state are left alone.
+func ReleaseRuntime(ag Agent, rt Runtime) {
+	if releaser, ok := ag.(RuntimeReleaser); ok {
+		releaser.ReleaseRuntime(rt)
+	}
+}
+
 // Preflight checks executable availability and then collects optional static
 // runtime metadata. It never probes authentication or makes a model request.
 func Preflight(ctx context.Context, rt Runtime, ag Agent) (RuntimeObservation, error) {
@@ -217,6 +232,8 @@ var (
 	_ SessionResumer = (*QoderCLIAgent)(nil)
 	_ SessionResumer = (*CodexAgent)(nil)
 	_ SessionResumer = (*OpenCodeAgent)(nil)
+
+	_ RuntimeReleaser = (*CodexAgent)(nil)
 )
 
 // BaseAgent provides common functionality for agents.

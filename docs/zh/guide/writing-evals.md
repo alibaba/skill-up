@@ -269,7 +269,7 @@ SessionInput / SessionResult 的完整 JSON 契约见 `docs/design/custom-engine
 
 ### MCP 配置说明
 
-MCP 支持 `mode: real` 和 `mode: mocked`。`real` 用于把真实 MCP Server 安装到 `claude_code`、`qodercli`、`codex` 或 `qwen_code` 等 Agent；`mocked` 会由 `internal/mcp` 生成本地 stdio Mock Server，并按普通 MCP 配置安装到 Agent。
+MCP 支持 `mode: real` 和 `mode: mocked`。`real` 用于把真实 MCP Server 安装到 `claude_code`、`qodercli`、`codex` 或 `qwen_code` 等 Agent；`mocked` 会由 `internal/mcp` 生成本地 stdio Mock Server，并按普通 MCP 配置安装到 Agent。对于 `codex`，mocked Server 改为在每条 `codex exec` 命令上通过 `-c mcp_servers.<name>...` 覆盖项定义，不会写入用户的 Codex 配置（`~/.codex/config.toml`）。其脚本在每次运行时写入临时文件。如果该配置中已有同名 Server，或 mocked Server 名称不能作为 Codex 配置键（只能包含字母、数字、`-` 和 `_`），运行会提前报错。
 
 HTTP MCP 可以直接在 `eval.yaml` 中声明，也可以用 `config_ref` 引用 `evals/fixtures/mcp/*.yaml`：
 
