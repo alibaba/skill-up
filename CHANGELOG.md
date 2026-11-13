@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
 - Mocked MCP fixtures accept a `tools` map that defines each tool in one
   place: a required `response`, plus an optional `description` and
   `input_schema` advertised in `tools/list`, so Agents see the same tool
@@ -15,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeps the placeholder description and open object schema; the schema is
   advertised only, not enforced on calls. Existing `tool_responses` fixtures
   keep working unchanged and may sit beside `tools` for other tool names.
+
+- Remove the qodercli project directory a run creates under
+  `~/.qoder/projects` (or `~/.qoder-cn/projects` for the CN edition) when
+  session cleanup is requested. The directory is removed only when every
+  transcript in it records this workspace, so the shared-directory and
+  unproven-ownership safeguards apply to qodercli exactly as they do to Claude
+  Code.
 
 ### Fixed
 - Stop reporting a successful Claude Code answer as a provider rate-limit or

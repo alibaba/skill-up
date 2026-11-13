@@ -423,7 +423,7 @@ func (e *defaultEvaluator) cleanupSessionDir(ctx context.Context, ag agent.Agent
 	}
 	cleaner, ok := ag.(agent.SessionDirCleaner)
 	if !ok {
-		e.announceCleanupSkip(ctx, fmt.Sprintf("agent %q does not support it (supported today: claude_code)", ag.Name()))
+		e.announceCleanupSkip(ctx, fmt.Sprintf("agent %q does not support it", ag.Name()))
 		return
 	}
 	if err := cleaner.CleanupSessionDir(context.WithoutCancel(ctx), rt); err != nil {
