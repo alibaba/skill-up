@@ -270,6 +270,23 @@ Secret-handling rules (enforced at config load):
 - `${api_key}` and any kwarg whose key looks like a credential (`token`, `secret`, `api_key`, `apiKey`, `bearerToken`, …) cannot be referenced from `command` / `args` / `cwd` / `input_file` / `output_file`. Pass them through `engine.custom.env`, where they reach your agent as process environment variables instead of leaking into process listings.
 - `${SOMEVAR:-...}` defaults that contain recognizable credential shapes (`sk-...`, `sk-ant-...`, `ghp_...`, `AIza...`, `AKIA...`, JWTs) are likewise rejected in command-line contexts.
 
+**Local adapters: three pitfalls worth knowing.** If your adapter spawns the agent CLI,
+close or redirect that child's stdin unless the protocol carries frames over stdin —
+several CLIs treat an open stdin pipe as "waiting for input" and block until the case
+deadline with no output, which looks like a slow agent. And make the agent
+non-interactive: drive it in its most autonomous permission mode and disable
+interactive question/approval tools when the CLI has a flag for that, because a
+headless run has nobody to answer and only cases that cross an approval point hang.
+Autonomous mode is only safe when the runtime isolates the agent: `environment.type:
+none` (the default) executes the CLI directly on your host, so pair a `--mode yolo`-style
+flag with `environment.type: docker` / `opensandbox` or an explicit tool allowlist —
+without either one it merely removes the approval prompt and leaves host privileges in
+place, the same warning that applies to `qwen_code` below.
+When a call times out, keep the tail of the child's stdout in the failure message; an
+empty timeout is the hardest report to debug. A worked local-transport example (the
+ZCode CLI) is in
+[docs/design/custom-engine.md](../design/custom-engine.md#example-zcode-cli).
+
 For `transport: http`, configure the call under `custom.http` instead of `custom.local`:
 
 ```yaml

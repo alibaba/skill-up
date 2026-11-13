@@ -132,6 +132,21 @@ Before completing an integration, confirm each item:
 - It does not require secrets to be written into `eval.yaml`; the API key is
   referenced through `${api_key}` after credential resolution.
 - It does not depend on implicit session state across cases, variants, or iterations.
+- If the local adapter spawns the agent CLI, close or redirect that child's stdin
+  unless the protocol carries frames over stdin. Several CLIs treat an open stdin
+  pipe as "waiting for input" and block until the case deadline without producing
+  output, which reads as a slow agent rather than a deadlock.
+- Make the agent non-interactive. Run it in the most autonomous permission mode it
+  offers, and disable interactive question/approval tools when the CLI has a flag
+  for that. A headless run has nobody to answer a prompt, so only the cases that
+  cross an approval point hang while simple cases pass — easily misdiagnosed as
+  the task being too slow. That mode is only safe under a runtime that isolates:
+  the default `environment.type: none` runs the CLI on your host, so pair it with
+  `environment.type: docker` / `opensandbox` or an explicit tool allowlist.
+  Otherwise the mode removes the approval prompt without removing host privileges.
+- When the invocation fails or times out, return the tail of the child's stdout in
+  the failure message or `final_message`; an empty timeout is the hardest failure
+  to diagnose from a report.
 
 Minimal `SessionResult`:
 
@@ -558,6 +573,58 @@ Invocation rules:
 File modifications by a local task should happen under `${workspace}`. If those files
 need to enter the report directory, the agent must explicitly declare them in the
 `artifacts` of the result.
+
+### Example: ZCode CLI
+
+ZCode is a Claude Code-shaped CLI with a headless mode, and a
+small adapter is enough to run it over the local transport. Its flags map onto the
+SessionInput contract like this: `-p <prompt>`, `--json`, `--resume <sessionId>`
+for stateful turns, `--cwd <dir>`, `--mode <build|edit|plan|yolo|guarded>`, and
+`--disallowed-tools <names>`.
+
+The adapter (a ~100-line Node script, attached to GitHub issue #377) reads the
+`SessionInput`, spawns ZCode with those flags, parses the JSON reply, and writes the
+`SessionResult`. The engine config stays declarative (the adapter path resolves
+inside the runtime workspace, so ship it with the skill or copy it in first):
+
+```yaml
+engine:
+  name: zcode
+  custom:
+    transport: local
+    conversation_mode: stateful
+    response_format: session_result
+    timeout_seconds: 300
+    env:
+      ZCODE_CLI: ${ZCODE_CLI}
+      ZCODE_MODE: ${kwargs.mode}
+    kwargs:
+      mode: yolo  # needs an isolating runtime; see the notes below
+    local:
+      command: node
+      args:
+        - adapters/zcode-runner.mjs
+        - --input
+        - ${input_file}
+        - --output
+        - ${output_file}
+      cwd: ${workspace}
+```
+
+Three behaviours are worth knowing before copying it:
+
+- `--mode yolo` removes ZCode's approval prompts, so it belongs under an isolating
+  runtime (`environment.type: docker` / `opensandbox`). With the default `none`
+  runtime ZCode executes shell and file tools on your host with your privileges; on
+  `none`, use `--mode build` (or `guarded`) and narrow `--disallowed-tools` instead.
+- Tool calls that would wait for a human must not: run in the CLI's most autonomous
+  permission mode (`--mode yolo` above) and, where the CLI supports it, disallow the
+  interactive question tool (`--disallowed-tools AskUserQuestion`). Otherwise cases
+  that reach an approval point hang until the deadline while simple cases pass.
+- ZCode's headless mode resolves the model from the personal channel's
+  `providerOrder` and offers no per-run `--model` flag, so `${model}` /
+  `${model_name}` cannot be forwarded. Per-case model selection needs CLI support
+  first; tracked in issue #377.
 
 ## HTTP transport
 
