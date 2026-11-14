@@ -22,7 +22,7 @@ expect:
 
 judge:
   type: agent_judge
-  model: anthropic/claude-sonnet-4-6
+  model: dashscope/qwen3.8-max
   criteria:
     - "在 evals/cases/ 下新建了 list-todos.yaml 文件"
     - "list-todos.yaml 的 id 字段为 list-todos，且 judge.type 为 rule_based"

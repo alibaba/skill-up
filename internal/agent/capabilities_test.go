@@ -15,6 +15,57 @@ import (
 
 const testDashscopeProvider = "dashscope"
 
+func TestValidateJudgeAdapterConfig(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		engine, provider, endpoint string
+		wantErr                    bool
+	}{
+		{"codex", "anthropic", "https://anthropic.example.test", true},
+		{"claude_code", "openai", "https://openai.example.test/v1", true},
+		{"claude-code", "anthropic", "", false},
+		{"codex", "openai", "", false},
+		{"codex", "gateway", "https://gateway.example.test/v1", false},
+		{"codex", "gateway", "", true},
+		{"opencode", "anthropic", "", false},
+		{"qodercli", "anthropic", "", false},
+		{"custom-judge", "anthropic", "", false},
+	} {
+		t.Run(test.engine+"/"+test.provider+"/"+test.endpoint, func(t *testing.T) {
+			t.Parallel()
+			params := ResolveAdapterConfig(credential.ResolvedAgentConfig{
+				Role: credential.AgentRoleJudge, Engine: test.engine, Provider: test.provider, Model: "judge-model", BaseURL: test.endpoint,
+			}, nil)
+			if err := ValidateJudgeAdapterConfig(params, nil); (err != nil) != test.wantErr {
+				t.Fatalf("validation = %v, wantErr=%t", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestIndependentJudgeUsesProtocolScopedConnection(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "credentials.yaml")
+	if err := os.WriteFile(path, []byte("providers:\n  anthropic:\n    openai:\n      api_key: judge-key\n      base_url: https://gateway.example.test/v1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolver := credential.NewResolver(path)
+	if err := resolver.Load(); err != nil {
+		t.Fatal(err)
+	}
+	params := ResolveAdapterConfig(credential.ResolveJudgeConfig(config.JudgeConfig{
+		Type: "agent_judge", Engine: &config.EngineConfig{
+			Name: "codex", Model: config.ModelConfig{Provider: "anthropic", Name: "gateway-model"},
+		},
+	}, credential.ResolvedAgentConfig{Engine: "claude_code", Provider: "anthropic", APIKey: "runner-key"}, resolver), resolver)
+	if err := ValidateJudgeAdapterConfig(params, resolver); err != nil {
+		t.Fatal(err)
+	}
+	if params.AppliedAPIKey != "judge-key" || params.AppliedBaseURL != "https://gateway.example.test/v1" || params.AppliedModel != "gateway-model" {
+		t.Fatalf("wrong judge connection: %+v", params)
+	}
+}
+
 func TestCapabilitiesForEngine(t *testing.T) {
 	t.Parallel()
 

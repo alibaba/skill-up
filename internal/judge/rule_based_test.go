@@ -853,3 +853,25 @@ func TestRuleBased_ToolNotCalledInTurn_MissingTurn(t *testing.T) {
 	assertNoError(t, err)
 	assertStatus(t, r, StatusFail)
 }
+
+func TestRuleBased_ConfiguredDenominator(t *testing.T) {
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Failure: []config.Rule{{OutputContains: &config.OutputContainsRule{All: []string{"bad"}}}},
+		Success: []config.Rule{{OutputContains: &config.OutputContainsRule{All: []string{"good"}}}},
+	})
+	for _, output := range []string{"bad", "good", "neither"} {
+		t.Run(output, func(t *testing.T) {
+			result, err := j.Evaluate(context.Background(), Input{FinalMessage: output})
+			assertNoError(t, err)
+			if result.Summary.Total != 2 {
+				t.Fatalf("summary=%+v", result.Summary)
+			}
+			if result.AssertionResults[1].Skipped != (output == "bad") {
+				t.Fatalf("assertions=%+v", result.AssertionResults)
+			}
+			if result.AssertionResults[0].Passed != (output != "bad") {
+				t.Fatalf("failure rule=%+v", result.AssertionResults[0])
+			}
+		})
+	}
+}

@@ -83,6 +83,10 @@ type Input struct {
 	// should write or download its own run artifacts.
 	ArtifactDir string
 
+	// ContextArtifactDir is the context archive path relative to case outputs.
+	// Empty preserves the legacy judge/context layout for standalone callers.
+	ContextArtifactDir string
+
 	// SessionResult is the full engine output, available for advanced judges.
 	SessionResult *agent.SessionResult
 
@@ -139,6 +143,33 @@ type Result struct {
 	// JudgeContext records how agent_judge materialized and delivered review
 	// materials. It is omitted for deterministic judges and older results.
 	JudgeContext *ContextMetadata `json:"judge_context,omitempty"`
+
+	// Recovery records when agent_judge accepted a valid result after its
+	// agent call returned an error. It is carried into report.json separately so
+	// grading.json remains compatible with the Anthropic grading contract.
+	Recovery *RecoveryMetadata `json:"-"`
+}
+
+// RecoveryMetadata describes a recovered judge result without exposing the
+// underlying agent error, which can contain provider-specific details.
+type RecoveryMetadata struct {
+	Recovered bool   `json:"recovered"`
+	Reason    string `json:"reason"`
+}
+
+// Outcome preserves one independent judge's result and diagnostic session.
+type Outcome struct {
+	ID         string               `json:"id"`
+	Type       string               `json:"type"`
+	Status     Status               `json:"status"`
+	Result     *Result              `json:"result,omitempty"`
+	Error      string               `json:"error,omitempty"`
+	SkipReason string               `json:"skip_reason,omitempty"`
+	Artifacts  string               `json:"artifacts_dir,omitempty"`
+	DurationMs int64                `json:"duration_ms"`
+	Recovery   *RecoveryMetadata    `json:"recovery,omitempty"`
+	Session    *agent.SessionResult `json:"-"`
+	Skills     []SkillInfo          `json:"judge_skills,omitempty"`
 }
 
 // ContextMetadata is report-facing metadata for agent_judge context
@@ -192,6 +223,9 @@ type AssertionResult struct {
 
 	// Passed indicates whether this assertion was satisfied.
 	Passed bool `json:"passed"`
+
+	// Skipped indicates that the assertion was not evaluated and received no credit.
+	Skipped bool `json:"skipped,omitempty"`
 
 	// Evidence provides the concrete reason for the pass/fail determination.
 	Evidence string `json:"evidence"`

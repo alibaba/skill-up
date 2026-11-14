@@ -22,6 +22,8 @@ const DefaultScriptTimeout = 30 * time.Second
 //   - Exit code 0 → PASS, non-0 → FAIL
 //   - stdout → evaluation evidence, stderr → debug info
 type ScriptJudge struct {
+	// TimeoutIsError marks a timed-out script as an execution error.
+	TimeoutIsError bool
 	// ScriptPath is the absolute or workspace-relative path to the evaluation script.
 	ScriptPath string
 
@@ -125,6 +127,10 @@ func (j *ScriptJudge) evaluateInRuntime(ctx context.Context, rt evalruntime.Runt
 	debugInfo := strings.TrimSpace(result.Stderr)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
+			if j.TimeoutIsError {
+				timeoutErr := fmt.Errorf("script timed out after %s: %w", timeout, ctx.Err())
+				return NewErrorResult(timeoutErr, in.TurnsExecuted, in.TurnsTotal), timeoutErr
+			}
 			return j.buildResult(false, "script timed out after "+timeout.String(), debugInfo, in), nil
 		}
 		if result.ExitCode == 0 {

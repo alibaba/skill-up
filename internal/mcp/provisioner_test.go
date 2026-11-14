@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,49 @@ import (
 )
 
 const nodeCommand = "node"
+
+func TestProvisioner_WholeEnvRefs(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name, ref, endpoint, endpointVar string
+	}{
+		{"bare config", "$%s", "", "MCP_URL"},
+		{"braced config", "${%s}", "", "MCP_URL"},
+		{"bare inline", "$%s", "$OVERRIDE_URL", "OVERRIDE_URL"},
+		{"braced inline", "${%s}", "${OVERRIDE_URL}", "OVERRIDE_URL"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			skillDir := t.TempDir()
+			content := fmt.Sprintf("endpoint: %s\nheaders:\n  PRIVATE-TOKEN: %s\n", fmt.Sprintf(tc.ref, "MCP_URL"), fmt.Sprintf(tc.ref, "MCP_TOKEN"))
+			if err := os.WriteFile(filepath.Join(skillDir, "mcp.yaml"), []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			server := config.MCPServer{Name: "remote", Mode: "real", ConfigRef: "mcp.yaml", Endpoint: tc.endpoint}
+			values := map[string]string{"MCP_URL": "https://mcp.example.test", "OVERRIDE_URL": "https://override.example.test", "MCP_TOKEN": "test-token"}
+			resolved, env, err := (Provisioner{SkillDir: skillDir, LookupEnv: func(name string) (string, bool) {
+				value, ok := values[name]
+				return value, ok
+			}}).Provision(config.MCPConfig{Servers: []config.MCPServer{server}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := resolved.Servers[0]
+			if got.Endpoint != "${"+tc.endpointVar+"}" || got.Headers["PRIVATE-TOKEN"] != "${MCP_TOKEN}" {
+				t.Errorf("references = %q, %q; want braced references", got.Endpoint, got.Headers["PRIVATE-TOKEN"])
+			}
+			if got.HeaderEnv["PRIVATE-TOKEN"] != "MCP_TOKEN" {
+				t.Errorf("HeaderEnv = %#v", got.HeaderEnv)
+			}
+			for _, key := range []string{tc.endpointVar, "MCP_TOKEN"} {
+				if got.Env[key] != values[key] || env[key] != values[key] {
+					t.Errorf("environment value for %s was not propagated", key)
+				}
+			}
+		})
+	}
+}
 
 func TestProvisioner_RealServerFromConfigRefResolvesAuthEnv(t *testing.T) {
 	t.Parallel()
@@ -320,6 +364,52 @@ func TestProvisioner_SameNameMockedServersDifferentFixtures(t *testing.T) {
 	}
 	if !strings.Contains(openScript, "OPEN") || !strings.Contains(closedScript, "CLOSED") {
 		t.Errorf("scripts do not embed their respective fixture status values")
+	}
+}
+
+func TestProvisioner_MockedServerRejectsInvalidToolMetadata(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		tool string
+		want string
+	}{
+		{
+			name: "unknown field",
+			tool: "    description: Look up a project.\n    inputSchema:\n      type: object\n    response: {status: OPEN}\n",
+			want: `has unknown field "inputSchema"; supported fields are description, input_schema and response`,
+		},
+		{
+			name: "scalar input schema",
+			tool: "    input_schema: object\n    response: {status: OPEN}\n",
+			want: "input_schema must be a mapping with type: object",
+		},
+		{
+			name: "missing response",
+			tool: "    description: Look up a project.\n",
+			want: "has no response; set response (null is allowed)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			skillDir := t.TempDir()
+			content := "tools:\n  get_project:\n" + tt.tool
+			if err := os.WriteFile(filepath.Join(skillDir, "mcp.yaml"), []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, _, err := (Provisioner{SkillDir: skillDir}).Provision(config.MCPConfig{
+				Servers: []config.MCPServer{{Name: "project-mgmt", Mode: "mocked", ConfigRef: "mcp.yaml"}},
+			})
+			want := `mcp server "project-mgmt" mock fixture tool "get_project" ` + tt.want
+			if err == nil || err.Error() != want {
+				t.Fatalf("Provision error = %v, want %q", err, want)
+			}
+		})
 	}
 }
 

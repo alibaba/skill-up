@@ -44,7 +44,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.25.x"
+          go-version: "1.26.x"
           cache: true
 
       - name: Run e2e tests (none runtime, quick mode)
@@ -55,7 +55,7 @@ jobs:
 
       - name: Upload e2e workspace artifacts
         if: always() && hashFiles('e2e-artifacts/**') != ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-windows-workspaces
           path: e2e-artifacts/
@@ -77,7 +77,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.25.x"
+          go-version: "1.26.x"
           cache: true
 
       - name: Verify Docker is available
@@ -105,26 +105,36 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Configure fresh Go caches
+        run: |
+          cache_root="${RUNNER_TEMP}/goreleaser-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "GOCACHE=${cache_root}/build" >> "$GITHUB_ENV"
+          echo "GOMODCACHE=${cache_root}/mod" >> "$GITHUB_ENV"
+
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.25.x"
-          # This job builds snapshot release artifacts; avoid cache poisoning.
+          go-version: "1.26.x"
+          # Keep the temporary Go caches independent of remote cache archives.
           cache: false
 
       - name: GoReleaser check
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7
         with:
           distribution: goreleaser
           version: "v2.17.0"
           args: check
 
       - name: GoReleaser snapshot build
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7
+        env:
+          # Bound both cross-target builds and each Go compiler on 16 GiB runners.
+          GOMAXPROCS: "2"
+          GOFLAGS: "-p=2"
         with:
           distribution: goreleaser
           version: "v2.17.0"
-          args: release --snapshot --clean --skip=publish
+          args: release --snapshot --clean --skip=publish --parallelism=1
 
   summary:
     name: Extended CI Summary

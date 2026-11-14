@@ -1,6 +1,6 @@
 ---
 name: skill-upper
-description: "Capture and review Agent Skill observations, and create, run, diagnose, or iteratively improve Skill evaluations (evals) with the skill-up CLI. Use when the user asks to record explicitly attributed Skill usage or feedback; review observations; turn an approved observation into a regression case; evaluate, test, regress, verify, fix, improve, iterate, or evolve a Skill; add or strengthen eval cases; write eval.yaml/case.yaml; run skill-up run/validate/list-cases/report/import/init; or migrate from Anthropic evals.json. Observation capture and review require either the Codex skill-up plugin or an observer-enabled DSH skill-up plugin; evaluation remains multi-engine."
+description: "Capture and review Agent Skill observations, and create, run, diagnose, or iteratively improve Skill evaluations (evals) with the skill-up CLI. Use when the user asks to record explicitly attributed Skill usage or feedback; review observations or user-supplied traces/transcripts; turn an approved observation into a regression case; evaluate, test, regress, verify, fix, improve, iterate, or evolve a Skill; add or strengthen eval cases; write eval.yaml/case.yaml; run skill-up run/validate/list-cases/report/import/init; or migrate from Anthropic evals.json. Plugin observation capture/review require either the Codex skill-up plugin or an observer-enabled DSH skill-up plugin. User-supplied external evidence can be reviewed without a plugin; evaluation remains multi-engine."
 ---
 
 # use-skill-up-cli
@@ -23,18 +23,39 @@ Regardless of the response language, technical identifiers in this SKILL — CLI
 
 ### Language Rules for Generated Artifacts
 
-When creating or editing `eval.yaml`, `case.yaml`, grading scripts, README snippets, final replies, or any other user-visible artifact, treat the language of the user's current message as the output language for this turn:
+Use the user's current language for replies, newly authored explanatory prose,
+and YAML comments. Preserve the language and semantics of test inputs, expected
+output literals, identifiers, commands, paths, and existing regression cases.
+Do not translate a deterministic assertion merely because the conversation
+language changed. When testing localized behavior, keep the original business
+text even in an English conversation.
 
-- If the user asks in Chinese, write the final response and all generated natural-language content in Chinese, including YAML comments, `title`, `description`, `input.prompt`, `expect` keywords, and `judge.criteria`.
-- If the user asks in English, write the final response and all generated natural-language content in English, including YAML comments, `title`, `description`, `input.prompt`, `expect` keywords, and `judge.criteria`; do not leave Chinese or CJK characters in generated case files.
-- If the target Skill itself is written in Chinese but the user asks in English, translate the Skill's functional intent into English test prompts and assertions instead of copying Chinese prose from the target Skill.
-- In an English context, deterministic keywords in `rule_based` cases, including `expect.must_contain` and `judge.success.output_contains`, must also be English keywords. Express concepts such as resource leaks, closing resources, and exception handling in English; do not mix source-language terms into English assertions.
-- Keep technical identifiers unchanged, such as `schema_version`, `environment.type`, `engine.name`, `rule_based`, `agent_judge`, `script_path`, file paths, and commands.
-- Generated YAML comments must use field-leading comments. Keep each comment short: one line for field meaning, plus one line for options only when useful.
-- When listing options in comments, keep enum values unchanged, such as `none | opensandbox | docker` and `rule_based | agent_judge | script`.
-- Treat `assets/*.tmpl` as structural references only. Replace placeholder prose and comments with case-specific content in the current output language. The bundled templates are in English; translate their prose and comments when the user requests another language.
-- `skill-up import` uses the CLI conversion path and does not preserve template comments; do not promise commented YAML for import-generated files.
-- In an English context, after generating all files but BEFORE submitting the final reply, you **MUST perform a CJK self-check**: open every `evals/cases/*.yaml` and `evals/eval.yaml` and scan for CJK characters (Unicode ranges `\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u3000-\u303f\uff00-\uffef`), including but not limited to `title`, `description`, `input.prompt`, `expect` keywords, `judge.criteria`, and YAML comments. If any CJK character is found, **replace it with an equivalent English expression before finishing the task**. This step is mandatory and must not be skipped.
+Treat `assets/*.tmpl` as structural references: adapt placeholder prose and
+comments to the requested language. Review only files created or changed for
+this task; never rewrite unrelated cases to enforce a language preference.
+
+Use short field-leading comments for generated YAML. Explain actual configured
+fields: `schema_version`, `environment.type`, `engine.name`, `cases.files`, and
+`report.formats` in eval.yaml; `id`, `title`, `input.prompt`, and `judge.type` in
+case YAML. For nested fields, place the comment inside the parent mapping
+immediately before the child field, rather than only before the parent.
+For example, comment both `prompt` and `type` at their own indentation:
+
+```yaml
+input:
+  # User request sent to the agent.
+  prompt: Review this code.
+# Cheap prerequisites checked before the judge.
+expect:
+  must_contain: ["suggestion"]
+judge:
+  # Deterministic grading strategy for this case.
+  type: rule_based
+```
+
+Comment `expect` and a top-level `judge` when present; do not add an
+optional field just to satisfy a comment check. Keep field names and enum values
+unchanged. `skill-up import` does not preserve template comments.
 
 ## What is skill-up
 
@@ -66,7 +87,21 @@ Use this skill in any of the following situations:
 - The user wants to migrate from Anthropic `evals.json` to skill-up.
 - The current working directory contains `evals/eval.yaml` or `evals/evals.json` and the user wants to run it.
 
-## Main flow (follow this order strictly)
+## Choose the requested workflow
+
+- **Diagnose or plan:** read the target Skill and supplied evidence, identify
+  concrete problems, and propose changes or cases. Do not install tools, create
+  eval files, change configuration, or run evaluations unless requested.
+- **Create or edit cases:** use Steps 1–4 to create or update the suite and
+  validate its configuration. Stop before credentials and execution unless the
+  user also requests a run. Report the actual config/case paths and validation
+  status in the final reply.
+- **Evaluate:** follow Steps 0–7 for the requested suite; report failures without
+  automatically editing the Skill.
+- **Improve:** follow the evaluation workflow and Step 8 within the requested
+  scope. Preserve valid existing cases and assertions.
+
+## Evaluation workflow
 
 ### Observation capture mode (optional)
 
@@ -156,7 +191,7 @@ Precedence (low → high): embedded empty defaults < user config < project `.ski
 ### Step 1: Locate the target Skill
 
 1. Identify the root directory of the target Skill (the directory containing `SKILL.md`). Search in this priority: user path → nearest `SKILL.md` upward from CWD → recently viewed files.
-2. Read the target `SKILL.md` for scope, triggers, and dependencies. If the Skill is Chinese but the user writes in English, translate capabilities into English for prompts and assertions.
+2. Read the target `SKILL.md` for scope, triggers, and dependencies. Preserve localized behavior and expected literals when designing cases.
 3. Check `evals/`:
    - `evals/eval.yaml` exists → Step 4 (optionally Step 3).
    - Only `evals/evals.json` → `references/migrate-anthropic.md` (`skill-up run --auto` or `skill-up import`).
@@ -166,6 +201,14 @@ Precedence (low → high): embedded empty defaults < user config < project `.ski
 
 - Copy `assets/eval.yaml.tmpl` to `<skill-root>/evals/eval.yaml`.
 - Copy `assets/case.yaml.tmpl` to `<skill-root>/evals/cases/<case-id>.yaml`.
+
+Start with the smallest complete scaffold requested by the user. Unless they
+request broader coverage, create one representative case; add more only for
+distinct requirements. For a script judge, implement the required output
+contract in a short script and reuse it across cases with the same contract.
+Do not build a general report parser or an extensive script test matrix as part
+of scaffolding. For a JSON-only contract, use `json.loads` and explicit field
+checks; support prose or Markdown wrappers only when the contract allows them.
 
 Adapt language per "Language Rules for Generated Artifacts". Replace the templates' generic English placeholders with case-specific prose in the requested output language. Preserve short field-leading comments in generated YAML; translate them when the output language differs from English, while keeping field names and enum values in English.
 
@@ -184,6 +227,9 @@ See `references/eval-yaml.md` and `references/case-yaml.md`.
 - `skill-up list-cases <path>`
 - Review `eval.yaml` and representative cases; avoid `agent_judge` abuse.
 - Add or edit YAML under `cases/` as needed.
+- For byte-for-byte preservation checks, compare `sha256sum <file>` (or
+  `shasum -a 256 <file>`) before and after editing, within the user's allowed
+  command profile.
 - If adding simulated user turns, check that the selected engine supports session resumption, configure the separate simulator connection, and retain deterministic fixed turns and judge assertions wherever possible.
 
 ### Step 4: Validate the configuration
@@ -194,19 +240,52 @@ skill-up validate <skill-root>/evals/eval.yaml
 
 Expect: `✓ eval.yaml is valid (loaded N case(s))`.
 
+For a case-authoring request, finish here with the config and case paths plus
+validation status. Do not start a background evaluation as part of scaffolding.
+Before replying, reopen the generated YAML and check comments immediately
+before nested `input.prompt`, `judge.type`, and `report.formats` where configured.
+A comment before `input`, `judge`, or `report` does not document its child field.
+Check every generated case separately: read its actual `judge:` block and ensure
+the explanatory comment sits between `judge:` and `type:`, indented like `type:`.
+If the comment is above `judge:`, move it inside the mapping and validate again.
+Do not infer comment coverage from a successful YAML validation or from what you
+intended to write.
+For an `expect` block, put its explanatory comment immediately above `expect:`;
+a comment inside it above `must_contain` does not document the parent gate.
+For a new scoring script, check one passing and one failing sample when feasible,
+then report the checks and finish. Do not expand into unrelated script features
+or a large test matrix unless the user asks for that work.
+
 ### Step 5: Prepare credentials
 
-For the agent model, priority is `--api-key` > env (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `QODER_PERSONAL_ACCESS_TOKEN`) > `~/.skill-up/credentials.yaml`.
-
-The user simulator resolves credentials by its own `user_simulator.provider`. For `provider: simulation`, set `SIMULATION_API_KEY` and `SIMULATION_BASE_URL`, or configure the `simulation` provider in `~/.skill-up/credentials.yaml`. For `provider: openai`, use `OPENAI_API_KEY` and optionally `OPENAI_BASE_URL`; its standard endpoint is the fallback. Choose `protocol: openai` for Chat Completions or `protocol: anthropic` for Messages; custom base URLs must match that protocol. For `provider: anthropic` with `protocol: anthropic`, use `ANTHROPIC_API_KEY` and optional `ANTHROPIC_BASE_URL` (official endpoint fallback). `--api-key` for the agent does not supply the simulator connection. Never put a raw key in eval YAML.
+Check authentication for the selected engine and provider. Provider API keys
+resolve from `--api-key`, environment variables, or `~/.skill-up/credentials.yaml`;
+engine-specific tokens and saved login sessions follow the engine's auth rules.
+Never dump environment variables or credential files, or print secret values
+into tool output, logs, or the conversation. Check only whether a relevant
+variable has a non-empty value. For example, for an OpenAI API-key workflow:
 
 ```bash
-for name in ANTHROPIC_API_KEY OPENAI_API_KEY QODER_PERSONAL_ACCESS_TOKEN SIMULATION_API_KEY SIMULATION_BASE_URL; do
-  if printenv "$name" | grep -q .; then printf '%s=set\n' "$name"; fi
-done
+if printenv OPENAI_API_KEY | grep -q .; then
+  printf '%s\n' 'OPENAI_API_KEY: configured'
+else
+  printf '%s\n' 'OPENAI_API_KEY: not configured in the environment'
+fi
 ```
 
-If the selected provider lacks credentials in both the environment and the credential file, ask the user to configure it; do not print secret values or write them into YAML.
+An absent environment variable does not rule out file-based credentials or an
+existing engine login. If the selected authentication path is unavailable,
+**stop and ask** the user to configure it locally; do not ask them to paste a
+secret into the conversation or write secrets into YAML without consent.
+
+When asked to author a credential probe, respect the user's allowed command
+profile during verification too. Writing a script does not authorize launching
+it with `sh`, `sh -x`, or sourcing it when that profile excludes script execution.
+Inspect the written probe instead and report that execution was not performed;
+do not add an unsupported launcher just to test it. Check shell-tracing behavior
+only in an explicitly permitted isolated test with synthetic credentials.
+
+The user simulator resolves credentials by its own `user_simulator.provider`. For `provider: simulation`, set `SIMULATION_API_KEY` and `SIMULATION_BASE_URL`, or configure the `simulation` provider in `~/.skill-up/credentials.yaml`. For `provider: openai`, use `OPENAI_API_KEY` and optionally `OPENAI_BASE_URL`; its standard endpoint is the fallback. Choose `protocol: openai` for Chat Completions or `protocol: anthropic` for Messages; custom base URLs must match that protocol. For `provider: anthropic` with `protocol: anthropic`, use `ANTHROPIC_API_KEY` and optional `ANTHROPIC_BASE_URL` (official endpoint fallback). `--api-key` for the agent does not supply the simulator connection. Never put a raw key in eval YAML.
 
 For `opensandbox`, also ensure `OPENSANDBOX_API_KEY` (and related env) as needed.
 
@@ -249,12 +328,36 @@ Only enter this loop when the user asks to fix, improve, iterate, or evolve the
 target Skill. If the user only asks to evaluate or report results, stop after
 Step 7 without modifying it.
 
-1. Diagnose failures from `result.json`, `grading.json`, and output evidence.
-2. Fix `SKILL.md` or supporting files when the Skill behavior is incorrect.
-3. Add or refine eval cases when coverage is missing.
-4. Do not weaken valid assertions merely to make a failure pass.
-5. Rerun failed cases first, then run the full eval suite.
-6. Continue until the evals pass or clearly report what remains blocked.
+1. Diagnose failures from `result.json`, `grading.json`, transcripts, and produced
+   artifacts. Distinguish a Skill defect from an invalid eval, execution or
+   infrastructure error, and an uncertain outcome. Before editing, state the
+   observed failure, the smallest proposed change, and the behavior it should
+   change; cite the evidence rather than assuming a score increase proves why.
+2. Preserve the original Skill and its run artifacts so the candidate can be
+   compared or reverted without overwriting either version's evidence. Fix
+   `SKILL.md` or supporting files within the requested scope. Keep unrelated
+   changes separate so their effects can be assessed.
+3. Preserve valid assertions. If an eval or judge is wrong, explain and correct
+   it separately, then evaluate both Skill versions against that same corrected
+   suite. Add regression coverage and nearby counterexamples where needed to
+   distinguish a reusable fix from a rule tailored to one prompt.
+4. Compare the original and candidate on the affected cases with the same engine,
+   model, environment, inputs, and judges. Reuse existing runs only when those
+   conditions match. `--baseline` compares with and without a Skill; it does not
+   compare old and new Skill versions. Use separate output directories for the
+   two versions. For uncertain or intermittent outcomes, repeat both versions
+   within the user's budget; `--iteration N` samples one version, not N revisions.
+5. Run the full eval suite for a promising candidate. Accept it only when the
+   evidence supports the intended improvement without regressions in important
+   existing behaviors. Inspect runtime, token usage, and execution errors where
+   available. A single PASS, a higher aggregate score, or a preferred-looking
+   answer alone does not establish a reliable improvement.
+6. Revert unsupported changes or report uncertainty; keeping the original is a
+   valid outcome. Stop when the requested improvement is verified, the agreed
+   budget is reached, or an external blocker prevents validation. Summarize the
+   accepted or reverted change, comparative evidence and artifact paths,
+   regressions, costs, and remaining limitations. Record reusable lessons only
+   when the execution evidence supports them, with their scope and uncertainty.
 
 ## Command quick reference
 
@@ -276,7 +379,7 @@ Full flags: `references/cli.md`.
 
 - Model IDs vs proxy aliases — preserve what works for the user's `base_url`.
 - `opensandbox` without `OPENSANDBOX_API_KEY` — auth failures.
-- Chinese `expect.must_contain` vs English model output — align language in prompts/assertions.
+- Match the language of deterministic assertions to the behavior under test, not merely to the conversation language.
 - Abusing `agent_judge`.
 - Anthropic `evals.json` expectations → default `agent_judge`; use `import` + hand edits for deterministic checks.
 - Paths relative to Skill root (`SKILL.md` directory).

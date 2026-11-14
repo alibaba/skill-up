@@ -120,6 +120,30 @@ func ResolveAdapterConfig(params credential.ResolvedAgentConfig, resolver *crede
 	return params
 }
 
+// ValidateJudgeAdapterConfig rejects known protocol mismatches and model
+// overrides that an adapter would silently discard. Provider namespaces with
+// an explicit endpoint for the selected protocol remain supported.
+func ValidateJudgeAdapterConfig(params credential.ResolvedAgentConfig, resolver *credential.Resolver) error {
+	wantedProtocol := Protocol("")
+	switch params.Provider {
+	case agentProviderAnthropic:
+		wantedProtocol = ProtocolAnthropic
+	case agentProviderOpenAI:
+		wantedProtocol = ProtocolOpenAI
+	}
+	protocol := Protocol(params.Protocol)
+	if wantedProtocol != "" && wantedProtocol != protocol && (protocol == ProtocolOpenAI || protocol == ProtocolAnthropic) {
+		provider, _ := resolver.GetProviderConfiguration(params.Provider)
+		if _, explicit := provider.Endpoints[protocol]; !explicit {
+			return fmt.Errorf("judge engine %q uses %s protocol, incompatible with provider %q; configure judge.engine explicitly or a provider endpoint for %s", params.Engine, protocol, params.Provider, protocol)
+		}
+	}
+	if params.Model != "" && params.AppliedModel == "" {
+		return fmt.Errorf("judge engine %q cannot apply model %q for provider %q; configure a compatible judge.engine and model connection", params.Engine, params.Model, params.Provider)
+	}
+	return nil
+}
+
 func resolveModelConnection(
 	params credential.ResolvedAgentConfig,
 	resolver *credential.Resolver,

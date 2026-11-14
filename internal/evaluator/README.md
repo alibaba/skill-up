@@ -208,7 +208,7 @@ executeCaseOnce(caseCfg, configName, overrideRT, overrideAgent)
 │   └── download session file (if any)
 │
 ├── 4. resolveExpectConfig + CheckExpect  ← expect pre-check
-│   ├── failure → grading = NewResult + StatusFail → return immediately
+│   ├── failure → grading = NewExpectFailureResult + StatusFail → return immediately
 │   └── pass → continue
 │
 ├── 5. judge.NewJudge + j.Evaluate    ← judge scoring

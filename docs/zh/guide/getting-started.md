@@ -91,7 +91,7 @@ curl -fsSL https://raw.githubusercontent.com/alibaba/skill-up/main/install.sh | 
 
 安装脚本会从 [GitHub Releases](https://github.com/alibaba/skill-up/releases) 下载当前平台对应的二进制文件。
 
-如需从仓库 checkout 后本地构建，需要安装 [Go](https://go.dev/dl/) 1.25 或更高版本：
+如需从仓库 checkout 后本地构建，需要安装 [Go](https://go.dev/dl/) 1.26 或更高版本：
 
 ```bash
 make build

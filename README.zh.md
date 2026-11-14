@@ -14,13 +14,13 @@
       <img src="https://github.com/alibaba/skill-up/actions/workflows/ci.yml/badge.svg" alt="CI" />
     </a>
     <a href="https://deepwiki.com/alibaba/skill-up">
-      <img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" />
+      <img src="assets/deepwiki-badge.svg" alt="Ask DeepWiki" />
     </a>
     <a href="./.github/badges/coverage.json">
       <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/alibaba/skill-up/badges/.github/badges/coverage.json" alt="Coverage" />
     </a>
     <a href="https://go.dev/">
-      <img src="https://img.shields.io/badge/go-%3E%3D1.25-blue" alt="Go Version" />
+      <img src="https://img.shields.io/badge/go-%3E%3D1.26-blue" alt="Go Version" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License" />
@@ -64,8 +64,10 @@
 - **声明式评测配置**：通过 YAML（`eval.yaml` + `cases/*.yaml`）定义评测环境、引擎、模型和用例。
 - **运行环境准备**：为每个用例准备本地、Docker 或 OpenSandbox 环境，在支持的 Agent Engine 中安装配置的真实或 Mock MCP Server，并将 `context.repo_fixture` 和 `context.files` 上传到 workspace。
 - **可选 Skill 与 Workspace 用例**：无需安装 Skill 即可评测 Agent；可按用例准备代码仓库 fixture，或用 `--workspace` 评测已有本地目录。
-- **多引擎支持**：内置支持 Qoder CLI、Claude Code、Codex；亦可通过 `engine.custom` 接入用户自定义 Agent（本地传输，详见 [docs/design/custom-engine.md](docs/design/custom-engine.md)）。
+- **多引擎支持**：内置支持 Qoder CLI、Claude Code、Codex；亦可通过 `engine.custom` 接入用户自定义 Agent（本地命令或 HTTP 服务，详见 [docs/design/custom-engine.md](docs/design/custom-engine.md)）。
 - **DeepSeek Harness 插件**：通过内置的 `skill-upper` Skill、显式启用的持久化观察采集、审批门禁回归用例、隔离运行与状态对比，验证有证据的 Skill 改进。详见 [`plugins/dsh-skill-up`](plugins/dsh-skill-up/README.md)。
+- **多轮对话与用户模拟**：支持固定轮次、固定与模拟回复混合编排，以及由独立模型驱动并自主结束的用户对话。
+- **按角色指定引擎与模型**：被测 Agent、Agent Judge 和用户模拟器可分别配置，便于独立评判自定义 Agent。
 - **灵活评分**：支持 `rule_based`（规则匹配）、`script`（脚本评分）、`agent_judge`（Agent 评分）三种评估策略。
 - **结构化报告**：输出 Anthropic 兼容的 `grading.json`、`benchmark.json`、`benchmark.md`，以及 `result.json`、JUnit XML 和 HTML 报告。
 - **Anthropic 兼容**：通过 `skill-up import` 导入 `evals.json`，或使用 `--auto` 自动识别。
@@ -139,13 +141,15 @@ my-skill-workspace/
 在同一段对话中继续：
 
 ```markdown
-检查最新的 skill-up 评测结果。逐个判断失败来自 Skill 还是 eval：
-按需修复 SKILL.md 和相关文件，或修复 eval 用例与 Judge；为发现的问题
-补充回归用例，然后重新运行 skill-up，直到关键能力通过评测。
+使用 skill-upper 根据最新评测结果改进这个 Skill。
+遵循它的演进流程，对照原版与候选版，补充回归覆盖，并总结证据支持
+保留哪些改动。
 ```
 
-这就是演进闭环：报告转化为修复，修复沉淀为回归用例，每轮迭代都会让
-Skill 和它的评测集更可靠。
+对照与接受改动的规则统一定义在
+[skill-upper 的演进流程](skills/skill-upper/SKILL.md#step-8-evolve-the-skill-when-requested)中。
+这段提示词只负责调用该流程；候选版没有体现出有证据支持的改进时，
+保留原版也是有效结果。
 
 ### 更喜欢手工配置？
 
@@ -205,6 +209,105 @@ skill-up 会保留这个目录，但 Agent 和用例准备步骤可能修改其�
 [编写评测](docs/zh/guide/writing-evals.md)和
 [CLI 命令参考](docs/zh/guide/cli-reference.md#skill-up-run)。
 
+## 多轮对话与角色配置
+
+模拟用户根据 Agent 的实际回答生成后续输入，无需预先写死整段问答。例如，可以用
+一场“二十问猜物品”评测 Agent 的提问与推理能力：
+
+- **被测 Agent**：用自然语言提出是非问题，并猜测物品。
+- **模拟用户**：掌握隐藏答案，根据对话历史回答问题。
+- **独立 Agent Judge**：读取完整对话，按明确标准逐项评分。
+
+以下 **case YAML** 片段只给出开场规则，后续回复由模拟用户动态生成：
+
+```yaml
+id: umbrella
+title: 通过模拟用户的多轮回复猜出隐藏物品
+user_simulator:
+  scenario: |
+    你是二十问的出题人，隐藏答案是一把普通折叠雨伞。
+    按常识只回答“是”“否”或“不确定”，不要泄露答案或主动提供线索。
+    玩家猜中，或完成最后一次允许的猜测后，立即结束对话。
+input:
+  prompt: |
+    我想好了一个日常物品。请用是非问题猜出它，我只回答是、否或不确定。
+    每轮只问一个问题，至少提问两次再猜；提问和错误猜测共限 20 次，
+    之后还有一次最终猜测。请用自然语言交流。
+constraints:
+  max_turns: 22
+```
+
+隐藏答案只放在模拟用户的场景中，不放进被测 Agent 的开场消息。例如，Agent
+询问物品是否用于遮雨，与询问它是否为电子产品，会引出不同的后续问题，模拟用户
+会根据实际问题回答。22 轮运行上限为最多 20 次提问或错误猜测、一次最终猜测及
+一句正常收尾留出空间；游戏规则仍由 Judge 检查，运行上限本身不负责执行这些规则。
+
+也可以使用其他对话编排方式：
+
+| 方式 | 用例配置 | 行为 |
+| --- | --- | --- |
+| 自主模拟（上例） | `input.prompt` + `user_simulator.scenario`，不配置 `input.turns` | 模拟器生成后续用户消息，并决定何时停止 |
+| 混合对话 | `input.turns` 中混用 `content` 和 `respond`，并配置 `user_simulator.scenario` | 模拟器根据真实对话历史和当前轮指令生成指定轮次的用户回复 |
+| 固定对话 | `input.turns[].content` | 按顺序发送预先写好的用户消息 |
+
+真实的逐轮交互需要引擎支持会话续接。目前 `claude_code`、`codex`、`qodercli`
+和 `opencode` 支持；custom engine 需设置 `engine.custom.conversation_mode: stateful`
+并通过 `session_id` 续接会话。普通固定多轮用例在不支持续接的引擎上退化为批量提示；
+用户模拟用例要求支持续接。自主对话的开场算第 1 轮，`max_turns` 限制总轮数；
+模拟器决定停止并不代表通过，最终仍由配置的 Judge 判定。
+
+### 分别配置被测 Agent、Judge 和模拟器
+
+| 角色 | `eval.yaml` 配置 | 独立性 |
+| --- | --- | --- |
+| 被测 Agent | `engine.name`、`engine.model`、可选 `engine.custom` | 执行任务，可使用内置引擎或自有本地命令／HTTP 服务 |
+| Agent Judge | `judge.engine`，或 `judges[]` 中各成员的 `engine` | 可选择独立引擎、模型、provider 和端点；规则与脚本 Judge 不需要模型 |
+| 模拟用户 | `user_simulator.provider`、`protocol`、`model` | 使用独立模型连接，根据场景和历史生成用户回复；不选择 Agent CLI 引擎 |
+
+以下是 **eval.yaml** 的角色配置片段。模型名为占位符，需替换为各 provider
+实际支持的 ID，并配置用例文件和环境。这里的评分标准对应上面的游戏，
+`pass_threshold: 1.0` 要求所有评分项均通过：
+
+```yaml
+engine:
+  name: codex
+  model:
+    provider: openai
+    name: your-agent-model-id
+
+judge:
+  type: agent_judge
+  engine:
+    name: claude_code
+    model:
+      provider: anthropic
+      name: your-judge-model-id
+  criteria:
+    - "玩家至少提问两次再猜，并正确猜出雨伞"
+    - "玩家每轮只问一个问题，遵守 20 次提问或错误猜测加一次最终猜测的限制"
+    - "模拟用户的回答符合普通折叠雨伞的常识，且未在猜中前泄露答案"
+  pass_threshold: 1.0
+  context:
+    transcript: file_ref
+
+user_simulator:
+  provider: simulation
+  protocol: openai
+  model: your-simulator-model-id
+  timeout_seconds: 60
+```
+
+`judge.engine` 不继承被测 Agent 的模型、CLI 覆盖参数或连接配置；分别准备所需的
+Engine 和凭据。它与旧式 `judge.model` 互斥，后者复用被测 Agent 的引擎。
+示例中的模拟器使用 `SIMULATION_API_KEY` 和 `SIMULATION_BASE_URL`，也可通过
+凭据文件配置同名 provider；`protocol` 支持 `openai`（Chat Completions）和
+`anthropic`（Messages）。独立 Judge 仍使用用例的 runtime，没有 `judge.environment`。
+驱动 skill-upper 做诊断和修改的宿主 Agent／模型由宿主应用配置，不属于这些评测字段。
+
+完整字段、逐轮断言和会话支持矩阵见[编写评测](https://alibaba.github.io/skill-up/zh/guide/writing-evals)。
+可运行配置及已验证范围见[用户模拟示例](examples/user-simulator/README.md)，
+自定义引擎接入见[Custom Engine 设计](docs/design/custom-engine.md)。
+
 ## CLI 命令概览
 
 | 命令                                 | 说明                                       |
@@ -213,6 +316,7 @@ skill-up 会保留这个目录，但 Agent 和用例准备步骤可能修改其�
 | `skill-up validate [path]`           | 校验 `eval.yaml` 和用例文件                |
 | `skill-up validate --skill <dir>`    | 检查单个 skill 的内容完整性                |
 | `skill-up list-cases [path]`         | 列出配置引用的所有用例                     |
+| `skill-up compare <result> <result>...` | 离线对比多个评测结果，支持 HTML、Markdown、JSON 和文本 |
 | `skill-up report <result.json>`      | 从已有结果生成报告                         |
 | `skill-up import <evals.json>`       | 将 Anthropic `evals.json` 导入为 YAML 用例 |
 | `skill-up debug judge <input.json>`  | 使用 JSON 输入调试 judge 模块              |

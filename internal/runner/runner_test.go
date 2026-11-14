@@ -734,10 +734,50 @@ func TestBuildReportInput_IncludesFailedJudgeSessionMetrics(t *testing.T) {
 	}
 }
 
+func TestBuildReportInput_RecordsRecoveredJudgeCall(t *testing.T) {
+	evalCfg := &config.EvalConfig{Engine: config.EngineConfig{Name: "test"}}
+	recovery := &judge.RecoveryMetadata{Recovered: true, Reason: "agent_call_error"}
+	grouped := map[string]*caseResults{
+		"recovered-judge": {
+			withSkill: &evaluator.EvalResult{
+				CaseID:        "recovered-judge",
+				Status:        judge.StatusPass,
+				Configuration: "with_skill",
+				SessionResult: &agent.SessionResult{},
+				Grading: &judge.Result{
+					Status:   judge.StatusPass,
+					Recovery: recovery,
+				},
+			},
+		},
+	}
+
+	input := buildReportInput("s", grouped, []string{"recovered-judge"}, time.Time{}, time.Time{}, evalCfg, credential.ResolvedAgentConfig{})
+	if len(input.CaseResults) != 1 {
+		t.Fatalf("CaseResults count = %d, want 1", len(input.CaseResults))
+	}
+	if input.CaseResults[0].JudgeRecovery != recovery {
+		t.Fatalf("JudgeRecovery = %#v, want %#v", input.CaseResults[0].JudgeRecovery, recovery)
+	}
+}
+
 func TestRunner_WriteResults_NoWorkspace(t *testing.T) {
 	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.ResolvedAgentConfig{})
 	err := r.WriteResults(context.Background(), nil, "", "", 1, nil, time.Time{}, time.Time{})
 	if err == nil {
 		t.Error("expected error when workspace not initialized")
+	}
+}
+
+func TestResultToBenchmarkRun_PreservesSkippedAssertions(t *testing.T) {
+	t.Parallel()
+	expect := &judge.ExpectResult{ConfiguredRules: []string{"must_contain"}, Failures: []judge.ExpectFailure{{Rule: "must_contain", Detail: "missing"}}}
+	grading := judge.NewExpectFailureResult(expect, config.JudgeConfig{Type: "agent_judge", Criteria: []string{"one", "two"}}, judge.Input{})
+	run := resultToBenchmarkRun(&evaluator.EvalResult{SessionResult: &agent.SessionResult{}, Grading: grading, Status: judge.StatusFail}, 1)
+	if run.Result.Total != 3 || run.Result.PassRate != 0 || len(run.Expectations) != 3 {
+		t.Fatalf("run=%+v", run)
+	}
+	if run.Expectations[0].Skipped || !run.Expectations[1].Skipped || !run.Expectations[2].Skipped {
+		t.Fatalf("expectations=%+v", run.Expectations)
 	}
 }

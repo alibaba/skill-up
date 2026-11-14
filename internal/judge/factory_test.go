@@ -8,7 +8,7 @@ import (
 
 func TestNewJudge_RuleBased(t *testing.T) {
 	cfg := config.JudgeConfig{
-		Type: "rule_based",
+		Type: ruleBasedType,
 		Success: []config.Rule{
 			{FilesExist: []string{"main.go"}},
 		},
@@ -27,7 +27,7 @@ func TestNewJudge_RuleBased(t *testing.T) {
 
 func TestNewJudge_Script(t *testing.T) {
 	cfg := config.JudgeConfig{
-		Type:       "script",
+		Type:       scriptType,
 		ScriptPath: "/tmp/test.sh",
 	}
 	j, err := NewJudge(cfg, nil, nil)
@@ -48,9 +48,9 @@ func TestNewJudge_Script(t *testing.T) {
 
 func TestNewJudge_ScriptWithTimeout(t *testing.T) {
 	cfg := config.JudgeConfig{
-		Type:           "script",
+		Type:           scriptType,
 		ScriptPath:     "/tmp/test.sh",
-		TimeoutSeconds: intPtr(45),
+		TimeoutSeconds: new(45),
 	}
 	j, err := NewJudge(cfg, nil, nil)
 	if err != nil {
@@ -66,7 +66,7 @@ func TestNewJudge_ScriptWithTimeout(t *testing.T) {
 }
 
 func TestNewJudge_ScriptMissingPath(t *testing.T) {
-	cfg := config.JudgeConfig{Type: "script"}
+	cfg := config.JudgeConfig{Type: scriptType}
 	_, err := NewJudge(cfg, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for missing script_path")
@@ -147,7 +147,7 @@ func TestNewJudge_AgentJudge_PropagatesTimeoutSeconds(t *testing.T) {
 		Type:           "agent_judge",
 		Model:          "test-model",
 		Criteria:       []string{"c1"},
-		TimeoutSeconds: intPtr(45),
+		TimeoutSeconds: new(45),
 	}
 	j, err := NewJudge(cfg, &mockJudgeTestAgent{}, &mockJudgeTestRuntime{})
 	if err != nil {
@@ -236,14 +236,14 @@ func TestMergeJudgeConfig_CaseOverridesGlobal(t *testing.T) {
 		PassThreshold:  &globalThreshold,
 		Criteria:       []string{"global-c"},
 		Skills:         []config.SkillRef{{Source: "local_path", Path: "evals/fixtures/global-judge"}},
-		TimeoutSeconds: intPtr(60),
+		TimeoutSeconds: new(60),
 	}
 	caseLevel := config.JudgeConfig{
-		Type:     "rule_based",
+		Type:     ruleBasedType,
 		Criteria: []string{"case-c"},
 	}
 	merged := MergeJudgeConfig(global, caseLevel)
-	if merged.Type != "rule_based" {
+	if merged.Type != ruleBasedType {
 		t.Errorf("expected type rule_based, got %s", merged.Type)
 	}
 	if merged.Model != "global-model" {
@@ -284,14 +284,14 @@ func TestMergeJudgeConfig_CaseAgentJudgeOverridesSkills(t *testing.T) {
 
 func TestMergeJudgeConfig_CaseTimeoutOverridesGlobal(t *testing.T) {
 	global := config.JudgeConfig{
-		Type:           "script",
+		Type:           scriptType,
 		ScriptPath:     "/tmp/global.sh",
-		TimeoutSeconds: intPtr(60),
+		TimeoutSeconds: new(60),
 	}
 	caseLevel := config.JudgeConfig{
-		Type:           "script",
+		Type:           scriptType,
 		ScriptPath:     "/tmp/case.sh",
-		TimeoutSeconds: intPtr(120),
+		TimeoutSeconds: new(120),
 	}
 	merged := MergeJudgeConfig(global, caseLevel)
 	if merged.TimeoutSeconds == nil || *merged.TimeoutSeconds != 120 {
@@ -353,12 +353,43 @@ func TestMergeJudgeConfig_CaseContextOverridesGlobalFields(t *testing.T) {
 
 func TestMergeJudgeConfig_NoCaseLevel(t *testing.T) {
 	global := config.JudgeConfig{
-		Type:  "rule_based",
+		Type:  ruleBasedType,
 		Model: "global-model",
 	}
 	caseLevel := config.JudgeConfig{}
 	merged := MergeJudgeConfig(global, caseLevel)
-	if merged.Type != "rule_based" {
+	if merged.Type != ruleBasedType {
 		t.Errorf("expected type rule_based, got %s", merged.Type)
+	}
+}
+
+func TestMergeJudgeConfig_IndependentEngineReplacement(t *testing.T) {
+	t.Parallel()
+	global := config.JudgeConfig{Type: "agent_judge", Engine: &config.EngineConfig{Name: "claude_code"}}
+	for _, local := range []config.JudgeConfig{
+		{Type: "agent_judge"},
+		{Type: "agent_judge", Model: "openai/case-model"},
+		{Type: "agent_judge", Engine: &config.EngineConfig{Name: "codex"}},
+		{Type: "script", ScriptPath: "check.sh"},
+	} {
+		merged := MergeJudgeConfig(global, local)
+		switch {
+		case local.Engine != nil:
+			if merged.Engine != local.Engine || merged.Model != "" {
+				t.Fatal("case engine was not a full replacement")
+			}
+		case local.Model != "" || local.Type == "script":
+			if merged.Engine != nil {
+				t.Fatal("unrelated engine inherited")
+			}
+		default:
+			if merged.Engine != global.Engine {
+				t.Fatal("default engine missing")
+			}
+		}
+	}
+	merged := MergeJudgeConfig(config.JudgeConfig{Type: "agent_judge", Model: "legacy"}, config.JudgeConfig{Type: "agent_judge", Engine: &config.EngineConfig{Name: "codex"}})
+	if merged.Model != "" {
+		t.Fatal("independent engine inherited legacy model")
 	}
 }

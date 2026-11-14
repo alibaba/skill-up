@@ -50,7 +50,7 @@ jobs:
           gh api "repos/${GITHUB_REPOSITORY}" --jq .full_name
 
       - name: Set up Node.js for plugin packaging
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '20'
           package-manager-cache: false
@@ -94,28 +94,37 @@ jobs:
             exit 1
           fi
 
+      - name: Configure fresh Go caches
+        run: |
+          cache_root="${RUNNER_TEMP}/goreleaser-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "GOCACHE=${cache_root}/build" >> "$GITHUB_ENV"
+          echo "GOMODCACHE=${cache_root}/mod" >> "$GITHUB_ENV"
+
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.25.x"
-          # Release artifacts must not consume caches writable by other jobs.
+          go-version: "1.26.x"
+          # Keep the temporary Go caches independent of remote cache archives.
           cache: false
 
       - name: Set up Node.js for plugin packaging
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '20'
           package-manager-cache: false
 
       - name: Build release artifacts with GoReleaser
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7
         with:
           distribution: goreleaser
           version: "v2.17.0"
           # Build once without publishing. The protected job below publishes
           # these exact files after approval; it never recompiles them.
-          args: release --clean --skip=publish
+          args: release --clean --skip=publish --parallelism=1
         env:
+          # Match the snapshot build's memory budget on 16 GiB runners.
+          GOMAXPROCS: "2"
+          GOFLAGS: "-p=2"
           # The changelog provider reads repository history through the API.
           # This token is read-only in the build job and cannot publish.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -136,7 +145,7 @@ jobs:
           (cd dist && sha256sum "$codex_archive" "$dsh_archive" >> "$(basename "$checksum_file")")
 
       - name: Upload release artifacts for approval
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-dist-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -183,7 +192,7 @@ jobs:
         run: .github/scripts/install-gh.sh
 
       - name: Download approved release candidate
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: release-dist-${{ github.run_id }}-${{ github.run_attempt }}
           path: release-dist

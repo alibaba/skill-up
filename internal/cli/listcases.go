@@ -42,8 +42,8 @@ var listCasesCmd = &cobra.Command{
 			}
 			const promptPreviewLen = 50
 			promptPreview := c.Input.Prompt
-			if len(promptPreview) > promptPreviewLen {
-				promptPreview = promptPreview[:promptPreviewLen-3] + "..."
+			if previewRunes := []rune(promptPreview); len(previewRunes) > promptPreviewLen {
+				promptPreview = string(previewRunes[:promptPreviewLen-3]) + "..."
 			}
 			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", c.ID, title, tag, promptPreview)
 		}

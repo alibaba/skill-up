@@ -34,10 +34,11 @@ engine:
   # Built-in options: claude_code | codex | opencode | qodercli | qwen_code.
   name: claude_code
   # Optional model override; omit this block to use the engine default model.
+  # For this DashScope model block, set engine.name to opencode.
   # model:
-  #   provider: anthropic
-  #   name: claude-sonnet-4-6
-  #   base_url: ""
+  #   provider: dashscope
+  #   name: qwen3.8-max
+  #   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
   # Agent-specific switches passed through to the selected engine.
   # kwargs:
   #   bypass_sandbox: "true"
@@ -83,7 +84,8 @@ cases:
 #   # Grading strategy for case results.
 #   # Options: rule_based | agent_judge | script.
 #   type: agent_judge
-#   model: anthropic/claude-sonnet-4-6
+#   # Use this model with the OpenCode/DashScope engine configuration above.
+#   model: dashscope/qwen3.8-max
 #   context:
 #     profile: standard
 #   criteria:

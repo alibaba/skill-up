@@ -77,8 +77,9 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.25.x"
-          cache: true
+          go-version: "1.26.x"
+          # Reuse persistent runner caches without remote archive transfers.
+          cache: false
 
       - name: Verify dependencies
         run: go mod verify
@@ -90,12 +91,12 @@ jobs:
         run: go test -race -timeout 120s -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
 
       - name: Set up Node.js for plugins
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '20'
 
@@ -139,8 +140,9 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.25.x"
-          cache: true
+          go-version: "1.26.x"
+          # Reuse persistent runner caches without remote archive transfers.
+          cache: false
 
       - name: Run deterministic e2e suite
         run: go test -tags e2e -timeout 1200s -count=1 -v ./e2e
@@ -149,7 +151,7 @@ jobs:
 
       - name: Upload e2e workspace artifacts
         if: always() && hashFiles('e2e-artifacts/**') != ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: e2e-smoke-workspaces
           path: e2e-artifacts/
@@ -173,8 +175,10 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.25.x"
-          cache: true
+          go-version: "1.26.x"
+          # Self-hosted runners retain Go caches; restoring/uploading the shared
+          # multi-GB archive can collide with existing modules and time out.
+          cache: false
 
       - name: Check formatting
         run: |

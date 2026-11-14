@@ -23,6 +23,9 @@ import (
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
 
+// ErrRequestedModelUnavailable prevents accepting output from an unintended fallback model.
+var ErrRequestedModelUnavailable = errors.New("requested model unavailable")
+
 // ErrAgentNotFound is returned when the agent executable is not found.
 var ErrAgentNotFound = errors.New("agent not found in PATH")
 
@@ -104,6 +107,17 @@ type RuntimeObservation struct {
 // after the executable availability check succeeds.
 type RuntimeInspector interface {
 	InspectRuntime(ctx context.Context, rt Runtime) (RuntimeObservation, error)
+}
+
+// SessionDirCleaner is implemented by agents that keep per-workspace state
+// outside the workspace itself — Claude Code writes a project directory under
+// $HOME/.claude/projects for every workspace it runs in. Deleting the workspace
+// leaves that directory behind, which is what this removes.
+//
+// The evaluator calls it only when the workspace is deleted, so --no-delete
+// keeps both.
+type SessionDirCleaner interface {
+	CleanupSessionDir(ctx context.Context, rt Runtime) error
 }
 
 // Preflight checks executable availability and then collects optional static
@@ -273,9 +287,9 @@ func (a *BaseAgent) CheckCredentials(ctx context.Context) error {
 	return nil
 }
 
-func (a *BaseAgent) logCredentialStatus(ctx context.Context, apiKeyEnv, baseURLEnv, missingMessage string) {
+func (a *BaseAgent) logCredentialStatus(ctx context.Context, credentialEnvName, baseURLEnv, missingMessage string) {
 	if a.Cfg.APIKey != "" {
-		logging.DebugContextf(ctx, "%s detected for %s (masked: %s, source=agent_config)", apiKeyEnv, a.Name(), credential.MaskAPIKey(a.Cfg.APIKey))
+		logging.DebugContextf(ctx, "%s detected for %s (source=agent_config)", credentialEnvName, a.Name())
 		if baseURLEnv != "" && a.Cfg.BaseURL != "" {
 			logging.DebugContextf(ctx, "%s detected for %s (value: %s, source=agent_config)", baseURLEnv, a.Name(), a.Cfg.BaseURL)
 		}
@@ -283,8 +297,8 @@ func (a *BaseAgent) logCredentialStatus(ctx context.Context, apiKeyEnv, baseURLE
 	}
 	// Fall back to the current provider's process env for observability only.
 	// This does not scan unrelated providers.
-	if apiKey := os.Getenv(apiKeyEnv); apiKey != "" {
-		logging.DebugContextf(ctx, "%s detected for %s (source=process_env)", apiKeyEnv, a.Name())
+	if os.Getenv(credentialEnvName) != "" {
+		logging.DebugContextf(ctx, "%s detected for %s (source=process_env)", credentialEnvName, a.Name())
 		if baseURLEnv != "" && os.Getenv(baseURLEnv) != "" {
 			logging.DebugContextf(ctx, "%s detected for %s (source=process_env)", baseURLEnv, a.Name())
 		}

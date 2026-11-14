@@ -33,7 +33,7 @@ LABEL org.opencontainers.image.source="https://github.com/alibaba/skill-up" \
 # python3 (for main.py) + curl/bash/git/ca-certificates/unzip (installers).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        python3 curl bash git ca-certificates unzip \
+        python3 python3-yaml curl bash git ca-certificates unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Agent engines.

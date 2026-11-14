@@ -16,9 +16,12 @@ type EvalConfig struct {
 	Engine        EngineConfig       `yaml:"engine"`
 	Cases         CasesConfig        `yaml:"cases"`
 	Judge         JudgeConfig        `yaml:"judge"`
-	UserSimulator UserSimulatorModel `yaml:"user_simulator,omitempty"`
+	Judges        *[]JudgeConfig     `yaml:"judges,omitempty"`
+	JudgeSet      bool               `yaml:"-" json:"-"`
+	JudgesSet     bool               `yaml:"-" json:"-"`
 	Benchmark     BenchmarkConfig    `yaml:"benchmark"`
 	Report        ReportConfig       `yaml:"report"`
+	UserSimulator UserSimulatorModel `yaml:"user_simulator,omitempty"`
 }
 
 // Environment defines the runtime environment for evaluation.
@@ -36,7 +39,12 @@ type Environment struct {
 	Metadata              map[string]string `yaml:"metadata,omitempty"`
 	Kwargs                map[string]string `yaml:"kwargs,omitempty"`
 	NetworkPolicy         string            `yaml:"network_policy,omitempty"` // deny_all, allow_declared
-	AllowedEgress         []string          `yaml:"allowed_egress,omitempty"` // FQDN/wildcard egress allowlist for allow_declared
+	// CleanupSessions deletes the agent's per-workspace session directory (for
+	// example Claude Code's ~/.claude/projects entry) together with the
+	// workspace. Off by default: it removes user-visible history that today
+	// survives an evaluation.
+	CleanupSessions bool     `yaml:"cleanup_sessions,omitempty"`
+	AllowedEgress   []string `yaml:"allowed_egress,omitempty"` // FQDN/wildcard egress allowlist for allow_declared
 }
 
 // ToRuntimeConfig converts Environment to runtime.Config.
@@ -160,14 +168,23 @@ type RetryPolicy struct {
 	RetryOn    []string `yaml:"retry_on,omitempty"` // timeout, error
 }
 
+// JudgeOutputConfig selects the agent judge result delivery channel.
+type JudgeOutputConfig struct {
+	Mode string `json:"mode,omitempty" yaml:"mode,omitempty"` // final_message (default) or file
+}
+
 // JudgeConfig describes the evaluation strategy.
 type JudgeConfig struct {
+	Output     *JudgeOutputConfig  `json:"output,omitempty" yaml:"output,omitempty"`
+	ID         string              `json:"id,omitempty" yaml:"id,omitempty"`
 	Type       string              `json:"type"                     yaml:"type"` // rule_based, script, agent_judge
 	ScriptPath string              `json:"script_path,omitempty"    yaml:"script_path,omitempty"`
 	Model      string              `json:"model,omitempty"          yaml:"model,omitempty"`
 	Criteria   []string            `json:"criteria,omitempty"       yaml:"criteria,omitempty"`
 	Skills     []SkillRef          `json:"skills,omitempty"         yaml:"skills,omitempty"`
 	Context    *JudgeContextConfig `json:"context,omitempty" yaml:"context,omitempty"`
+	// Engine selects an independent judge agent. When absent, Model uses the runner engine.
+	Engine *EngineConfig `json:"engine,omitempty" yaml:"engine,omitempty"`
 	// PassThreshold is the minimum pass rate for agent_judge.
 	// Nil means "not configured", so the judge layer applies its default of 0.7.
 	// When set explicitly, the value must be in the inclusive range [0.0, 1.0].
@@ -288,6 +305,9 @@ type CaseConfig struct {
 	Constraints   Constraints            `yaml:"constraints"`
 	Expect        Expect                 `yaml:"expect"`
 	Judge         JudgeConfig            `yaml:"judge,omitempty"`
+	Judges        *[]JudgeConfig         `yaml:"judges,omitempty"`
+	JudgeSet      bool                   `yaml:"-" json:"-"`
+	JudgesSet     bool                   `yaml:"-" json:"-"`
 	UserSimulator *UserSimulatorScenario `yaml:"user_simulator,omitempty"`
 	// MCP declares case-level MCP server overrides. Servers are merged with
 	// eval-level mcp.servers by name: a same-name entry replaces the whole

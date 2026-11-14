@@ -1063,7 +1063,12 @@ func (e *defaultEvaluator) executeMultiTurnCase(
 	// Workspace diff hooks.
 	var cleanupArtifacts func()
 	finalizeArtifacts := func(*agent.SessionResult) {}
-	if judgeNeedsWorkspaceDiff(judgeCfg) {
+	plan, planErr := config.ResolveJudgePlan(e.evalCfg, caseCfg)
+	if planErr != nil {
+		result.Status, result.Error = judge.StatusError, planErr
+		return *result
+	}
+	if judgePlanNeedsWorkspaceDiff(plan) {
 		cleanupArtifacts, finalizeArtifacts = e.prepareWorkspaceArtifacts(ctx, rt, caseCfg)
 		defer cleanupArtifacts()
 	}
@@ -1087,6 +1092,7 @@ func (e *defaultEvaluator) executeMultiTurnCase(
 		}
 		result.Status = judge.StatusError
 		result.Error = fmt.Errorf("agent execution failed: %w", execErr)
+		recordSkippedJudges(result, plan, "agent_execution_failed")
 		result.Configuration = configName
 		return *result
 	}
@@ -1095,11 +1101,13 @@ func (e *defaultEvaluator) executeMultiTurnCase(
 	status := multiTurnStatus(turnResults)
 	switch status {
 	case judge.StatusError:
+		recordSkippedJudges(result, plan, "turn_error")
 		result.Status = judge.StatusError
 		result.Configuration = configName
 		return *result
 	case judge.StatusFail:
 		// Post-condition failure — mark FAIL, skip judge.
+		recordSkippedJudges(result, plan, "post_condition_failed")
 		if result.DurationMs == 0 {
 			result.DurationMs = time.Since(startTime).Milliseconds()
 		}
@@ -1107,6 +1115,7 @@ func (e *defaultEvaluator) executeMultiTurnCase(
 		result.Configuration = configName
 		return *result
 	case judge.StatusSkip:
+		recordSkippedJudges(result, plan, "turns_skipped")
 		result.Status = judge.StatusSkip
 		result.Configuration = configName
 		return *result

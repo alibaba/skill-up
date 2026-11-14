@@ -99,32 +99,6 @@ func TestResolveRunnerConfig_OpenCodeDoesNotInferProviderFromModel(t *testing.T)
 	}
 }
 
-func TestMaskAPIKey(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		key      string
-		expected string
-	}{
-		{name: "normal key", key: "sk-abcdefghijklmnopqrstuvwxyz123456", expected: "sk****56"},
-		{name: "short key (4 chars)", key: "abcd", expected: "****"},
-		{name: "shorter than mask length", key: "abc", expected: "****"},
-		{name: "empty key", key: "", expected: "****"},
-		{name: "exactly 5 chars", key: "abcde", expected: "ab****de"},
-		{name: "anthropic key format", key: "sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", expected: "sk****xx"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			if got := MaskAPIKey(tt.key); got != tt.expected {
-				t.Errorf("MaskAPIKey(%q) = %q, want %q", tt.key, got, tt.expected)
-			}
-		})
-	}
-}
-
 func TestDefaultConfPath(t *testing.T) {
 	t.Parallel()
 
@@ -432,6 +406,22 @@ func TestResolveRunnerConfig_PreservesOpaqueSlashedCLIModel(t *testing.T) {
 	}
 }
 
+func TestResolver_LogEffectiveConfigDoesNotLogKeyMaterial(t *testing.T) {
+	logging.SetVerbosity(1)
+	defer logging.SetVerbosity(0)
+
+	apiKey := strings.Join([]string{"resolver", "test", "credential"}, "-")
+	r := NewResolver("")
+	r.creds["openai"] = &config.APIKeyConfig{APIKey: apiKey}
+	output := captureLogOutput(t, r.logEffectiveConfig)
+	if !strings.Contains(output, "api_key=present") {
+		t.Fatalf("expected credential-presence log, got %q", output)
+	}
+	if strings.Contains(output, apiKey) || strings.Contains(output, "****") {
+		t.Fatalf("key material leaked into log: %q", output)
+	}
+}
+
 func TestResolveRunnerConfig_DoesNotLogCLIAPIKey(t *testing.T) {
 	logging.SetVerbosity(1)
 	defer logging.SetVerbosity(0)
@@ -574,6 +564,39 @@ func captureLogOutput(t *testing.T, fn func()) string {
 
 	restoreOutput()
 	return buf.String()
+}
+
+func TestResolveJudgeConfig_ExplicitEngineDoesNotInheritRunner(t *testing.T) {
+	for _, key := range []string{"OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL"} {
+		t.Setenv(key, "")
+	}
+	for _, engineName := range []string{"codex", "claude-code", "custom-judge"} {
+		t.Run(engineName, func(t *testing.T) {
+			engine := &config.EngineConfig{
+				Name: engineName, Version: "1.2.3",
+				Model:  config.ModelConfig{Provider: "openai", Name: "judge-model"},
+				Kwargs: map[string]string{"judge-option": "yes"},
+			}
+			runner := ResolvedAgentConfig{
+				Engine: "codex", Version: "9.9.9", Provider: "openai", Model: "runner-model",
+				APIKey: "runner-key", BaseURL: "https://runner.example.test",
+				Kwargs:            map[string]string{"runner-option": "yes"},
+				Custom:            &config.CustomEngineConfig{Transport: "http"},
+				AppliedConnection: ResolvedModelConnection{Protocol: ProtocolOpenAI, APIKey: "runner-key"},
+			}
+			resolved := ResolveJudgeConfig(config.JudgeConfig{Type: "agent_judge", Engine: engine}, runner, nil)
+			if resolved.Role != AgentRoleJudge || resolved.Engine != engineName || resolved.Version != "1.2.3" || resolved.Model != "judge-model" {
+				t.Fatalf("unexpected judge config: %+v", resolved)
+			}
+			if resolved.APIKey != "" || resolved.BaseURL != "" || resolved.Custom != nil || resolved.AppliedConnection.Protocol != "" || resolved.Kwargs["runner-option"] != "" {
+				t.Fatalf("runner configuration leaked: %+v", resolved)
+			}
+			engine.Kwargs["judge-option"] = "changed"
+			if resolved.Kwargs["judge-option"] != "yes" {
+				t.Fatal("judge kwargs were not cloned")
+			}
+		})
+	}
 }
 
 func TestResolveJudgeConfig_FallsBackToRunnerWhenJudgeModelEmpty(t *testing.T) {

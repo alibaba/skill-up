@@ -45,10 +45,11 @@ environment:
   type: none
 
 engine:
-  name: claude_code
+  name: opencode
   model:
-    provider: anthropic
-    name: claude-sonnet-4-6
+    provider: dashscope
+    name: qwen3.8-max
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 
 cases:
   files:
@@ -87,14 +88,14 @@ skills:
 
 # ========== 5. Agent Engine ==========
 engine:
-  name: claude_code               # claude_code / codex / opencode / qodercli / qwen_code
-  version: 2.1.0                  # 可选的 CLI 具体版本；语义见下文
+  name: opencode                  # claude_code / codex / opencode / qodercli / qwen_code
+  version: 1.14.24                # 可选的 CLI 具体版本；语义见下文
   # kwargs:
   #   edition: cn                 # qodercli 可选：global（默认）/ cn
   model:
-    provider: anthropic           # 模型供应商
-    name: claude-sonnet-4-6       # 模型名称
-    base_url: ""                  # 自定义 API 端点（可选）
+    provider: dashscope           # 模型供应商
+    name: qwen3.8-max             # 模型名称
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 
 # ========== 6. 用例配置 ==========
 cases:
@@ -191,8 +192,8 @@ workspace，因此 `collect_artifacts` 的 glob 不会（也不应）命中它�
 engine:
   name: my-agent
   model:
-    provider: anthropic
-    name: claude-sonnet-4-6
+    provider: dashscope
+    name: qwen3.8-max
   custom:
     transport: local              # local | http
     response_format: session_result  # session_result（默认）| text
@@ -313,7 +314,7 @@ mcp:
       mode: mocked
 ```
 
-也可以通过 `config_ref` 定义工具响应：
+或者通过 `config_ref` 定义 mocked 工具：
 
 ```yaml
 mcp:
@@ -324,6 +325,32 @@ mcp:
 ```
 
 ```yaml
+tools:
+  create_publish_plan_simple:
+    description: Create a publish plan for a project release.
+    input_schema:
+      type: object
+      properties:
+        name: {type: string}
+        planReleaseDate: {type: string}
+      required: [name]
+    response:
+      default:
+        id: 999
+        name: "{{params.name}}"
+        status: ONGOING
+```
+
+`tools` 下的每个条目定义一个工具：
+
+- `response` 必填。每次调用该工具都返回其 `default` 键下的值；若没有 `default` 键，则整个值即为响应。字符串值可以像示例中的 `name` 字段那样用 `params` 模板引用调用参数，并可用 `| default:'<value>'` 指定缺省值。`response: null` 返回 null。
+- `description` 和 `input_schema` 可选，决定 Agent 在 `tools/list` 中看到的内容。不填写时，Agent 看到的描述为 `Mocked MCP tool <name>`，输入 schema 接受任意对象，而不是真实 Server 的描述和参数，因此选择工具的方式可能与面对真实 Server 时不同。空的 `description` 同样沿用占位描述。
+- `input_schema` 一旦填写，就必须是 `type: object` 的映射，因为 MCP 要求输入 schema 是对象类型；空映射（`{}`）会报错，而 `input_schema: null` 沿用默认值。更深层的 JSON Schema 不做校验。schema 只用于声明：Mock Server 不会按它校验调用参数，参数缺失或多余的调用仍然返回该响应。
+- 工具条目只接受 `description`、`input_schema` 和 `response`；出现其他键（例如 MCP 协议里的 `inputSchema`）会报错。
+
+使用 `tool_responses` 映射的 fixture 无需修改，行为不变。其中每个条目即为该工具的 `response`，工具使用默认元数据：
+
+```yaml
 tool_responses:
   create_publish_plan_simple:
     default:
@@ -331,6 +358,14 @@ tool_responses:
       name: "{{params.name}}"
       status: ONGOING
 ```
+
+同一个 fixture 可以用两种映射声明不同的工具；同一个工具名同时出现在 `tools` 和 `tool_responses` 中会报错。
+
+基于 fixture 的 Mock Server 行为如下：
+
+- 仅支持 stdio。`mode: mocked` 时，skill-up 会拒绝 `transport: http`、`endpoint`、`command` 和 `args`。
+- skill-up 使用 `node` 启动 Mock Server，因此运行环境的 `PATH` 中必须有 `node`。只有当 skill-up 自行安装 Claude Code、Codex、Qwen Code 或 OpenCode 时才会准备 Node.js；预先安装的引擎 CLI 或 Qoder CLI 不会附带 Node.js。
+- 调用 fixture 中未声明的工具会返回 MCP 错误。
 
 环境变量引用支持 `${VAR}` 和完整值 `$VAR` 两种形式，变量名必须匹配 `[A-Za-z_][A-Za-z0-9_]*`。`required_env` 会把变量注入 Agent 运行环境；`headers` 中完整的环境变量引用会额外记录变量名，供 Agent 安装 MCP 时选择合适的传递方式。
 
@@ -376,6 +411,28 @@ mcp:
 | `docker`      | 本地容器隔离，无需远程服务       | 自定义工具链、可复现 CI、离线环境 |
 
 > **建议**：如果你的 Skill 不涉及文件操作，使用 `none` 可以省去沙箱准备时间。
+
+#### 按实验分组执行初始化
+
+框架在 setup 前注入 `SKILL_UP_VARIANT`，并让 `none`、Docker 和 OpenSandbox 的后续 runtime 命令都能读取。它标识任务实际使用的执行配置，当前为 `with_skill` 或 `without_skill`。非 benchmark 运行即使 Skill 列表为空也使用 `with_skill`；这个值不代表 Skill 已安装或被调用。未来配置名可以是 `v1.0`、`v1.1` 等，但这个变量本身不会启用自定义分组。
+
+`SKILL_UP_VARIANT` 是保留名：在 `environment.env` 中配置会报错，即使值为空或与实际分组一致。框架会用实际任务配置覆盖宿主机继承值及 MCP 提供的同名值，不修改宿主进程环境。各用例、分组、重试和迭代使用独立的 runtime 环境。
+
+```yaml
+environment:
+  type: none
+  setup_steps:
+    - run: |
+        case "$SKILL_UP_VARIANT" in
+          with_skill)    bash /opt/eval/init-with.sh ;;
+          without_skill) bash /opt/eval/init-without.sh ;;
+          *) exit 1 ;;
+        esac
+benchmark:
+  enabled: true
+```
+
+脚本必须预先存在于所选 runtime 中，case fixtures 在 setup **之后**才上传。以上使用 POSIX shell 语法。本地 qodercli 可通过 `environment.type: none` 使用此配置；benchmark 任务仍使用独立工作区并生成原有对比报告。`--workspace` 与 benchmark 的现有限制保持有效。
 
 #### OpenSandbox 配置
 
@@ -718,7 +775,7 @@ judge:
         not: ["(?i)api[_-]?key\\s*="]
     - exit_code: 0                            # 退出码必须为 0
     - tool_called:                            # Agent 必须调用了某个工具
-        name: "github::create_pull_request"
+        name: "mcp__github__create_pull_request"
         args:                                 # 工具参数部分匹配
           title: "Fix null check"
   failure:                                    # 任一条件匹配则立即失败
@@ -729,6 +786,8 @@ judge:
 ```
 
 > **评估逻辑**：`failure` 优先于 `success`。任何一条 `failure` 规则匹配即立即失败；否则所有 `success` 规则必须全部满足才算通过。
+
+> **MCP 工具名**：`tool_called`、`tool_called_in_turn` 和 `tool_not_called_in_turn` 会把 `name` 与 Agent Engine 记录的工具名做精确匹配。Claude Code、Codex 和 Qoder CLI 记录的 MCP 工具名格式为 `mcp__<server>__<tool>`，其中 `<server>` 是 `mcp.servers` 中的 `name`。
 
 `output_contains` 执行字面 substring 检查。需要正则表达式时使用 `output_matches`；pattern 使用 Go `regexp` 语法，非法 pattern 会在配置校验阶段失败。
 
@@ -751,6 +810,93 @@ judge:
 - `$EVAL_TRANSCRIPT_PATH` 仅在运行时生成了可用 transcript 路径时才会设置；若未设置，脚本中会收到空值
 - 脚本的标准输出会作为评估理由记录到报告中
 
+### 多个独立 judge
+
+同一次 Agent 执行需要同时检查确定性结果和语义质量时，使用 `judges`：
+
+```yaml
+judges:
+  - id: functional
+    type: script
+    script_path: evals/fixtures/scripts/check-quality.sh
+    timeout_seconds: 30
+  - id: semantic
+    type: agent_judge
+    model: dashscope/qwen3.8-max
+    criteria:
+      - "结果满足用户意图"
+    pass_threshold: 0.7
+```
+
+被测 Agent 只执行一次。每个 judge 独立记录状态、断言、诊断和产物。`expect` 仍是前置门控：失败时所有 judge 都跳过；通过后即使前一个 judge 失败或出错，后面的 judge 仍会执行。全部 judge 通过时用例才通过。列表顺序决定执行顺序，不表示 judge 之间有数据依赖。
+
+上面的模型示例配合 OpenCode/DashScope engine 配置使用。Agent judge 继承 engine 和 endpoint；只改 model 不会切换 engine。已实际验证的配置见 [code-stats 示例](../../examples/code-stats/README.md)。
+
+eval 和 case 都可配置 `judges`。case 级列表整体替换 eval 级列表；case 级单数 `judge` 也可覆盖 eval 级列表。同一文档不能同时配置 `judge` 和 `judges`；成员 ID 必须唯一，仅使用小写字母、数字、`_` 和 `-`。
+
+多个 judge 在一次被测 Agent 执行后，按配置顺序复用同一个 case runtime（`none`、Docker 或 OpenSandbox）。每个 Agent judge 新开自己的会话，不 resume 被测 Agent 或前一个 judge。已安装依赖、后台服务、挂载、环境变量和网络策略继续可用，不需要文件系统 Snapshot 或恢复接口。
+
+文件系统由所有 judge 共享：前一个 judge 的修改会被后面的 judge 看到。需要评审原始输出时，请使用只读检查。各 judge 的判定、超时、上下文材料和会话产物仍按 ID 单独记录；这不代表文件系统或外部服务隔离。所有 judge 结束后再按配置清理 case runtime。
+
+#### OpenSandbox 共享环境验证
+
+OpenSandbox judge 直接复用 case 已启动的 sandbox，不调用原生快照、恢复、pause 或
+resume API。各 Agent judge 新开评审会话，工具、文件修改及 case 网络策略留在
+同一个 sandbox；结束后按普通 case 生命周期清理。
+
+通过环境提供 `OPENSANDBOX_API_KEY`、`OPENSANDBOX_BASE_URL` 和 `OPENSANDBOX_IMAGE`：
+
+```bash
+SKILL_UP_OPENSANDBOX_JUDGE_E2E=1 go test -tags e2e -run TestOpenSandboxSharedJudgeEnvironment -v ./e2e
+```
+
+测试创建带测试 metadata 和五分钟 TTL 的临时 sandbox，一次 Agent fixture 执行后，
+顺序执行一个 script judge 和两个新开的 Agent judge fixture 会话。覆盖共享文件修改、
+setup/Agent 安装到工作区外的依赖、环境配置和各 judge 材料读回，以及全通过和
+script FAIL / 两个 Agent judge PASS / 总体 FAIL。测试走真实评分链路但不调用模型服务。
+实际服务的 egress 执行效果需单独网络测试，不声称外部服务隔离。
+
+若要验证真实 OpenCode provider 链路，还需注入 `JUDGE_LIVE_API_KEY`，并设置
+OpenAI 兼容服务的 `SKILL_UP_OPENCODE_JUDGE_BASE_URL` 和
+`SKILL_UP_OPENCODE_JUDGE_MODEL`，然后运行：
+
+```bash
+SKILL_UP_OPENCODE_JUDGE_E2E=1 go test -count=1 -tags e2e -run '^TestOpenSandboxOpenCodeJudgeProvider$' -v ./e2e
+```
+
+该测试启动真实 OpenCode CLI 并请求模型服务。runner fixture 预置冲突的 provider
+端点和 key，两个独立 judge 必须覆盖它们、评分通过并返回不同 session ID。
+临时 sandbox 使用十五分钟 TTL 并正常删除。可用 `SKILL_UP_OPENCODE_JUDGE_VERSION`
+固定 OpenCode 版本（已验证 `1.14.24`）。
+
+若要覆盖省略 `judge.engine.model.base_url` 的场景，设置
+`SKILL_UP_OPENCODE_JUDGE_PROVIDER=openai`（或 `anthropic`），不设置
+`SKILL_UP_OPENCODE_JUDGE_BASE_URL`，并通过相同变量提供原生服务的模型和 key。
+测试仍预置冲突的 runner provider，独立 judge 必须使用原生默认端点。
+初始化只移除所选 provider 的遗留 inline 配置，保留 case MCP、其他 provider
+及 OpenCode 的其他设置。
+
+本地已安装 OpenCode 时，可运行真实 HTTP 路由回归：
+
+```bash
+SKILL_UP_OPENCODE_ORDER_E2E=1 go test -count=1 -tags e2e -run '^TestOpenCodeJudgeConnectionOrder$' -v ./e2e
+```
+
+测试使用两个 loopback 记录端点、fixture key 和固定 HTTP 400 响应，核对独立 judge
+与旧式 `judge.model` 不同顺序下的真实 CLI 请求去向，不调用模型服务，也不验证模型评分成功。
+
+另有配置读回 smoke test，在真实 OpenSandbox 安装并预检 OpenCode，重置冲突的
+OpenAI provider，再读回 MCP 和其他 provider 的保留状态。只需上述 sandbox 变量，
+不需要模型 key 或原生模型服务的可达性：
+
+```bash
+SKILL_UP_OPENCODE_CONFIG_E2E=1 go test -count=1 -tags e2e -run '^TestOpenSandboxOpenCodeDefaultRouting$' -v ./e2e
+```
+
+
+
+报告分别展示门控、各 judge 和总体结果。`evaluation.json` 保存完整分组结果；`grading.json` 为兼容格式，每个 judge 对应一个顶层断言。增加 Agent 评审标准不会改变脚本 judge 的权重。多个 case 现在即可引用同一个 `script_path`；连同辅助文件一起打包脚本属于后续功能。
+
 ### judge: agent_judge — LLM 评审
 
 让 LLM 按你定义的标准来评分，适合需要语义理解的场景：
@@ -758,7 +904,7 @@ judge:
 ```yaml
 judge:
   type: agent_judge
-  model: anthropic/claude-sonnet-4-6        # 评审使用的模型
+  model: dashscope/qwen3.8-max        # 评审使用的模型
   skills:                                   # 可选：仅供 judge 使用的 Skills
     - source: local_path
       path: evals/fixtures/judge-rubric
@@ -769,6 +915,41 @@ judge:
   pass_threshold: 0.7                        # 通过率阈值，默认 0.7
   timeout_seconds: 60                        # 可选：限制单次 judge 调用时长（0 = 不加 judge 级 deadline，仍受 case timeout 约束）
 ```
+
+如果评审需要独立于被测 agent 选择 engine，请用完整的 `judge.engine` 替换 `judge.model`：
+
+```yaml
+judge:
+  type: agent_judge
+  engine:
+    name: claude_code
+    model:
+      provider: anthropic
+      name: claude-sonnet-4-6
+  criteria:
+    - "结果满足任务要求"
+```
+
+`judge.engine` 和 `judge.model` 互斥。独立配置要求填写 `name`、`model.provider` 和
+`model.name`；支持主运行 engine 的 `version`、`kwargs`、`model.base_url`、`custom`
+字段及环境变量展开。它不会继承 runner 的模型、CLI 覆盖、kwargs、custom 配置或已解析
+连接；凭据和 endpoint 按 judge 自己的 provider 与 adapter 协议，使用现有凭据配置解析。
+不会根据 provider 自动推断 engine。
+
+旧 `judge.model` 保留 runner engine 及兼容的 provider 范围内回退。已知原生
+OpenAI/Anthropic 协议冲突，以及 adapter 会忽略的评分模型，会在被测 agent 执行前报错。
+网关若使用原生 provider 名称提供另一种协议，需要在 `credentials.yaml` 中显式配置
+对应协议的 endpoint。
+
+单个 case 的 `judge.engine` 会整体替换 eval 的 judge engine；显式 `judge.model`
+切换为旧模式；两者都未指定时继承 eval 的 engine/model 选择。`judges` 列表仍整体替换，
+成员不会继承单个 judge 的默认配置。
+
+Judge 继续使用 case 的 runtime，不新增 `judge.environment`。独立 judge 的 CLI
+在 Docker/OpenSandbox 的评分阶段安装和检查，发生在被测 agent 完成之后。
+`none` 环境需要预先安装所需 CLI，skill-up 只检查可用性；版本选择遵循现有 adapter
+规则。单 judge 保留原有共享 runtime 行为；多 judge 同样按顺序复用 case runtime，
+各自新开会话，文件系统状态共享。
 
 `judge.skills` 仅支持 `agent_judge`。这些 Skills 会安装到 judge agent，
 不会安装到主运行 agent；顶层 `skills` 也不会自动安装到 judge。开启
@@ -787,7 +968,7 @@ skill-up 不会把 Skill 文件内容拼接进 judge prompt。
 ```yaml
 judge:
   type: agent_judge
-  model: anthropic/claude-sonnet-4-6
+  model: dashscope/qwen3.8-max
   context:
     profile: minimal                         # 省略 transcript/diff，截断 final_message
     attachments:
@@ -999,6 +1180,19 @@ engine:
 >
 > **注意**：`--api-key` 参数和 `eval.yaml` 中的 provider API key **不会**被用作 qodercli 的认证 token。鉴权来自所选版本对应的 PAT 或本地登录态。
 
+若 CLI 以退出码 0 返回空结果，但 `stop_reason` 为 `tool_use`，说明工具循环尚未完成。
+skill-up 会将其报告为引擎错误并保留原始输出。先检查 `qodercli --version`，
+通过 `qodercli update` 或官方安装器升级，再用原生命令确认，避免误判为 Judge JSON 格式问题。
+Qoder CLI 0.2.0 使用已退役的 `performance` 参数时曾复现此问题，而 `auto` 能正常完成。
+当前客户端 1.1.83 使用可用档位时可以正常完成同样的任务。
+文件输出模式仍允许已正常结束的 `end_turn` 没有聊天文本。
+
+Qoder 已[将 Performance 替换为 Fast](https://docs.qoder.com/product-overview/fast-mode-announcement)。
+先用 `qodercli --list-models` 检查账号可用模型，当前客户端可选择 `fast`。
+若 Qoder 明确警告已将不可用的指定模型降级为其他模型，skill-up 会返回引擎错误；
+即使结果文件合法，Agent Judge 也不会恢复并接受该非预期模型的评分。
+
+
 qodercli 的模型选择：
 
 - 非空的 `engine.model.name` 会去除首尾空白后传给 Qoder 的 `--model`，保留大小写和完整 ID。普通调用、stdin 提示词和恢复会话均遵循此规则。
@@ -1114,10 +1308,11 @@ schema_version: v1alpha1
 environment:
   type: none
 engine:
-  name: claude_code
+  name: opencode
   model:
-    provider: anthropic
-    name: claude-sonnet-4-6
+    provider: dashscope
+    name: qwen3.8-max
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 cases:
   files:
     - evals/cases/route-to-summary.yaml
@@ -1165,7 +1360,7 @@ judge:
   type: rule_based
   success:
     - tool_called:
-        name: "project-mgmt::create_publish_plan_simple"
+        name: "mcp__project-mgmt__create_publish_plan_simple"
         args:
           name: "Q1发布"
           planReleaseDate: "2026-04-03"
@@ -1182,3 +1377,39 @@ judge:
 ### Q: 什么时候用 expect，什么时候用 judge？
 
 `expect` 用于快速的、零成本的门槛检查（文件是否存在、关键词是否出现）。`judge` 用于更复杂的质量评估。两者可以同时使用——`expect` 不通过时 `judge` 会被跳过，节省时间和 token。
+
+### Agent Judge 文件输出
+
+设置 `judge.output.mode: file`，让 Judge 编辑框架预创建的 JSON 文件。
+默认模式仍为 `final_message`。文件模式要求 Agent 具有文件工具，并能访问
+Runtime 工作区；内置 none、Docker、OpenSandbox 均提供文件传输能力。
+
+```yaml
+judge:
+  type: agent_judge
+  engine:
+    name: qodercli
+    model:
+      provider: qoder
+      name: fast
+  output:
+    mode: file
+  criteria:
+    - 实现满足要求，并提供具体证据。
+```
+
+每次尝试使用独立路径，模板预填稳定 criterion ID、`passed: null` 和空数组。
+Judge 必须填写全部判断、证据和失败原因。框架只读取该文件并严格校验，
+不以聊天回复作为兜底结果。未修改、漏填、文件缺失、Markdown 包装或非法 JSON
+会触发一次纠正；纠正后仍无效则为 ERROR。有效的 FAIL 不触发纠正。
+纠正重试与首次调用共用原有超时预算，且使用新的模板和路径。
+
+下载的结果保留为 `result-attempt-1.json`、`result-attempt-2.json`，
+聊天原文仍保留为 `raw-response-attempt-*.txt`，样例不会作为备用评分。
+文件模式提高交付可靠性，不保证判断准确率。case 级 agent judge 继承全局设置，
+显式配置 `mode: final_message` 可覆盖；`judges` 列表各成员独立配置。
+可运行示例见 `examples/code-stats/evals/eval-agent-judge-file.yaml`。
+
+即使聊天回复为空，非取消类引擎错误后仍可恢复已通过校验的文件结果，
+报告会标记该调用发生过恢复。显式取消始终返回错误。
+已超时的调用最多允许额外五秒下载已有结果文件，不会重新启动 Agent。

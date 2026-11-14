@@ -36,7 +36,18 @@ skill-up run [path] [flags]
 | `--baseline`          | 配置文件中的值                | 为本次运行覆盖 `benchmark.enabled` 为 `true`                                                                                                                |
 | `--api-key`           | —                            | 传入 API Key（优先级高于环境变量）                                                                                                                          |
 | `--no-delete`         | `false`                      | 评测后保留由 skill-up 创建的 workspace 或容器，便于调试。                                                                                                   |
+| `--cleanup-sessions`  | `false`                      | 评测后同时删除 agent 为该 workspace 保存的会话目录。目前仅支持 `claude_code`：删除其 `~/.claude/projects/<workspace-key>/` 目录，包含会话记录与 memory。默认关闭，因为它会删除今天在评测后仍会保留的历史；显式的 `--cleanup-sessions=false` 会覆盖 `environment.cleanup_sessions: true`，`--no-delete` 优先级最高。 |
 | `-v, --verbose`       | `0`                          | 增加日志详细程度。默认输出 `info`；`-v`/`--verbose`/`--verbose=true` 输出 `debug`；`-vv`/`--verbose=2` 输出 `trace`；`--verbose=false` 关闭附加详细日志        |
+
+> **校验范围。** `run` 校验 eval 级配置，以及经过 `--include-case-name` /
+> `--exclude-case-name` 筛选的用例。被排除用例的语义校验错误不会阻止运行，
+> 但文件读取或元数据错误仍可能阻止筛选。使用 `skill-up validate` 校验整个套件。
+
+YAML 配置加载会拒绝未知字段，包括嵌套结构中的字段以及通过别名或 `<<` 合并引入的字段，
+错误包含字段名和行号。`engine.kwargs`、环境变量和 `context.files` 等自由映射仍允许任意键。
+`run` 先读取用例 ID 进行筛选，再严格解码选中的用例；缺少 ID 时使用不含扩展名的文件名。
+被排除用例中的未知字段和其他字段类型错误不会阻止运行，但无法读取文件、YAML 语法错误或
+无效 ID 仍会在筛选前报错。合并引入的 `judge` 和 `judges` 也参与显式空值和互斥校验。
 
 > **已有 workspace 的状态语义。** `--workspace` 会让所有已选 case、retry 和
 > iteration 串行复用同一个目录；配置的 setup、fixture、skill 安装及 agent 修改都会
@@ -179,6 +190,9 @@ warning、退出码为 0。`--skill` 不能与 eval.yaml 路径参数同时使�
 ## skill-up list-cases
 
 列出评测配置中的所有用例，方便快速查看。
+
+此命令严格解码所有引用的用例；未知 YAML 字段和字段类型错误会导致加载失败。
+它不执行语义校验，也不运行 judge。检查配置语义请使用 `validate`。
 
 ```bash
 skill-up list-cases [path to eval.yaml]

@@ -15,7 +15,7 @@ structured reports (JSON / JUnit / HTML / Anthropic `grading.json`).
 
 - Module path: `github.com/alibaba/skill-up`
 - Entry point: [`cmd/skill-up/main.go`](cmd/skill-up/main.go)
-- Go version: **1.25+** (see [`go.mod`](go.mod))
+- Go version: **1.26+** (see [`go.mod`](go.mod))
 - License: Apache-2.0
 
 ## Setup commands

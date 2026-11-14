@@ -114,6 +114,7 @@ func TestDeliverPrompt_RejectsOversizedPromptWithoutStdinFileBuilder(t *testing.
 }
 
 type promptDeliveryTestRuntime struct {
+	shell           platform.Shell
 	workspace       string
 	uploadedTarget  string
 	uploadedContent string
@@ -144,5 +145,32 @@ func (r *promptDeliveryTestRuntime) MergeEnv(map[string]string)   {}
 func (r *promptDeliveryTestRuntime) Workspace() string            { return r.workspace }
 func (r *promptDeliveryTestRuntime) RequiresProcessSandbox() bool { return false }
 func (r *promptDeliveryTestRuntime) Shell() platform.Shell {
+	if r.shell.GOOS != "" {
+		return r.shell
+	}
 	return platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
+}
+
+func TestDeliverPrompt_WindowsUsesFile(t *testing.T) {
+	for _, threshold := range []string{"", "65536"} {
+		t.Run("threshold="+threshold, func(t *testing.T) {
+			t.Setenv(envPromptInlineMaxBytes, threshold)
+			for _, prompt := range []string{"short", strings.Repeat("agent's output\n", 1000)} {
+				rt := &promptDeliveryTestRuntime{
+					workspace: t.TempDir(),
+					shell:     platform.Shell{GOOS: platform.GOOSWindows, Family: platform.ShellPOSIX, BashPath: "bash.exe"},
+				}
+				cmd, meta, err := deliverPrompt(context.Background(), rt, ExecOptions{}, prompt, promptCommandBuilder{
+					Inline:    func(string) string { t.Fatal("Windows prompt must not be in argv"); return "" },
+					StdinFile: func(path string) string { return "cat " + shellQuote(path) + " | run" },
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if meta.Mode != promptDeliveryModeFile || meta.InlineMaxBytes != 0 || rt.uploadedContent != prompt || strings.Contains(cmd, prompt) {
+					t.Fatalf("Windows file delivery failed: metadata=%+v command=%q", meta, cmd)
+				}
+			}
+		})
+	}
 }

@@ -36,6 +36,10 @@ func deepCopyEvalConfig(cfg *EvalConfig) *EvalConfig {
 	if err := yaml.Unmarshal(data, &copied); err != nil {
 		panic("failed to unmarshal EvalConfig: " + err.Error())
 	}
+	// The round trip may emit an empty judge block; preserve the source's
+	// explicit field-presence flags instead of treating that block as configured.
+	copied.JudgeSet = cfg.JudgeSet
+	copied.JudgesSet = cfg.JudgesSet
 	// Ensure nil slices are initialized to empty slices for consistency
 	// (YAML unmarshal may produce nil for empty arrays)
 	if copied.MCP.Servers == nil {
@@ -59,7 +63,9 @@ func deepCopyEvalConfig(cfg *EvalConfig) *EvalConfig {
 
 func loadDefaults() (*EvalConfig, error) {
 	var cfg EvalConfig
-	if err := yaml.Unmarshal(defaultsYAML, &cfg); err != nil {
+	var err error
+	cfg.JudgeSet, cfg.JudgesSet, err = decodeConfig(defaultsYAML, &cfg)
+	if err != nil {
 		return nil, err
 	}
 

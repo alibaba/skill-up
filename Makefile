@@ -12,7 +12,7 @@ GOPRIVATE ?=
 TOOLS_BIN := $(CURDIR)/.tools/bin
 GOLANGCI_LINT := $(TOOLS_BIN)/golangci-lint
 REVIVE := $(TOOLS_BIN)/revive
-GO_VERSION := 1.25
+GO_VERSION := 1.26
 GOLANGCI_LINT_VERSION := v2.11.4
 REVIVE_VERSION := v1.10.0
 GOBIN := $(TOOLS_BIN)
@@ -31,6 +31,7 @@ test: test-plugin
 
 test-plugin: bundle-codex-plugin
 	python3 -m unittest discover -s plugins/codex-skill-up/tests -p 'test*.py'
+	python3 skills/skill-upper/evals/test_regression_scripts.py
 
 bundle-plugins:
 	node scripts/bundle-plugins.mjs all

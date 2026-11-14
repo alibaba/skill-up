@@ -3,6 +3,8 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/alibaba/skill-up/internal/config"
@@ -45,8 +47,12 @@ func buildMockedRuntimeServerConfig(server config.MCPServer, fileCfg mcpServerFi
 }
 
 func buildMockedServerScript(serverName string, fileCfg mcpServerFile) (string, error) {
-	if len(fileCfg.ToolResponses) > 0 {
-		fixtures, err := json.Marshal(map[string]any{"toolResponses": fileCfg.ToolResponses})
+	defs, err := mockedToolDefinitions(serverName, fileCfg)
+	if err != nil {
+		return "", err
+	}
+	if len(defs) > 0 {
+		fixtures, err := json.Marshal(map[string]any{"tools": defs})
 		if err != nil {
 			return "", fmt.Errorf("mcp server %q mock fixture is invalid: %w", serverName, err)
 		}
@@ -55,7 +61,51 @@ func buildMockedServerScript(serverName string, fileCfg mcpServerFile) (string, 
 	if serverName == "filesystem" {
 		return filesystemMockServerScript, nil
 	}
-	return "", fmt.Errorf("mcp server %q mocked mode requires config_ref tool_responses or a built-in mock server name", serverName)
+	return "", fmt.Errorf("mcp server %q mocked mode requires config_ref tools or tool_responses, or a built-in mock server name", serverName)
+}
+
+// mockedToolDefinition is the single internal form of a mocked tool, built
+// from either fixture format.
+type mockedToolDefinition struct {
+	Description string `json:"description,omitempty"`
+	InputSchema any    `json:"inputSchema,omitempty"`
+	Response    any    `json:"response"`
+}
+
+// mockedToolDefinitions normalizes a fixture's tools map and its legacy
+// tool_responses map into one definition per tool. A legacy entry keeps its
+// response semantics and the default metadata. A tool may be declared in only
+// one of the two maps. MCP requires an object input schema, so only the
+// top-level type is checked; the schema is advertised to the agent, never
+// enforced on tools/call.
+func mockedToolDefinitions(serverName string, fileCfg mcpServerFile) (map[string]mockedToolDefinition, error) {
+	defs := make(map[string]mockedToolDefinition, len(fileCfg.Tools)+len(fileCfg.ToolResponses))
+	for name, response := range fileCfg.ToolResponses {
+		defs[name] = mockedToolDefinition{Response: response}
+	}
+	for _, name := range slices.Sorted(maps.Keys(fileCfg.Tools)) {
+		tool := fileCfg.Tools[name]
+		if _, ok := fileCfg.ToolResponses[name]; ok {
+			return nil, fmt.Errorf("mcp server %q mock fixture tool %q is declared under both tools and tool_responses; keep one", serverName, name)
+		}
+		if unknown := slices.Sorted(maps.Keys(tool.Unknown)); len(unknown) > 0 {
+			return nil, fmt.Errorf("mcp server %q mock fixture tool %q has unknown field %q; supported fields are description, input_schema and response", serverName, name, unknown[0])
+		}
+		if tool.Response.Kind == 0 {
+			return nil, fmt.Errorf("mcp server %q mock fixture tool %q has no response; set response (null is allowed)", serverName, name)
+		}
+		var response any
+		if err := tool.Response.Decode(&response); err != nil {
+			return nil, fmt.Errorf("mcp server %q mock fixture tool %q response is invalid: %w", serverName, name, err)
+		}
+		if tool.InputSchema != nil {
+			if mapping, ok := tool.InputSchema.(map[string]any); !ok || mapping["type"] != "object" {
+				return nil, fmt.Errorf("mcp server %q mock fixture tool %q input_schema must be a mapping with type: object", serverName, name)
+			}
+		}
+		defs[name] = mockedToolDefinition{Description: tool.Description, InputSchema: tool.InputSchema, Response: response}
+	}
+	return defs, nil
 }
 
 // mcpProtocolScript is shared by all mock server scripts. It provides the MCP
@@ -119,7 +169,8 @@ function sendError(id, code, message, framed) {
 
 const genericMockServerScript = `
 const fixtures = ` + fixturesJSONPlaceholder + `;
-const tools = Object.keys(fixtures.toolResponses || {});
+const toolDefs = fixtures.tools || {};
+const tools = Object.keys(toolDefs);
 ` + mcpProtocolScript + `
 function handleMessage(message, framed) {
   if (!message || message.id === undefined) return;
@@ -128,22 +179,30 @@ function handleMessage(message, framed) {
     return;
   }
   if (message.method === "tools/list") {
-    send(message.id, { tools: tools.map(name => ({ name, description: "Mocked MCP tool " + name, inputSchema: { type: "object", additionalProperties: true } })) }, framed);
+    send(message.id, { tools: tools.map(describeTool) }, framed);
     return;
   }
   if (message.method === "tools/call") {
     const name = message.params && message.params.name;
-    if (!Object.prototype.hasOwnProperty.call(fixtures.toolResponses || {}, name)) {
+    if (!Object.prototype.hasOwnProperty.call(toolDefs, name)) {
       sendError(message.id, -32602, "unknown mocked tool " + name, framed);
       return;
     }
     const args = (message.params && message.params.arguments) || {};
-    const response = render(selectResponse(fixtures.toolResponses[name]), args);
+    const response = render(selectResponse(toolDefs[name].response), args);
     const text = typeof response === "string" ? response : JSON.stringify(response);
     send(message.id, { content: [{ type: "text", text }] }, framed);
     return;
   }
   send(message.id, {}, framed);
+}
+function describeTool(name) {
+  const meta = toolDefs[name];
+  return {
+    name,
+    description: meta.description || ("Mocked MCP tool " + name),
+    inputSchema: meta.inputSchema || { type: "object", additionalProperties: true }
+  };
 }
 function selectResponse(fixture) {
   if (fixture && Object.prototype.hasOwnProperty.call(fixture, "default")) return fixture.default;

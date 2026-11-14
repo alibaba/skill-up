@@ -99,7 +99,7 @@ curl -fsSL https://raw.githubusercontent.com/alibaba/skill-up/main/install.sh | 
 
 The installer downloads the matching binary from [GitHub Releases](https://github.com/alibaba/skill-up/releases).
 
-To build locally from a checkout, install [Go](https://go.dev/dl/) 1.25 or later:
+To build locally from a checkout, install [Go](https://go.dev/dl/) 1.26 or later:
 
 ```bash
 make build

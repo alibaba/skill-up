@@ -116,3 +116,24 @@ func TestWriteBenchmarkMarkdownFile(t *testing.T) {
 		t.Error("expected markdown header")
 	}
 }
+
+func TestWriteBenchmarkMarkdown_DistinguishesSkippedAssertions(t *testing.T) {
+	t.Parallel()
+	benchmark := &AnthropicBenchmark{Runs: []BenchmarkRun{{
+		Result: BenchmarkRunResult{Passed: 1, Failed: 2, Total: 3, PassRate: 1.0 / 3},
+		Expectations: []AnthropicExpectation{
+			{Text: "passed check", Passed: true},
+			{Text: "failed check", Evidence: "evaluated"},
+			{Text: "skipped check", Skipped: true, Evidence: "expect gate failed"},
+		},
+	}}}
+	var buf bytes.Buffer
+	if err := WriteBenchmarkMarkdown(&buf, benchmark); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"| passed check | ✅ |", "| failed check | ❌ | evaluated |", "| skipped check | ⏭️ SKIP | expect gate failed |", "1/3"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("benchmark missing %q: %s", want, buf.String())
+		}
+	}
+}

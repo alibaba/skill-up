@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"regexp"
 	"strings"
@@ -168,6 +169,27 @@ func IsBuiltinTemplateVar(name string) bool {
 // engines, which ignore any engine.custom block.
 func ResolveCustomEngineConfig(cfg *EvalConfig) error {
 	return ResolveCustomEngineConfigWithOptions(cfg, ResolveCustomEngineOptions{})
+}
+
+// ResolveJudgeEngineConfig resolves an independent judge engine using the same
+// environment expansion and validation as the runner, without changing the input.
+func ResolveJudgeEngineConfig(judge JudgeConfig) (JudgeConfig, error) {
+	if judge.Engine == nil {
+		return judge, nil
+	}
+	if errs := validateJudgeTypeAndLocalFields(judge); len(errs) > 0 {
+		return judge, errors.New(strings.Join(errs, "; "))
+	}
+	engine := *judge.Engine
+	engine.Custom = customengine.CloneConfig(engine.Custom)
+	engine.Kwargs = maps.Clone(engine.Kwargs)
+	engine.Model.Params = maps.Clone(engine.Model.Params)
+	cfg := EvalConfig{Engine: engine}
+	if err := ResolveCustomEngineConfig(&cfg); err != nil {
+		return judge, fmt.Errorf("judge.engine: %w", err)
+	}
+	judge.Engine = &cfg.Engine
+	return judge, nil
 }
 
 // ResolveCustomEngineOptions controls which raw engine fields are relevant to

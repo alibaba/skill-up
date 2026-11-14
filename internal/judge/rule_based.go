@@ -35,23 +35,35 @@ func NewRuleBasedJudge(cfg config.JudgeConfig) *RuleBasedJudge {
 // Evaluate implements the Judge interface.
 func (j *RuleBasedJudge) Evaluate(_ context.Context, in Input) (*Result, error) {
 	var allAssertions []AssertionResult
+	failureMatched := false
 
 	// 1. Check failure rules first — any match is immediate FAIL.
 	for _, rule := range j.Failure {
 		ar := evaluateAssertion(rule, in)
 		if ar.Passed {
+			failureMatched = true
 			// A failure rule "passed" means the bad pattern WAS found → FAIL.
 			allAssertions = append(allAssertions, AssertionResult{
 				Text:     "failure: " + ar.Text,
 				Passed:   false,
 				Evidence: "failure rule matched: " + ar.Evidence,
 			})
+		} else {
+			allAssertions = append(allAssertions, AssertionResult{
+				Text: "failure: " + ar.Text, Passed: true,
+				Evidence: "failure rule did not match: " + ar.Evidence,
+			})
 		}
-		// If the failure rule did not match, we don't record it (it's good).
 	}
 
 	// Short-circuit: if any failure rule matched, return immediately.
-	if len(allAssertions) > 0 {
+	if failureMatched {
+		for i := range j.Success {
+			allAssertions = append(allAssertions, AssertionResult{
+				Text: fmt.Sprintf("success rule %d", i+1), Skipped: true,
+				Evidence: "not evaluated: failure rule matched",
+			})
+		}
 		return NewResult(allAssertions, in.TurnsExecuted, in.TurnsTotal), nil
 	}
 

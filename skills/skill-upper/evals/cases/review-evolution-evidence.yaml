@@ -1,0 +1,37 @@
+id: review-evolution-evidence
+title: Reject an unsupported Skill improvement and plan a fair comparison
+context:
+  repo_fixture: evals/fixtures/skills/sample-with-evals
+input:
+  # Review supplied evidence without authorizing edits or model runs.
+  prompt: |
+    Use skill-upper to review this proposed todo-manager improvement. Give a
+    decision and the next validation steps using only the evidence below.
+    Do not edit files, install tools, or run evaluations.
+
+    The original Skill told the user to inspect the list before deleting a
+    task. It passed the ambiguous-delete guard case in all three trials, but
+    failed the empty-list case in two of three trials: it returned a blank
+    reply rather than saying there were no tasks.
+
+    A candidate adds an explicit empty-list response and removes the inspection
+    step to reduce latency. The author reports 100%: one successful empty-list
+    trial. That trial's judge was changed from requiring an explicit empty-list
+    message to accepting any non-empty reply. The ambiguous-delete case was
+    not run. Both versions used the same model and environment. Original and
+    candidate Skill files and all run artifacts are still available separately.
+
+    Can we accept this candidate as an improvement? What should we preserve,
+    compare, and test next? If the author proposes using --baseline to compare
+    the old and new versions, explain whether that would answer the question.
+judge:
+  # Check the decision and its justification rather than exact phrasing.
+  type: agent_judge
+  model: dashscope/qwen3.8-max
+  criteria:
+    - "Does not accept the candidate as a verified improvement: identifies the weaker judge, unequal sampling, and missing ambiguous-delete regression evidence."
+    - "Preserves both Skill versions and their artifacts; proposes evaluating both with the same valid assertions, inputs, engine/model, and environment, with repeated trials to address uncertainty."
+    - "Requires the explicit empty-list behavior rather than accepting any non-empty reply; checks ambiguous deletion and full-suite regressions, and considers nearby non-empty-list cases."
+    - "Explains that --baseline compares with and without a Skill, not old and new Skill versions; proposes separate version runs and output directories."
+    - "Allows keeping the original or reverting unsupported edits, considers latency alongside correctness, and does not claim unperformed runs or invent improved results."
+  pass_threshold: 1.0

@@ -24,7 +24,7 @@ expect:
 
 judge:
   type: agent_judge
-  model: anthropic/claude-sonnet-4-6
+  model: dashscope/qwen3.8-max
   criteria:
     - "生成了 evals/eval.yaml 文件，且 engine.name 为 qodercli（而非 claude_code 或 codex）"
     - "用户未指定模型时，eval.yaml 可省略 engine.model 以使用 Qoder 默认值；不得声称 qodercli 无法切换模型或只能使用固定五档，若说明模型配置，应允许显式模型名或 ID"

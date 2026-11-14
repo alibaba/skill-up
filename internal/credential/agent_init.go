@@ -106,10 +106,18 @@ func ResolveRunnerConfig(engine config.EngineConfig, resolver *Resolver, cli CLI
 }
 
 // ResolveJudgeConfig resolves the final configuration for the judge agent.
-// The judge inherits the runner engine lifecycle and kwargs until an explicit
-// judge-engine schema is introduced, but its model/provider resolution is a
-// separate role-aware pass.
+// An explicit judge engine is resolved independently. Legacy judge.model
+// configurations retain runner lifecycle and provider-scoped fallback behavior.
 func ResolveJudgeConfig(judgeCfg config.JudgeConfig, runner ResolvedAgentConfig, resolver *Resolver) ResolvedAgentConfig {
+	if judgeCfg.Engine != nil {
+		engine := *judgeCfg.Engine
+		return resolveResolvedAgentConfig(agentResolveInput{
+			role: AgentRoleJudge, engine: engine,
+			provider: engine.Model.Provider, model: engine.Model.Name,
+			baseURL: engine.Model.BaseURL, valueSource: ValueSourceJudge,
+			resolver: resolver,
+		})
+	}
 	provider, model := parseJudgeModel(judgeCfg.Model)
 	var fallback *ResolvedAgentConfig
 	if runner.Provider != "" || runner.Model != "" || runner.APIKey != "" || runner.BaseURL != "" {

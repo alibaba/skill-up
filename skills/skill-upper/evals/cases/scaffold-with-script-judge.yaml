@@ -24,7 +24,7 @@ expect:
 
 judge:
   type: agent_judge
-  model: anthropic/claude-sonnet-4-6
+  model: dashscope/qwen3.8-max
   criteria:
     - "生成了 evals/eval.yaml 和至少一个 case yaml 文件"
     - "case yaml 中 judge.type 为 script，且包含 script_path 字段指向一个脚本文件路径"

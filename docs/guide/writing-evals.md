@@ -45,10 +45,11 @@ environment:
   type: none
 
 engine:
-  name: claude_code
+  name: opencode
   model:
-    provider: anthropic
-    name: claude-sonnet-4-6
+    provider: dashscope
+    name: qwen3.8-max
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 
 cases:
   files:
@@ -87,12 +88,12 @@ skills:
 
 # ========== 5. Agent Engine ==========
 engine:
-  name: claude_code               # claude_code / codex / opencode / qodercli / qwen_code
-  version: 2.1.0                  # Optional concrete CLI version; see version lifecycle below
+  name: opencode                  # claude_code / codex / opencode / qodercli / qwen_code
+  version: 1.14.24                # Optional concrete CLI version; see version lifecycle below
   model:
-    provider: anthropic
-    name: claude-sonnet-4-6
-    base_url: ""                  # Custom API endpoint (optional)
+    provider: dashscope
+    name: qwen3.8-max
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
   # kwargs: { ... }               # Agent-specific switches — see "Engine kwargs" below
 
 # ========== 6. Cases ==========
@@ -166,7 +167,7 @@ to an adapter and are now explicitly ignored with migration warnings. Use
 
 | key | agent | `true` behaviour | unset / `false` |
 | :---: | :---: | :--- | :--- |
-| `bypass_sandbox` | `codex` | Forces `--dangerously-bypass-approvals-and-sandbox`; overrides the runtime-derived choice. Use when the host kernel lacks Landlock support (e.g. some CI containers) | Default: `none` runtime → `--sandbox workspace-write`; other runtimes already bypass |
+| `bypass_sandbox` | `codex` | Forces `--dangerously-bypass-approvals-and-sandbox`; overrides the runtime-derived choice. Use when the host kernel lacks Landlock support (e.g. some CI containers) | Default: `none` runtime → `--sandbox workspace-write`, with tool calls approved for the MCP servers skill-up installed whose names match `^[A-Za-z0-9_-]+$` (other names cannot be addressed by a Codex `-c` override, so Codex still rejects their calls); other runtimes already bypass |
 | `bypass_sandbox` | `claude_code` | No-op — claude already runs with `--permission-mode=bypassPermissions` | No-op |
 | `bypass_sandbox` | `qodercli` | No-op — no equivalent flag | No-op |
 | `bypass_sandbox` | `qwen_code` | No-op — `qwen_code` never imposes its own sandbox (`--yolo` only auto-approves tool calls; it does **not** isolate). Like `claude_code`/`qodercli`, isolation is the runtime's job | No-op |
@@ -222,8 +223,8 @@ When `engine.name` is not one of the built-ins (`claude_code`, `codex`, `qodercl
 engine:
   name: my-agent
   model:
-    provider: anthropic
-    name: claude-sonnet-4-6
+    provider: dashscope
+    name: qwen3.8-max
   custom:
     transport: local             # local | http
     conversation_mode: batch     # batch (default) | stateful
@@ -349,7 +350,7 @@ mcp:
       mode: mocked
 ```
 
-Or define tool responses through `config_ref`:
+Or define the mocked tools through `config_ref`:
 
 ```yaml
 mcp:
@@ -360,6 +361,32 @@ mcp:
 ```
 
 ```yaml
+tools:
+  create_publish_plan_simple:
+    description: Create a publish plan for a project release.
+    input_schema:
+      type: object
+      properties:
+        name: {type: string}
+        planReleaseDate: {type: string}
+      required: [name]
+    response:
+      default:
+        id: 999
+        name: "{{params.name}}"
+        status: ONGOING
+```
+
+Each entry under `tools` defines one tool:
+
+- `response` is required. Every call to the tool returns the value under its `default` key, or the whole value when there is no `default` key. String values can insert call arguments with the `params` template used in the example's `name` field, with an optional `| default:'<value>'` fallback. `response: null` returns null.
+- `description` and `input_schema` are optional and set what the Agent sees in `tools/list`. Without them the Agent sees the description `Mocked MCP tool <name>` and an input schema that accepts any object, not the real server's descriptions and parameters, so it may pick tools differently than against the real server. An empty `description` also keeps the placeholder.
+- `input_schema`, when set, must be a mapping with `type: object`, because MCP requires an object schema; an empty mapping (`{}`) is an error, while `input_schema: null` keeps the default. Nothing deeper is validated. The schema is advertised only: the mock does not check call arguments against it, so a call with missing or extra arguments still returns the response.
+- A tool entry accepts only `description`, `input_schema` and `response`. Any other key, such as the MCP wire name `inputSchema`, is an error.
+
+Fixtures that use the `tool_responses` map keep working unchanged. Each entry there is the tool's `response`, and the tool gets the default metadata:
+
+```yaml
 tool_responses:
   create_publish_plan_simple:
     default:
@@ -367,6 +394,14 @@ tool_responses:
       name: "{{params.name}}"
       status: ONGOING
 ```
+
+One fixture may use both maps for different tools. A tool name declared under both `tools` and `tool_responses` is an error.
+
+A mocked server built from a fixture behaves as follows:
+
+- It uses stdio only. For `mode: mocked`, skill-up rejects `transport: http`, `endpoint`, `command`, and `args`.
+- skill-up starts it with `node`, so `node` must be on `PATH` in the runtime. skill-up sets up Node.js only when it installs Claude Code, Codex, Qwen Code, or OpenCode itself. A preinstalled engine CLI or the Qoder CLI does not bring Node.js with it.
+- A call to a tool that the fixture does not declare returns an MCP error.
 
 Environment-variable references support both `${VAR}` and full-value `$VAR` forms; the variable name must match `[A-Za-z_][A-Za-z0-9_]*`. Variables listed in `required_env` are injected into the Agent process; full env-var references inside `headers` are also recorded by name so the Agent can pick the right transport mechanism when installing the MCP server.
 
@@ -412,6 +447,44 @@ Rules and constraints:
 | `docker`      | Local container isolation, no remote dependency    | Custom toolchains, reproducible CI, offline |
 
 > **Tip:** if your Skill does not touch the filesystem, `none` avoids sandbox provisioning and is significantly faster.
+
+#### Session cleanup
+
+An evaluation deletes its workspace, but an agent CLI may keep per-workspace state outside it. Claude Code writes a project directory under `~/.claude/projects/<workspace-key>/` with the session transcript and a `memory/` folder, so repeated runs add up in the user's own session history.
+
+`environment.cleanup_sessions: true` (or `--cleanup-sessions`) removes that directory together with the workspace. It is off by default because it deletes user-visible history, and only `claude_code` implements it today:
+
+```yaml
+environment:
+  type: none
+  cleanup_sessions: true
+```
+
+An explicit `--cleanup-sessions=false` overrides `cleanup_sessions: true`; only an unset flag falls back to the config.
+
+`--no-delete` wins: the workspace and the sessions are both preserved, and the run reports that cleanup was skipped. Cleanup also does not run for an externally owned workspace (`--workspace`), when the runtime keeps the workspace, or when ownership cannot be proven. Ownership is parsed from each transcript's recorded working directory, not searched for as a string, so a path inside a tool argument never counts; a directory is removed only when every transcript in it records this workspace, and it is kept when the transcripts disagree, do not parse, or record nothing. Two workspaces whose paths differ only in punctuation share one project directory, so it is left untouched. For an agent that does not implement cleanup, the run reports that it is unsupported.
+
+#### Branching setup by experiment group
+
+The framework injects `SKILL_UP_VARIANT` before setup and keeps it available to subsequent runtime commands in `none`, Docker, and OpenSandbox. It identifies the scheduled execution configuration: currently `with_skill` or `without_skill`. Non-benchmark runs use `with_skill`, even when the Skill list is empty; this does not prove that a Skill was installed or invoked. Future configurations may use other names (for example, `v1.0` or `v1.1`); custom groups are not enabled by this variable alone.
+
+`SKILL_UP_VARIANT` is reserved: defining it in `environment.env` is an error, including an empty or matching value. The framework overrides an inherited host value and any MCP-provided value with the actual task configuration, without changing the host process environment. Cases, variants, retries, and iterations receive their own runtime environment.
+
+```yaml
+environment:
+  type: none
+  setup_steps:
+    - run: |
+        case "$SKILL_UP_VARIANT" in
+          with_skill)    bash /opt/eval/init-with.sh ;;
+          without_skill) bash /opt/eval/init-without.sh ;;
+          *) exit 1 ;;
+        esac
+benchmark:
+  enabled: true
+```
+
+The scripts must already exist in the selected runtime; case fixtures are uploaded **after** setup. POSIX shell syntax is shown above. Local qodercli can use this setup with `environment.type: none`; benchmark tasks still use independent workspaces and generate the existing comparison report. The existing restriction on `--workspace` with benchmark remains in effect.
 
 #### OpenSandbox configuration
 
@@ -757,6 +830,14 @@ Grading happens in two layers: **expect** (gating checks) and **judge** (quality
 ### expect — fast gating
 
 `expect` is a zero-cost local check. If `expect` fails, `judge` is skipped.
+The case is FAIL, and configured judge assertions still count in the assertion
+pass-rate denominator with no credit. Reports mark them `skipped: true` to
+separate unexecuted checks from evaluated failures. For a single judge, scoring
+counts each configured expect rule type plus each judge criterion (each success
+and failure rule for `rule_based`, or one outcome for `script`). Agent-judge
+thresholds still apply only to judge criteria. Internal benchmark pass rates
+count passed cases; Anthropic-compatible benchmark pass rates average each run's
+assertion pass rate.
 
 ```yaml
 expect:
@@ -830,7 +911,7 @@ judge:
         not: ["(?i)api[_-]?key\\s*="]
     - exit_code: 0
     - tool_called:                            # Agent must invoke this tool
-        name: "github::create_pull_request"
+        name: "mcp__github__create_pull_request"
         args:                                 # Partial-match against tool args
           title: "Fix null check"
   failure:                                    # If ANY rule matches → immediate fail
@@ -841,6 +922,8 @@ judge:
 ```
 
 > **Evaluation order:** `failure` outranks `success`. If any `failure` rule matches, the case fails immediately. Otherwise every `success` rule must pass.
+
+> **MCP tool names:** `tool_called`, `tool_called_in_turn`, and `tool_not_called_in_turn` compare `name` exactly with the tool name the Agent Engine recorded. Claude Code, Codex, and Qoder CLI record MCP tools as `mcp__<server>__<tool>`, where `<server>` is the server `name` from `mcp.servers`.
 
 `output_contains` performs literal substring checks. Use `output_matches` when you need regular expressions; patterns use Go `regexp` syntax and invalid patterns fail config validation.
 
@@ -863,6 +946,105 @@ Script contract:
 - `$EVAL_TRANSCRIPT_PATH` is set only when a transcript was produced; otherwise it is empty
 - Stdout from the script is captured as the grading rationale in the report
 
+### Multiple independent judges
+
+For execution contracts, isolation limits, and planned extensions, see the
+[Multi-judge design](../design/multi-judge.md).
+
+Use `judges` when one agent run needs both a deterministic check and semantic review:
+
+```yaml
+judges:
+  - id: functional
+    type: script
+    script_path: evals/fixtures/scripts/check-quality.sh
+    timeout_seconds: 30
+  - id: semantic
+    type: agent_judge
+    model: dashscope/qwen3.8-max
+    criteria:
+      - "The result meets the user's intent"
+    pass_threshold: 0.7
+```
+
+The model example uses the OpenCode/DashScope engine configuration above. An Agent judge inherits the configured engine and endpoint; changing only its model does not select another engine. See the [live code-stats example](../../examples/code-stats/README.md) for a verified configuration.
+
+Each member has its own status, assertions, diagnostics, and artifacts. All members inspect the same agent execution; the evaluated agent does not run again. `expect` remains a gate: if it fails, all judges are skipped. Otherwise every member runs, even if an earlier member fails or errors. The case passes only when every member passes. List order controls execution order but does not pass data between judges.
+
+`judges` can be defined at eval or case level. A case-level list replaces the full eval-level list. A case-level singular `judge` also replaces an eval-level list. A document cannot contain both `judge` and `judges`, and member IDs must be unique lowercase identifiers containing letters, digits, `_`, or `-`.
+
+Judges run sequentially in the same case runtime (`none`, Docker, or OpenSandbox), after one evaluated-Agent execution. Each Agent judge starts a fresh session rather than resuming the Agent or a previous judge. Installed dependencies, background services, mounted volumes, environment variables and network policy stay available because the runtime is reused. No filesystem snapshot or restore capability is required.
+
+The runtime filesystem is shared: a judge's changes are visible to later judges. Use read-only checks when every judge must observe unchanged output. Verdicts, timeouts, context materials and session artifacts are recorded separately under each judge's ID; this does not provide filesystem or external-service isolation. The case runtime is cleaned up after all judges finish, using the configured lifecycle policy.
+
+#### OpenSandbox shared-runtime verification
+
+OpenSandbox judges use the running case sandbox directly; they do not call native
+snapshot, restore, pause or resume APIs. Each Agent judge uses a fresh review
+session, while installed tools, filesystem changes and the case's network policy
+remain in the same sandbox. Cleanup follows the normal case lifecycle.
+
+To run the gated live-service test, configure `OPENSANDBOX_API_KEY`,
+`OPENSANDBOX_BASE_URL` and `OPENSANDBOX_IMAGE` in your environment:
+
+```bash
+SKILL_UP_OPENSANDBOX_JUDGE_E2E=1 go test -tags e2e -run TestOpenSandboxSharedJudgeEnvironment -v ./e2e
+```
+
+The test creates temporary sandboxes with a five-minute TTL and test metadata.
+It runs one Agent fixture, a script judge and two fresh Agent-judge fixture
+sessions sequentially. It checks shared file changes, setup and Agent-installed
+dependencies outside the workspace, environment configuration and per-judge
+material readback. It covers PASS/PASS/PASS and script FAIL / both Agent judges
+PASS / aggregate FAIL. The fixture exercises the actual judging pipeline without
+calling a model provider. Actual service egress enforcement requires a separate
+network test; this test does not claim external-service isolation.
+
+To verify the real OpenCode provider path, also inject `JUDGE_LIVE_API_KEY`,
+set `SKILL_UP_OPENCODE_JUDGE_BASE_URL` and `SKILL_UP_OPENCODE_JUDGE_MODEL` for an
+OpenAI-compatible provider, then run:
+
+```bash
+SKILL_UP_OPENCODE_JUDGE_E2E=1 go test -count=1 -tags e2e -run '^TestOpenSandboxOpenCodeJudgeProvider$' -v ./e2e
+```
+
+This separate test starts the real OpenCode CLI and makes live model requests.
+The runner fixture seeds a conflicting provider endpoint and key; two independent
+judges must override them, pass their rubric and return different session IDs.
+It uses a fifteen-minute sandbox TTL and normal case deletion. Optionally pin
+OpenCode with `SKILL_UP_OPENCODE_JUDGE_VERSION` (validated with `1.14.24`).
+
+To exercise an omitted `judge.engine.model.base_url`, set
+`SKILL_UP_OPENCODE_JUDGE_PROVIDER=openai` (or `anthropic`), leave
+`SKILL_UP_OPENCODE_JUDGE_BASE_URL` unset, and supply the native provider's model
+and key through the same variables. The test still seeds a conflicting runner
+provider; the independent judge must use its native default endpoint. Provider
+initialization removes the selected provider's inherited inline settings while
+preserving case MCP configuration, unrelated providers and other OpenCode settings.
+
+For a local HTTP-routing regression with OpenCode installed, run:
+
+```bash
+SKILL_UP_OPENCODE_ORDER_E2E=1 go test -count=1 -tags e2e -run '^TestOpenCodeJudgeConnectionOrder$' -v ./e2e
+```
+
+This test uses two loopback recording endpoints with fixture keys and fixed HTTP
+400 responses. It checks independent/legacy judge ordering against actual CLI
+requests without a model service; it does not test successful model grading.
+
+A separate configuration-only smoke test installs and preflights the real
+OpenCode CLI in an OpenSandbox, resets a conflicting OpenAI provider, and reads
+back the preserved MCP and unrelated provider settings. It needs the sandbox
+variables above but no model-provider key or native-provider connectivity:
+
+```bash
+SKILL_UP_OPENCODE_CONFIG_E2E=1 go test -count=1 -tags e2e -run '^TestOpenSandboxOpenCodeDefaultRouting$' -v ./e2e
+```
+
+
+
+Reports show gates, member results, and the overall decision separately. `evaluation.json` stores the complete grouped result; `grading.json` contains one top-level expectation per judge for compatibility. Adding Agent criteria does not change a script judge's weight. Multiple cases can reference the same `script_path` today; packaging helper files with a script is a separate feature.
+
 ### judge: agent_judge — LLM rubric
 
 Let an LLM grade against rubric criteria — useful when semantic understanding is required:
@@ -870,7 +1052,7 @@ Let an LLM grade against rubric criteria — useful when semantic understanding 
 ```yaml
 judge:
   type: agent_judge
-  model: anthropic/claude-sonnet-4-6        # Model used by the judge
+  model: dashscope/qwen3.8-max        # Model used by the judge
   skills:                                   # Optional: judge-only Skills
     - source: local_path
       path: evals/fixtures/judge-rubric
@@ -881,6 +1063,49 @@ judge:
   pass_threshold: 0.7                        # Default 0.7
   timeout_seconds: 60                        # Optional: bound a single judge call (0 = no judge-level deadline, parent case timeout still applies)
 ```
+
+To select a judge independently from the evaluated agent, replace `judge.model`
+with a complete `judge.engine` block:
+
+```yaml
+judge:
+  type: agent_judge
+  engine:
+    name: claude_code
+    model:
+      provider: anthropic
+      name: claude-sonnet-4-6
+  criteria:
+    - "The result satisfies the task requirements"
+```
+
+`judge.engine` and `judge.model` are mutually exclusive. An independent engine
+requires its own `name`, `model.provider`, and `model.name`; it supports the same
+`version`, `kwargs`, `model.base_url`, and `custom` fields and environment expansion
+as the run engine. It does not inherit the runner's model, CLI overrides, kwargs,
+custom configuration, or resolved connection. Credentials and endpoints resolve
+from the judge's own provider and adapter protocol using the existing credential
+configuration. No provider-to-engine inference is performed.
+
+Legacy `judge.model` keeps the runner engine and compatible provider-scoped
+fallbacks. Known native OpenAI/Anthropic protocol mismatches and model overrides
+that the adapter would discard fail before the evaluated agent runs. A gateway
+using a native provider name with another protocol must explicitly configure that
+protocol's endpoint in `credentials.yaml`.
+
+For a singular case-level `judge`, an explicit `engine` replaces the entire eval
+judge engine; an explicit legacy `model` selects the legacy mode. If neither is
+set, the eval's engine/model selection is inherited. `judges` lists retain their
+existing full-list replacement semantics; members do not inherit a singular
+judge's defaults.
+
+The judge continues to use the case runtime; there is no `judge.environment`.
+An independent judge's CLI is installed and checked in Docker/OpenSandbox during
+the judge phase, after the evaluated agent completes. In `none`, install all
+required CLIs beforehand; skill-up only checks them. Version selection follows
+the existing adapter rules. Single judges retain the existing shared-runtime
+behavior. Multiple judges also reuse the same case runtime sequentially, each
+starting a fresh session; their filesystem state is shared.
 
 `judge.skills` is supported only for `agent_judge`. These Skills are installed
 into the judge agent, not the run agent, and top-level `skills` are not
@@ -902,7 +1127,7 @@ on explicit attachments or script outputs instead of the full conversation:
 ```yaml
 judge:
   type: agent_judge
-  model: anthropic/claude-sonnet-4-6
+  model: dashscope/qwen3.8-max
   context:
     profile: minimal                         # transcript/diff omitted, final_message truncated
     attachments:
@@ -1119,6 +1344,22 @@ engine:
 >
 > **Note:** the `--api-key` flag and any provider API key declared in `eval.yaml` are **not** used as the qodercli auth token. Authentication comes from the selected edition's PAT or local login state.
 
+If a run returns an empty result with `stop_reason: tool_use`, the CLI has not
+finished its tool loop even if it exits zero. skill-up reports this as an engine
+error and retains the raw output. Check `qodercli --version` and update the CLI
+with `qodercli update` or the official installer. A native-CLI reproduction
+separates this issue from judge JSON formatting. Qoder CLI 0.2.0 reproduced it
+with the retired `performance` argument while `auto` completed normally. The
+current client (1.1.83) completed the same tasks with available tiers.
+A completed `end_turn` with empty chat is still allowed for file-based judges.
+
+Qoder has [replaced Performance with Fast](https://docs.qoder.com/product-overview/fast-mode-announcement).
+Use `qodercli --list-models` to check account availability and select `fast` on
+current clients. If Qoder explicitly warns that an unavailable requested model
+was replaced with a fallback, skill-up returns an engine error. Agent judges do
+not recover a verdict from that unintended model, even from a valid result file.
+
+
 qodercli model selection:
 
 - A non-empty `engine.model.name` is passed to Qoder's `--model` after trimming
@@ -1254,10 +1495,11 @@ schema_version: v1alpha1
 environment:
   type: none
 engine:
-  name: claude_code
+  name: opencode
   model:
-    provider: anthropic
-    name: claude-sonnet-4-6
+    provider: dashscope
+    name: qwen3.8-max
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 cases:
   files:
     - evals/cases/route-to-summary.yaml
@@ -1305,7 +1547,7 @@ judge:
   type: rule_based
   success:
     - tool_called:
-        name: "project-mgmt::create_publish_plan_simple"
+        name: "mcp__project-mgmt__create_publish_plan_simple"
         args:
           name: "Q1 release"
           planReleaseDate: "2026-04-03"
@@ -1322,3 +1564,45 @@ All paths (including `cases.files` and fixture paths) are resolved relative to t
 ### When should I use `expect` vs `judge`?
 
 Use `expect` for fast, zero-cost gating (file existence, keyword presence). Use `judge` for richer quality grading. They compose well — when `expect` fails, `judge` is skipped, saving time and tokens.
+
+### Agent judge result files
+
+Set `judge.output.mode: file` to have the Judge edit a framework-created JSON
+file instead of returning JSON in its final chat message. The default remains
+`final_message`. This requires an agent with file tools and a shared runtime
+workspace; built-in none, Docker, and OpenSandbox runtimes provide file transfer.
+
+```yaml
+judge:
+  type: agent_judge
+  engine:
+    name: qodercli
+    model:
+      provider: qoder
+      name: fast
+  output:
+    mode: file
+  criteria:
+    - The implementation satisfies the required behavior with concrete evidence.
+```
+
+Each attempt receives a fresh runtime path and a template with stable criterion
+IDs, `passed: null`, and empty evidence/failure arrays. The Judge must replace all
+placeholders. The framework reads only that file, validates the existing strict
+result contract, and retries correction once if needed. Final chat prose is
+preserved for diagnosis but never used as a fallback verdict. A valid failing
+verdict does not trigger correction. Retries share the original timeout budget.
+
+Unchanged, incomplete, missing, fenced, or malformed files remain errors after
+correction. File output improves delivery reliability; it does not guarantee
+better evaluation accuracy. The framework saves `result-attempt-1.json` and,
+when downloaded, `result-attempt-2.json` beside the original
+`raw-response-attempt-*.txt` chat artifacts. No sample result is used as a backup
+score. Case-level agent judges inherit the global output setting; explicitly set
+`mode: final_message` to override it. Explicit `judges` members are independent.
+See `examples/code-stats/evals/eval-agent-judge-file.yaml` for a runnable example.
+
+A validated file can be recovered after a non-cancellation engine error even if
+chat is empty; reports disclose the recovered call. Explicit cancellation is
+never recovered. After an expired deadline, recovery permits up to five seconds
+only to download the existing result file, without restarting the agent.

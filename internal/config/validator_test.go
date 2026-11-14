@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-func intPtr(v int) *int { return &v }
-
 //nolint:maintidx,funlen // table-driven test cases drive the line count; splitting hurts readability.
 func TestValidator_ValidateEvalConfig(t *testing.T) {
 	t.Parallel()
@@ -150,7 +148,7 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 					Success: []Rule{
 						{OutputContains: &OutputContainsRule{All: []string{"ok"}}},
 						{OutputMatches: &OutputMatchesRule{All: []string{"ok"}}},
-						{ExitCode: intPtr(0)},
+						{ExitCode: new(0)},
 						{ToolCalled: &ToolCalledRule{Name: "read"}},
 						{FilesExist: []string{"out.txt"}},
 						{FilesNotExist: []string{"secret.txt"}},
@@ -585,7 +583,7 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 					Type:          "agent_judge",
 					Model:         "test-model",
 					Criteria:      []string{"criterion"},
-					PassThreshold: float64Ptr(0.0),
+					PassThreshold: new(0.0),
 				},
 			},
 			wantErr: false,
@@ -609,7 +607,7 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 					Type:          "agent_judge",
 					Model:         "test-model",
 					Criteria:      []string{"criterion"},
-					PassThreshold: float64Ptr(1.1),
+					PassThreshold: new(1.1),
 				},
 			},
 			wantErr: true,
@@ -1112,7 +1110,7 @@ func TestValidator_ValidateCaseConfig(t *testing.T) {
 					Type:          "agent_judge",
 					Model:         "test-model",
 					Criteria:      []string{"criterion"},
-					PassThreshold: float64Ptr(-0.1),
+					PassThreshold: new(-0.1),
 				},
 			},
 			wantErr: true,
@@ -1128,7 +1126,7 @@ func TestValidator_ValidateCaseConfig(t *testing.T) {
 				Judge: JudgeConfig{
 					Type:           "script",
 					ScriptPath:     "check.sh",
-					TimeoutSeconds: intPtr(-1),
+					TimeoutSeconds: new(-1),
 				},
 			},
 			wantErr: true,
@@ -1684,10 +1682,6 @@ func containsHelper(s, substr string) bool {
 	}
 
 	return false
-}
-
-func float64Ptr(v float64) *float64 {
-	return &v
 }
 
 func TestValidator_CollectArtifacts(t *testing.T) {
@@ -2253,6 +2247,102 @@ func TestValidator_PerTurnJudgeRules(t *testing.T) {
 			}
 			if tt.wantErr && err != nil && tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
 				t.Errorf("error = %v, should contain %q", err, tt.errMsg)
+			}
+		})
+	}
+}
+
+//nolint:funlen // table-driven coverage for blank input and mutual-exclusion semantics.
+func TestValidator_RejectsWhitespaceOnlyInput(t *testing.T) {
+	t.Parallel()
+	validator := NewValidator()
+
+	tests := []struct {
+		name      string
+		input     Input
+		simulator *UserSimulatorScenario
+		wantErr   string
+	}{
+		{
+			name:    "space-only prompt is rejected",
+			input:   Input{Prompt: " "},
+			wantErr: "input.prompt or input.turns is required",
+		},
+		{
+			name:    "tab and newline prompt is rejected",
+			input:   Input{Prompt: "\t\n"},
+			wantErr: "input.prompt or input.turns is required",
+		},
+		{
+			name:    "valid prompt keeps surrounding whitespace",
+			input:   Input{Prompt: "  real task\n"},
+			wantErr: "",
+		},
+		{
+			name: "blank prompt with valid turns remains mutually exclusive",
+			input: Input{
+				Prompt: " ",
+				Turns:  []Turn{{Role: "user", Content: "valid turn"}},
+			},
+			wantErr: "input.prompt and input.turns are mutually exclusive",
+		},
+		{
+			name:    "space-only turn content is rejected",
+			input:   Input{Turns: []Turn{{Role: "user", Content: " "}}},
+			wantErr: "input.turns[0].content is required unless respond is set",
+		},
+		{
+			name:    "tab and newline turn content is rejected",
+			input:   Input{Turns: []Turn{{Role: "user", Content: "\t\n"}}},
+			wantErr: "input.turns[0].content is required unless respond is set",
+		},
+		{
+			name:    "valid turn content keeps surrounding whitespace",
+			input:   Input{Turns: []Turn{{Role: "user", Content: "  real turn\n"}}},
+			wantErr: "",
+		},
+		{
+			name: "blank content with respond remains mutually exclusive",
+			input: Input{
+				Turns: []Turn{{Role: "user", Content: " ", Respond: "generated"}},
+			},
+			simulator: &UserSimulatorScenario{Scenario: "test"},
+			wantErr:   "input.turns[0].content and respond are mutually exclusive",
+		},
+		{
+			name: "empty content with respond is allowed",
+			input: Input{
+				Turns: []Turn{{Role: "user", Respond: "generated"}},
+			},
+			simulator: &UserSimulatorScenario{Scenario: "test"},
+			wantErr:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validator.ValidateCaseConfig(&CaseConfig{ID: "test-case", Input: tt.input, UserSimulator: tt.simulator})
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestValidatorReservedVariant(t *testing.T) {
+	for _, value := range []string{"", "with_skill", "without_skill", "v1.0"} {
+		t.Run(value, func(t *testing.T) {
+			cfg := &EvalConfig{SchemaVersion: "v1alpha1", Environment: Environment{Type: "none", Env: map[string]string{"SKILL_UP_VARIANT": value}}, Engine: EngineConfig{Name: "qodercli"}, Cases: CasesConfig{Files: []string{"case.yaml"}}}
+			err := NewValidator().ValidateEvalConfig(cfg)
+			if err == nil || !strings.Contains(err.Error(), "environment.env.SKILL_UP_VARIANT is reserved") {
+				t.Fatalf("expected reserved-name error, got %v", err)
 			}
 		})
 	}

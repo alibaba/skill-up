@@ -1,0 +1,21 @@
+id: preserve-localized-regressions
+title: Preserve Chinese test literals in an English conversation
+context:
+  repo_fixture: evals/fixtures/skills/sample-with-evals
+input:
+  prompt: |
+    Use skill-upper to add a rule_based case with ID list-empty-todos for
+    todo-manager. Its required Chinese response for an empty list is exactly
+    "暂无待办事项". Keep that exact literal in the assertion. Preserve the
+    existing add-todo.yaml byte-for-byte. Do not run evaluations or modify
+    SKILL.md. Reply in English and add short field-leading English comments
+    for id, title, input.prompt, expect, and judge.type when present in the
+    new case.
+    Use standalone shell wrappers; do not chain commands outside a shell wrapper.
+    Use literal skill-up command arguments without shell expansion.
+    Author YAML with literal shell file writers or file-edit tools, without interpreter code or dynamic command dispatch.
+    Use at most one heredoc per command line and quote its delimiter (for example <<'EOF') when writing files; use POSIX single/double quotes or backslash quoting, without Bash dollar-quoted delimiters. Unquoted heredocs are outside the literal authoring profile.
+judge:
+  type: script
+  script_path: evals/fixtures/scripts/assert-localized-regressions.sh
+  timeout_seconds: 30

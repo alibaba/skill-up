@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -169,6 +170,37 @@ func TestJSONReporter_PreservesExecutionMetrics(t *testing.T) {
 	if first.InputTokens != 1000 || first.OutputTokens != 200 ||
 		first.JudgeInputTokens != 300 || first.JudgeOutputTokens != 40 || first.JudgeDurationMs != 12000 {
 		t.Fatalf("case metrics not preserved in JSON: %#v", first)
+	}
+}
+
+func TestJSONReporter_RecordsRecoveredJudgeCall(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "result.json")
+	recovery := &judge.RecoveryMetadata{Recovered: true, Reason: "agent_call_error"}
+	input := Input{CaseResults: []CaseResult{{
+		CaseID:        "recovered-judge",
+		Status:        judge.StatusPass,
+		JudgeRecovery: recovery,
+		Grading:       &judge.Result{Status: judge.StatusPass, Recovery: recovery},
+	}}}
+
+	if err := (&JSONReporter{OutputPath: path}).Write(context.Background(), input); err != nil {
+		t.Fatalf("JSONReporter.Write failed: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read json file: %v", err)
+	}
+	var parsed Input
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if len(parsed.CaseResults) != 1 || parsed.CaseResults[0].JudgeRecovery == nil ||
+		!parsed.CaseResults[0].JudgeRecovery.Recovered || parsed.CaseResults[0].JudgeRecovery.Reason != "agent_call_error" {
+		t.Fatalf("judge_recovery not preserved in JSON: %#v", parsed.CaseResults)
+	}
+	if strings.Contains(string(data), `"recovery":`) {
+		t.Fatalf("grading payload must not gain a recovery field: %s", data)
 	}
 }
 
@@ -800,5 +832,170 @@ func TestInput_TotalDuration(t *testing.T) {
 	d := in.TotalDuration()
 	if d != 4*time.Minute+5*time.Second {
 		t.Fatalf("expected 4m5s, got %v", d)
+	}
+}
+
+func TestHTMLReporter_PreservesSkippedAssertions(t *testing.T) {
+	t.Parallel()
+	grading := judge.NewResult([]judge.AssertionResult{{Text: "gate failed"}, {Text: "judge not run", Skipped: true}}, 1, 1)
+	data, err := (&HTMLReporter{}).buildTemplateData(Input{CaseResults: []CaseResult{{CaseID: "gate", Status: judge.StatusFail, Grading: grading}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var embedded embeddedReportData
+	if err := json.Unmarshal([]byte(data.EmbeddedDataJSON), &embedded); err != nil {
+		t.Fatal(err)
+	}
+	assertions := embedded.Cases[0].Grading.Expectations
+	if len(assertions) != 2 || assertions[0].Skipped || !assertions[1].Skipped {
+		t.Fatalf("assertions=%+v", assertions)
+	}
+	if embedded.Cases[0].Grading.Summary.Total != 2 {
+		t.Fatal("skipped assertion lost from denominator")
+	}
+}
+
+func TestHTMLReporter_RendersSkippedAssertions(t *testing.T) {
+	t.Parallel()
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node.js required to execute HTML report renderer")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, node, "-e", `
+ const assert = require('node:assert/strict');
+ const vm = require('node:vm');
+ const template = require('node:fs').readFileSync(0, 'utf8');
+ const start = template.indexOf('function renderGradingBlock(g)');
+ const end = template.indexOf('function toggleGrades()', start);
+ const context = {esc: text => text};
+ vm.createContext(context);
+ vm.runInContext(template.slice(start, end), context);
+ const mixed = context.renderGradingBlock({summary: {passed: 1, failed: 2, total: 3, pass_rate: 1/3}, expectations: [
+  {text: 'passed check', passed: true},
+  {text: 'failed check', passed: false},
+  {text: 'skipped check', passed: false, skipped: true}
+ ]});
+ assert.match(mixed, /1 passed, 1 failed, 1 skipped of 3/);
+ assert.match(mixed, /a-pass[^<]*<[^>]*><span>passed check/);
+ assert.match(mixed, /a-fail[^<]*<[^>]*><span>failed check/);
+ assert.match(mixed, /a-skip[^<]*SKIP<[^>]*><span>skipped check/);
+ const skipped = context.renderGradingBlock({summary: {passed: 0, failed: 1, total: 1, pass_rate: 0}, expectations: [{text: 'unexecuted', passed: false, skipped: true}]});
+ assert.match(skipped, /0 passed, 0 failed, 1 skipped of 1/);
+ const legacy = context.renderGradingBlock({summary: {passed: 0, failed: 1, total: 1, pass_rate: 0}, expectations: [{text: 'executed', passed: false}]});
+ assert.match(legacy, /0 passed, 1 failed of 1/);
+ assert.doesNotMatch(legacy, /a-skip/);
+ `)
+	cmd.Stdin = strings.NewReader(htmlTemplate)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("renderer: %v\n%s", err, output)
+	}
+}
+
+func TestMarkdownReporter_DistinguishesSkippedAssertions(t *testing.T) {
+	t.Parallel()
+	grading := judge.NewResult([]judge.AssertionResult{
+		{Text: "satisfied criterion", Passed: true},
+		{Text: "evaluated failure", Evidence: "check failed"},
+		{Text: "unexecuted criterion", Skipped: true, Evidence: "expect gate failed"},
+	}, 1, 1)
+	input := Input{SkillName: "test", CaseResults: []CaseResult{
+		{CaseID: "legacy", Status: judge.StatusFail, Grading: grading},
+		{CaseID: "grouped", Status: judge.StatusFail, JudgeResults: []judge.Outcome{{ID: "quality", Status: judge.StatusFail, Result: grading}}},
+	}}
+	path := filepath.Join(t.TempDir(), "report.md")
+	if err := (&MarkdownReporter{OutputPath: path}).Write(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"- Failed: evaluated failure", "- Skipped: unexecuted criterion", "  - PASS: satisfied criterion", "  - FAIL: evaluated failure", "  - SKIP: unexecuted criterion", "Evidence: expect gate failed"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("report missing %q: %s", want, data)
+		}
+	}
+	if strings.Contains(string(data), "Failed: unexecuted criterion") {
+		t.Fatal("skipped assertion mislabeled as failed")
+	}
+}
+
+func TestHTMLReporter_ComparisonPreservesTurnFailureEvidence(t *testing.T) {
+	t.Parallel()
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node.js required to execute HTML report renderer")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, node, "-e", `
+ const assert = require('node:assert/strict');
+ const vm = require('node:vm');
+ const template = require('node:fs').readFileSync(0, 'utf8');
+ const elements = new Map();
+ function element() {
+   return {style: {}, innerHTML: '', classList: {remove() {}}, replaceChildren() {}, appendChild() {}};
+ }
+ const context = {
+   esc: text => String(text).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;'),
+   pairLabels: ['Reference', 'Compared'],
+   renderResponse() {},
+   document: {
+     getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); },
+     createElement: element,
+     createTextNode: text => text
+   }
+ };
+ vm.createContext(context);
+ const gradesStart = template.indexOf('function renderGrades(c)');
+ vm.runInContext(template.slice(gradesStart, template.indexOf('function toggleGrades()', gradesStart)), context);
+ const pairStart = template.indexOf('function renderPairDetails(c)');
+ vm.runInContext(template.slice(pairStart, template.indexOf('function selectComparisonRun(', pairStart)), context);
+ const failed = {status: 'FAIL', turn_results: [
+   {turn_number: 1, status: 'completed'},
+   {turn_number: 2, status: 'failed', reason: 'Missing <required> field'}
+ ]};
+ const errored = {status: 'ERROR', turn_results: [
+   {turn_number: 1, status: 'error', reason: 'Agent connection closed'}
+ ]};
+ context.renderGrades(failed);
+ const normal = elements.get('grades-content').innerHTML;
+ assert.match(normal, /Missing &lt;required&gt; field/);
+ for (const [left, right] of [[failed, errored], [errored, failed]]) {
+   context.renderPairDetails({pairLeft: left, pairRight: right});
+   const html = elements.get('grades-content').innerHTML;
+   const columns = html.split('<div class="config-col">').slice(1);
+   assert.equal(columns.length, 2);
+   for (const [i, side] of [left, right].entries()) {
+     assert.match(columns[i], /post-condition/);
+     assert.ok(columns[i].includes(context.renderCaseGrading(side)));
+     assert.doesNotMatch(columns[i], /No grading data/);
+   }
+   assert.match(html, /Turn 2 post-condition/);
+   assert.match(html, /Missing &lt;required&gt; field/);
+   assert.match(html, /Agent connection closed/);
+   assert.match(html, /1 passed, 1 failed of 2/);
+ }
+ const grading = {summary: {passed: 1, failed: 0, total: 1, pass_rate: 1}, expectations: [{text: 'Judge evidence', passed: true}]};
+ for (const scored of [
+   {...failed, grading},
+   {...failed, judge_results: [{id: 'quality', type: 'rule_based', status: 'PASS', result: {summary: grading.summary, assertion_results: grading.expectations}}]}
+ ]) {
+   context.renderPairDetails({pairLeft: failed, pairRight: scored});
+   const columns = elements.get('grades-content').innerHTML.split('<div class="config-col">').slice(1);
+   assert.match(columns[0], /Missing &lt;required&gt; field/);
+   assert.match(columns[1], /Judge evidence/);
+   assert.doesNotMatch(columns[1], /post-condition/);
+ }
+ context.renderPairDetails({pairLeft: {status: 'PASS', turn_results: [{turn_number: 1, status: 'completed'}]}});
+ const empty = elements.get('grades-content').innerHTML;
+ assert.match(empty, /No grading data/);
+ assert.match(empty, /Case absent from this run/);
+ `)
+	cmd.Stdin = strings.NewReader(htmlTemplate)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("renderer: %v\n%s", err, output)
 	}
 }

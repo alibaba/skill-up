@@ -9,11 +9,13 @@ import (
 	"strconv"
 
 	"github.com/alibaba/skill-up/internal/logging"
+	"github.com/alibaba/skill-up/internal/platform"
 )
 
 const (
 	defaultPromptInlineMaxBytes = 32 * 1024
 	envPromptInlineMaxBytes     = "SKILL_UP_PROMPT_INLINE_MAX_BYTES"
+	promptDeliveryModeFile      = "file"
 )
 
 // PromptDeliveryMetadata records how an agent prompt was delivered.
@@ -32,6 +34,12 @@ type promptCommandBuilder struct {
 
 func deliverPrompt(ctx context.Context, rt Runtime, opts ExecOptions, instruction string, builder promptCommandBuilder) (string, *PromptDeliveryMetadata, error) {
 	threshold := promptInlineMaxBytes()
+	// MSYS2 bash can truncate quoted argv near 8 KiB when launched by a
+	// native Windows process. Keep prompt contents out of that command line,
+	// regardless of a configured inline threshold or the host OS.
+	if rt != nil && rt.Shell().GOOS == platform.GOOSWindows {
+		threshold = 0
+	}
 	promptBytes := len([]byte(instruction))
 	meta := &PromptDeliveryMetadata{
 		Mode:           "inline",
@@ -59,7 +67,7 @@ func deliverPrompt(ctx context.Context, rt Runtime, opts ExecOptions, instructio
 	if err != nil {
 		return "", nil, err
 	}
-	meta.Mode = "file"
+	meta.Mode = promptDeliveryModeFile
 	meta.PromptPath = hostPath
 	meta.RuntimePath = runtimePath
 	logging.InfoContextf(ctx, "prompt delivery mode=file bytes=%d threshold=%d", meta.PromptBytes, threshold)

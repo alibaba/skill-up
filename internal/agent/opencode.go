@@ -130,6 +130,28 @@ func (a *OpenCodeAgent) InstallMCP(ctx context.Context, rt Runtime, mcpCfg runti
 	return nil
 }
 
+// InstallJudgeConfig replaces the selected provider's inherited inline settings
+// before initializing a judge, preserving MCP and other providers.
+func (a *OpenCodeAgent) InstallJudgeConfig(ctx context.Context, rt Runtime) error {
+	configValue, err := readOpenCodeRuntimeConfig(ctx, rt)
+	if err != nil {
+		return err
+	}
+	provider := a.Cfg.ModelProvider
+	if provider == "" {
+		provider = agentProviderOpenAI
+	}
+	if providers, ok := configValue["provider"].(map[string]any); ok {
+		delete(providers, provider)
+	}
+	config, err := json.Marshal(configValue)
+	if err != nil {
+		return fmt.Errorf("encode opencode judge config: %w", err)
+	}
+	rt.MergeEnv(map[string]string{"OPENCODE_CONFIG_CONTENT": string(config)})
+	return a.InstallMCP(ctx, rt, runtime.MCPConfig{})
+}
+
 func readOpenCodeRuntimeConfig(ctx context.Context, rt Runtime) (map[string]any, error) {
 	current, err := rt.Exec(ctx, `printf '%s' "$OPENCODE_CONFIG_CONTENT"`, ExecOptions{})
 	if err != nil {

@@ -92,6 +92,14 @@ go test -race ./...
 
 ## Known limitations
 
+- **Long prompts with Git Bash** — MSYS2 can truncate quoted command arguments
+  near 8 KiB when launched by a native Windows process. Built-in CLI agents use
+  prompt files for Windows runtime targets, including `agent_judge` invocations;
+  `SKILL_UP_PROMPT_INLINE_MAX_BYTES` cannot enable inline prompts on those targets.
+  Linux sandbox targets retain their configured threshold. On older releases,
+  set `$env:SKILL_UP_PROMPT_INLINE_MAX_BYTES = "0"` in PowerShell before running
+  skill-up to force file delivery.
+
 - **Running real agents natively** — Claude Code / Codex / Qoder CLI are
   launched through a bash-based Node/nvm bootstrap. That bootstrap does not
   run under `cmd.exe`. To run full agent evals on Windows, either install

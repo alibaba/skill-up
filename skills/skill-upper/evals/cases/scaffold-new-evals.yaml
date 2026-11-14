@@ -23,7 +23,7 @@ expect:
 
 judge:
   type: agent_judge
-  model: anthropic/claude-sonnet-4-6
+  model: dashscope/qwen3.8-max
   criteria:
     - "生成了 evals/eval.yaml 文件，且包含 schema_version、environment、engine、cases 等必要字段"
     - "evals/eval.yaml 中 schema_version、environment.type、engine.name、cases.files、judge 等关键字段附近有简短中文字段注释"

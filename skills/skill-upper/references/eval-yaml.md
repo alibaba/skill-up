@@ -24,11 +24,11 @@ skills:
     exclude: [".qoder/repowiki/**"]                     # Optional; exclude takes priority
 
 engine:
-  name: claude_code               # claude_code | codex | opencode | qodercli (qoder-cli also accepted) | qwen_code
+  name: opencode                  # claude_code | codex | opencode | qodercli (qoder-cli also accepted) | qwen_code
   model:
-    provider: anthropic
-    name: claude-sonnet-4-6
-    base_url: ""
+    provider: dashscope
+    name: qwen3.8-max
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 
 cases:
   files:
@@ -51,7 +51,7 @@ cases:
 
 judge:
   type: agent_judge
-  model: anthropic/claude-sonnet-4-6
+  model: dashscope/qwen3.8-max
   skills:                         # Optional: rubric Skills installed only for the judge
     - source: local_path
       path: evals/fixtures/judge-rubric
@@ -73,6 +73,8 @@ report:
 `skills[].include` and `skills[].exclude` use doublestar globs relative to `skills[].path`, with `/` separators. An empty `include` selects all files; `exclude` is applied afterward and takes priority. `evals/` is never installed. An explicit `include` must contain `SKILL.md`. `judge.skills` supports the same filters.
 
 `judge.skills` is supported only with `judge.type: agent_judge`. These reusable rubric Skills install for the judge, not the run agent. Top-level `skills` are not automatically installed for the judge. Both `with_skill` and `without_skill` benchmark runs install judge Skills because they are scoring tools. Paths are resolved relative to the Skill root. Installation requires native Skill support in the selected Agent adapter; do not paste Skill contents into `criteria`.
+
+`judge.engine` selects an independent judge agent using the same schema as `engine`. It requires `name`, `model.provider`, and `model.name` and is mutually exclusive with legacy `judge.model`; runner CLI/model/kwargs/connection settings do not flow into it. See [judge-types.md](judge-types.md) for configuration and runtime requirements.
 
 ## Execution environments
 
@@ -120,13 +122,14 @@ Docker CLI and daemon are required. `network_policy: deny_all` creates a contain
 - `mode: real` installs a real MCP server for the agent.
 - HTTP MCP may be configured inline or with `config_ref` pointing to `evals/fixtures/mcp/*.yaml`.
 - Stdio MCP accepts `command` and `args`.
+- A mocked `config_ref` fixture declares tools under `tools`: each entry has a required `response` (its `default` key, or the whole value, is returned on every call; `null` is allowed) and optional `description` and `input_schema` (a mapping with `type: object`) advertised in `tools/list`, never enforced on calls. The older `tool_responses` map (name to response) still works; a name may not appear in both maps.
 - Environment references use `${VAR}` or a whole-value `$VAR`; `required_env` injects variables into the agent environment.
 - Evaluation-level `mcp` provides defaults. A case may declare `mcp.servers` (currently `mode: mocked` only), replacing a same-named server as a whole to swap mocked fixtures under the same server and tool names. `config_ref` remains relative to the Skill root.
 
 ## Engine and model
 
 - `engine.model` is optional; if omitted, the engine chooses its local default model.
-- CLI model IDs combine `provider` and `name`, such as `anthropic/claude-sonnet-4-6` or `openai/gpt-4`.
+- CLI model IDs combine `provider` and `name`, such as `dashscope/qwen3.8-max` or `openai/gpt-4`.
 - `qodercli` usually needs no `model` configuration.
 
 ### Independent user simulator model

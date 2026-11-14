@@ -34,9 +34,6 @@ func assertStatus(t *testing.T, r *Result, expected Status) {
 	}
 }
 
-// intPtr returns a pointer to v.
-func intPtr(v int) *int { return &v }
-
 type testCriterionOutcome bool
 
 func testCriterionResult(index int, outcome testCriterionOutcome, evidence string) CriterionResult {

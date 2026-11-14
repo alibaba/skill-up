@@ -18,25 +18,25 @@ import (
 // ExpectResult is the structured outcome of an expect pre-check.
 type ExpectResult struct {
 	// Passed is true when ALL expect checks succeeded.
-	Passed bool
+	Passed bool `json:"passed"`
 
 	// Failures lists every check that did not pass.
 	// Empty when Passed == true.
-	Failures []ExpectFailure
+	Failures []ExpectFailure `json:"failures"`
 
 	// ConfiguredRules lists the names of all rules that were evaluated
 	// (e.g. "must_contain", "exit_code"). Used by ToAssertionResults to
 	// emit passing assertions for report completeness.
-	ConfiguredRules []string
+	ConfiguredRules []string `json:"configured_rules"`
 }
 
 // ExpectFailure records a single failed expect check.
 type ExpectFailure struct {
 	// Rule identifies the check type (e.g. "must_contain", "files_exist").
-	Rule string
+	Rule string `json:"rule"`
 
 	// Detail provides human-readable evidence of the failure.
-	Detail string
+	Detail string `json:"detail"`
 }
 
 // CheckExpect evaluates all expect rules defined in the case configuration
@@ -118,6 +118,33 @@ func (r *ExpectResult) ToAssertionResults() []AssertionResult {
 		}
 	}
 	return results
+}
+
+// NewExpectFailureResult preserves configured judge assertions in the scoring
+// denominator when the expect gate prevents the judge from running.
+func NewExpectFailureResult(expect *ExpectResult, cfg config.JudgeConfig, in Input) *Result {
+	assertions := expect.ToAssertionResults()
+	addSkipped := func(text string) {
+		assertions = append(assertions, AssertionResult{
+			Text: text, Skipped: true, Evidence: "not evaluated: expect gate failed",
+		})
+	}
+	switch cfg.Type {
+	case "agent_judge":
+		for _, criterion := range cfg.Criteria {
+			addSkipped(criterion)
+		}
+	case "script":
+		addSkipped("script: " + cfg.ScriptPath)
+	case "rule_based":
+		for i := range cfg.Failure {
+			addSkipped(fmt.Sprintf("failure rule %d", i+1))
+		}
+		for i := range cfg.Success {
+			addSkipped(fmt.Sprintf("success rule %d", i+1))
+		}
+	}
+	return NewResult(assertions, in.TurnsExecuted, in.TurnsTotal)
 }
 
 // ---------------------------------------------------------------------------

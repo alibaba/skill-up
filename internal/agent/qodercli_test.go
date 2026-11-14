@@ -970,3 +970,91 @@ func (r *qoderTestRuntime) MergeEnv(env map[string]string) {
 func (r *qoderTestRuntime) Shell() platform.Shell {
 	return platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
 }
+
+func TestQoderCLIResultEnvelope(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct{ name, output, wantErr, stderr string }{
+		{"completed chat", `{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","result":"OK"}`, "", ""},
+		{"completed without chat", `{"type":"result","subtype":"success","stop_reason":"end_turn","result":""}`, "", ""},
+		{"legacy envelope", `{"type":"result","result":"OK"}`, "", ""},
+		{"legacy text", "OK", "", ""},
+		{"legacy JSON number", "42", "", ""},
+		{"legacy JSON array", "[1,2]", "", ""},
+		{"legacy JSON object", `{"is_error":"domain data"}`, "", ""},
+		{"unrelated typed object", `{"type":{"nested":1},"is_error":"domain data"}`, "", ""},
+		{"unfinished empty turn", `{"type":"result","subtype":"success","is_error":false,"stop_reason":"tool_use","result":""}`, "incomplete result", ""},
+		{"unfinished prose turn", `{"type":"result","stop_reason":"tool_use","result":"Reading files"}`, "incomplete result", ""},
+		{"error flag", `{"type":"result","subtype":"success","is_error":true,"result":"Not logged in"}`, "error result", ""},
+		{"error subtype", `{"type":"result","subtype":"error_max_turns","result":""}`, "error result", ""},
+		{"explicit model fallback", `{"type":"result","result":"OK","stop_reason":"end_turn"}`, "requested model unavailable", `Model "performance" is not available right now; using "auto" instead. Use /model to choose another model.`},
+		{"unrelated warning", `{"type":"result","result":"OK"}`, "", "1 warning loading skill configs"},
+		{"invalid envelope field", `{"type":"result","is_error":"no"}`, "decode qoder result envelope", ""},
+	} {
+		for _, resume := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/resume=%t", tt.name, resume), func(t *testing.T) {
+				t.Parallel()
+				rt := &qoderTestRuntime{workspace: t.TempDir(), execResult: runtime.ExecResult{Stdout: tt.output, Stderr: tt.stderr}}
+				ag := NewQoderCLIAgent(Config{ModelName: "performance"})
+				opts := ExecOptions{ArtifactDir: t.TempDir()}
+				msg := transcript.Message{Role: transcript.RoleUser, Content: "evaluate", Turn: 1}
+				var result *SessionResult
+				var err error
+				if resume {
+					result, err = ag.RunTurn(context.Background(), rt, opts, msg, "existing-session")
+				} else {
+					result, err = ag.Run(context.Background(), rt, opts, []transcript.Message{msg})
+				}
+				errorText := ""
+				if err != nil {
+					errorText = err.Error()
+				}
+				if (err != nil) != (tt.wantErr != "") || !strings.Contains(errorText, tt.wantErr) {
+					t.Fatalf("error=%v, want %q", err, tt.wantErr)
+				}
+				if errors.Is(err, ErrRequestedModelUnavailable) != (tt.name == "explicit model fallback") {
+					t.Fatalf("model fallback error not classified: %v", err)
+				}
+				if result == nil {
+					t.Fatal("session diagnostics must be preserved")
+				}
+				raw, readErr := os.ReadFile(filepath.Join(opts.ArtifactDir, "stdout.json"))
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				if string(raw) != tt.output {
+					t.Fatalf("raw output changed: %s", raw)
+				}
+			})
+		}
+	}
+}
+
+func TestQoderCLIModelFallbackPreservesClassificationOnFailure(t *testing.T) {
+	t.Parallel()
+	for _, resume := range []bool{false, true} {
+		for _, execErr := range []error{nil, context.Canceled} {
+			t.Run(fmt.Sprintf("resume=%t/execErr=%v", resume, execErr), func(t *testing.T) {
+				t.Parallel()
+				rt := &qoderTestRuntime{workspace: t.TempDir(), execResult: runtime.ExecResult{ExitCode: 1, Stdout: `{"type":"result","result":"OK"}`, Stderr: `Model "performance" is not available right now; using "auto" instead.`}, execErr: execErr}
+				ag := NewQoderCLIAgent(Config{ModelName: "performance"})
+				msg := transcript.Message{Role: transcript.RoleUser, Content: "evaluate", Turn: 1}
+				var result *SessionResult
+				var err error
+				if resume {
+					result, err = ag.RunTurn(context.Background(), rt, ExecOptions{}, msg, "session")
+				} else {
+					result, err = ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{msg})
+				}
+				if !errors.Is(err, ErrRequestedModelUnavailable) {
+					t.Fatalf("fallback classification lost: %v", err)
+				}
+				if execErr != nil && !errors.Is(err, execErr) {
+					t.Fatalf("execution error lost: %v", err)
+				}
+				if result == nil {
+					t.Fatal("session diagnostics lost")
+				}
+			})
+		}
+	}
+}

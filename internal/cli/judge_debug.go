@@ -145,6 +145,9 @@ func runJudgeDebug(cmd *cobra.Command, args []string) error {
 	if err := json.Unmarshal(data, &input); err != nil { //nolint:musttag // debug input embeds config structs with existing tags.
 		return fmt.Errorf("parse input JSON: %w", err)
 	}
+	if input.Judge.Type == "" {
+		input.Judge.Type = "rule_based"
+	}
 
 	// 2. Build judge from config.
 	transcriptPath, cleanupTranscript, err := prepareDebugTranscriptFile(input)
@@ -162,7 +165,7 @@ func runJudgeDebug(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
 	// 3. Run Expect pre-check
-	result, err := evaluateJudgeWithExpect(ctx, cmd, j, input.Expect, judgeInput)
+	result, err := evaluateJudgeWithExpect(ctx, cmd, j, input.Judge, input.Expect, judgeInput)
 	if err != nil {
 		return err
 	}
@@ -230,12 +233,11 @@ func prepareDebugTranscriptFile(input judgeDebugInput) (string, func(), error) {
 // evaluateJudgeWithExpect runs the Expect pre-check; on failure it short-circuits
 // to a synthesised Result, otherwise dispatches to the configured judge. Logs a
 // one-line PASS/FAIL summary to cmd's stderr so the debug UX matches the real run.
-func evaluateJudgeWithExpect(ctx context.Context, cmd *cobra.Command, j judge.Judge, expect *config.Expect, judgeInput judge.Input) (*judge.Result, error) {
+func evaluateJudgeWithExpect(ctx context.Context, cmd *cobra.Command, j judge.Judge, cfg config.JudgeConfig, expect *config.Expect, judgeInput judge.Input) (*judge.Result, error) {
 	er := judge.CheckExpect(expect, judgeInput)
 	if !er.Passed {
-		assertions := er.ToAssertionResults()
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "[expect] FAIL — %d checks failed, judge skipped\n", len(er.Failures))
-		return judge.NewResult(assertions, judgeInput.TurnsExecuted, judgeInput.TurnsTotal), nil
+		return judge.NewExpectFailureResult(er, cfg, judgeInput), nil
 	}
 
 	if expect != nil {
@@ -244,6 +246,13 @@ func evaluateJudgeWithExpect(ctx context.Context, cmd *cobra.Command, j judge.Ju
 	result, err := j.Evaluate(ctx, judgeInput)
 	if err != nil {
 		return nil, fmt.Errorf("judge evaluation failed: %w", err)
+	}
+	assertions := er.ToAssertionResults()
+	if len(assertions) > 0 {
+		result.AssertionResults = append(assertions, result.AssertionResults...)
+		result.Summary.Passed += len(assertions)
+		result.Summary.Total += len(assertions)
+		result.Summary.PassRate = float64(result.Summary.Passed) / float64(result.Summary.Total)
 	}
 	return result, nil
 }

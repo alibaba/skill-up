@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,8 +15,56 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alibaba/skill-up/internal/agent"
 	"github.com/alibaba/skill-up/internal/config"
+	"github.com/alibaba/skill-up/internal/platform"
+	evalruntime "github.com/alibaba/skill-up/internal/runtime"
+	"github.com/alibaba/skill-up/pkg/transcript"
 )
+
+func TestQwenPromptShellRoundTrip(t *testing.T) {
+	t.Parallel()
+	if platform.Host().Target.Family != platform.ShellPOSIX {
+		t.Skip("Qwen Code requires a POSIX shell")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	bashEnv := filepath.Join(t.TempDir(), "qwen-echo.sh")
+	writeFile(t, bashEnv, "qwen() { cat; }\n")
+	rt, err := evalruntime.NewRuntime(evalruntime.Config{Type: "none", Delete: true, Env: map[string]string{"BASH_ENV": filepath.ToSlash(bashEnv)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Create(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := rt.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	for _, prompt := range []string{
+		"You must assess the agent's output against the following criteria.",
+		"You must assess the agent's output.\n" + strings.Repeat("- \"criterion_id\": \"agent's answer\"\n", 177) + "end",
+		"Literal: ' \" \\ $(echo unexpected) `echo unexpected` %PATH% 中文\nend",
+		strings.Repeat("agent's output with \"JSON\" and literal $(echo unexpected)\n", 300) + "end",
+		strings.Repeat("中文 agent's output\n", 3000) + "end",
+	} {
+		// BASH_ENV supplies an stdin-echoing Qwen stand-in to exercise the
+		// real adapter and shell transport without a model or CLI install.
+		result, err := agent.NewQwenCodeAgent(agent.Config{}).Run(ctx, rt, agent.ExecOptions{}, []transcript.Message{{Role: transcript.RoleUser, Content: prompt}})
+		if err != nil {
+			t.Fatalf("prompt transport failed (%d bytes): %v", len(prompt), err)
+		}
+		if result.FinalMessage != prompt {
+			t.Fatalf("prompt changed in transit (%d bytes): got %q, want %q", len(prompt), result.FinalMessage, prompt)
+		}
+		if platform.Host().Target.GOOS == platform.GOOSWindows && result.PromptDelivery.Mode != "file" {
+			t.Fatalf("Windows prompt delivery = %q, want file", result.PromptDelivery.Mode)
+		}
+		t.Logf("prompt bytes=%d delivery=%s shell=%+v", len(prompt), result.PromptDelivery.Mode, platform.Host().Target)
+	}
+}
 
 func isQoderCLIInstalled() bool {
 	_, err := exec.LookPath("qodercli")
@@ -105,6 +154,12 @@ func writeFakeCodexBinary(t *testing.T) string {
 set -euo pipefail
 
 instruction="${!#}"
+if [[ ! -t 0 ]]; then
+  stdin_prompt="$(cat)"
+  if [[ -n "$stdin_prompt" ]]; then
+    instruction="$stdin_prompt"
+  fi
+fi
 debug_dir="${WORKSPACE_DIFF_DEBUG_DIR:-}"
 
 write_debug_file() {
@@ -501,9 +556,9 @@ cases:
 
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "Hello"
+  success:
+    - output_contains:
+        any: ["Hello"]
 
 report:
   formats: [json]
@@ -601,9 +656,9 @@ cases:
 
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "Hello"
+  success:
+    - output_contains:
+        any: ["Hello"]
 
 report:
   formats: [json]
@@ -699,9 +754,9 @@ cases:
 
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "hello"
+  success:
+    - output_contains:
+        any: ["hello"]
 
 report:
   formats: [json]
@@ -1058,9 +1113,9 @@ benchmark:
   enabled: false
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "hello"
+  success:
+    - output_contains:
+        any: ["hello"]
 report:
   formats: [json]
   artifacts: [transcript]
@@ -1147,9 +1202,9 @@ cases:
 
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "hello"
+  success:
+    - output_contains:
+        any: ["hello"]
 
 report:
   formats: [json]
@@ -1220,9 +1275,9 @@ cases:
 
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "hello"
+  success:
+    - output_contains:
+        any: ["hello"]
 
 report:
   formats: [json]
@@ -1321,9 +1376,9 @@ cases:
 
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "hello"
+  success:
+    - output_contains:
+        any: ["hello"]
 
 report:
   formats: [json]
@@ -1405,9 +1460,9 @@ cases:
 
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "hello"
+  success:
+    - output_contains:
+        any: ["hello"]
 
 report:
   formats: [json]
@@ -1464,9 +1519,9 @@ cases:
 
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "hello"
+  success:
+    - output_contains:
+        any: ["hello"]
 
 report:
   formats: [json]
@@ -1997,9 +2052,9 @@ cases:
 
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "hello"
+  success:
+    - output_contains:
+        any: ["hello"]
 
 report:
   formats: [json]
@@ -2424,9 +2479,9 @@ cases:
 
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "hello"
+  success:
+    - output_contains:
+        any: ["hello"]
 
 report:
   formats: [json]

@@ -14,13 +14,13 @@
       <img src="https://github.com/alibaba/skill-up/actions/workflows/ci.yml/badge.svg" alt="CI" />
     </a>
     <a href="https://deepwiki.com/alibaba/skill-up">
-      <img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" />
+      <img src="assets/deepwiki-badge.svg" alt="Ask DeepWiki" />
     </a>
     <a href="./.github/badges/coverage.json">
       <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/alibaba/skill-up/badges/.github/badges/coverage.json" alt="Coverage" />
     </a>
     <a href="https://go.dev/">
-      <img src="https://img.shields.io/badge/go-%3E%3D1.25-blue" alt="Go Version" />
+      <img src="https://img.shields.io/badge/go-%3E%3D1.26-blue" alt="Go Version" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License" />
@@ -64,8 +64,10 @@
 - **Declarative Eval Config**: Define evaluation environment, engine, model, and cases through YAML (`eval.yaml` + `cases/*.yaml`).
 - **Environment Provisioning**: Prepare a local, Docker, or OpenSandbox runtime for each case, install configured real or mocked MCP servers into supported Agent Engines, and upload `context.repo_fixture` and `context.files` into the workspace.
 - **Skill-Optional Runs and Workspace Cases**: Evaluate an agent without a Skill, prepare repository fixtures per case, or run against an existing local workspace with `--workspace`.
-- **Multi-Engine Support**: Works with Qoder CLI, Claude Code, and Codex as built-in Agent Engines, plus user-defined agents via `engine.custom` (local transport — see [docs/design/custom-engine.md](docs/design/custom-engine.md)).
+- **Multi-Engine Support**: Works with Qoder CLI, Claude Code, and Codex as built-in Agent Engines, plus user-defined agents via `engine.custom` (local commands or HTTP services — see [docs/design/custom-engine.md](docs/design/custom-engine.md)).
 - **DeepSeek Harness Plugin**: Use the bundled `skill-upper` Skill, opt-in durable observation capture, approval-gated regression cases, isolated runs, and status comparison to verify evidence-backed Skill improvements. See [`plugins/dsh-skill-up`](plugins/dsh-skill-up/README.md).
+- **Multi-Turn Conversations and User Simulation**: Run fixed turns, mix scripted and simulated replies, or let an independent user model drive follow-ups and decide when to stop.
+- **Role-Specific Engines and Models**: Configure the evaluated agent, Agent Judge, and user simulator separately, including independent judging of custom agents.
 - **Flexible Judging**: Supports `rule_based`, `script`, and `agent_judge` evaluation strategies.
 - **Structured Reports**: Outputs Anthropic-compatible `grading.json`, `benchmark.json`, `benchmark.md`, plus `result.json`, JUnit XML, and HTML reports.
 - **Anthropic Compatible**: Import `evals.json` via `skill-up import`, or auto-detect with `--auto`.
@@ -141,14 +143,15 @@ my-skill-workspace/
 Continue in the same conversation:
 
 ```markdown
-Review the latest skill-up results. For each failure, determine whether the
-Skill or the eval is wrong. Fix SKILL.md and supporting files, or repair the
-eval case and judge as appropriate. Add regression cases for the bugs you
-found, rerun skill-up, and continue until the important behaviors pass.
+Use skill-upper to improve this Skill from the latest evaluation results.
+Follow its evolution workflow, compare the original and candidate, add
+regression coverage, and summarize which changes the evidence supports.
 ```
 
-This is the evolution loop: reports become fixes, fixes become regression
-cases, and every iteration makes the Skill and its eval suite stronger.
+The comparison and acceptance rules live in
+[skill-upper's evolution workflow](skills/skill-upper/SKILL.md#step-8-evolve-the-skill-when-requested).
+This prompt invokes that workflow; keeping the original is a valid outcome
+when a candidate does not show a supported improvement.
 
 ### Prefer manual setup?
 
@@ -209,6 +212,117 @@ The existing directory is preserved, but the agent and case setup can change
 its contents. This option requires `environment.type: none`, one case at a time,
 and benchmark mode off. See [Writing Evals](docs/guide/writing-evals.md)
 and the [CLI Reference](docs/guide/cli-reference.md#skill-up-run).
+
+## Multi-Turn Conversations and Role Configuration
+
+A simulated user can react to what the agent actually says, so follow-up messages
+need not be scripted in advance. For example, evaluate a Twenty Questions player:
+
+- The **evaluated agent** asks natural-language yes/no questions and guesses an object.
+- The **simulated user** knows the hidden object and answers from the conversation history.
+- An **independent Agent Judge** reviews the complete dialogue against explicit criteria.
+
+This **case YAML** excerpt lets the simulator drive all replies after the opening:
+
+```yaml
+id: umbrella
+title: Guess a hidden object through simulated user replies
+user_simulator:
+  scenario: |
+    You host Twenty Questions. The hidden object is an ordinary folding umbrella.
+    Answer questions using common knowledge, with only yes, no, or unsure.
+    Do not reveal the object or volunteer hints. Stop immediately when the player
+    guesses correctly, or after the final permitted guess.
+input:
+  prompt: |
+    I have a common everyday object in mind. Guess it by asking yes/no questions;
+    I will answer yes, no, or unsure. Ask only one question per turn, and ask at
+    least two questions before guessing. You have 20 questions or incorrect
+    guesses in total, followed by one final guess. Use natural language.
+constraints:
+  max_turns: 22
+```
+
+The hidden answer belongs to the simulator's scenario, not the player's prompt.
+For example, a question about rain protection can lead to a different next
+question than one about electronics; the simulator responds to the actual
+question. The 22-turn runtime cap leaves room for 20 questions or incorrect
+guesses, a final guess, and a closing response. The judge separately checks the
+game's rules; the runtime cap alone does not enforce them.
+
+Other conversation patterns remain available:
+
+| Pattern | Case configuration | Behavior |
+| --- | --- | --- |
+| Autonomous simulation (above) | `input.prompt` plus `user_simulator.scenario`, without `input.turns` | Generate subsequent user messages and decide when to stop |
+| Mixed | `content` and `respond` in `input.turns`, plus `user_simulator.scenario` | Generate selected user replies from the actual conversation history and turn instruction |
+| Fixed | `input.turns[].content` | Send predefined user messages in order |
+
+Real turn-by-turn interaction requires session resumption. `claude_code`, `codex`,
+`qodercli`, and `opencode` support it; custom engines must set
+`engine.custom.conversation_mode: stateful` and resume using `session_id`.
+Ordinary fixed-turn cases fall back to a batch prompt on engines without resumption;
+simulated cases require resumption. The opening prompt counts as turn one in an
+autonomous conversation, and `max_turns` bounds the total. A simulator stop ends
+the dialogue; the configured judge still determines PASS or FAIL.
+
+### Select the evaluated agent, judge, and simulator independently
+
+| Role | Configuration in `eval.yaml` | Independence |
+| --- | --- | --- |
+| Evaluated agent | `engine.name`, `engine.model`, optional `engine.custom` | Executes tasks through a built-in engine or your own local command / HTTP service |
+| Agent Judge | `judge.engine`, or each member's `engine` in `judges[]` | Can use a separate engine, model, provider, and endpoint; rule and script judges need no model |
+| Simulated user | `user_simulator.provider`, `protocol`, `model` | Uses its own model connection to generate replies from the scenario and history; does not select an Agent CLI engine |
+
+This **eval.yaml** excerpt shows role configuration. Model IDs are placeholders;
+replace them with IDs supported by each provider and configure case files and
+environment for your evaluation. These criteria grade the game above;
+`pass_threshold: 1.0` requires all criteria to pass:
+
+```yaml
+engine:
+  name: codex
+  model:
+    provider: openai
+    name: your-agent-model-id
+
+judge:
+  type: agent_judge
+  engine:
+    name: claude_code
+    model:
+      provider: anthropic
+      name: your-judge-model-id
+  criteria:
+    - "The player asked at least two questions before guessing and correctly identified an umbrella"
+    - "The player asked only one question per turn and respected the 20-attempt limit plus one final guess"
+    - "The simulated user answered consistently with a folding umbrella and did not reveal the answer before a correct guess"
+  pass_threshold: 1.0
+  context:
+    transcript: file_ref
+
+user_simulator:
+  provider: simulation
+  protocol: openai
+  model: your-simulator-model-id
+  timeout_seconds: 60
+```
+
+`judge.engine` does not inherit the evaluated agent's model, CLI overrides, or
+connection configuration; prepare the required engines and credentials separately.
+It is mutually exclusive with legacy `judge.model`, which reuses the evaluated
+agent's engine. The simulator above resolves `SIMULATION_API_KEY` and
+`SIMULATION_BASE_URL`, or the same provider in the credentials file; `protocol`
+supports `openai` (Chat Completions) and `anthropic` (Messages). An independent
+judge still uses the case runtime; there is no `judge.environment`.
+The host agent/model that drives skill-upper's diagnosis and edits is configured
+in your host application, outside these evaluation fields.
+
+See [Writing Evals](https://alibaba.github.io/skill-up/guide/writing-evals) for
+complete fields, per-turn assertions, and the session support matrix. See the
+[user simulator example](examples/user-simulator/README.md) for runnable
+configurations and validation scope, and the
+[Custom Engine design](docs/design/custom-engine.md) for custom agent integration.
 
 ## User config
 
@@ -295,6 +409,7 @@ skill-up import ./evals/evals.json --output ./evals
 | `skill-up validate [path]`           | Validate `eval.yaml` and case files         |
 | `skill-up validate --skill <dir>`    | Lint a skill's content integrity            |
 | `skill-up list-cases [path]`         | List all cases referenced by the config     |
+| `skill-up compare <result> <result>...` | Compare multiple finished runs; export HTML, Markdown, JSON or text |
 | `skill-up report <result.json>`      | Generate reports from a previous run        |
 | `skill-up import <evals.json>`       | Import Anthropic `evals.json` to YAML cases |
 | `skill-up debug judge <input.json>`  | Debug judge module with a JSON input        |

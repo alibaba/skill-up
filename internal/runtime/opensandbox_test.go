@@ -580,7 +580,7 @@ func TestOpenSandboxCreateFallsBackWhenDirectoryAPICannotChmodWorkspace(t *testi
 
 	fake := &fakeOpenSandbox{
 		createDirErr: errors.New("RUNTIME_ERROR: error accessing file: chmod /workspace: operation not permitted"),
-		execResult:   &opensandbox.Execution{ExitCode: intPtr(0)},
+		execResult:   &opensandbox.Execution{ExitCode: new(0)},
 	}
 	createOpenSandbox = func(ctx context.Context, cfg opensandbox.ConnectionConfig, opts opensandbox.SandboxCreateOptions) (openSandboxClient, error) {
 		return fake, nil
@@ -613,7 +613,7 @@ func TestOpenSandboxCreateCleansUpWithUncanceledContext(t *testing.T) {
 
 	fake := &fakeOpenSandbox{
 		createDirErr: errors.New("create directory failed"),
-		execResult:   &opensandbox.Execution{ExitCode: intPtr(1), Stderr: []opensandbox.OutputMessage{{Text: "denied"}}},
+		execResult:   &opensandbox.Execution{ExitCode: new(1), Stderr: []opensandbox.OutputMessage{{Text: "denied"}}},
 	}
 	createOpenSandbox = func(ctx context.Context, cfg opensandbox.ConnectionConfig, opts opensandbox.SandboxCreateOptions) (openSandboxClient, error) {
 		return fake, nil
@@ -687,7 +687,7 @@ func TestOpenSandboxExecMapsOptionsAndResult(t *testing.T) {
 			execResult: &opensandbox.Execution{
 				Stdout:   []opensandbox.OutputMessage{{Text: "hello\n"}},
 				Stderr:   []opensandbox.OutputMessage{{Text: "warn\n"}},
-				ExitCode: intPtr(7),
+				ExitCode: new(7),
 			},
 		},
 	}
@@ -773,7 +773,7 @@ func TestOpenSandboxUploadDirUploadsFilesInSingleBatch(t *testing.T) {
 	dir := t.TempDir()
 	writeUploadDirFixture(t, dir)
 	fake := &fakeOpenSandbox{
-		execResult: &opensandbox.Execution{ExitCode: intPtr(0)},
+		execResult: &opensandbox.Execution{ExitCode: new(0)},
 	}
 	rt := &OpenSandboxRuntime{workspace: "/workspace", sandbox: fake}
 
@@ -817,7 +817,7 @@ func TestOpenSandboxUploadDirChunksLargeTreeIntoBoundedBatches(t *testing.T) {
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
-	fake := &fakeOpenSandbox{execResult: &opensandbox.Execution{ExitCode: intPtr(0)}}
+	fake := &fakeOpenSandbox{execResult: &opensandbox.Execution{ExitCode: new(0)}}
 	rt := &OpenSandboxRuntime{workspace: "/workspace", sandbox: fake}
 
 	if err := rt.UploadDir(context.Background(), dir, "dest"); err != nil {
@@ -1073,18 +1073,14 @@ func (f *fakeOpenSandbox) RunCommandWithOpts(_ context.Context, req opensandbox.
 	if f.execResult != nil {
 		return f.execResult, nil
 	}
-	return &opensandbox.Execution{ExitCode: intPtr(0)}, nil
-}
-
-func intPtr(v int) *int {
-	return &v
+	return &opensandbox.Execution{ExitCode: new(0)}, nil
 }
 
 func TestOpenSandboxRuntime_MergeEnv_AppliesToSubsequentExec(t *testing.T) {
 	rt := &OpenSandboxRuntime{
 		workspace: "/workspace",
 		sandbox: &fakeOpenSandbox{
-			execResult: &opensandbox.Execution{ExitCode: intPtr(0)},
+			execResult: &opensandbox.Execution{ExitCode: new(0)},
 		},
 	}
 	rt.MergeEnv(map[string]string{"FROM_MERGE": "yes"})
@@ -1095,5 +1091,22 @@ func TestOpenSandboxRuntime_MergeEnv_AppliesToSubsequentExec(t *testing.T) {
 	fake, _ := rt.sandbox.(*fakeOpenSandbox)
 	if got := fake.lastExec.Envs["FROM_MERGE"]; got != "yes" {
 		t.Fatalf("Envs[FROM_MERGE] = %q, want yes; got envs=%+v", got, fake.lastExec.Envs)
+	}
+}
+
+func TestOpenSandboxRuntimeVariantPropagation(t *testing.T) {
+	for _, variant := range []string{"with_skill", "without_skill"} {
+		t.Run(variant, func(t *testing.T) {
+			fake := &fakeOpenSandbox{}
+			rt := &OpenSandboxRuntime{workspace: "/workspace", cfg: Config{Env: map[string]string{VariantEnvName: variant}}, sandbox: fake}
+			for range 2 {
+				if _, err := rt.Exec(context.Background(), "true", ExecOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				if got := fake.lastExec.Envs[VariantEnvName]; got != variant {
+					t.Fatalf("variant = %q, want %q", got, variant)
+				}
+			}
+		})
 	}
 }

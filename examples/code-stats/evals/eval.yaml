@@ -14,9 +14,11 @@ skills:
     path: .
 
 engine:
-  name: qodercli
+  name: opencode
   model:
-    name: auto
+    provider: dashscope
+    name: qwen3.8-max
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 
 cases:
   files:

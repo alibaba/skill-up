@@ -14,6 +14,8 @@ import (
 )
 
 const (
+	// VariantEnvName identifies the framework-owned execution configuration variable.
+	VariantEnvName = "SKILL_UP_VARIANT"
 	// ClaudeDirMode is the default directory mode for Claude files.
 	ClaudeDirMode = 0o755
 	// ClaudeFileMode is the default file mode for Claude files.
@@ -154,6 +156,14 @@ type Runtime interface {
 	// may differ from the skill-up host (for example, a Linux container on a
 	// Windows host), so callers must not re-derive it from platform.Host.
 	Shell() platform.Shell
+}
+
+// WorkspaceOwner is implemented by runtimes that can be handed a workspace they
+// did not create. Close preserves such a workspace even when deletion is
+// requested, so callers that remove per-workspace state elsewhere (for example
+// an agent's session directory) must check this before doing so.
+type WorkspaceOwner interface {
+	OwnsWorkspace() bool
 }
 
 // FileReadSeeker combines io.ReadSeeker for file access.

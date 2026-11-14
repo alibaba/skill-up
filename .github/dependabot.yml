@@ -63,6 +63,10 @@ updates:
   # Experimental DeepSeek Harness plugin dependencies.
   - package-ecosystem: "npm"
     directory: "/plugins/dsh-skill-up"
+    # dsh-agent 0.1.5-rc.3 requires cordis 4.0.2 exactly.
+    ignore:
+      - dependency-name: "@deepseek-ai/cordis"
+        versions: ["4.0.4"]
     schedule:
       interval: "weekly"
       day: "monday"

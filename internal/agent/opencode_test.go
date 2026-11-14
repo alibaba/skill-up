@@ -288,3 +288,33 @@ func TestOpenCodeLocalRuntimeCommandBoundary(t *testing.T) {
 		t.Fatalf("OpenCode arguments=%q err=%v", args, err)
 	}
 }
+
+func TestOpenCodeJudgeClearsOnlyProviderInlineConfiguration(t *testing.T) {
+	ctx := context.Background()
+	rt, err := runtime.NewRuntime(runtime.Config{Type: "none", WorkspaceDir: t.TempDir(), Env: map[string]string{"OPENCODE_CONFIG_CONTENT": `{"provider":{"openai":{"options":{"baseURL":"https://runner.example/v1"}}}}`}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Create(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+	ag := NewOpenCodeAgent(Config{ModelProvider: "openai", ModelName: "judge-model"})
+	if err := ag.InstallMCP(ctx, rt, runtime.MCPConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := rt.Exec(ctx, `printf '%s' "$OPENCODE_CONFIG_CONTENT"`, runtime.ExecOptions{})
+	if err != nil || !strings.Contains(before.Stdout, "runner.example") {
+		t.Fatal("ordinary runner lost its existing provider configuration")
+	}
+	if err := ag.InstallJudgeConfig(ctx, rt); err != nil {
+		t.Fatal(err)
+	}
+	result, err := rt.Exec(ctx, `printf '%s' "$OPENCODE_CONFIG_CONTENT"`, runtime.ExecOptions{})
+	if err != nil || result.ExitCode != 0 {
+		t.Fatalf("read config: %v", err)
+	}
+	if strings.Contains(result.Stdout, "runner.example") {
+		t.Fatal("runner route remains in provider-only config")
+	}
+}

@@ -86,7 +86,7 @@ func TestCheckExpect_MustNotContain_Fail(t *testing.T) {
 
 func TestCheckExpect_ExitCode_Pass(t *testing.T) {
 	// Expect exit_code=1, actual=1 → pass.
-	expect := &config.Expect{ExitCode: intPtr(1)}
+	expect := &config.Expect{ExitCode: new(1)}
 	r := CheckExpect(expect, Input{ExitCode: 1})
 	if !r.Passed {
 		t.Fatalf("expected pass, got failures: %+v", r.Failures)
@@ -95,7 +95,7 @@ func TestCheckExpect_ExitCode_Pass(t *testing.T) {
 
 func TestCheckExpect_ExitCode_Fail(t *testing.T) {
 	// Expect exit_code=1, actual=2 → fail.
-	expect := &config.Expect{ExitCode: intPtr(1)}
+	expect := &config.Expect{ExitCode: new(1)}
 	r := CheckExpect(expect, Input{ExitCode: 2})
 	if r.Passed {
 		t.Fatal("expected fail")
@@ -115,8 +115,8 @@ func TestCheckExpect_ExitCode_Nil_NoCheck(t *testing.T) {
 }
 
 func TestCheckExpect_ExitCode_Zero_Configured(t *testing.T) {
-	// ExitCode == intPtr(0) means "configured as 0" — actual must be 0.
-	expect := &config.Expect{ExitCode: intPtr(0)}
+	// ExitCode == new(0) means "configured as 0" — actual must be 0.
+	expect := &config.Expect{ExitCode: new(0)}
 
 	// actual=0 → pass
 	r := CheckExpect(expect, Input{ExitCode: 0})
@@ -369,7 +369,7 @@ func TestCheckExpect_CombinedRules_MultipleFailures(t *testing.T) {
 	expect := &config.Expect{
 		MustContain:    []string{"missing_kw"},
 		MustNotContain: []string{"LGTM"},
-		ExitCode:       intPtr(2), // expect 2, actual is 1 → triggers exit_code failure
+		ExitCode:       new(2), // expect 2, actual is 1 → triggers exit_code failure
 		FilesExist:     []string{"missing.txt"},
 	}
 	in := Input{
@@ -476,5 +476,44 @@ func TestExpectResult_ToAssertionResults_MultipleFailuresSameRule(t *testing.T) 
 	}
 	if !strings.Contains(results[0].Evidence, "bar") {
 		t.Errorf("evidence missing second keyword detail: %q", results[0].Evidence)
+	}
+}
+
+const (
+	scriptType    = "script"
+	ruleBasedType = "rule_based"
+)
+
+func TestNewExpectFailureResult_ConfiguredDenominator(t *testing.T) {
+	t.Parallel()
+	expect := &ExpectResult{ConfiguredRules: []string{"must_contain", "exit_code"}, Failures: []ExpectFailure{{Rule: "must_contain", Detail: "missing"}}}
+	tests := []struct {
+		name    string
+		cfg     config.JudgeConfig
+		skipped int
+	}{
+		{"none", config.JudgeConfig{}, 0},
+		{"empty agent criteria", config.JudgeConfig{Type: "agent_judge"}, 0},
+		{"agent", config.JudgeConfig{Type: "agent_judge", Criteria: []string{"one", "two"}}, 2},
+		{scriptType, config.JudgeConfig{Type: scriptType, ScriptPath: "never-run.sh"}, 1},
+		{"rules", config.JudgeConfig{Type: ruleBasedType, Success: []config.Rule{{}, {}}, Failure: []config.Rule{{}}}, 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := NewExpectFailureResult(expect, tt.cfg, Input{TurnsExecuted: 2, TurnsTotal: 3})
+			total := 2 + tt.skipped
+			if result.Status != StatusFail || result.Summary.Total != total || result.Summary.Passed != 1 || result.Summary.Failed != total-1 || result.Summary.PassRate != 1/float64(total) {
+				t.Fatalf("result=%+v", result)
+			}
+			if result.TurnsExecuted != 2 || result.TurnsTotal != 3 || result.JudgeSession != nil {
+				t.Fatalf("unexpected judge execution metadata: %+v", result)
+			}
+			for _, assertion := range result.AssertionResults[2:] {
+				if !assertion.Skipped || assertion.Passed || !strings.Contains(assertion.Evidence, "not evaluated") {
+					t.Fatalf("assertion=%+v", assertion)
+				}
+			}
+		})
 	}
 }

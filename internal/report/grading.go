@@ -33,6 +33,7 @@ type AnthropicGrading struct {
 type AnthropicExpectation struct {
 	Text     string `json:"text"`
 	Passed   bool   `json:"passed"`
+	Skipped  bool   `json:"skipped,omitempty"`
 	Evidence string `json:"evidence"`
 }
 
@@ -65,6 +66,7 @@ func ConvertToAnthropicGrading(result *judge.Result) *AnthropicGrading {
 		expectations = append(expectations, AnthropicExpectation{
 			Text:     ar.Text,
 			Passed:   ar.Passed,
+			Skipped:  ar.Skipped,
 			Evidence: ar.Evidence,
 		})
 	}

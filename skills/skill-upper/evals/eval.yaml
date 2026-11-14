@@ -8,7 +8,11 @@ skills:
     path: .
 
 engine:
-  name: claude_code
+  name: opencode
+  model:
+    provider: dashscope
+    name: qwen3.8-max
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 
 cases:
   files:
@@ -19,6 +23,11 @@ cases:
     - evals/cases/scaffold-with-user-simulator.yaml
     - evals/cases/english-context-generates-english-only-cases.yaml
     - evals/cases/evolve-existing-skill.yaml
+    - evals/cases/review-evolution-evidence.yaml
+    - evals/cases/plan-without-mutation.yaml
+    - evals/cases/preserve-localized-regressions.yaml
+    - evals/cases/external-trace-review.yaml
+    - evals/cases/credential-presence-only.yaml
   defaults:
     # Budget sized to be engine-agnostic: claude_code finishes well under this,
     # but slower coding agents (codex on a coder model) need more wall-clock and

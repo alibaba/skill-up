@@ -145,8 +145,9 @@ After the CLI Release succeeds, continue with **Manual skill-up version synchron
 
 ## Cache policy
 
-- Go module caches are enabled only for deterministic validation jobs. Pull-request caches are treated as untrusted performance hints: jobs must still verify and compile all inputs, and they receive no secrets or write token.
-- GoReleaser snapshot and production builds disable the Actions cache so release output does not consume cache entries writable by other jobs.
+- Default CI jobs reuse the persistent self-hosted runners' local Go module and build caches, with `setup-go` remote caching disabled. Downloading and uploading multi-gigabyte archives can exceed the job timeout, and restoring module archives over existing local files can fail with `File exists`. New runners populate local caches through normal Go commands.
+- Other validation workflows may use the Actions Go cache. Pull-request caches are treated as untrusted performance hints: jobs must still verify and compile all inputs, and they receive no secrets or write token.
+- GoReleaser snapshot and production builds disable the Actions cache and use run/attempt-specific `GOCACHE` and `GOMODCACHE` directories under `RUNNER_TEMP`. This avoids reusing local caches from earlier jobs while allowing reuse within each build. Cache directory separation does not isolate jobs from other processes running as the same user on the host.
 - Runner-image builds do not use the GitHub Actions cache backend; a cache service outage must not fail a publication after registry writes begin.
 - Caches are disposable and must never carry reports, release files, credentials, or state required by a later job. Use uploaded artifacts for job-to-job transfer and pin retention explicitly.
 - When changing a cache key, dependency manager, lockfile, or trust boundary, review both restore sources and write permissions before enabling it.

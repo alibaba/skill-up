@@ -29,6 +29,7 @@ import (
 	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/evaluator"
+	"github.com/alibaba/skill-up/internal/judge"
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/observability"
 	"github.com/alibaba/skill-up/internal/report"
@@ -43,16 +44,34 @@ type IterationObserver interface {
 	OnIterationComplete(ctx context.Context, iteration evaluator.IterationPlan, results []evaluator.EvalResult)
 }
 
+// cleanupSessionsEnabled reports whether session cleanup was requested, by the
+// flag or by the eval config. Whether it actually runs also depends on the
+// workspace being deleted and the agent supporting it; that decision lives in
+// the evaluator so every caller of it applies the same precedence.
+func cleanupSessionsEnabled(opts EvaluateOptions, evalCfg *config.EvalConfig) bool {
+	// The flag wins when it was set, in either direction; an unset flag falls
+	// back to the eval config. OR-ing them would make an explicit `false`
+	// unable to turn off `cleanup_sessions: true`.
+	if opts.CleanupSessionsSet {
+		return opts.CleanupSessions
+	}
+	return evalCfg != nil && evalCfg.Environment.CleanupSessions
+}
+
 // EvaluateOptions controls evaluation behavior.
 type EvaluateOptions struct {
-	DeleteWorkspace   bool
-	OutputDir         string
-	WorkspaceDir      string
-	Iteration         int
-	Formats           []string
-	Observer          evaluator.ProgressObserver
-	TaskObserver      evaluator.TaskObserver
-	IterationObserver IterationObserver
+	DeleteWorkspace bool
+	// CleanupSessions is the flag value; CleanupSessionsSet records whether the
+	// flag was given at all, so an explicit false can override the config.
+	CleanupSessions    bool
+	CleanupSessionsSet bool
+	OutputDir          string
+	WorkspaceDir       string
+	Iteration          int
+	Formats            []string
+	Observer           evaluator.ProgressObserver
+	TaskObserver       evaluator.TaskObserver
+	IterationObserver  IterationObserver
 }
 
 // ExecutionPlan contains the immutable invocation metadata and expanded tasks.
@@ -224,6 +243,7 @@ func (r *Runner) EvaluatePlan(ctx context.Context, plan ExecutionPlan, ag agent.
 			WorkspaceDir:    opts.WorkspaceDir,
 			Concurrency:     r.evalCfg.Cases.Parallelism,
 			DeleteWorkspace: opts.DeleteWorkspace,
+			CleanupSessions: cleanupSessionsEnabled(opts, r.evalCfg),
 			WithBaseline:    r.evalCfg.Benchmark.Enabled,
 			Observer:        opts.Observer,
 			TaskObserver:    opts.TaskObserver,
@@ -586,6 +606,21 @@ func (r *Runner) writeCaseArtifacts(ws *report.IterationWorkspace, res *evaluato
 			return err
 		}
 	}
+	if len(res.JudgeResults) > 0 {
+		strategy := res.AggregationStrategy
+		if strategy == "" {
+			strategy = judge.DefaultOutcomeAggregator().Strategy()
+		}
+		grouped := &report.GroupedEvaluation{
+			Version:      1,
+			Gates:        res.ExpectResult,
+			JudgeResults: res.JudgeResults,
+			Aggregation:  report.GroupAggregation{Strategy: strategy, Status: res.Status},
+		}
+		if err := ws.WriteEvaluation(res.CaseID, cfgName, grouped); err != nil {
+			return err
+		}
+	}
 
 	var assertions []string
 	if res.Grading != nil {
@@ -616,6 +651,7 @@ func resultToBenchmarkRun(res *evaluator.EvalResult, runNumber int) report.Bench
 			expectations = append(expectations, report.AnthropicExpectation{
 				Text:     a.Text,
 				Passed:   a.Passed,
+				Skipped:  a.Skipped,
 				Evidence: a.Evidence,
 			})
 		}
@@ -769,6 +805,8 @@ func evalResultToCaseResult(res *evaluator.EvalResult) report.CaseResult {
 		InputTokens:     res.InputTokens,
 		OutputTokens:    res.OutputTokens,
 		Grading:         res.Grading,
+		Gates:           res.ExpectResult,
+		JudgeResults:    res.JudgeResults,
 		JudgeSkills:     res.JudgeSkills,
 		Configuration:   res.Configuration,
 		Prompt:          res.Prompt,
@@ -785,6 +823,16 @@ func evalResultToCaseResult(res *evaluator.EvalResult) report.CaseResult {
 		cr.JudgeDurationMs = judgeSession.DurationMs
 		cr.JudgeInputTokens = judgeSession.InputTokens
 		cr.JudgeOutputTokens = judgeSession.OutputTokens
+	}
+	if res.Grading != nil {
+		cr.JudgeRecovery = res.Grading.Recovery
+	}
+	for _, outcome := range res.JudgeResults {
+		cr.JudgeDurationMs += outcome.DurationMs
+		if outcome.Session != nil {
+			cr.JudgeInputTokens += outcome.Session.InputTokens
+			cr.JudgeOutputTokens += outcome.Session.OutputTokens
+		}
 	}
 	if res.Error != nil {
 		cr.Error = res.Error.Error()

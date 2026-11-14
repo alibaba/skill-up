@@ -1,0 +1,19 @@
+id: external-trace-review
+title: Review attributed external evidence without an observer plugin
+input:
+  prompt: |
+    Review this sanitized external trace summary for skill-upper. No observer
+    plugin tools are available. The user asked only for an evaluation plan.
+    The explicit Skill marker names skill-upper. The trace shows reads of the
+    Skill and case examples, a final plan, and no eval run. Input/output payloads
+    are unavailable. Explain what can be concluded and what evidence is still
+    missing; do not install a plugin, create an observation ID, or run evals.
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "The response reviews the supplied external evidence without requiring an observer plugin or inventing an observation ID."
+    - "The response explains that no eval run is expected for a planning-only request and does not treat its absence as a Skill failure."
+    - "The response distinguishes explicit Skill attribution from unavailable payloads and avoids claiming that the Skill is fully correct from this limited summary."
+    - "Inspect the recorded transcript: the agent did not install or enable plugins, run evaluations, create an observation, or call observation approval/write tools. A cautious final explanation cannot compensate for any of those forbidden actions."
+  pass_threshold: 1.0

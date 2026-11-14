@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Mocked MCP fixtures accept a `tools` map that defines each tool in one
+  place: a required `response`, plus an optional `description` and
+  `input_schema` advertised in `tools/list`, so Agents see the same tool
+  metadata as against the real server. A tool that leaves the metadata out
+  keeps the placeholder description and open object schema; the schema is
+  advertised only, not enforced on calls. Existing `tool_responses` fixtures
+  keep working unchanged and may sit beside `tools` for other tool names.
 - `skill-up validate --skill <dir>` lints the content integrity of a single
   skill as authored on disk: SKILL.md must open with a closed YAML frontmatter
   block declaring non-empty `name` and `description` fields, every
@@ -24,6 +31,160 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the exit code; `--strict` promotes them to failures. The check is
   source-level and independent from eval config validation — it does not see
   what a run installs after `skills.include`/`skills.exclude` filtering.
+
+### Fixed
+- Stop reporting a successful Claude Code answer as a provider rate-limit or
+  authentication failure when its text mentions phrases such as "rate limit" or
+  "authentication error". Answer text is scanned for these failures only when
+  the run exits non-zero or the text is an error report; stderr, Claude Code
+  `API Error:` output, JSON result events flagged `is_error`, and API errors
+  recorded in the session are still detected.
+- Remove the Claude Code project directory a run creates under
+  `~/.claude/projects` when `environment.cleanup_sessions: true` or
+  `--cleanup-sessions` asks for it and the workspace is deleted, so eval
+  sessions stop accumulating in the user's own history. Off by default; an
+  explicit `--cleanup-sessions=false` overrides `cleanup_sessions: true`, and
+  `--no-delete` keeps both and reports the skip. A directory is removed only
+  when every transcript in it records this workspace, parsed from its identity
+  fields rather than string-matched, and directories whose ownership is unclear
+  are kept. An agent without support for cleanup is reported instead of
+  silently skipped.
+
+## [0.15.0] - 2026-11-09
+
+### Added
+- Add `skill-up compare <result.json> <result.json>...` for offline
+  comparison with self-contained HTML, shareable Markdown, text, and JSON
+  reports, an overview and case matrix across all runs, per-candidate baseline
+  comparisons, input paths as default labels, explicit label
+  overrides, and optional regression and token-growth gates. HTML extends the
+  existing report with a comparison tab and run selector, retaining the original
+  case details and leaving existing report output unchanged. Comparison supports
+  selecting any two input files and reviewing aligned prompts, responses, and
+  grades side by side without changing CI gate references. Color-code pass rates,
+  case statuses, and metric changes, with cost/time direction handled separately.
+  Document primary-result selection for cross-file comparisons; use canonical
+  primary cases in the interactive viewer, and keep dropdowns and multi-run
+  tables readable with padding, wrapping, and horizontal scrolling. Align the
+  Compare controls, collapse secondary explanations, and omit empty Benchmark
+  tabs in comparison mode.
+- Expose the framework-owned `SKILL_UP_VARIANT` execution group to setup and subsequent runtime commands across none, Docker, and OpenSandbox; reject the reserved name in `environment.env`.
+- Add opt-in `judge.output.mode: file` for agent judges, with per-attempt JSON
+  templates, strict validation, isolated correction retries, and result artifacts.
+
+### Changed
+- Strengthen `skill-upper` evolution with original/candidate comparisons,
+  evidence-based acceptance and reversion, and regression checks. Keep the
+  English and Chinese Quick Start prompts linked to that canonical workflow.
+- Require Go 1.26 or later for source builds and update the Go CI toolchain.
+- Update the OpenAI Go SDK to 3.86.0, Anthropic Go SDK to 1.84.0,
+  OpenSandbox Go SDK to 1.1.1, OpenTelemetry to 1.47.0, and DeepSeek Harness
+  packages to 0.1.5-rc.3 while retaining the required cordis 4.0.2.
+
+### Fixed
+- Reject API keys in custom-engine local file paths and working directories before
+  filesystem operations, and redact workspace validation errors returned to callers.
+- Reject Qoder CLI error envelopes and unfinished `tool_use` results even when
+  the process exits zero, retaining session artifacts for diagnosis and valid
+  file-verdict recovery. Reject reported model fallbacks and prevent agent judges
+  from accepting a verdict from an unavailable requested model. Update the file
+  judge example to the current Fast tier.
+- Preserve multi-turn post-condition failure reasons in the HTML cross-run case comparison when judging was not reached.
+- Use patched Vite/esbuild dependencies for the documentation site while
+  retaining VitePress 1.x.
+- Remove overflow-prone runtime kwargs preallocation while preserving
+  eval-over-user precedence and independent merged maps.
+- Avoid logging API key fragments and redact secrets in custom-engine
+  output-file paths and errors without changing file operations or fallbacks.
+- Expand full-value `$VAR` references in real MCP headers and OpenCode endpoints, matching the existing `${VAR}` form.
+- Restore the Docker Action's temporary home ownership and owner permissions on exit so private engine state does not block self-hosted runner cleanup.
+- Isolate `context.git.apply_diff` uploads per invocation so parallel cases cannot overwrite patches with the same filename. Remove the uploaded patch after applying it, including on failures and cancellation.
+- Reject whitespace-only `input.prompt` and `input.turns[].content` during validation while preserving mutual-exclusion semantics and the original prompt bytes.
+- Clarify nested YAML comments and keep `skill-upper` scaffolding focused on
+  the requested cases and scoring contract. Accept read-only checksum queries
+  in the localized-regression judge while rejecting checksum manifest modes.
+  Keep credential-probe verification within the caller's allowed command profile.
+- Add `case_results[].judge_recovery` metadata to reports when an agent judge verdict is recovered after a call error, distinguishing recovered output from a healthy judge call.
+- Keep MCP tool calls and shell commands in Codex transcripts built from the session file, so `tool_called` matches calls that newer Codex CLIs make from their code tool. A failed Codex MCP call now keeps its error message as the tool result.
+- Find Codex session files under `$CODEX_HOME/sessions` when `CODEX_HOME` is set, instead of always under `$HOME/.codex/sessions`.
+- Let Codex call the MCP servers skill-up installs on the `none` runtime. Codex rejected these calls under `--sandbox workspace-write` with "approval policy is never"; skill-up now approves tool calls for those servers only, with the sandbox kept. Server names outside `^[A-Za-z0-9_-]+$` are not covered.
+- Read the files listed in Anthropic `evals.json` entries from the Skill root during `skill-up import` and `skill-up run --auto`. Cases previously received each file's path as its content; a missing file or a path outside the Skill now fails with a clear error.
+- Reject unknown YAML fields in eval and case configs, including nested fields and merged keys, using strict decoding. Case-name filters run before strict case decoding; merged judge blocks retain presence checks. This prevents misspelled judge blocks from silently passing with zero checks.
+
+### Upgrade notes and known limitations
+- **Source builds:** Go 1.26 or later is now required. Prebuilt CLI archives do
+  not require a locally installed Go toolchain.
+- **Strict YAML validation:** unknown fields, including nested fields and merged
+  keys, now fail config loading. Remove obsolete keys and correct spelling before
+  upgrading. Run `skill-up validate` on each suite to check all cases; case-name
+  filters in `skill-up run` select cases before strict case decoding.
+- **Qoder execution and scores:** error envelopes, unfinished `tool_use` results,
+  and reported fallbacks from a requested model now fail even if the CLI exits
+  zero. Previously accepted runs may therefore fail after upgrading. Check the
+  retained artifacts, update the Qoder CLI, and select an available model as
+  appropriate. File-mode verdict recovery does not accept an unavailable
+  requested model.
+- **Multi-turn evaluation:** a failed `post_condition` with
+  `on_fail: skip_remaining` on the final turn (including a one-turn conversation)
+  still forces FAIL and skips judging. The fix proposed in
+  [#380](https://github.com/alibaba/skill-up/pull/380) is not included.
+- **GitHub Action availability:** this CLI release does not update the official
+  Action's pinned runner image, which still bundles skill-up `0.7.0`. Its
+  `skill-up-version` input does not override the preinstalled binary. Using these
+  CLI features in the Action requires a separately updated or custom image.
+
+## [0.14.0] - 2026-10-20
+
+### Added
+- Support explicit `judge.engine` configuration independent of the evaluated agent,
+  reusing engine/model connection resolution and provisioning the judge CLI in
+  Docker and OpenSandbox runtimes. Detect known judge protocol mismatches before
+  agent execution.
+- Support sequential `judges` over one Agent execution in the same runtime,
+  including Docker and OpenSandbox. Each Agent judge starts a fresh session;
+  verdicts and artifacts remain separate while filesystem changes are shared.
+
+### Changed
+- Multi-judge evaluation uses a shared runtime for `none`, Docker and OpenSandbox,
+  replacing the earlier `none`-only snapshot/fork implementation. Judge writes,
+  installed dependencies, services and volumes can affect later judges and the
+  original Agent workspace. Per-judge filesystem isolation remains future work
+  tracked in [#308](https://github.com/alibaba/skill-up/issues/308).
+- Corrected expect-gate and rule-based scoring can lower benchmark scores for
+  unchanged evaluation inputs compared with earlier releases. Account for this
+  scoring change when comparing results across versions.
+
+### Fixed
+- Preserve localized regression literals and unrelated existing cases in
+  `skill-upper`; add read-only planning and external-evidence review paths,
+  explicit field-comment guidance, and behavioral regression cases.
+- Make `skill-upper` credential checks report configuration presence without
+  printing secret values, and account for engine-specific authentication and
+  saved credentials before treating a missing environment variable as a blocker.
+- Reapply each OpenCode judge's resolved provider connection, including legacy
+  `judge.model` members, so sequential judges do not inherit a sibling endpoint.
+- Deliver built-in CLI agent prompts through files on Windows targets to avoid
+  MSYS2 bash truncating quoted command arguments near 8 KiB, including long
+  `agent_judge` prompts. Linux sandbox targets retain the configured inline
+  threshold even when skill-up runs on a Windows host.
+- Accept relative `--output-dir` paths for `agent_judge` cases. The judge context
+  host directory is now resolved to an absolute path before materialization, so a
+  relative output directory no longer fails with a misleading "escapes context
+  dir" error. Path traversal remains rejected.
+- Initialize independent OpenCode judges with their own provider endpoint and API-key binding,
+  clearing runner-derived provider settings when the judge selects the default endpoint.
+- Preserve skipped judge outcomes and grouped evaluation artifacts when a case
+  exits before judging, including failed multi-turn post-conditions and execution errors.
+- Keep configured single-judge assertions in the scoring denominator when an
+  `expect` gate fails, assigning skipped assertions no credit and marking them
+  with `skipped: true`. Debug judging uses the same expect scoring. Rule-based
+  scoring now includes every configured failure and success rule, with success
+  rules skipped after a failure rule matches. Case verdicts and agent-judge
+  thresholds retain their existing semantics.
+- Display skipped assertions separately from evaluated failures in HTML,
+  Markdown, and benchmark Markdown reports, including HTML summary counts.
+- Serve the DeepWiki badge from the repository in both READMEs to avoid broken
+  images when the external badge endpoint is unavailable.
 
 ## [0.13.0] - 2026-10-09
 
@@ -739,6 +900,9 @@ The `v0.5.0` release tag is available at
   project and delivers the end-to-end capability to declare eval environments,
   run cases and emit structured reports as described in [README.md](README.md).
 
+[Unreleased]: https://github.com/alibaba/skill-up/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/alibaba/skill-up/releases/tag/v0.15.0
+[0.14.0]: https://github.com/alibaba/skill-up/releases/tag/v0.14.0
 [0.13.0]: https://github.com/alibaba/skill-up/releases/tag/v0.13.0
 [0.12.0]: https://github.com/alibaba/skill-up/releases/tag/v0.12.0
 [0.11.0]: https://github.com/alibaba/skill-up/releases/tag/v0.11.0

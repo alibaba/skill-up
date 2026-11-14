@@ -1,10 +1,12 @@
 package report
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -29,20 +31,67 @@ func (r *HTMLReporter) Write(_ context.Context, in Input) error {
 		return err
 	}
 
+	return writeToOutput(r.OutputPath, "html report", func(w io.Writer) error { return executeHTMLReport(w, data) })
+}
+
+func executeHTMLReport(w io.Writer, data htmlReportData) error {
 	funcMap := SharedTemplateFuncs()
 	funcMap["statusIcon"] = statusIcon
-
 	tmpl, err := template.New("report").Funcs(funcMap).Parse(htmlTemplate)
 	if err != nil {
 		return fmt.Errorf("parse html template: %w", err)
 	}
+	if err := tmpl.Execute(w, data); err != nil {
+		return fmt.Errorf("execute html template: %w", err)
+	}
+	return nil
+}
 
-	return writeToOutput(r.OutputPath, "html report", func(w io.Writer) error {
-		if err := tmpl.Execute(w, data); err != nil {
-			return fmt.Errorf("execute html template: %w", err)
+// ComparisonRun supplies a full original report for the comparison run selector.
+type ComparisonRun struct {
+	Label string
+	Input Input
+}
+
+// RenderComparisonHTML extends the existing report with a trusted, template-rendered
+// comparison section and a run selector. Each run retains its original case details.
+func RenderComparisonHTML(runs []ComparisonRun, section template.HTML) ([]byte, error) {
+	if len(runs) == 0 {
+		return nil, errors.New("comparison requires run details")
+	}
+	reporter := &HTMLReporter{}
+	data, err := reporter.buildTemplateData(runs[0].Input)
+	if err != nil {
+		return nil, err
+	}
+	type runPayload struct {
+		Label        string          `json:"label"`
+		Data         json.RawMessage `json:"data"`
+		PrimaryCases []embeddedCase  `json:"primary_cases"`
+	}
+	var payload []runPayload
+	for _, run := range runs {
+		runData, err := reporter.buildTemplateData(run.Input)
+		if err != nil {
+			return nil, err
 		}
-		return nil
-	})
+		primary := make([]embeddedCase, 0)
+		for _, cr := range run.Input.PrimaryCaseResults() {
+			primary = append(primary, caseResultToEmbeddedCase(cr))
+		}
+		payload = append(payload, runPayload{Label: run.Label, Data: json.RawMessage(runData.EmbeddedDataJSON), PrimaryCases: primary})
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encode comparison runs: %w", err)
+	}
+	data.ComparisonSection = section
+	data.ComparisonRuns = template.JS(encoded) //nolint:gosec // json.Marshal escapes untrusted strings, including script delimiters.
+	var b bytes.Buffer
+	if err := executeHTMLReport(&b, data); err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -50,9 +99,11 @@ func (r *HTMLReporter) Write(_ context.Context, in Input) error {
 // ---------------------------------------------------------------------------
 
 type htmlReportData struct {
-	SkillName        string
-	LogoDataURI      template.URL
-	EmbeddedDataJSON template.JS
+	ComparisonSection template.HTML
+	ComparisonRuns    template.JS
+	SkillName         string
+	LogoDataURI       template.URL
+	EmbeddedDataJSON  template.JS
 }
 
 // -- Embedded JSON types for JavaScript consumption --
@@ -88,28 +139,30 @@ type embeddedSummary struct {
 }
 
 type embeddedCase struct {
-	ID                string            `json:"id"`
-	Title             string            `json:"title,omitempty"`
-	Status            string            `json:"status"`
-	AgentDurationMs   int64             `json:"agent_duration_ms"`
-	AgentDuration     string            `json:"agent_duration"`
-	InputTokens       int               `json:"input_tokens"`
-	OutputTokens      int               `json:"output_tokens"`
-	AgentTokens       int               `json:"agent_tokens"`
-	JudgeDurationMs   int64             `json:"judge_duration_ms"`
-	JudgeDuration     string            `json:"judge_duration"`
-	JudgeInputTokens  int               `json:"judge_input_tokens"`
-	JudgeOutputTokens int               `json:"judge_output_tokens"`
-	JudgeTokens       int               `json:"judge_tokens"`
-	Turns             int               `json:"turns"`
-	Error             string            `json:"error,omitempty"`
-	Grading           *embeddedGrading  `json:"grading,omitempty"`
-	Configuration     string            `json:"configuration,omitempty"`
-	Prompt            string            `json:"prompt,omitempty"`
-	Response          string            `json:"response,omitempty"`
-	Baseline          *embeddedCase     `json:"baseline,omitempty"`
-	TurnResults       []embeddedTurn    `json:"turn_results,omitempty"`
-	JudgeSkills       []judge.SkillInfo `json:"judge_skills,omitempty"`
+	ID                string              `json:"id"`
+	Title             string              `json:"title,omitempty"`
+	Status            string              `json:"status"`
+	AgentDurationMs   int64               `json:"agent_duration_ms"`
+	AgentDuration     string              `json:"agent_duration"`
+	InputTokens       int                 `json:"input_tokens"`
+	OutputTokens      int                 `json:"output_tokens"`
+	AgentTokens       int                 `json:"agent_tokens"`
+	JudgeDurationMs   int64               `json:"judge_duration_ms"`
+	JudgeDuration     string              `json:"judge_duration"`
+	JudgeInputTokens  int                 `json:"judge_input_tokens"`
+	JudgeOutputTokens int                 `json:"judge_output_tokens"`
+	JudgeTokens       int                 `json:"judge_tokens"`
+	Turns             int                 `json:"turns"`
+	Error             string              `json:"error,omitempty"`
+	Grading           *embeddedGrading    `json:"grading,omitempty"`
+	Configuration     string              `json:"configuration,omitempty"`
+	Prompt            string              `json:"prompt,omitempty"`
+	Response          string              `json:"response,omitempty"`
+	Baseline          *embeddedCase       `json:"baseline,omitempty"`
+	TurnResults       []embeddedTurn      `json:"turn_results,omitempty"`
+	JudgeSkills       []judge.SkillInfo   `json:"judge_skills,omitempty"`
+	Gates             *judge.ExpectResult `json:"gates,omitempty"`
+	JudgeResults      []judge.Outcome     `json:"judge_results,omitempty"`
 }
 
 // embeddedTurn holds per-turn data for the HTML report JavaScript.
@@ -131,6 +184,7 @@ type embeddedGrading struct {
 type embeddedExpectation struct {
 	Text     string `json:"text"`
 	Passed   bool   `json:"passed"`
+	Skipped  bool   `json:"skipped,omitempty"`
 	Evidence string `json:"evidence"`
 }
 
@@ -175,6 +229,8 @@ func caseResultToEmbeddedCase(cr CaseResult) embeddedCase {
 		Response:          cr.Response,
 		TurnResults:       caseTurnResultsToEmbedded(cr.TurnResults),
 		JudgeSkills:       cr.JudgeSkills,
+		Gates:             cr.Gates,
+		JudgeResults:      cr.JudgeResults,
 	}
 	if cr.Grading != nil {
 		eg := &embeddedGrading{
@@ -190,6 +246,7 @@ func caseResultToEmbeddedCase(cr CaseResult) embeddedCase {
 			eg.Expectations = append(eg.Expectations, embeddedExpectation{
 				Text:     ar.Text,
 				Passed:   ar.Passed,
+				Skipped:  ar.Skipped,
 				Evidence: ar.Evidence,
 			})
 		}

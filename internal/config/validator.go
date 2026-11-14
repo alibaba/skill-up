@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"path"
 	"regexp"
 	"slices"
@@ -68,6 +69,8 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 		errs = append(errs, "environment.type must be one of: none, opensandbox, docker")
 	}
 
+	errs = append(errs, validateReservedEnvironment(cfg.Environment)...)
+
 	// Docker-runtime fields that would otherwise silently pass `skill-up
 	// validate` and only fail later when NewDockerRuntime constructs the
 	// container — catch them at the preflight gate.
@@ -98,7 +101,7 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	errs = append(errs, validateCollectArtifacts("cases.defaults.collect_artifacts", cfg.Cases.Defaults.CollectArtifacts)...)
 	errs = append(errs, validateExpect("cases.defaults.expect", cfg.Cases.Defaults.Expect)...)
 	errs = append(errs, validateSkillRefs("skills", cfg.Skills)...)
-	errs = append(errs, validateJudgeTypeAndLocalFields(cfg.Judge)...)
+	errs = append(errs, validateConfiguredJudges(judgeFields{single: cfg.Judge, singleSet: cfg.JudgeSet, members: cfg.Judges, membersSet: cfg.JudgesSet})...)
 	if cfg.UserSimulator != (UserSimulatorModel{}) {
 		if strings.TrimSpace(cfg.UserSimulator.Provider) == "" || strings.TrimSpace(cfg.UserSimulator.Model) == "" {
 			errs = append(errs, "user_simulator.provider and user_simulator.model are required")
@@ -125,8 +128,10 @@ func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 	// id is optional - Loader auto-generates from filename if not specified
 	// See loader.go:LoadCaseConfig for the fallback logic
 
-	// input.prompt or input.turns is required, but not both
-	if cfg.Input.Prompt == "" && len(cfg.Input.Turns) == 0 {
+	// input.prompt or input.turns is required, but not both. Presence for
+	// mutual exclusion deliberately stays byte-based so a whitespace-only
+	// prompt alongside turns cannot silently become a turns-only case.
+	if strings.TrimSpace(cfg.Input.Prompt) == "" && len(cfg.Input.Turns) == 0 {
 		errs = append(errs, "input.prompt or input.turns is required")
 	}
 	if cfg.Input.Prompt != "" && len(cfg.Input.Turns) > 0 {
@@ -149,13 +154,14 @@ func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 
 	// validate per-turn judge rules reference valid turn numbers
 	turnsTotal := len(cfg.Input.Turns)
-	if judgeNeedsLocalValidation(cfg.Judge) {
-		errs = append(errs, validateJudgeTypeAndLocalFields(cfg.Judge)...)
-	}
+	errs = append(errs, validateConfiguredJudges(judgeFields{single: cfg.Judge, singleSet: cfg.JudgeSet, members: cfg.Judges, membersSet: cfg.JudgesSet})...)
 	var allRules []Rule
 	allRules = append(allRules, cfg.Judge.Success...)
 	allRules = append(allRules, cfg.Judge.Failure...)
 	errs = append(errs, validatePerTurnRules(allRules, turnsTotal)...)
+	if cfg.Judges != nil {
+		errs = append(errs, validateJudgeTurnRules(*cfg.Judges, turnsTotal)...)
+	}
 
 	errs = append(errs, validateCollectArtifacts("collect_artifacts", cfg.CollectArtifacts)...)
 	errs = append(errs, validateExpect("expect", cfg.Expect)...)
@@ -176,7 +182,7 @@ func validateTurnFields(i int, turn Turn, scenario *UserSimulatorScenario) []str
 	} else if turn.Role != "user" {
 		errs = append(errs, fmt.Sprintf("input.turns[%d].role must be \"user\", got %q", i, turn.Role))
 	}
-	if turn.Content == "" && turn.Respond == "" {
+	if strings.TrimSpace(turn.Content) == "" && turn.Respond == "" {
 		errs = append(errs, fmt.Sprintf("input.turns[%d].content is required unless respond is set", i))
 	}
 	if turn.Content != "" && turn.Respond != "" {
@@ -259,10 +265,6 @@ func validateCaseMCP(mcpCfg MCPConfig) []string {
 	return errs
 }
 
-func judgeNeedsLocalValidation(judge JudgeConfig) bool {
-	return judge.Type != "" || len(judge.Skills) > 0 || judge.Context != nil || len(judge.Success) > 0 || len(judge.Failure) > 0
-}
-
 // validateJudgeTypeAndLocalFields validates judge fields that do not depend on inheritance.
 func validateJudgeTypeAndLocalFields(judge JudgeConfig) []string {
 	var errs []string
@@ -274,6 +276,15 @@ func validateJudgeTypeAndLocalFields(judge JudgeConfig) []string {
 		errs = append(errs, "judge.skills is only supported when judge.type is agent_judge")
 	}
 	errs = append(errs, validateSkillRefs("judge.skills", judge.Skills)...)
+	errs = append(errs, validateJudgeEngine(judge)...)
+	if judge.Output != nil {
+		if judge.Type != "" && judge.Type != judgeTypeAgentJudge {
+			errs = append(errs, "judge.output is only supported when judge.type is agent_judge")
+		}
+		if mode := judge.Output.Mode; mode != "" && mode != "file" && mode != "final_message" {
+			errs = append(errs, "judge.output.mode must be one of: final_message, file")
+		}
+	}
 
 	errs = append(errs, validatePassThreshold(judge.PassThreshold)...)
 	errs = append(errs, validateJudgeContext(judge.Context)...)
@@ -286,6 +297,33 @@ func validateJudgeTypeAndLocalFields(judge JudgeConfig) []string {
 	errs = append(errs, validateRecognizableRules("judge.success", judge.Success)...)
 	errs = append(errs, validateRecognizableRules("judge.failure", judge.Failure)...)
 
+	return errs
+}
+
+func validateJudgeEngine(judge JudgeConfig) []string {
+	if judge.Engine == nil {
+		return nil
+	}
+	var errs []string
+	if judge.Type != judgeTypeAgentJudge {
+		errs = append(errs, "judge.engine is only supported when judge.type is agent_judge")
+	}
+	if judge.Model != "" {
+		errs = append(errs, "judge.model and judge.engine are mutually exclusive")
+	}
+	engine := *judge.Engine
+	engine.Custom = customengine.CloneConfig(engine.Custom)
+	engine.Model.Params = maps.Clone(engine.Model.Params)
+	resolved := EvalConfig{Engine: engine}
+	if err := ResolveCustomEngineConfig(&resolved); err != nil {
+		errs = append(errs, "judge.engine: "+err.Error())
+	}
+	if strings.TrimSpace(resolved.Engine.Name) == "" {
+		errs = append(errs, "judge.engine.name is required")
+	}
+	if strings.TrimSpace(resolved.Engine.Model.Provider) == "" || strings.TrimSpace(resolved.Engine.Model.Name) == "" {
+		errs = append(errs, "judge.engine.model.provider and judge.engine.model.name are required")
+	}
 	return errs
 }
 
@@ -355,7 +393,7 @@ func validateJudgeTypeAndRequiredFields(judge JudgeConfig) []string {
 	if judge.Type == judgeTypeScript && judge.ScriptPath == "" {
 		errs = append(errs, "judge.script_path is required when judge.type is script")
 	}
-	if judge.Type == judgeTypeAgentJudge && judge.Model == "" {
+	if judge.Type == judgeTypeAgentJudge && judge.Model == "" && judge.Engine == nil {
 		errs = append(errs, "judge.model is required when judge.type is agent_judge")
 	}
 	if judge.Type == judgeTypeAgentJudge && len(judge.Criteria) == 0 {
@@ -543,29 +581,112 @@ func (v *Validator) ValidateCasesWithEvalDefaults(eval *EvalConfig, cases []*Cas
 		if c.UserSimulator != nil && (eval.UserSimulator.Provider == "" || eval.UserSimulator.Model == "" || !validUserSimulatorProtocol(eval.UserSimulator.Protocol)) {
 			return fmt.Errorf("case %s: user_simulator requires eval-level provider, protocol: openai or anthropic, and model", c.ID)
 		}
+		plan, err := ResolveJudgePlan(eval, c)
+		if err != nil {
+			return fmt.Errorf("case %s: %w", c.ID, err)
+		}
+		if plan.Multi {
+			for i, member := range plan.Judges {
+				if errs := validateJudgeTypeAndRequiredFields(member); len(errs) > 0 {
+					return fmt.Errorf("case %s judges[%d]: %s", c.ID, i, strings.Join(errs, "; "))
+				}
+			}
+			if errs := validateJudgeTurnRules(plan.Judges, len(c.Input.Turns)); len(errs) > 0 {
+				return fmt.Errorf("case %s: validation errors:\n  - %s", c.ID, strings.Join(errs, "\n  - "))
+			}
+			continue
+		}
 		effectiveJudge := mergeJudgeConfigForValidation(eval.Judge, c.Judge)
 		if errs := validateJudgeTypeAndRequiredFields(effectiveJudge); len(errs) > 0 {
+			return fmt.Errorf("case %s: validation errors:\n  - %s", c.ID, strings.Join(errs, "\n  - "))
+		}
+		rules := append(append([]Rule(nil), effectiveJudge.Success...), effectiveJudge.Failure...)
+		if errs := validatePerTurnRules(rules, len(c.Input.Turns)); len(errs) > 0 {
 			return fmt.Errorf("case %s: validation errors:\n  - %s", c.ID, strings.Join(errs, "\n  - "))
 		}
 	}
 	return nil
 }
 
-func mergeJudgeConfigForValidation(global, caseLevel JudgeConfig) JudgeConfig {
-	if caseLevel.Type != "" {
-		merged := caseLevel
-		if merged.Model == "" {
-			merged.Model = global.Model
+func validateJudgeTurnRules(members []JudgeConfig, turnsTotal int) []string {
+	var errs []string
+	for i, member := range members {
+		rules := append(append([]Rule(nil), member.Success...), member.Failure...)
+		for _, detail := range validatePerTurnRules(rules, turnsTotal) {
+			errs = append(errs, fmt.Sprintf("judges[%d]: %s", i, detail))
 		}
-		if merged.PassThreshold == nil {
-			merged.PassThreshold = global.PassThreshold
-		}
-		if merged.TimeoutSeconds == nil {
-			merged.TimeoutSeconds = global.TimeoutSeconds
-		}
-		return merged
 	}
-	return global
+	return errs
+}
+
+func validateJudgeList(members *[]JudgeConfig) []string {
+	if members == nil {
+		return nil
+	}
+	if len(*members) == 0 {
+		return []string{"judges must contain at least one member"}
+	}
+	var errs []string
+	seen := make(map[string]bool, len(*members))
+	for i, member := range *members {
+		if member.Type == "" {
+			errs = append(errs, fmt.Sprintf("judges[%d].type is required", i))
+		}
+		if !judgeIDPattern.MatchString(member.ID) {
+			errs = append(errs, fmt.Sprintf("judges[%d].id must be a safe lowercase identifier", i))
+		}
+		if seen[member.ID] {
+			errs = append(errs, fmt.Sprintf("judges[%d].id %q is duplicated", i, member.ID))
+		}
+		seen[member.ID] = true
+		for _, detail := range validateJudgeTypeAndRequiredFields(member) {
+			errs = append(errs, fmt.Sprintf("judges[%d]: %s", i, detail))
+		}
+	}
+	return errs
+}
+
+type judgeFields struct {
+	single     JudgeConfig
+	singleSet  bool
+	members    *[]JudgeConfig
+	membersSet bool
+}
+
+func validateConfiguredJudges(fields judgeFields) []string {
+	var errs []string
+	errs = append(errs, validateJudgeTypeAndLocalFields(fields.single)...)
+	errs = append(errs, validateJudgeList(fields.members)...)
+	if (fields.membersSet || fields.members != nil) && (fields.singleSet || fields.single.Type != "") {
+		errs = append(errs, "judge and judges cannot be configured together")
+	}
+	if fields.membersSet && fields.members == nil {
+		errs = append(errs, "judges must contain at least one member")
+	}
+	return errs
+}
+
+func mergeJudgeConfigForValidation(global, caseLevel JudgeConfig) JudgeConfig {
+	if caseLevel.Type == "" {
+		return global
+	}
+	merged := caseLevel
+	if merged.Type == judgeTypeAgentJudge && merged.Output == nil {
+		merged.Output = global.Output
+	}
+	if merged.Model == "" && merged.Engine == nil {
+		merged.Model = global.Model
+		if merged.Type == judgeTypeAgentJudge {
+			merged.Engine = global.Engine
+		}
+	}
+	if merged.PassThreshold == nil {
+		merged.PassThreshold = global.PassThreshold
+	}
+	if merged.TimeoutSeconds == nil {
+		merged.TimeoutSeconds = global.TimeoutSeconds
+	}
+	return merged
 }
 
 // duplicateCaseErrors reports duplicate source-file references and duplicate
@@ -727,6 +848,13 @@ func validateCustomHTTP(h *customengine.HTTPConfig) []string {
 
 func isValidRuntimeType(t string) bool {
 	return t == runtimeTypeNone || t == runtimeTypeOpenSandbox || t == runtimeTypeDocker
+}
+
+func validateReservedEnvironment(env Environment) []string {
+	if _, exists := env.Env["SKILL_UP_VARIANT"]; exists {
+		return []string{"environment.env.SKILL_UP_VARIANT is reserved for the framework"}
+	}
+	return nil
 }
 
 // validateDockerEnvironment collects preflight errors for fields the docker

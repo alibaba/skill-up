@@ -14,6 +14,12 @@ input:
     This Skill does not have any evals yet, so create evals/eval.yaml and at least one
     case YAML file under evals/cases/.
 
+    Use English for the newly authored test prompts, expected natural-language
+    responses, and explanatory text. This suite tests English-language usage;
+    it does not exercise a required Chinese output literal. Reply in English.
+    Add short English field-leading comments immediately before configured
+    fields, including report.formats and the nested judge.type in every case.
+
     Use environment type none and engine claude_code.
 
 expect:

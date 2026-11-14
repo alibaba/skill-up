@@ -64,6 +64,7 @@ type EvalOptions struct {
 	WorkspaceDir    string
 	Concurrency     int
 	DeleteWorkspace bool
+	CleanupSessions bool
 	Loader          *config.Loader
 	Resolver        *credential.Resolver
 	Agent           agent.Agent
@@ -103,6 +104,12 @@ type EvalResult struct {
 
 	// Grading is the valid judge evaluation result (nil if judge was skipped or failed).
 	Grading *judge.Result
+
+	// JudgeResults preserves each independent judge result in multi-judge cases.
+	JudgeResults []JudgeOutcome
+
+	// AggregationStrategy identifies the multi-judge policy, including gate failures.
+	AggregationStrategy string
 
 	// JudgeSession is the separate agent session used by agent_judge. It is
 	// preserved even when the judge fails to produce a valid grading result.
@@ -155,6 +162,8 @@ type defaultEvaluator struct {
 	simulator       usersimulator.Simulator
 	fixtures        *fixtureRegistry
 	deleteWorkspace bool
+	cleanupSessions bool
+	cleanupNotice   sync.Once
 	observer        ProgressObserver
 	taskObserver    TaskObserver
 	mcpOnce         sync.Once
@@ -190,6 +199,7 @@ func NewEvaluator(opts EvalOptions) Evaluator {
 		simulator:       opts.Simulator,
 		fixtures:        newFixtureRegistry(),
 		deleteWorkspace: opts.DeleteWorkspace,
+		cleanupSessions: opts.CleanupSessions,
 		observer:        opts.Observer,
 		taskObserver:    opts.TaskObserver,
 	}
@@ -387,6 +397,48 @@ func (e *defaultEvaluator) executeCase(ctx context.Context, caseCfg *config.Case
 	return result
 }
 
+// cleanupSessionDir removes per-workspace state an agent keeps outside the
+// workspace, such as the Claude Code project directory under
+// $HOME/.claude/projects. It is opt-in: nothing is deleted unless
+// --cleanup-sessions or environment.cleanup_sessions asked for it, because the
+// sessions are user-visible history that today survives an evaluation.
+//
+// --no-delete wins over the request, and every reason a requested cleanup did
+// not run is announced once. A failure is logged, never fatal: the case result
+// is already decided at this point.
+func (e *defaultEvaluator) cleanupSessionDir(ctx context.Context, ag agent.Agent, rt runtime.Runtime) {
+	if !e.cleanupSessions {
+		return
+	}
+	if !e.deleteWorkspace {
+		e.announceCleanupSkip(ctx, "--no-delete keeps both the workspace and its sessions")
+		return
+	}
+	// DeleteWorkspace only says the evaluator asked. A runtime handed a
+	// workspace it does not own preserves it, and the project directory has to
+	// survive with it.
+	if owner, ok := rt.(runtime.WorkspaceOwner); ok && !owner.OwnsWorkspace() {
+		e.announceCleanupSkip(ctx, "the workspace is externally owned and preserved")
+		return
+	}
+	cleaner, ok := ag.(agent.SessionDirCleaner)
+	if !ok {
+		e.announceCleanupSkip(ctx, fmt.Sprintf("agent %q does not support it (supported today: claude_code)", ag.Name()))
+		return
+	}
+	if err := cleaner.CleanupSessionDir(context.WithoutCancel(ctx), rt); err != nil {
+		logging.WarnContextf(ctx, "session cleanup failed: %v", err)
+	}
+}
+
+// announceCleanupSkip reports a skipped cleanup once per evaluator rather than
+// once per case; the reason is the same for every case in a run.
+func (e *defaultEvaluator) announceCleanupSkip(ctx context.Context, reason string) {
+	e.cleanupNotice.Do(func() {
+		logging.WarnContextf(ctx, "session cleanup requested but not run: %s", reason)
+	})
+}
+
 func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.CaseConfig, configName string, overrideRT runtime.Runtime, overrideAgent agent.Agent) EvalResult { //nolint:cyclop,gocyclo,funlen // orchestrates the full case lifecycle (runtime prep → agent run → judge → finalize); splitting further would obscure the linear flow
 	ctx, span := observability.Tracer().Start(ctx, "evaluator.case")
 	defer span.End()
@@ -407,6 +459,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	result := EvalResult{
 		CaseID:        caseCfg.ID,
 		CaseName:      caseCfg.Title,
+		Configuration: configName,
 		Prompt:        prompt,
 		SessionResult: &agent.SessionResult{},
 		TurnsTotal:    turnsTotal,
@@ -435,6 +488,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	)
 	if overrideRT != nil {
 		rt = overrideRT
+		rt.MergeEnv(map[string]string{runtime.VariantEnvName: configName})
 		var err error
 		observation, err = agent.Preflight(ctx, rt, runAgent)
 		if err != nil {
@@ -452,12 +506,24 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 			result.Configuration = configName
 			return result
 		}
-		defer func() { _ = rt.Close() }()
+		defer func() {
+			e.cleanupSessionDir(ctx, runAgent, rt)
+			_ = rt.Close()
+		}()
 	}
 
 	logging.DebugContextf(ctx, "Runner: case %s (%s): %s", caseCfg.ID, configName, caseCfg.Title)
 
 	judgeCfg := judge.MergeJudgeConfig(e.evalCfg.Judge, caseCfg.Judge)
+	judgePlan, planErr := config.ResolveJudgePlan(e.evalCfg, caseCfg)
+	if planErr != nil {
+		result.Status, result.Error = judge.StatusError, planErr
+		return result
+	}
+	if err := e.validateJudgePlan(judgePlan, &result); err != nil {
+		result.Status, result.Error = judge.StatusError, err
+		return result
+	}
 
 	// Multi-turn branch: delegate to dedicated engine when the case defines
 	// input.turns AND the agent supports session resumption. Agents that do
@@ -479,6 +545,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 			return multiTurnResult
 		}
 		if caseCfg.UserSimulator != nil {
+			recordSkippedJudges(&result, judgePlan, "session_resumption_unsupported")
 			result.Status = judge.StatusError
 			result.Error = fmt.Errorf("agent %s does not support session resumption required by user simulation", runAgent.Name())
 			result.Configuration = configName
@@ -494,7 +561,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 
 	var cleanupArtifacts func()
 	finalizeArtifacts := func(*agent.SessionResult) {}
-	if judgeNeedsWorkspaceDiff(judgeCfg) {
+	if judgePlanNeedsWorkspaceDiff(judgePlan) {
 		cleanupArtifacts, finalizeArtifacts = e.prepareWorkspaceArtifacts(ctx, rt, caseCfg)
 		defer cleanupArtifacts()
 	}
@@ -532,6 +599,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	// they are captured even when the agent failed or timed out.
 	e.collectGlobArtifacts(ctx, rt, configName, caseCfg)
 	if shouldReturn := e.handleExecutionResult(ctx, caseCfg, configName, startTime, &result, execErr); shouldReturn {
+		recordSkippedJudges(&result, judgePlan, "agent_execution_failed")
 		return result
 	}
 	// A genuine non-zero exit may still be handled by expect.exit_code or a
@@ -543,7 +611,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 		defaultExpect := e.evalCfg.Cases.Defaults.Expect
 		effectiveExpect := mergeExpectConfig(&defaultExpect, &caseCfg.Expect)
 		hasExitCodeCheck := effectiveExpect.ExitCode != nil
-		hasJudge := judgeCfg.Type != ""
+		hasJudge := judgeCfg.Type != "" || judgePlan.Multi
 		if !hasExitCodeCheck && !hasJudge {
 			if result.DurationMs == 0 {
 				result.DurationMs = time.Since(startTime).Milliseconds()
@@ -593,8 +661,18 @@ func (e *defaultEvaluator) evaluateCaseSession(
 		SessionResult:  sessionResult,
 		TurnResults:    toJudgeTurnResults(result.TurnResults),
 	}
+	plan, planErr := config.ResolveJudgePlan(e.evalCfg, caseCfg)
+	if planErr != nil {
+		result.Status, result.Error = judge.StatusError, planErr
+		return *result
+	}
 
-	if failed := e.runExpectPreCheck(ctx, caseCfg, configName, judgeInput, turnsTotal, result); failed {
+	if failed := e.runExpectPreCheck(ctx, caseCfg, configName, judgeCfg, judgeInput, result); failed {
+		recordSkippedJudges(result, plan, "gate_failed")
+		if plan.Multi {
+			result.Grading, _ = judge.DefaultOutcomeAggregator().Aggregate(result.JudgeResults, result.Turns, turnsTotal)
+			result.Grading.Status = judge.StatusFail
+		}
 		return *result
 	}
 
@@ -603,8 +681,13 @@ func (e *defaultEvaluator) evaluateCaseSession(
 		expectAssertions = result.ExpectResult.ToAssertionResults()
 	}
 
-	finalResult := e.runJudgePhase(ctx, rt, caseCfg, configName, judgeCfg, turnsTotal, runAgent, judgeInput, result)
-	if len(expectAssertions) > 0 && finalResult.Grading != nil {
+	var finalResult EvalResult
+	if plan.Multi {
+		finalResult = e.runMultipleJudges(ctx, rt, caseCfg, configName, plan, turnsTotal, runAgent, judgeInput, result)
+	} else {
+		finalResult = e.runJudgePhase(ctx, rt, caseCfg, configName, judgeCfg, turnsTotal, runAgent, judgeInput, result, "judge/run", false)
+	}
+	if !plan.Multi && len(expectAssertions) > 0 && finalResult.Grading != nil {
 		finalResult.Grading.AssertionResults = append(expectAssertions, finalResult.Grading.AssertionResults...)
 		finalResult.Grading.Summary.Passed += len(expectAssertions)
 		finalResult.Grading.Summary.Total += len(expectAssertions)
@@ -620,8 +703,8 @@ func (e *defaultEvaluator) runExpectPreCheck(
 	ctx context.Context,
 	caseCfg *config.CaseConfig,
 	configName string,
+	judgeCfg config.JudgeConfig,
 	judgeInput judge.Input,
-	turnsTotal int,
 	result *EvalResult,
 ) bool {
 	// Merge default expect with case-level expect
@@ -639,8 +722,7 @@ func (e *defaultEvaluator) runExpectPreCheck(
 		return false
 	}
 
-	assertions := expectResult.ToAssertionResults()
-	result.Grading = judge.NewResult(assertions, result.Turns, turnsTotal)
+	result.Grading = judge.NewExpectFailureResult(expectResult, judgeCfg, judgeInput)
 	result.Status = judge.StatusFail
 	result.Configuration = configName
 	logging.DebugContextf(ctx, "Judge: case %s expect pre-check FAILED", caseCfg.ID)
@@ -657,17 +739,19 @@ func (e *defaultEvaluator) runJudgePhase(
 	runAgent agent.Agent,
 	judgeInput judge.Input,
 	result *EvalResult,
+	artifactRoot string,
+	strictTimeout bool,
 ) EvalResult {
 	if observability.LinkedTraceTopologyEnabled() && judgeNeedsWorkspaceDiff(judgeCfg) {
 		ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, nil)
 		ctx, span := observability.StartLinkedRootSpan(ctx, "evaluator.judge")
 		defer span.End()
 		logging.DebugContextf(ctx, "Evaluator: linked judge trace started for case %s (%s)", caseCfg.ID, configName)
-		return e.runJudgePhaseWithSpan(ctx, span, rt, caseCfg, configName, judgeCfg, turnsTotal, runAgent, judgeInput, result)
+		return e.runJudgePhaseWithSpan(ctx, span, rt, caseCfg, configName, judgeCfg, turnsTotal, runAgent, judgeInput, result, artifactRoot, strictTimeout)
 	}
 	ctx, span := observability.Tracer().Start(ctx, "evaluator.judge")
 	defer span.End()
-	return e.runJudgePhaseWithSpan(ctx, span, rt, caseCfg, configName, judgeCfg, turnsTotal, runAgent, judgeInput, result)
+	return e.runJudgePhaseWithSpan(ctx, span, rt, caseCfg, configName, judgeCfg, turnsTotal, runAgent, judgeInput, result, artifactRoot, strictTimeout)
 }
 
 func (e *defaultEvaluator) runJudgePhaseWithSpan(
@@ -681,6 +765,8 @@ func (e *defaultEvaluator) runJudgePhaseWithSpan(
 	runAgent agent.Agent,
 	judgeInput judge.Input,
 	result *EvalResult,
+	artifactRoot string,
+	strictTimeout bool,
 ) EvalResult {
 	span.SetAttributes(
 		attribute.String("skill_up.case.id", caseCfg.ID),
@@ -708,27 +794,20 @@ func (e *defaultEvaluator) runJudgePhaseWithSpan(
 		return *result
 	}
 	if judgeCfg.Type == judgeTypeAgentJudge {
-		judgeInput.ArtifactDir = e.prepareOutputDir(ctx, configName, caseCfg.ID, "judge/run")
+		judgeInput.ArtifactDir = e.prepareOutputDir(ctx, configName, caseCfg.ID, artifactRoot)
+		judgeInput.ContextArtifactDir = filepath.ToSlash(filepath.Join(filepath.Dir(artifactRoot), "context"))
 	}
 
-	// For ScriptJudge, serialize transcript to a temp file so that
-	// EVAL_TRANSCRIPT_PATH is populated for the evaluation script.
-	if sj, ok := j.(*judge.ScriptJudge); ok && len(judgeInput.Transcript) > 0 {
-		transcriptPath, cleanupFn, serErr := serializeTranscript(judgeInput.Transcript)
-		if serErr != nil {
-			logging.WarnContextf(ctx, "Evaluator: failed to serialize transcript for script judge: %v", serErr)
-		} else {
-			defer cleanupFn()
-			sj.TranscriptPath = transcriptPath
-		}
-	}
+	cleanupScript := configureScriptJudge(ctx, j, judgeInput.Transcript, strictTimeout)
+	defer cleanupScript()
 
 	grading, err := j.Evaluate(ctx, judgeInput)
 	if err != nil {
+		result.Grading = grading
 		if judgeSession := judge.SessionResultFromError(err); judgeSession != nil {
 			result.JudgeSession = judgeSession
 			if judgeSession.Artifacts != nil {
-				e.ensureArtifactsInOutputDir(ctx, rt, configName, caseCfg.ID, "judge/run", judgeInput.ArtifactDir, judgeSession)
+				e.ensureArtifactsInOutputDir(ctx, rt, configName, caseCfg.ID, artifactRoot, judgeInput.ArtifactDir, judgeSession)
 			}
 		}
 		result.Status = judge.StatusError
@@ -745,11 +824,29 @@ func (e *defaultEvaluator) runJudgePhaseWithSpan(
 	logging.DebugContextf(ctx, "Judge: case %s: %s (pass_rate: %.1f%%)", caseCfg.ID, grading.Status, grading.Summary.PassRate*100)
 	if grading.JudgeSession != nil {
 		if grading.JudgeSession.Artifacts != nil {
-			e.ensureArtifactsInOutputDir(ctx, rt, configName, caseCfg.ID, "judge/run", judgeInput.ArtifactDir, grading.JudgeSession)
+			e.ensureArtifactsInOutputDir(ctx, rt, configName, caseCfg.ID, artifactRoot, judgeInput.ArtifactDir, grading.JudgeSession)
 		}
 	}
 
 	return *result
+}
+
+func configureScriptJudge(ctx context.Context, j judge.Judge, transcriptData transcript.Transcript, strictTimeout bool) func() {
+	sj, ok := j.(*judge.ScriptJudge)
+	if !ok {
+		return func() {}
+	}
+	sj.TimeoutIsError = strictTimeout
+	if len(transcriptData) == 0 {
+		return func() {}
+	}
+	path, cleanup, err := serializeTranscript(transcriptData)
+	if err != nil {
+		logging.WarnContextf(ctx, "Evaluator: failed to serialize transcript for script judge: %v", err)
+		return func() {}
+	}
+	sj.TranscriptPath = path
+	return cleanup
 }
 
 func (e *defaultEvaluator) newJudgeForCase(
@@ -760,10 +857,30 @@ func (e *defaultEvaluator) newJudgeForCase(
 	runAgent agent.Agent,
 ) (judge.Judge, error) {
 	judgeCfg = resolveJudgeScriptPath(e.judgeScriptBaseDir(), judgeCfg)
+	judgeCfg, err := config.ResolveJudgeEngineConfig(judgeCfg)
+	if err != nil {
+		return nil, err
+	}
 
 	judgeAgent, err := e.resolveJudgeAgent(ctx, judgeCfg, runAgent)
 	if err != nil {
 		return nil, err
+	}
+	if judgeCfg.Engine != nil && e.evalCfg.Environment.Type != "none" {
+		if err := judgeAgent.Install(ctx, rt); err != nil {
+			return nil, fmt.Errorf("failed to install judge agent %s: %w", judgeAgent.Name(), err)
+		}
+	}
+	if judgeCfg.Engine != nil {
+		if _, err := agent.Preflight(ctx, rt, judgeAgent); err != nil {
+			return nil, fmt.Errorf("judge agent %s preflight failed: %w", judgeAgent.Name(), err)
+		}
+	}
+	// OpenCode routing lives in the shared runtime, including for legacy judges.
+	if _, openCode := judgeAgent.(*agent.OpenCodeAgent); judgeCfg.Type == judgeTypeAgentJudge && (judgeCfg.Engine != nil || openCode) {
+		if err := initializeJudgeAgentConfig(ctx, rt, judgeAgent); err != nil {
+			return nil, fmt.Errorf("failed to initialize judge agent %s runtime configuration: %w", judgeAgent.Name(), err)
+		}
 	}
 	if err := e.removeDefaultRunSkillsBeforeJudge(ctx, rt, configName, judgeCfg, runAgent); err != nil {
 		return nil, err
@@ -778,6 +895,13 @@ func (e *defaultEvaluator) newJudgeForCase(
 	}
 
 	return j, nil
+}
+
+func initializeJudgeAgentConfig(ctx context.Context, rt runtime.Runtime, judgeAgent agent.Agent) error {
+	if openCode, ok := judgeAgent.(*agent.OpenCodeAgent); ok {
+		return openCode.InstallJudgeConfig(ctx, rt)
+	}
+	return judgeAgent.InstallMCP(ctx, rt, runtime.MCPConfig{})
 }
 
 func (e *defaultEvaluator) installJudgeSkills(ctx context.Context, rt runtime.Runtime, judgeCfg config.JudgeConfig, judgeAgent agent.Agent) error {
@@ -896,11 +1020,12 @@ func (e *defaultEvaluator) resolveJudgeAgent(ctx context.Context, judgeCfg confi
 	}
 
 	judgeAgent := runAgent
-	if e.evalCfg.Engine.Name != "" {
-		resolvedJudge := credential.ResolveJudgeConfig(judgeCfg, e.runnerConfig, e.resolver)
-		resolvedJudge = agent.ResolveAdapterConfig(resolvedJudge, e.resolver)
+	if judgeCfg.Engine != nil || e.evalCfg.Engine.Name != "" {
+		resolvedJudge, err := e.resolveJudgeAgentConfig(judgeCfg)
+		if err != nil {
+			return nil, err
+		}
 		agent.LogAdapterConfig(ctx, resolvedJudge)
-		var err error
 		judgeAgent, err = agentDetectWithResolvedConfig(resolvedJudge)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create judge agent: %w", err)
@@ -911,6 +1036,39 @@ func (e *defaultEvaluator) resolveJudgeAgent(ctx context.Context, judgeCfg confi
 	}
 
 	return judgeAgent, nil
+}
+
+func (e *defaultEvaluator) resolveJudgeAgentConfig(judgeCfg config.JudgeConfig) (credential.ResolvedAgentConfig, error) {
+	judgeCfg, err := config.ResolveJudgeEngineConfig(judgeCfg)
+	if err != nil {
+		return credential.ResolvedAgentConfig{}, err
+	}
+	resolved := credential.ResolveJudgeConfig(judgeCfg, e.runnerConfig, e.resolver)
+	resolved = agent.ResolveAdapterConfig(resolved, e.resolver)
+	return resolved, agent.ValidateJudgeAdapterConfig(resolved, e.resolver)
+}
+
+func (e *defaultEvaluator) validateJudgePlan(plan config.JudgePlan, result *EvalResult) error {
+	if plan.Multi {
+		result.AggregationStrategy = judge.DefaultOutcomeAggregator().Strategy()
+	}
+	if err := e.validateJudgeAgents(plan); err != nil {
+		recordSkippedJudges(result, plan, "invalid_judge_config")
+		return err
+	}
+	return nil
+}
+
+func (e *defaultEvaluator) validateJudgeAgents(plan config.JudgePlan) error {
+	for _, member := range plan.Judges {
+		if member.Type != judgeTypeAgentJudge {
+			continue
+		}
+		if _, err := e.resolveJudgeAgentConfig(member); err != nil {
+			return fmt.Errorf("judge %q configuration: %w", member.ID, err)
+		}
+	}
+	return nil
 }
 
 func (e *defaultEvaluator) judgeScriptBaseDir() string {
@@ -1153,6 +1311,9 @@ func mergeFileContains(a, b []config.FileContainsCheck) []config.FileContainsChe
 }
 
 func (e *defaultEvaluator) prepareRuntimeForCase(ctx context.Context, caseCfg *config.CaseConfig, configName string, ag agent.Agent) (runtime.Runtime, agent.RuntimeObservation, error) {
+	if _, exists := e.evalCfg.Environment.Env[runtime.VariantEnvName]; exists {
+		return nil, agent.RuntimeObservation{}, errors.New("environment.env.SKILL_UP_VARIANT is reserved for the framework")
+	}
 	rtCfg := e.evalCfg.Environment.ToRuntimeConfig()
 	rtCfg.Delete = e.deleteWorkspace
 	rtCfg.WorkspaceDir = e.workspaceDir
@@ -1160,7 +1321,11 @@ func (e *defaultEvaluator) prepareRuntimeForCase(ctx context.Context, caseCfg *c
 	if err != nil {
 		return nil, agent.RuntimeObservation{}, err
 	}
-	rtCfg.Env = mergeEnvMaps(rtCfg.Env, mcpEnv)
+	rtCfg.Env = mergeEnvMaps(maps.Clone(rtCfg.Env), mcpEnv)
+	if rtCfg.Env == nil {
+		rtCfg.Env = make(map[string]string)
+	}
+	rtCfg.Env[runtime.VariantEnvName] = configName
 
 	rt, err := runtime.NewRuntime(rtCfg)
 	if err != nil {
