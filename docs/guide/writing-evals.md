@@ -925,7 +925,7 @@ judge:
 
 > **MCP tool names:** `tool_called`, `tool_called_in_turn`, and `tool_not_called_in_turn` compare `name` exactly with the tool name the Agent Engine recorded. Claude Code, Codex, and Qoder CLI record MCP tools as `mcp__<server>__<tool>`, where `<server>` is the server `name` from `mcp.servers`.
 
-`output_contains` performs literal substring checks. Use `output_matches` when you need regular expressions; patterns use Go `regexp` syntax and invalid patterns fail config validation. A matcher that is present but lists no values is rejected by config validation: an empty `output_contains`, `output_matches`, `turn_response_contains`, or `turn_response_not_contains` would otherwise be reported as passing with zero checks.
+`output_contains` performs literal substring checks. Use `output_matches` when you need regular expressions; patterns use Go `regexp` syntax and invalid patterns fail config validation. A matcher that is present but lists no values is rejected by config validation: an empty `output_contains`, `output_matches`, `turn_response_contains`, or `turn_response_not_contains` would otherwise be reported as passing with zero checks. The same applies to blank entries: an empty literal is a substring of every response and an empty pattern matches every response, so `all: [""]` cannot keep the false-positive pass.
 
 ### judge: script — custom script
 

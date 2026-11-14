@@ -789,7 +789,7 @@ judge:
 
 > **MCP 工具名**：`tool_called`、`tool_called_in_turn` 和 `tool_not_called_in_turn` 会把 `name` 与 Agent Engine 记录的工具名做精确匹配。Claude Code、Codex 和 Qoder CLI 记录的 MCP 工具名格式为 `mcp__<server>__<tool>`，其中 `<server>` 是 `mcp.servers` 中的 `name`。
 
-`output_contains` 执行字面 substring 检查。需要正则表达式时使用 `output_matches`；pattern 使用 Go `regexp` 语法，非法 pattern 会在配置校验阶段失败。 matcher 存在但没有任何值时会被配置校验拒绝：空的 `output_contains`、`output_matches`、`turn_response_contains` 或 `turn_response_not_contains` 否则会以零检查被报告为通过。
+`output_contains` 执行字面 substring 检查。需要正则表达式时使用 `output_matches`；pattern 使用 Go `regexp` 语法，非法 pattern 会在配置校验阶段失败。 matcher 存在但没有任何值时会被配置校验拒绝：空的 `output_contains`、`output_matches`、`turn_response_contains` 或 `turn_response_not_contains` 否则会以零检查被报告为通过。空白条目同样会被拒绝：空字面量是任何响应的子串，空 pattern 匹配任何响应，因此 `all: [""]` 无法继续制造假通过。
 
 ### judge: script — 自定义脚本评估
 

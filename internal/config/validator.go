@@ -377,21 +377,57 @@ func ruleHasRecognizableField(rule Rule) bool {
 // turns into a silent pass with zero checks (see #294 for the same class of
 // bug with unknown matcher names). validateRecognizableRules only catches rules
 // that name no matcher at all.
+//
+// The same reasoning covers blank entries: an empty literal is a substring of
+// every response and an empty regular expression matches every response, so
+// [" "] or [""] would preserve the false-positive pass without checking the
+// output.
 func validateNonVacuousRules(field string, rules []Rule) []string {
 	var errs []string
 	for i, rule := range rules {
 		prefix := fmt.Sprintf("%s[%d]", field, i)
-		if rule.OutputContains != nil && len(rule.OutputContains.All)+len(rule.OutputContains.Any)+len(rule.OutputContains.Not) == 0 {
-			errs = append(errs, prefix+".output_contains must include at least one of all, any, or not")
+		if oc := rule.OutputContains; oc != nil {
+			if len(oc.All)+len(oc.Any)+len(oc.Not) == 0 {
+				errs = append(errs, prefix+".output_contains must include at least one of all, any, or not")
+			}
+			errs = append(errs, validateNonBlankMatcherValues(prefix+".output_contains.all", oc.All)...)
+			errs = append(errs, validateNonBlankMatcherValues(prefix+".output_contains.any", oc.Any)...)
+			errs = append(errs, validateNonBlankMatcherValues(prefix+".output_contains.not", oc.Not)...)
 		}
-		if rule.OutputMatches != nil && len(rule.OutputMatches.All)+len(rule.OutputMatches.Any)+len(rule.OutputMatches.Not) == 0 {
-			errs = append(errs, prefix+".output_matches must include at least one of all, any, or not")
+		if om := rule.OutputMatches; om != nil {
+			if len(om.All)+len(om.Any)+len(om.Not) == 0 {
+				errs = append(errs, prefix+".output_matches must include at least one of all, any, or not")
+			}
+			errs = append(errs, validateNonBlankMatcherValues(prefix+".output_matches.all", om.All)...)
+			errs = append(errs, validateNonBlankMatcherValues(prefix+".output_matches.any", om.Any)...)
+			errs = append(errs, validateNonBlankMatcherValues(prefix+".output_matches.not", om.Not)...)
 		}
-		if rule.TurnResponseContains != nil && len(rule.TurnResponseContains.ContainsAll)+len(rule.TurnResponseContains.ContainsAny) == 0 {
-			errs = append(errs, prefix+".turn_response_contains must include at least one of contains_all or contains_any")
+		if trc := rule.TurnResponseContains; trc != nil {
+			if len(trc.ContainsAll)+len(trc.ContainsAny) == 0 {
+				errs = append(errs, prefix+".turn_response_contains must include at least one of contains_all or contains_any")
+			}
+			errs = append(errs, validateNonBlankMatcherValues(prefix+".turn_response_contains.contains_all", trc.ContainsAll)...)
+			errs = append(errs, validateNonBlankMatcherValues(prefix+".turn_response_contains.contains_any", trc.ContainsAny)...)
 		}
-		if rule.TurnResponseNotContains != nil && len(rule.TurnResponseNotContains.NotContains) == 0 {
-			errs = append(errs, prefix+".turn_response_not_contains.not_contains must not be empty")
+		if trn := rule.TurnResponseNotContains; trn != nil {
+			if len(trn.NotContains) == 0 {
+				errs = append(errs, prefix+".turn_response_not_contains.not_contains must not be empty")
+			}
+			errs = append(errs, validateNonBlankMatcherValues(prefix+".turn_response_not_contains.not_contains", trn.NotContains)...)
+		}
+	}
+	return errs
+}
+
+// validateNonBlankMatcherValues rejects blank entries in a matcher list. An
+// empty literal is a substring of every response and an empty regular
+// expression matches every response, so a blank entry would keep the vacuous
+// pass this validation exists to remove.
+func validateNonBlankMatcherValues(field string, values []string) []string {
+	var errs []string
+	for i, value := range values {
+		if strings.TrimSpace(value) == "" {
+			errs = append(errs, fmt.Sprintf("%s[%d] must not be empty", field, i))
 		}
 	}
 	return errs
