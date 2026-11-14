@@ -7,7 +7,7 @@ constraints:
   timeout_seconds: 180
   max_turns: 3
 expect:
-  files_not_exist: [".canary-relevant", ".canary-decoy"]
+  files_not_exist: [".canary-relevant", ".translation-done"]
 judge:
   type: rule_based
   success:
