@@ -15,6 +15,7 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
 	"gopkg.in/yaml.v3"
 )
 
@@ -33,11 +34,14 @@ var skillRefPrefixes = []string{"references/", "assets/", "scripts/"}
 // linkSchemePattern matches the scheme prefix of a URI (https:, mailto:, ...).
 var linkSchemePattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*:`)
 
-// urlTokenPattern matches a complete URL token (scheme://...) so prose
-// scanning can blank it out before collecting citations: a query string or
-// fragment may contain an attachment-looking path (view?file=assets/x.png)
-// that is part of the URL, not a skill citation.
-var urlTokenPattern = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://\S+`)
+// urlTokenPattern matches a complete URL token — scheme://... or a bare
+// www. host — so prose scanning can blank it out before collecting
+// citations: a query string or fragment may contain an attachment-looking
+// path (view?file=assets/x.png) that is part of the URL, not a skill
+// citation. The token is limited to ASCII URL characters, so it ends at
+// whitespace and at non-ASCII prose such as a full-width comma
+// (详见https://example.com/docs，以及references/guide.md).
+var urlTokenPattern = regexp.MustCompile(`(?:[a-zA-Z][a-zA-Z0-9+.-]*://|\bwww\.)[A-Za-z0-9_.~:/?#\[\]@!$&'()*+,;=%-]+`)
 
 // relScriptPattern matches ./-prefixed relative path mentions inside script
 // and data files (`source ./lib.sh`). Group 1 is the path relative to the
@@ -294,7 +298,9 @@ func walkMarkdownAttachmentRefs(rel string, data []byte, add func(string)) {
 		}
 		switch node := n.(type) {
 		case *ast.Text:
-			collectProseRefs(node.Segment.Value(data), add)
+			if !continuesProseRun(node) {
+				collectProseRefs(proseRun(node, data), add)
+			}
 		case *ast.Link:
 			addLinkTarget(node.Destination)
 		case *ast.Image:
@@ -430,7 +436,9 @@ func extractSkillRefs(body []byte) []string {
 		}
 		switch node := n.(type) {
 		case *ast.Text:
-			collectProseRefs(node.Segment.Value(body), add)
+			if !continuesProseRun(node) {
+				collectProseRefs(proseRun(node, body), add)
+			}
 		case *ast.Link:
 			if ref, ok := localLinkTarget(node.Destination); ok {
 				add(ref)
@@ -453,6 +461,35 @@ func extractSkillRefs(body []byte) []string {
 		return ast.WalkContinue, nil
 	})
 	return refs
+}
+
+// proseRun returns the text of first and of the text siblings that directly
+// follow it as one string. goldmark ends a text node after an emphasis
+// delimiter, so an underscore inside a path (references/api_docs.md) or a URL
+// (https://example.com/a_b?f=assets/x.png) splits that token across adjacent
+// text nodes; scanning the run as a whole keeps it intact. Line breaks between
+// the nodes are kept, and backslash escapes are resolved the way CommonMark
+// renders them (references/api\_docs.md cites references/api_docs.md).
+func proseRun(first *ast.Text, src []byte) []byte {
+	var buf bytes.Buffer
+	for n := ast.Node(first); n != nil; n = n.NextSibling() {
+		t, ok := n.(*ast.Text)
+		if !ok {
+			break
+		}
+		buf.Write(t.Segment.Value(src))
+		if t.SoftLineBreak() || t.HardLineBreak() {
+			buf.WriteByte('\n')
+		}
+	}
+	return util.UnescapePunctuations(buf.Bytes())
+}
+
+// continuesProseRun reports whether t was already scanned as part of the
+// prose run that starts at an earlier text sibling (see proseRun).
+func continuesProseRun(t *ast.Text) bool {
+	_, ok := t.PreviousSibling().(*ast.Text)
+	return ok
 }
 
 // collectProseRefs collects root-anchored attachment citations from a prose

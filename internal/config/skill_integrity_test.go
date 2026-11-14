@@ -411,6 +411,32 @@ Mirror: https://example.com/page#assets/icon.png
 	}
 }
 
+func TestCheckSkillIntegrityUnderscoredCitations(t *testing.T) {
+	t.Parallel()
+
+	// Regression: an underscore splits goldmark's prose text nodes, which used
+	// to truncate references/api_docs.md to a phantom "references/api_"
+	// citation and leave the real file uncited.
+	dir := t.TempDir()
+	writeSkillFiles(t, dir, map[string]string{
+		"SKILL.md": `---
+name: underscored
+description: Skill citing snake_case attachments in prose and link text.
+---
+
+See references/api_docs.md for the API, and read
+[references/error_codes.md](references/error_codes.md) or references/rate\_limits.md.
+`,
+		"references/api_docs.md":    "# API\n",
+		"references/error_codes.md": "# Errors\n",
+		"references/rate_limits.md": "# Limits\n",
+	})
+
+	if got := CheckSkillIntegrity(dir); len(got) != 0 {
+		t.Fatalf("CheckSkillIntegrity() = %v, want no warnings for underscored citations", got)
+	}
+}
+
 func TestCheckSkillIntegrityCitedBinaryIsNotScanned(t *testing.T) {
 	t.Parallel()
 
@@ -570,6 +596,56 @@ func TestExtractSkillRefsProse(t *testing.T) {
 		{
 			name: "paths inside pipe tables are references",
 			body: "| File | Purpose |\n| --- | --- |\n| references/guide.md | docs |",
+			want: []string{"references/guide.md"},
+		},
+	})
+}
+
+// TestExtractSkillRefsProseRuns covers prose that goldmark splits across
+// adjacent text nodes (an underscore ends a node), which must be scanned as
+// one run so paths and URLs stay whole.
+func TestExtractSkillRefsProseRuns(t *testing.T) {
+	t.Parallel()
+
+	runExtractRefsCases(t, []extractRefsCase{
+		{
+			name: "underscore inside a prose path keeps the path whole",
+			body: "See references/api_docs.md for the API.",
+			want: []string{"references/api_docs.md"},
+		},
+		{
+			name: "underscore inside link text keeps the path whole",
+			body: "Read [references/api_docs.md](references/api_docs.md) first.",
+			want: []string{"references/api_docs.md"},
+		},
+		{
+			name: "backslash-escaped underscore resolves to the rendered path",
+			body: `See references/api\_docs.md for the API.`,
+			want: []string{"references/api_docs.md"},
+		},
+		{
+			name: "paths on consecutive lines stay separate",
+			body: "First references/a.md\nreferences/b.md next.",
+			want: []string{"references/a.md", "references/b.md"},
+		},
+		{
+			name: "bare URL with an underscore in its path is ignored",
+			body: "Remote: https://example.com/a_b/view?file=assets/missing.png",
+			want: nil,
+		},
+		{
+			name: "bare www URL with a query string is ignored",
+			body: "Remote: www.example.com/view?file=assets/missing.png",
+			want: nil,
+		},
+		{
+			name: "underscored URL used as link text is ignored",
+			body: "[https://example.com/a_b?file=assets/x.png](https://example.com/a_b?file=assets/x.png)",
+			want: nil,
+		},
+		{
+			name: "citation after a URL in CJK prose is found",
+			body: "详见https://example.com/docs，以及references/guide.md。",
 			want: []string{"references/guide.md"},
 		},
 	})
