@@ -20,7 +20,7 @@ import json
 import sys
 from pathlib import Path
 
-MARKERS = (".canary-relevant", ".canary-decoy")
+MARKERS = (".canary-relevant", ".translation-done")
 
 
 def tool_calls(obj, out):

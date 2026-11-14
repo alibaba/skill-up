@@ -15,14 +15,14 @@ and is run with `scripts/routing-canary/run.sh`.
 ## Method
 
 Two Skills with non-overlapping triggers are installed for every case:
-`canary-routing` ("the canary routing code word") and `canary-decoy` ("translate
-French poetry"). Three cases probe the routing decision:
+`canary-routing` ("the canary routing code word") and `literary-translation`
+("translate French poetry or literary prose"). Three cases probe the routing decision:
 
 | Case | Request | Expected workspace evidence |
 | --- | --- | --- |
-| `relevant` | ask for the canary code word | `.canary-relevant` written, `.canary-decoy` absent |
+| `relevant` | ask for the canary code word | `.canary-relevant` written, `.translation-done` absent |
 | `unrelated` | `17 * 23` | neither marker written |
-| `competing` | French poetry translation | `.canary-decoy` written, `.canary-relevant` absent |
+| `competing` | French poetry translation | `.translation-done` written, `.canary-relevant` absent |
 
 Each Skill body instructs the model to write a marker file before replying, and
 the case expectations check those files. A green case therefore means the Skill
@@ -49,10 +49,13 @@ pins it.
 
 ## Results
 
-| Engine | Relevant | Unrelated | Competing | Runs |
+Three iterations per engine (`ITERATIONS=3`), each iteration running all three
+cases in a fresh workspace:
+
+| Engine | Relevant | Unrelated | Competing | Iterations |
 | --- | --- | --- | --- | --- |
-| `claude_code` | PASS | PASS | PASS | 2 |
-| `codex` | PASS | PASS | PASS | 2 |
+| `claude_code` | 3/3 PASS | 3/3 PASS | **1/3 PASS** | 3 |
+| `codex` | 3/3 PASS | 3/3 PASS | 3/3 PASS | 3 |
 | `opencode` | not run | not run | not run | 0 |
 
 `opencode` could not be measured on this machine: the engine refuses to start
@@ -61,15 +64,30 @@ rules that OpenCode V1 rejects (`V2 permissions are not supported by OpenCode
 V1`). Verifying OpenCode needs an isolated config directory; that is left as the
 next measurement.
 
-Both engines pass by *application* evidence (the marker files), not by text
-similarity. That is the outcome half of the question. The observability half is
-the next section.
+These numbers are *application* evidence (the marker files), not text
+similarity. Two results deserve attention rather than being averaged away:
+
+- The `claude_code` competing case is flaky on application while its routing
+  decision is stable: in all three iterations the transcript contains a
+  `Skill` call for `translator`, but only iteration 1 also wrote
+  `.translation-done`. In iteration 3 the model answered the translation first
+  and then explained that it did not follow the marker instruction because the
+  instruction looked artificial. Loading the right Skill and obeying it are
+  different measurements.
+- An earlier fixture named the second Skill `canary-decoy`. With that name the
+  competing case failed once out of three runs because the model read the name
+  from the catalog and answered that it was "a canary/decoy entry rather than a
+  real translation skill", so it translated directly. The fixture now uses a
+  neutral `literary-translation` name; the canary result must not leak what it
+  expects.
+
+The observability half of the question is the next section.
 
 ## Capability matrix
 
 | Engine | Native evidence | Strongest claim it supports | Identity in the evidence |
 | --- | --- | --- | --- |
-| `claude_code` | Structured `Skill` tool call with a result | **loaded / invoked** — the engine reports launching a named Skill body | Install directory name (`skill`, `decoy`), not the frontmatter `name` |
+| `claude_code` | Structured `Skill` tool call with a result | **loaded / invoked** — the engine reports launching a named Skill body | Install directory name (`skill`, `translator`), not the frontmatter `name` |
 | `codex` | No Skill event; the session starts with an injected `<skills_instructions>` catalog, and activation appears as a command that references the Skill file | **loaded** (weaker) — the command opened `SKILL.md`; no engine-level selection confirmation | Catalog lists the frontmatter `name` plus the install path |
 | `opencode` | Unknown | — | — |
 
@@ -98,6 +116,12 @@ Two gaps remain:
   need a mapping from install identity to declared identity; that is the same
   problem addressed in #367/#393/#400.
 
+Loading is also not the same as obeying. In the neutral-fixture runs the model
+called `Skill {"skill": "translator"}` in every competing iteration, but only
+one of three wrote the marker and replied with the token the Skill body asked
+for. The tool event is still valid routing evidence; the marker is what turns it
+into an application claim, and that second step is where the flakiness appeared.
+
 ### codex
 
 No Skill tool call exists. Instead the session begins with a developer message
@@ -110,7 +134,7 @@ that contains the installed Skill catalog:
 - `r1` = /Users/<user>/.agents/skills
 - `r2` = <CODEX_HOME>/skills/.system
 ### Available skills
-- canary-decoy: Use when the user asks to translate Frenc (file: r0/decoy/SKILL.md)
+- literary-translation: Use when the user asks to translate Frenc (file: r0/translator/SKILL.md)
 - canary-routing: Use when the user asks for the canary r (file: r0/skill/SKILL.md)
 ...
 ```
@@ -164,20 +188,29 @@ matters if this becomes a CI signal.
    polluted. `CODEX_HOME` isolates part of Codex's roots but does not remove
    `~/.agents/skills` (observed).
 2. **Install identity is the directory name on one engine and the declared name
-   on the other.** Claude Code's `Skill` call uses `skill`/`decoy` (directory
-   names); Codex's catalog uses `canary-routing`/`canary-decoy` (frontmatter
-   names) while pointing at the same directories. A normalized `SkillActivation`
+   on the other.** Claude Code's `Skill` call uses `skill`/`translator` (directory
+   names); Codex's catalog uses `canary-routing`/`literary-translation`
+   (frontmatter names) while pointing at the same directories. A normalized `SkillActivation`
    must not compare these two strings directly.
 3. **Nested Skill directories are installed recursively.** A first fixture put
-   the decoy inside the root Skill directory; both Codex and Claude Code then
-   registered the decoy twice (once nested, once flat), because `skills[].path`
+   the second Skill inside the root Skill directory; both Codex and Claude Code then
+   registered the second Skill twice (once nested, once flat), because `skills[].path`
    is copied recursively. The fixture in `examples/routing-canary/` keeps the two
    Skills side by side for that reason.
-4. **Routing is nondeterministic at the margin.** The installed-name retry in the
-   early Claude Code run is one example; the unrelated and competing cases are
-   there to catch the other direction (no activation on a non-match, and the
-   right Skill when two are present). Repeated runs (`ITERATIONS=3`) are
-   supported but have not been recorded yet.
+4. **Application compliance is nondeterministic where the task is answerable
+   without the Skill.** With three iterations on the final fixture, Claude Code
+   routed the competing case correctly 3/3 (a `translator` `Skill` call in every
+   transcript) but applied the marker instruction only 1/3; the model translated
+   the line itself and said the instruction looked artificial. The relevant case
+   (where the code word cannot be guessed) applied 3/3. So a marker-based PASS
+   measures routing *and* instruction compliance together, and the second part
+   depends on whether the request can be satisfied without loading the Skill.
+   Codex applied 3/3 on all cases.
+5. **The fixture name leaks the expected answer.** Naming the second Skill
+   `canary-decoy` was visible to the model through the catalog; one run answered
+   that it was "a canary/decoy entry rather than a real translation skill" and
+   skipped it. The fixture now uses `literary-translation`. Any Skill the canary
+   expects the model to *use* must not be named like an experiment.
 
 ## What this does not show
 
@@ -197,6 +230,10 @@ matters if this becomes a CI signal.
    about; a capability flag should say unsupported rather than silently pass.
 3. Measure OpenCode in an isolated config directory before designing anything
    for it.
-4. Then derive `SkillActivation`, the capability flag and `skill_activated` from
+4. Keep routing evidence and application evidence as separate assertions. A
+   marker file is only decisive for a request the model cannot answer without
+   the Skill (the `relevant` case); for a competing case whose task is
+   natively answerable it conflates "routed" with "chose to obey".
+5. Then derive `SkillActivation`, the capability flag and `skill_activated` from
    the actual event contracts, with unsupported engines reported explicitly
    (not skipped green).

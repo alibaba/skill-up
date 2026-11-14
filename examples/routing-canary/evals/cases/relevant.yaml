@@ -8,7 +8,7 @@ constraints:
   max_turns: 3
 expect:
   files_exist: [".canary-relevant"]
-  files_not_exist: [".canary-decoy"]
+  files_not_exist: [".translation-done"]
 judge:
   type: rule_based
   success:

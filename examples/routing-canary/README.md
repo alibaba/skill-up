@@ -16,20 +16,27 @@ Two Skills are installed per run:
 | Skill | Trigger |
 | --- | --- |
 | `canary-routing` | asks for "the canary routing code word" |
-| `canary-decoy` | asks to translate French poetry into English |
+| `literary-translation` | asks to translate French poetry into English |
 
 Three cases probe the routing decision from both sides:
 
 | Case | Request | Expected workspace evidence |
 | --- | --- | --- |
-| `relevant` | the canary code word | `.canary-relevant` written, `.canary-decoy` absent |
+| `relevant` | the canary code word | `.canary-relevant` written, `.translation-done` absent |
 | `unrelated` | `17 * 23` | neither marker written |
-| `competing` | French poetry translation | `.canary-decoy` written, `.canary-relevant` absent |
+| `competing` | French poetry translation | `.translation-done` written, `.canary-relevant` absent |
 
 Each Skill body writes a marker file before replying. The case expectations
-check those files, so a green result means the Skill instructions were followed
-rather than merely echoed in the final answer. The judge only checks the reply
-text.
+check those files, so a green result means the Skill instructions were applied
+to the workspace rather than merely echoed in the final answer. The judge only
+checks the reply text.
+
+A marker only measures "routed **and** obeyed". On a request the model can
+answer without the Skill (the competing translation case) it may load the right
+Skill and then skip the marker instruction, which reads as a routing failure
+even though the transcript shows the correct `Skill` call. Run with
+`ITERATIONS=3` before reading anything into a single pass; the investigation
+report separates routing evidence from application evidence.
 
 ## Run it
 
@@ -71,6 +78,11 @@ behavior and the canary is not meaningful across unknown models.
 - Keep the two Skill directories flat. `skills[].path` is copied recursively, so
   a Skill directory that contains another `SKILL.md` registers the nested one as
   a second entry with the same declared name.
+- Do not name a Skill after what the experiment expects. A Skill named
+  `canary-decoy` was visible in the catalog and one run answered that it was a
+  decoy rather than a real Skill, so it never applied. The fixture uses neutral
+  names (`canary-routing` for the code-word arm is unavoidable, but the other
+  arm is `literary-translation`).
 - Engines also load their own global Skills (`~/.claude/skills`,
   `~/.agents/skills`, `$CODEX_HOME/skills`, ...). Those entries appear in the
   same selection surface and can capture a canary prompt. See the investigation

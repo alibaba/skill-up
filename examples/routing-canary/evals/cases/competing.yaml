@@ -1,5 +1,5 @@
 id: competing
-title: Two installed Skills, only the decoy matches
+title: Two installed Skills, only the translation Skill matches
 tag: routing
 input:
   prompt: "Translate this French line into English: 'La nuit tombe sur la ville.' Use the Skill that covers French poetry translation."
@@ -7,10 +7,10 @@ constraints:
   timeout_seconds: 180
   max_turns: 3
 expect:
-  files_exist: [".canary-decoy"]
+  files_exist: [".translation-done"]
   files_not_exist: [".canary-relevant"]
 judge:
   type: rule_based
   success:
     - output_contains:
-        all: ["DECOY-OK"]
+        all: ["TRANSLATION-OK"]
