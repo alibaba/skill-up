@@ -15,6 +15,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeps the placeholder description and open object schema; the schema is
   advertised only, not enforced on calls. Existing `tool_responses` fixtures
   keep working unchanged and may sit beside `tools` for other tool names.
+- `skill-up validate --skill <dir>` lints the content integrity of a single
+  skill as authored on disk: SKILL.md must open with a closed YAML frontmatter
+  block declaring non-empty `name` and `description` fields, and every
+  `references/`, `assets/`, `scripts/` path cited in the markdown body must
+  exist on disk. The body is parsed as CommonMark so prose citations, local
+  link/image destinations, and path-citing inline code spans are checked —
+  with or without a leading `./`, and with equivalent path spellings
+  normalized — while code blocks, remote URLs, and raw HTML are ignored. The
+  opt-in `--uncited` flag also reports files under those directories that are
+  not reachable from the body, the orphans a truncated SKILL.md leaves behind;
+  reachability is transitive through the links of cited documents and the
+  path mentions of cited scripts (dotfiles stay silent; a directory cited as a
+  link destination covers everything beneath it), and it stays a heuristic,
+  which is why the report is off by default. Findings print as warnings
+  without changing the exit code; `--strict` promotes them to failures. The
+  check is source-level and independent from eval config validation — it does
+  not see what a run installs after `skills.include`/`skills.exclude`
+  filtering.
 
 ### Fixed
 - Stop reporting a successful Claude Code answer as a provider rate-limit or

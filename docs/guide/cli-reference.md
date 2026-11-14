@@ -176,6 +176,52 @@ The validator checks that:
 - All required fields are present
 - Field values are within the allowed range
 
+### Skill content check (`--skill`)
+
+```bash
+skill-up validate --skill <path to skill directory> [--uncited] [--strict]
+```
+
+Lints the content integrity of a single skill as authored on disk. It is a
+source-level check: it does not see what a run actually installs after
+`skills.include`/`skills.exclude` filtering, and it does not run automatically
+before evaluations. Findings print one warning per item:
+
+- SKILL.md opens with a closed YAML frontmatter block (`---` fences)
+- the frontmatter declares non-empty `name` and `description` fields
+- every `references/`, `assets/`, `scripts/` path cited in the markdown body
+  exists on disk. The body is parsed as CommonMark: prose citations, local
+  link/image destinations, and inline code spans that cite a path are checked,
+  while code blocks, remote URLs, and raw HTML are ignored as documentation
+  examples or external resources. Citations may be written with or without a
+  leading `./`, and equivalent spellings of one path
+  (`references/./guide.md`, or `references/my%20guide.md` as a link
+  destination) are normalized before comparison
+
+Pass `--uncited` to also report files under those directories that are not
+reachable from the body. Truncating the tail of a SKILL.md silently orphans
+the attachments its lost sections cited, and this report surfaces them.
+Reachability is transitive: a file a cited markdown document links to, or one
+a cited script mentions by a root-anchored or `./`-relative path, counts as
+cited even when SKILL.md never names it directly. Dotfiles (`.DS_Store`,
+`.gitkeep`, dot directories) are local metadata and stay silent; a directory
+cited as a link destination (e.g. `[docs](references/)`) covers everything
+beneath it. The report is opt-in because reachability is a heuristic: a file
+a script loads through a computed path (`$(dirname "$0")/lib.sh`, a Python
+import) is reported even though the skill works.
+
+A directory passed via `--skill` that has no SKILL.md is itself a finding.
+Pass `--strict` to promote warnings to failures (exit 1), including the
+`--uncited` report when both flags are set; without it the command exits 0
+and only prints warnings. `--skill` cannot be combined with a positional
+eval.yaml path, and `--uncited` and `--strict` apply only to `--skill`.
+
+On success:
+
+```text
+✓ skill content check passed (./skills/my-skill)
+```
+
 ---
 
 ## skill-up list-cases
