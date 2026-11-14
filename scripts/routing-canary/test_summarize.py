@@ -74,6 +74,37 @@ class SummarizeFixtureTest(unittest.TestCase):
         self.assertIn("| missing |", missing)
         self.assertIn("| PASS |", row(text, "relevant"))
 
+    def test_opencode_nested_tool_event_is_reported(self) -> None:
+        """OpenCode keeps the tool name in `part.tool` and the arguments in `part.state.input`."""
+        write_json(self.iteration / "result.json", {"case_results": [{"case_id": "competing", "status": "PASS"}]})
+        write_transcript(
+            self.iteration / "competing",
+            [
+                {
+                    "type": "tool_use",
+                    "part": {
+                        "type": "tool",
+                        "tool": "skill",
+                        "state": {"status": "completed", "input": {"name": "literary-translation"}},
+                    },
+                },
+                {
+                    "type": "tool_use",
+                    "part": {
+                        "type": "tool",
+                        "tool": "bash",
+                        "state": {"status": "completed", "input": {"command": "printf 'translated' > .translation-done"}},
+                    },
+                },
+            ],
+        )
+        write_json(self.iteration / "competing/with_skill/grading.json", {"summary": {"failed": 0}})
+
+        text = render(self.root)
+        competing = row(text, "competing")
+        self.assertIn("| skill |", competing)
+        self.assertIn("| .translation-done |", competing)
+
     def test_reference_without_a_read_is_not_reported_as_a_skill_call(self) -> None:
         write_json(self.iteration / "result.json", {"case_results": [{"case_id": "listing", "status": "PASS"}]})
         write_transcript(

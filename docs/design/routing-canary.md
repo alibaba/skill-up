@@ -39,7 +39,7 @@ Pinned environment for the runs below:
 | --- | --- | --- | --- |
 | `claude_code` | 2.1.317 | `environment.type: none` | engine default (MiniMax-compatible endpoint) |
 | `codex` | 0.166.0 | `environment.type: none` | engine default (`deepseek/deepseek-v4.1-flash`) |
-| `opencode` | 1.19.0 | not verified | — |
+| `opencode` | 1.19.0 | `environment.type: none` | pinned `opencode/deepseek-v4.1-flash-free` |
 
 The model is not part of the canary contract: routing is a model behavior, so a
 canary result is only comparable at a fixed engine version **and** model. The
@@ -56,13 +56,16 @@ cases in a fresh workspace:
 | --- | --- | --- | --- | --- |
 | `claude_code` | 3/3 PASS | 3/3 PASS | **1/3 PASS** | 3 |
 | `codex` | 3/3 PASS | 3/3 PASS | 3/3 PASS | 3 |
-| `opencode` | not run | not run | not run | 0 |
+| `opencode` | 3/3 PASS | 3/3 PASS | **1/3 PASS** | 3 |
 
-`opencode` could not be measured on this machine: the engine refuses to start
-because the user-level `~/.config/opencode/opencode.json` contains V2 permission
-rules that OpenCode V1 rejects (`V2 permissions are not supported by OpenCode
-V1`). Verifying OpenCode needs an isolated config directory; that is left as the
-next measurement.
+`opencode` needed two preconditions. Its user-level
+`~/.config/opencode/opencode.json` on this machine contains V2 permission rules
+that OpenCode V1 rejects (`V2 permissions are not supported by OpenCode V1`), so
+the run uses an isolated config directory (`XDG_CONFIG_HOME`) and an isolated
+data directory (`XDG_DATA_HOME`) with only `opencode/auth.json` copied in. The
+engine also has no usable default model here, so the run pins one with
+`CANARY_MODEL`; a canary run without a model reports `Model is unavailable` for
+the cases that call the model.
 
 These numbers are *application* evidence (the marker files), not text
 similarity. Two results deserve attention rather than being averaged away:
@@ -89,7 +92,7 @@ The observability half of the question is the next section.
 | --- | --- | --- | --- |
 | `claude_code` | Structured `Skill` tool call with a result | **loaded / invoked** — the engine reports launching a named Skill body | Install directory name (`skill`, `translator`), not the frontmatter `name` |
 | `codex` | No Skill event; the session starts with an injected `<skills_instructions>` catalog, and activation appears as a command that references the Skill file | **loaded** (weaker) — the command opened `SKILL.md`; no engine-level selection confirmation | Catalog lists the frontmatter `name` plus the install path |
-| `opencode` | Unknown | — | — |
+| `opencode` | Structured `skill` tool call whose result is the Skill body; the call names the frontmatter `name` | **loaded / invoked** — same class of evidence as `claude_code` | Frontmatter `name` (`literary-translation`), not the install directory (`translator`) |
 
 ### claude_code
 
@@ -157,6 +160,39 @@ the injected catalog and the behavior markers — which is exactly the kind of
 "looks like routing" inference that #166 asks us not to promote to an assertion
 prematurely.
 
+### opencode
+
+The transcript contains a structured tool call, but with its own shape: the tool
+name lives in `part.tool` and the arguments in `part.state.input`, and the tool
+result is the Skill body itself.
+
+```json
+{"type": "tool_use", "part": {"type": "tool", "tool": "skill",
+  "state": {"status": "completed",
+            "input": {"name": "literary-translation"},
+            "output": "<skill_content name=\"literary-translation\">..."}}}
+```
+
+Two details matter for a future capability flag:
+
+- The call names the **frontmatter `name`**, while the Skill is installed under
+  the directory name (`translator`). So OpenCode resolves the declared name,
+  unlike Claude Code, which reported the install directory name. Any identity
+  field must say which one it records.
+- The competing case showed the same failure mode as Claude Code: in two of
+  three iterations the transcript contains the `skill` call for
+  `literary-translation`, but the model translated directly and explained that
+  the marker instruction "is not a translation workflow". The routing evidence
+  was there; the application evidence was not.
+
+The user-level config could not be used: OpenCode V1 rejects the V2 permission
+rules in `~/.config/opencode/opencode.json`
+(`V2 permissions are not supported by OpenCode V1`). The run used
+`XDG_CONFIG_HOME`/`XDG_DATA_HOME` pointing at a temporary directory with only
+`opencode/auth.json`, and pinned
+`CANARY_MODEL=opencode/deepseek-v4.1-flash-free` because there is no working
+default model. See the example README for the exact command.
+
 ## Reading the summary
 
 `scripts/routing-canary/summarize.py` prints one row per case and keeps cases
@@ -218,18 +254,20 @@ matters if this becomes a CI signal.
   they are behavior, not activation evidence.
 - It does not compare with-Skill and without-Skill outcomes, so it cannot
   separate "routed and followed" from "would have done it anyway".
-- It does not cover OpenCode, or Windows, or sandboxed runtimes.
+- It does not cover Windows, sandboxed runtimes, or an OpenCode run with a model other than the one pinned above.
 
 ## Recommendation for the next change
 
-1. Treat the Claude Code `Skill` tool call as the only engine-native activation
-   evidence observed so far, and only at the **invoked/loaded** level. Pair it
-   with behavior assertions before calling anything "applied".
+1. Treat the Claude Code `Skill` tool call and the OpenCode `skill` tool call as
+   the engine-native activation evidence observed so far, and only at the
+   **invoked/loaded** level. Pair it with behavior assertions before calling
+   anything "applied".
 2. Treat Codex as **not exposing activation evidence** for now. Parsing a
    `SKILL.md` read as activation would encode the weak inference #166 warns
    about; a capability flag should say unsupported rather than silently pass.
-3. Measure OpenCode in an isolated config directory before designing anything
-   for it.
+3. An OpenCode capability flag must record the identity as the frontmatter
+   `name`; a later run with a second model should check whether that identity
+   changes.
 4. Keep routing evidence and application evidence as separate assertions. A
    marker file is only decisive for a request the model cannot answer without
    the Skill (the `relevant` case); for a competing case whose task is

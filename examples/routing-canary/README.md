@@ -55,6 +55,22 @@ artifacts do not land inside the repository, runs `skill-up run` with
 directory. `scripts/routing-canary/summarize.py out/<engine>` prints the
 Skill-related events found in each transcript.
 
+`CANARY_MODEL` pins the model for engines that need it:
+
+```bash
+CANARY_MODEL=opencode/deepseek-v4.1-flash-free \
+  XDG_CONFIG_HOME=/tmp/oc-cfg XDG_DATA_HOME=/tmp/oc-data \
+  scripts/routing-canary/run.sh opencode
+```
+
+OpenCode reads its user-level `~/.config/opencode/opencode.json` and refuses to
+start when that file contains V2 permission rules
+(`V2 permissions are not supported by OpenCode V1`). Point `XDG_CONFIG_HOME` and
+`XDG_DATA_HOME` at temporary directories (copy `opencode/auth.json` into the
+data directory to keep the login) and pin a model, otherwise `opencode run`
+fails with `Model is unavailable`. The captured run used
+`opencode/deepseek-v4.1-flash-free`.
+
 The script replaces `out/<engine>/` on every run (so an older `iteration-2/`
 cannot be read as part of the latest result) and exits nonzero if an engine
 failed or produced no artifacts. The summary keeps cases whose transcript is

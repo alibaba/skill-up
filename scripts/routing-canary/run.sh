@@ -5,6 +5,8 @@
 #   scripts/routing-canary/run.sh                 # all engines
 #   scripts/routing-canary/run.sh claude_code     # one engine
 #   ITERATIONS=3 scripts/routing-canary/run.sh    # repeat for stability
+#   CANARY_MODEL=opencode/deepseek-v4.1-flash-free \
+#     scripts/routing-canary/run.sh opencode      # pin the engine model
 #
 # Artifacts are written to ./out/<engine>/ (relative to the current directory).
 # The script exits nonzero if any engine failed to produce a passing run, so a
@@ -16,6 +18,7 @@ example="$root/examples/routing-canary"
 work="$(mktemp -d "${TMPDIR:-/tmp}/routing-canary.XXXXXX")"
 artifacts="${OUT:-out}"
 iterations="${ITERATIONS:-1}"
+model="${CANARY_MODEL:-}"
 failed=""
 
 if [ "$#" -gt 0 ]; then
@@ -40,8 +43,14 @@ for engine in "${engines[@]}"; do
   cp -R "$example" "$fixture"
   rm -rf "$fixture/out"
 
+  model_args=()
+  if [ -n "$model" ]; then
+    model_args=(--model "$model")
+  fi
+
   if ! "$work/skill-up" run "$fixture/evals/eval.yaml" \
     --engine "$engine" \
+    "${model_args[@]}" \
     --output-dir "$work/$engine/reports" \
     --no-delete \
     --iteration "$iterations"; then
