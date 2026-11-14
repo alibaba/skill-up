@@ -296,6 +296,8 @@ func validateJudgeTypeAndLocalFields(judge JudgeConfig) []string {
 	errs = append(errs, validateOutputMatchesRules("judge.failure", judge.Failure)...)
 	errs = append(errs, validateRecognizableRules("judge.success", judge.Success)...)
 	errs = append(errs, validateRecognizableRules("judge.failure", judge.Failure)...)
+	errs = append(errs, validateNonVacuousRules("judge.success", judge.Success)...)
+	errs = append(errs, validateNonVacuousRules("judge.failure", judge.Failure)...)
 
 	return errs
 }
@@ -362,6 +364,37 @@ func ruleHasRecognizableField(rule Rule) bool {
 		rule.TurnResponseNotContains != nil ||
 		rule.ToolCalledInTurn != nil ||
 		rule.ToolNotCalledInTurn != nil
+}
+
+// validateNonVacuousRules rejects matchers that are present but hold no values
+// to match. The runtime evaluates an empty matcher as "nothing to check" and
+// reports the assertion as passed, so a half-filled rule such as
+//
+//	success:
+//	  - output_contains:
+//	      all: []
+//
+// turns into a silent pass with zero checks (see #294 for the same class of
+// bug with unknown matcher names). validateRecognizableRules only catches rules
+// that name no matcher at all.
+func validateNonVacuousRules(field string, rules []Rule) []string {
+	var errs []string
+	for i, rule := range rules {
+		prefix := fmt.Sprintf("%s[%d]", field, i)
+		if rule.OutputContains != nil && len(rule.OutputContains.All)+len(rule.OutputContains.Any)+len(rule.OutputContains.Not) == 0 {
+			errs = append(errs, prefix+".output_contains must include at least one of all, any, or not")
+		}
+		if rule.OutputMatches != nil && len(rule.OutputMatches.All)+len(rule.OutputMatches.Any)+len(rule.OutputMatches.Not) == 0 {
+			errs = append(errs, prefix+".output_matches must include at least one of all, any, or not")
+		}
+		if rule.TurnResponseContains != nil && len(rule.TurnResponseContains.ContainsAll)+len(rule.TurnResponseContains.ContainsAny) == 0 {
+			errs = append(errs, prefix+".turn_response_contains must include at least one of contains_all or contains_any")
+		}
+		if rule.TurnResponseNotContains != nil && len(rule.TurnResponseNotContains.NotContains) == 0 {
+			errs = append(errs, prefix+".turn_response_not_contains.not_contains must not be empty")
+		}
+	}
+	return errs
 }
 
 func validateOutputMatchesRules(field string, rules []Rule) []string {
