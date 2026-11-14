@@ -590,6 +590,8 @@ func writeFormattedReports(ctx context.Context, iterDir string, formats []string
 			if err := reporter.Write(ctx, input); err != nil {
 				return fmt.Errorf("write html report: %w", err)
 			}
+		default:
+			return fmt.Errorf("unsupported report format %q (supported: json, junit, html)", format)
 		}
 	}
 	return nil

@@ -867,6 +867,41 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			wantErr: true,
 			errMsg:  "allow_declared is not supported for environment.type docker",
 		},
+		{
+			name: "supported report formats are accepted",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine:        EngineConfig{Name: "codex"},
+				Cases:         CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+				Report:        ReportConfig{Formats: []string{"json", "junit", "html"}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "unknown report format is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine:        EngineConfig{Name: "codex"},
+				Cases:         CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+				Report:        ReportConfig{Formats: []string{"json", "bogus"}},
+			},
+			wantErr: true,
+			errMsg:  `report.formats[1] must be one of json, junit, html (got "bogus")`,
+		},
+		{
+			name: "empty report format entry is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine:        EngineConfig{Name: "codex"},
+				Cases:         CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+				Report:        ReportConfig{Formats: []string{""}},
+			},
+			wantErr: true,
+			errMsg:  "report.formats[0] must not be empty",
+		},
 	}
 
 	for _, tt := range tests {

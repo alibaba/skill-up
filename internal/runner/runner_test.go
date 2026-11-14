@@ -781,3 +781,43 @@ func TestResultToBenchmarkRun_PreservesSkippedAssertions(t *testing.T) {
 		t.Fatalf("expectations=%+v", run.Expectations)
 	}
 }
+
+func TestRunner_WriteResults_RejectsUnknownReportFormat(t *testing.T) {
+	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.ResolvedAgentConfig{})
+
+	tmpDir := t.TempDir()
+	if err := r.InitWorkspace(tmpDir, "test-skill", 1); err != nil {
+		t.Fatalf("InitWorkspace failed: %v", err)
+	}
+
+	results := []evaluator.EvalResult{
+		{
+			CaseID:   "case-1",
+			CaseName: "Test Case 1",
+			Prompt:   "Do something",
+			Status:   judge.StatusPass,
+			SessionResult: &agent.SessionResult{
+				FinalMessage: "Done",
+				DurationMs:   1500,
+				Turns:        1,
+			},
+			TurnsTotal:    1,
+			Configuration: "with_skill",
+			Grading: &judge.Result{
+				Status: judge.StatusPass,
+				AssertionResults: []judge.AssertionResult{
+					{Text: "output correct", Passed: true, Evidence: "matched"},
+				},
+				Summary: judge.ResultSummary{Passed: 1, Failed: 0, Total: 1, PassRate: 1.0},
+			},
+		},
+	}
+
+	err := r.WriteResults(context.Background(), results, "test-skill", "/path/to/skill", 1, []string{"bogus"}, time.Time{}, time.Time{})
+	if err == nil {
+		t.Fatal("WriteResults() accepted an unsupported report format")
+	}
+	if want := `unsupported report format "bogus"`; !strings.Contains(err.Error(), want) {
+		t.Fatalf("WriteResults() error = %v, want it to contain %q", err, want)
+	}
+}
