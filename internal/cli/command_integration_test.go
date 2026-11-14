@@ -194,6 +194,92 @@ func TestValidateCommandStrictWithoutSkillFlagFails(t *testing.T) {
 	}
 }
 
+func TestValidateCommandUncitedWithoutSkillFlagFails(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("uncited", true, "")
+	cmd.SetContext(context.Background())
+
+	_, err := captureStdout(t, func() error {
+		return validateCmd.RunE(cmd, []string{testEvalPath})
+	})
+	if err == nil || !strings.Contains(err.Error(), "--uncited only applies") {
+		t.Fatalf("validate error = %v, want --uncited without --skill failure", err)
+	}
+}
+
+// writeUncitedSkill creates a skill whose frontmatter and citations are valid
+// but which carries one attachment that SKILL.md never reaches.
+func writeUncitedSkill(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	files := map[string]string{
+		"SKILL.md":             "---\nname: uncited\ndescription: Valid skill with one unreachable attachment.\n---\n\nRead [the guide](references/guide.md).\n",
+		"references/guide.md":  "# Guide\n",
+		"references/orphan.md": "# Never cited\n",
+	}
+	for rel, content := range files {
+		abs := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(abs, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestValidateCommandSkillFlagStrictIgnoresUncitedFilesByDefault(t *testing.T) {
+	var logBuf bytes.Buffer
+	restore := logging.SetOutputForTest(&logBuf)
+	defer restore()
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("skill", writeUncitedSkill(t), "")
+	cmd.Flags().Bool("strict", true, "")
+	cmd.SetContext(context.Background())
+
+	output, err := captureStdout(t, func() error {
+		return validateCmd.RunE(cmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("validate RunE returned error: %v", err)
+	}
+	if !strings.Contains(output, "skill content check passed") {
+		t.Fatalf("validate output = %q, want success message", output)
+	}
+	if strings.Contains(logBuf.String(), "never references") {
+		t.Fatalf("validate reported uncited files without --uncited:\n%s", logBuf.String())
+	}
+}
+
+func TestValidateCommandSkillFlagUncitedStrictFails(t *testing.T) {
+	var logBuf bytes.Buffer
+	restore := logging.SetOutputForTest(&logBuf)
+	defer restore()
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("skill", writeUncitedSkill(t), "")
+	cmd.Flags().Bool("uncited", true, "")
+	cmd.Flags().Bool("strict", true, "")
+	cmd.SetContext(context.Background())
+
+	_, err := captureStdout(t, func() error {
+		return validateCmd.RunE(cmd, nil)
+	})
+	if err == nil || !strings.Contains(err.Error(), "skill integrity") {
+		t.Fatalf("validate error = %v, want skill integrity failure", err)
+	}
+	for _, want := range []string{"never references", "references/orphan.md"} {
+		if !strings.Contains(logBuf.String(), want) {
+			t.Errorf("validate warnings missing %q:\n%s", want, logBuf.String())
+		}
+	}
+	if strings.Contains(logBuf.String(), "references/guide.md") {
+		t.Errorf("validate reported the cited references/guide.md:\n%s", logBuf.String())
+	}
+}
+
 func TestValidateCommandEvalValidationSkipsSkillCheck(t *testing.T) {
 	var logBuf bytes.Buffer
 	restore := logging.SetOutputForTest(&logBuf)

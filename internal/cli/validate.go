@@ -26,6 +26,9 @@ var validateCmd = &cobra.Command{
 		if strict {
 			return errors.New("--strict only applies to the --skill content check; eval config validation already fails on any error")
 		}
+		if uncited, _ := cmd.Flags().GetBool("uncited"); uncited {
+			return errors.New("--uncited only applies to the --skill content check")
+		}
 
 		evalPath, err := resolveEvalPath(cmd.Context(), args)
 		if err != nil {
@@ -56,10 +59,10 @@ var validateCmd = &cobra.Command{
 }
 
 // runSkillContentCheck lints the skill rooted at skillDir: SKILL.md
-// frontmatter, attachment paths the body cites that are missing, and
-// attachment files on disk the body never cites. It is a source-level check:
-// it validates the directory as authored and does not see what a run
-// actually installs after skills.include/skills.exclude filtering.
+// frontmatter and attachment paths the body cites that are missing, plus —
+// with --uncited — attachment files on disk the body never reaches. It is a
+// source-level check: it validates the directory as authored and does not see
+// what a run actually installs after skills.include/skills.exclude filtering.
 func runSkillContentCheck(cmd *cobra.Command, args []string, skillDir string) error {
 	if len(args) > 0 {
 		return errors.New("pass either --skill <dir> or a path to eval.yaml, not both")
@@ -75,6 +78,9 @@ func runSkillContentCheck(cmd *cobra.Command, args []string, skillDir string) er
 		warnings = []string{skillDir + ": no SKILL.md found (not a skill directory)"}
 	} else {
 		warnings = config.CheckSkillIntegrity(skillDir)
+		if uncited, _ := cmd.Flags().GetBool("uncited"); uncited {
+			warnings = append(warnings, config.CheckSkillUncitedAttachments(skillDir)...)
+		}
 	}
 
 	for _, warning := range warnings {
@@ -95,6 +101,7 @@ func runSkillContentCheck(cmd *cobra.Command, args []string, skillDir string) er
 }
 
 func init() {
-	validateCmd.Flags().String("skill", "", "Lint the content integrity of the skill rooted at this directory (SKILL.md frontmatter, cited attachment paths, uncited attachment files) instead of validating an eval config")
+	validateCmd.Flags().String("skill", "", "Lint the content integrity of the skill rooted at this directory (SKILL.md frontmatter, cited attachment paths) instead of validating an eval config")
+	validateCmd.Flags().Bool("uncited", false, "With --skill, also report files under references/, assets/, scripts/ that SKILL.md never reaches (heuristic: a file a script loads through a computed path is reported too)")
 	validateCmd.Flags().Bool("strict", false, "Fail when the --skill content check reports warnings")
 }

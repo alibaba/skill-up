@@ -155,7 +155,7 @@ skill-up validate ./evals/eval.yaml
 ### Skill 内容检查（`--skill`）
 
 ```bash
-skill-up validate --skill <skill 目录路径>
+skill-up validate --skill <skill 目录路径> [--uncited] [--strict]
 ```
 
 对单个 skill 的源文件做内容完整性检查。这是源码级检查：它看不到一次
@@ -166,18 +166,24 @@ run 在 `skills.include`/`skills.exclude` 过滤后实际安装的内容，也�
 - frontmatter 中 `name`、`description` 字段非空
 - 正文中引用的 `references/`、`assets/`、`scripts/` 相对路径在磁盘上存在。
   正文按 CommonMark 解析：正文行文、本地链接/图片目标、以及引用路径的行内代码
-  均参与检查；代码块、远程 URL 和原始 HTML 视为文档示例或外部资源，不参与检查
-- 这些目录下存在、但从正文出发不可达的文件会作为"未引用附件"报出。
-  可达性是传递的：被引用的 markdown 文档链接到的文件、被引用的脚本提到的
-  文件，都视为已被引用，即使 SKILL.md 从未直接点名。点文件（`.DS_Store`、
-  `.gitkeep`、点目录）属于本地元数据，不参与检查；以链接目标形式引用目录
-  （如 `[docs](references/)`）即视为覆盖其下所有文件。引用路径带不带前导
-  `./` 均可识别，同一路径的等价写法（`references/./guide.md`）会先归一化
-  再比对
+  均参与检查；代码块、远程 URL 和原始 HTML 视为文档示例或外部资源，不参与检查。
+  引用路径带不带前导 `./` 均可识别，同一路径的等价写法（`references/./guide.md`，
+  或链接目标中的 `references/my%20guide.md`）会先归一化再比对
+
+传入 `--uncited` 时，还会报出这些目录下存在、但从正文出发不可达的文件。
+SKILL.md 尾部被截断时，丢失段落引用过的附件会悄无声息地变成孤立文件，这项
+报告可以把它们找出来。可达性是传递的：被引用的 markdown 文档链接到的文件、
+被引用的脚本以根相对路径或 `./` 相对路径提到的文件，都视为已被引用，即使
+SKILL.md 从未直接点名。点文件（`.DS_Store`、`.gitkeep`、点目录）属于本地
+元数据，不参与检查；以链接目标形式引用目录（如 `[docs](references/)`）即视为
+覆盖其下所有文件。这项报告需要显式开启，因为可达性是启发式的：脚本通过计算
+得到的路径加载的文件（`$(dirname "$0")/lib.sh`、Python import），即使 skill
+能正常工作也会被报出。
 
 通过 `--skill` 传入的目录若没有 SKILL.md，本身即为一条告警。
-传入 `--strict` 可将 warning 提升为失败（退出码 1）；不传则仅打印
-warning、退出码为 0。`--skill` 不能与 eval.yaml 路径参数同时使用。
+传入 `--strict` 可将 warning 提升为失败（退出码 1），同时传入 `--uncited` 时
+也包括未引用附件；不传则仅打印 warning、退出码为 0。`--skill` 不能与
+eval.yaml 路径参数同时使用，`--uncited` 和 `--strict` 只对 `--skill` 生效。
 
 成功输出：
 

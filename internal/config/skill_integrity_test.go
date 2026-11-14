@@ -87,23 +87,59 @@ func TestCheckSkillIntegrity(t *testing.T) {
 	}
 }
 
-func TestCheckSkillIntegrityUncitedAttachmentFixture(t *testing.T) {
+func TestCheckSkillUncitedAttachmentsFixture(t *testing.T) {
 	t.Parallel()
 
 	// The fixture cites references/guide.md only; every other attachment
 	// file must be reported in sorted order, except the .gitkeep dotfile.
-	got := CheckSkillIntegrity("testdata/skill-integrity/orphan-attachment")
+	got := CheckSkillUncitedAttachments("testdata/skill-integrity/orphan-attachment")
 	want := []string{
 		`never references "assets/unused-diagram.png" but the file exists on disk`,
 		`never references "references/uncited-notes.md" but the file exists on disk`,
 	}
 	if len(got) != len(want) {
-		t.Fatalf("CheckSkillIntegrity() = %v, want %d warning(s): %v", got, len(want), want)
+		t.Fatalf("CheckSkillUncitedAttachments() = %v, want %d warning(s): %v", got, len(want), want)
 	}
 	for i, wantSub := range want {
 		if !strings.Contains(got[i], wantSub) {
 			t.Errorf("warning[%d] = %q, want substring %q", i, got[i], wantSub)
 		}
+	}
+}
+
+func TestCheckSkillIntegrityLeavesUncitedFilesToOptInCheck(t *testing.T) {
+	t.Parallel()
+
+	// The default check stays deterministic: uncited attachments — including
+	// a helper a cited script loads through a computed path, which the
+	// reachability heuristic cannot follow — are left to the opt-in
+	// CheckSkillUncitedAttachments policy.
+	if got := CheckSkillIntegrity("testdata/skill-integrity/orphan-attachment"); len(got) != 0 {
+		t.Fatalf("CheckSkillIntegrity(orphan-attachment) = %v, want no warnings", got)
+	}
+
+	dir := t.TempDir()
+	writeSkillFiles(t, dir, map[string]string{
+		"SKILL.md": `---
+name: computed-path
+description: Skill whose entrypoint script sources a sibling through a computed path.
+---
+
+Run ` + "`scripts/run.sh`" + ` to execute.
+`,
+		"scripts/run.sh": "#!/bin/sh\n. \"$(dirname \"$0\")/lib.sh\"\n",
+		"scripts/lib.sh": "# lib\n",
+	})
+	if got := CheckSkillIntegrity(dir); len(got) != 0 {
+		t.Fatalf("CheckSkillIntegrity() = %v, want no warnings for a computed-path script dependency", got)
+	}
+}
+
+func TestCheckSkillUncitedAttachmentsSkipsNonSkillDirectory(t *testing.T) {
+	t.Parallel()
+
+	if got := CheckSkillUncitedAttachments("testdata/skill-integrity"); got != nil {
+		t.Fatalf("CheckSkillUncitedAttachments() = %v, want nil for a directory without SKILL.md", got)
 	}
 }
 
@@ -142,7 +178,7 @@ Details live in references/missing.md.
 	}
 }
 
-func TestCheckSkillIntegrityOrphanEdges(t *testing.T) {
+func TestCheckSkillUncitedAttachmentsOrphanEdges(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -175,20 +211,26 @@ The icon lives at ./assets/slashy.png.
 		}
 	}
 
-	got := CheckSkillIntegrity(dir)
+	got := CheckSkillUncitedAttachments(dir)
 	want := []string{
 		`never references "assets/other.bin" but the file exists on disk`,
 		`never references "assets/sub/nested.png" but the file exists on disk`,
 		`never references "references/lonely.md" but the file exists on disk`,
 	}
 	if len(got) != len(want) {
-		t.Fatalf("CheckSkillIntegrity() = %v, want %d warning(s): %v", got, len(want), want)
+		t.Fatalf("CheckSkillUncitedAttachments() = %v, want %d warning(s): %v", got, len(want), want)
 	}
 	for i, wantSub := range want {
 		if !strings.Contains(got[i], wantSub) {
 			t.Errorf("warning[%d] = %q, want substring %q", i, got[i], wantSub)
 		}
 	}
+}
+
+// allSkillWarnings runs the integrity check and the opt-in uncited-attachment
+// check together, as skill-up validate --skill --uncited does.
+func allSkillWarnings(dir string) []string {
+	return append(CheckSkillIntegrity(dir), CheckSkillUncitedAttachments(dir)...)
 }
 
 // writeSkillFiles materializes a skill directory from a map of
@@ -224,8 +266,8 @@ Read [the guide](references/guide.md).
 		"references/details.md": "# Details\n",
 	})
 
-	if got := CheckSkillIntegrity(dir); len(got) != 0 {
-		t.Fatalf("CheckSkillIntegrity() = %v, want no warnings for a valid indirect reference chain", got)
+	if got := allSkillWarnings(dir); len(got) != 0 {
+		t.Fatalf("allSkillWarnings() = %v, want no warnings for a valid indirect reference chain", got)
 	}
 }
 
@@ -249,8 +291,8 @@ Run ` + "`scripts/run.sh`" + ` to execute.
 		"scripts/helper.sh": "# helper\n",
 	})
 
-	if got := CheckSkillIntegrity(dir); len(got) != 0 {
-		t.Fatalf("CheckSkillIntegrity() = %v, want no warnings for script dependencies", got)
+	if got := allSkillWarnings(dir); len(got) != 0 {
+		t.Fatalf("allSkillWarnings() = %v, want no warnings for script dependencies", got)
 	}
 }
 
@@ -272,8 +314,8 @@ Browse [the docs](references/).
 		"assets/diagram.png":  "not really a png\n",
 	})
 
-	if got := CheckSkillIntegrity(dir); len(got) != 0 {
-		t.Fatalf("CheckSkillIntegrity() = %v, want no warnings for directory citation dependencies", got)
+	if got := allSkillWarnings(dir); len(got) != 0 {
+		t.Fatalf("allSkillWarnings() = %v, want no warnings for directory citation dependencies", got)
 	}
 }
 
@@ -293,8 +335,8 @@ Read [a](references/a.md).
 		"references/b.md": "# B\n\nBack to [a](a.md).\n",
 	})
 
-	if got := CheckSkillIntegrity(dir); len(got) != 0 {
-		t.Fatalf("CheckSkillIntegrity() = %v, want no warnings for a cyclic reference chain", got)
+	if got := allSkillWarnings(dir); len(got) != 0 {
+		t.Fatalf("allSkillWarnings() = %v, want no warnings for a cyclic reference chain", got)
 	}
 }
 
@@ -316,13 +358,13 @@ This skill cites no attachments at all.
 		"references/details.md": "# Details\n",
 	})
 
-	got := CheckSkillIntegrity(dir)
+	got := allSkillWarnings(dir)
 	want := []string{
 		`never references "references/details.md" but the file exists on disk`,
 		`never references "references/guide.md" but the file exists on disk`,
 	}
 	if len(got) != len(want) {
-		t.Fatalf("CheckSkillIntegrity() = %v, want %d warning(s): %v", got, len(want), want)
+		t.Fatalf("allSkillWarnings() = %v, want %d warning(s): %v", got, len(want), want)
 	}
 	for i, wantSub := range want {
 		if !strings.Contains(got[i], wantSub) {
@@ -358,9 +400,9 @@ Read [the doc](references/gone.md).
 		t.Fatal(err)
 	}
 
-	got := CheckSkillIntegrity(dir)
+	got := allSkillWarnings(dir)
 	if len(got) != 1 || !strings.Contains(got[0], `references "references/gone.md" but it does not exist on disk`) {
-		t.Fatalf("CheckSkillIntegrity() = %v, want exactly one missing-reference warning for references/gone.md", got)
+		t.Fatalf("allSkillWarnings() = %v, want exactly one missing-reference warning for references/gone.md", got)
 	}
 }
 
@@ -384,8 +426,8 @@ Read [a](references/./guide.md), [b](references//notes.md), and
 		"references/deep.md":  "# Deep\n",
 	})
 
-	if got := CheckSkillIntegrity(dir); len(got) != 0 {
-		t.Fatalf("CheckSkillIntegrity() = %v, want no warnings for equivalent local paths", got)
+	if got := allSkillWarnings(dir); len(got) != 0 {
+		t.Fatalf("allSkillWarnings() = %v, want no warnings for equivalent local paths", got)
 	}
 }
 
@@ -406,8 +448,8 @@ Mirror: https://example.com/page#assets/icon.png
 `,
 	})
 
-	if got := CheckSkillIntegrity(dir); len(got) != 0 {
-		t.Fatalf("CheckSkillIntegrity() = %v, want no warnings for remote URL query/fragment text", got)
+	if got := allSkillWarnings(dir); len(got) != 0 {
+		t.Fatalf("allSkillWarnings() = %v, want no warnings for remote URL query/fragment text", got)
 	}
 }
 
@@ -432,8 +474,8 @@ See references/api_docs.md for the API, and read
 		"references/rate_limits.md": "# Limits\n",
 	})
 
-	if got := CheckSkillIntegrity(dir); len(got) != 0 {
-		t.Fatalf("CheckSkillIntegrity() = %v, want no warnings for underscored citations", got)
+	if got := allSkillWarnings(dir); len(got) != 0 {
+		t.Fatalf("allSkillWarnings() = %v, want no warnings for underscored citations", got)
 	}
 }
 
@@ -456,8 +498,8 @@ Read [the guide](references/my%20guide.md).
 		"references/more notes.md": "# More\n",
 	})
 
-	if got := CheckSkillIntegrity(dir); len(got) != 0 {
-		t.Fatalf("CheckSkillIntegrity() = %v, want no warnings for percent-encoded links", got)
+	if got := allSkillWarnings(dir); len(got) != 0 {
+		t.Fatalf("allSkillWarnings() = %v, want no warnings for percent-encoded links", got)
 	}
 }
 
@@ -485,9 +527,9 @@ The logo is ![logo](assets/logo.png).
 		t.Fatal(err)
 	}
 
-	got := CheckSkillIntegrity(dir)
+	got := allSkillWarnings(dir)
 	if len(got) != 1 || !strings.Contains(got[0], `"references/ghost.md"`) {
-		t.Fatalf("CheckSkillIntegrity() = %v, want exactly one orphan warning for references/ghost.md", got)
+		t.Fatalf("allSkillWarnings() = %v, want exactly one orphan warning for references/ghost.md", got)
 	}
 }
 
@@ -522,9 +564,9 @@ Read [the doc](references/evil.md).
 		t.Fatal(err)
 	}
 
-	got := CheckSkillIntegrity(dir)
+	got := allSkillWarnings(dir)
 	if len(got) != 1 || !strings.Contains(got[0], `"references/inside.md"`) {
-		t.Fatalf("CheckSkillIntegrity() = %v, want exactly one orphan warning for references/inside.md", got)
+		t.Fatalf("allSkillWarnings() = %v, want exactly one orphan warning for references/inside.md", got)
 	}
 }
 

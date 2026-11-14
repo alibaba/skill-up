@@ -52,22 +52,18 @@ var relScriptPattern = regexp.MustCompile(`(?:^|[^\w./~-])\./([\w](?:[\w./-]*[\w
 // CheckSkillIntegrity inspects the SKILL.md of the skill rooted at skillDir
 // and returns one human-readable warning per finding: a missing or
 // unterminated YAML frontmatter block, an empty name or description field,
-// references/, assets/, scripts/ paths cited in the markdown body that do not
-// exist on disk, and files under those directories that are not reachable
-// from the body. The body is parsed as CommonMark, so only real citations
+// and references/, assets/, scripts/ paths cited in the markdown body that do
+// not exist on disk. The body is parsed as CommonMark, so only real citations
 // are collected — prose text, local link and image destinations, and inline
 // code spans that cite a path. Code blocks, remote URLs, autolinks, and raw
 // HTML never yield references — they are documentation examples or external
 // resources, not skill attachments.
 //
-// Reachability is transitive: an attachment a cited markdown document links
-// to, or one a cited script mentions, counts as cited — absence of a direct
-// SKILL.md citation is not evidence that such a file is orphaned.
-//
 // It returns nil when skillDir has no SKILL.md (the directory is not a skill
 // root, so there is nothing to check). Every finding is a warning; callers
 // decide whether to tolerate or enforce them (skill-up validate --skill
-// --strict).
+// --strict). Attachment files the body never reaches are a separate,
+// heuristic policy: see CheckSkillUncitedAttachments.
 func CheckSkillIntegrity(skillDir string) []string {
 	data, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -77,31 +73,54 @@ func CheckSkillIntegrity(skillDir string) []string {
 		return []string{fmt.Sprintf("SKILL.md: unreadable: %v", err)}
 	}
 
-	var warnings []string
-	body := data
-
-	lines := bytes.Split(data, []byte("\n"))
-	hasOpeningFence := len(lines) > 0 && isFence(lines[0])
-	frontmatter, rest, closed := splitFrontmatter(lines)
-	switch {
-	case !hasOpeningFence:
-		warnings = append(warnings, "SKILL.md: YAML frontmatter is missing (file must start with a --- fence)")
-	case !closed:
-		warnings = append(warnings, "SKILL.md: YAML frontmatter is not closed (missing closing --- fence)")
-	default:
-		warnings = append(warnings, frontmatterFieldWarnings(frontmatter)...)
-		body = rest
-	}
-
-	bodyRefs := extractSkillRefs(body)
-	for _, ref := range missingSkillRefs(skillDir, bodyRefs) {
+	body, warnings := splitSkillMD(data)
+	for _, ref := range missingSkillRefs(skillDir, extractSkillRefs(body)) {
 		warnings = append(warnings, fmt.Sprintf("SKILL.md: references %q but it does not exist on disk", ref))
 	}
-	for _, file := range uncitedSkillFiles(skillDir, collectReachableRefs(skillDir, bodyRefs)) {
-		warnings = append(warnings, fmt.Sprintf("SKILL.md: never references %q but the file exists on disk", file))
+	return warnings
+}
+
+// CheckSkillUncitedAttachments returns one warning per file under the
+// skill's references/, assets/, scripts/ directories that is not reachable
+// from the SKILL.md body. Truncating the tail of SKILL.md silently turns the
+// attachments its lost sections cited into such orphans.
+//
+// Reachability is transitive — an attachment a cited markdown document links
+// to, or one a cited script mentions by a root-anchored or ./-relative path,
+// counts as cited — but it remains a heuristic: a file a script loads through
+// a computed path ($(dirname "$0")/lib.sh, a Python import) is reported even
+// though the skill works. That is why this is an opt-in policy (skill-up
+// validate --skill --uncited) rather than part of CheckSkillIntegrity. It
+// returns nil when SKILL.md is missing or unreadable; CheckSkillIntegrity
+// reports those.
+func CheckSkillUncitedAttachments(skillDir string) []string {
+	data, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		return nil
 	}
 
+	body, _ := splitSkillMD(data)
+	var warnings []string
+	for _, file := range uncitedSkillFiles(skillDir, collectReachableRefs(skillDir, extractSkillRefs(body))) {
+		warnings = append(warnings, fmt.Sprintf("SKILL.md: never references %q but the file exists on disk", file))
+	}
 	return warnings
+}
+
+// splitSkillMD returns the markdown body of SKILL.md content — everything
+// after a closed frontmatter block, or the whole file when the frontmatter is
+// missing or unterminated — together with the frontmatter findings.
+func splitSkillMD(data []byte) (body []byte, warnings []string) {
+	lines := bytes.Split(data, []byte("\n"))
+	frontmatter, rest, closed := splitFrontmatter(lines)
+	switch {
+	case len(lines) == 0 || !isFence(lines[0]):
+		return data, []string{"SKILL.md: YAML frontmatter is missing (file must start with a --- fence)"}
+	case !closed:
+		return data, []string{"SKILL.md: YAML frontmatter is not closed (missing closing --- fence)"}
+	default:
+		return rest, frontmatterFieldWarnings(frontmatter)
+	}
 }
 
 // splitFrontmatter extracts the YAML frontmatter block and the markdown body
