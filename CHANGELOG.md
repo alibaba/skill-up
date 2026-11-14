@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keep working unchanged and may sit beside `tools` for other tool names.
 
 ### Fixed
+- Reject `report.formats` values other than `json`, `junit` and `html` during
+  configuration validation. An unknown value used to pass validation and then be
+  silently skipped by the runner, which still printed that the reports were
+  saved, so a typo produced no report at all. The runner now also returns an
+  error if an unsupported format reaches it without going through validation.
 - Stop reporting a successful Claude Code answer as a provider rate-limit or
   authentication failure when its text mentions phrases such as "rate limit" or
   "authentication error". Answer text is scanned for these failures only when
