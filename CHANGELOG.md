@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keep working unchanged and may sit beside `tools` for other tool names.
 
 ### Fixed
+- Reject a `rule_based` matcher that is present but holds no values to match, and matcher entries that are blank (an empty substring or pattern matches every response).
+  `output_contains: {all: []}`, `output_matches: {}`, `turn_response_contains`
+  without `contains_all`/`contains_any`, and `turn_response_not_contains`
+  without `not_contains` used to validate and then report a passing assertion
+  with zero checks, so a half-filled rule became a silent pass (the same class
+  of bug as the unknown-matcher check for #294). `validate` now names the
+  matcher and asks for at least one value.
 - Stop reporting a successful Claude Code answer as a provider rate-limit or
   authentication failure when its text mentions phrases such as "rate limit" or
   "authentication error". Answer text is scanned for these failures only when
