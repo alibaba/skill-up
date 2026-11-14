@@ -24,10 +24,26 @@ MARKERS = (".canary-relevant", ".translation-done")
 
 
 def tool_calls(obj, out):
-    """Collect (name, payload) pairs from any transcript shape."""
+    """Collect (name, payload) pairs from any transcript shape.
+
+    Engines do not agree on where a call keeps its name and its arguments.
+    OpenCode nests them in `part.tool` and `part.state.input`, while the
+    Claude Code and Codex transcripts put `name`/`input` on one object, so
+    read the name and the payload from both layouts.
+    """
     if isinstance(obj, dict):
         name = obj.get("name") or obj.get("tool")
         payload = obj.get("input") or obj.get("arguments")
+        part = obj.get("part")
+        if isinstance(part, dict):
+            name = name or part.get("tool") or part.get("name")
+            state = part.get("state")
+            if isinstance(state, dict):
+                payload = payload or state.get("input") or state.get("arguments")
+        elif isinstance(obj.get("state"), dict):
+            # A bare `part`-like object passed in from a caller.
+            state = obj["state"]
+            payload = payload or state.get("input") or state.get("arguments")
         if isinstance(name, str) and payload is not None:
             out.append((name, payload if isinstance(payload, str) else json.dumps(payload)))
         for value in obj.values():
