@@ -437,6 +437,30 @@ See references/api_docs.md for the API, and read
 	}
 }
 
+func TestCheckSkillIntegrityPercentEncodedLinks(t *testing.T) {
+	t.Parallel()
+
+	// Regression: a percent-encoded link destination names the decoded file,
+	// both when SKILL.md cites it and when a cited document links onward
+	// relative to itself.
+	dir := t.TempDir()
+	writeSkillFiles(t, dir, map[string]string{
+		"SKILL.md": `---
+name: percent-encoded
+description: Skill linking to attachments whose names contain spaces.
+---
+
+Read [the guide](references/my%20guide.md).
+`,
+		"references/my guide.md":   "# Guide\n\nThen read [more](more%20notes.md).\n",
+		"references/more notes.md": "# More\n",
+	})
+
+	if got := CheckSkillIntegrity(dir); len(got) != 0 {
+		t.Fatalf("CheckSkillIntegrity() = %v, want no warnings for percent-encoded links", got)
+	}
+}
+
 func TestCheckSkillIntegrityCitedBinaryIsNotScanned(t *testing.T) {
 	t.Parallel()
 
@@ -793,6 +817,21 @@ func TestExtractSkillRefsNormalization(t *testing.T) {
 			name: "equivalent spellings collapse to one citation",
 			body: "[a](references/./guide.md) and [b](references/guide.md)",
 			want: []string{"references/guide.md"},
+		},
+		{
+			name: "percent-encoded link destination is decoded",
+			body: "[guide](references/my%20guide.md)",
+			want: []string{"references/my guide.md"},
+		},
+		{
+			name: "percent-encoded and plain spellings collapse to one citation",
+			body: "[a](assets/logo%2Ddark.png) and ![b](assets/logo-dark.png)",
+			want: []string{"assets/logo-dark.png"},
+		},
+		{
+			name: "invalid percent escape is kept verbatim",
+			body: "[odd](references/100%.md)",
+			want: []string{"references/100%.md"},
 		},
 	})
 }

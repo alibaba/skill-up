@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -531,8 +532,11 @@ func normalizeSkillRef(ref string) (string, bool) {
 }
 
 // localLinkTarget reduces a link or image destination to a local path
-// candidate: the fragment and query are stripped, and remote URLs, pure
-// anchors, and protocol-relative destinations are rejected.
+// candidate: the fragment and query are stripped, percent-encoding is
+// decoded the way a renderer resolves the link (references/my%20guide.md
+// names references/my guide.md), and remote URLs, pure anchors, and
+// protocol-relative destinations are rejected. A destination that is not
+// valid percent-encoding (references/100%.md) is kept verbatim.
 func localLinkTarget(dest []byte) (string, bool) {
 	s := string(dest)
 	if i := strings.IndexAny(s, "#?"); i >= 0 {
@@ -540,6 +544,9 @@ func localLinkTarget(dest []byte) (string, bool) {
 	}
 	if s == "" || strings.HasPrefix(s, "//") || linkSchemePattern.MatchString(s) {
 		return "", false
+	}
+	if decoded, err := url.PathUnescape(s); err == nil {
+		s = decoded
 	}
 	return s, true
 }
