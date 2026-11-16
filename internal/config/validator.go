@@ -90,6 +90,8 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	// engine.model.provider and engine.model.name are optional.
 	// When omitted, the engine uses its local default model configuration.
 
+	errs = append(errs, validateReportFormats(cfg.Report.Formats)...)
+
 	// cases.files is required and must have at least one file
 	if len(cfg.Cases.Files) == 0 {
 		errs = append(errs, "cases.files must contain at least one case file")
@@ -437,6 +439,26 @@ func validateSkillPatterns(field string, patterns []string) []string {
 		}
 		if !doublestar.ValidatePattern(pattern) {
 			errs = append(errs, fmt.Sprintf("%s[%d] is not a valid glob pattern: %q", field, i, pattern))
+		}
+	}
+	return errs
+}
+
+// validateReportFormats rejects report.formats values that both the runner and
+// the offline report command would otherwise ignore. An unknown value used to
+// pass validation and then produce no report at all, so a typo looked like a
+// successful run.
+func validateReportFormats(formats []string) []string {
+	var errs []string
+	for i, format := range formats {
+		if strings.TrimSpace(format) == "" {
+			errs = append(errs, fmt.Sprintf("report.formats[%d] must not be empty", i))
+			continue
+		}
+		switch format {
+		case "json", "junit", "html":
+		default:
+			errs = append(errs, fmt.Sprintf("report.formats[%d] must be one of json, junit, html (got %q)", i, format))
 		}
 	}
 	return errs

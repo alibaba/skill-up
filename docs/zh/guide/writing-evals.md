@@ -128,6 +128,9 @@ report:
   artifacts: [transcript]         # 报告中包含的产物
 ```
 
+`report.formats` 只接受 `json`、`junit`、`html`；其它值会直接报配置错误，因为运行时
+原本会跳过未知格式、却仍然打印"报告已保存"。
+
 `skills[].include` 和 `skills[].exclude` 使用
 [doublestar](https://github.com/bmatcuk/doublestar) 语法（`*` 匹配单层路径，
 `**` 可跨目录）。pattern 相对 `skills[].path`，统一使用 `/` 分隔；

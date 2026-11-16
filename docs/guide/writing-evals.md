@@ -127,6 +127,10 @@ report:
   artifacts: [transcript]
 ```
 
+`report.formats` only accepts `json`, `junit` and `html`; any other value is a
+configuration error, because the runner would otherwise skip the unknown format
+and still report that the reports were saved.
+
 `skills[].include` and `skills[].exclude` use
 [doublestar](https://github.com/bmatcuk/doublestar) syntax (`*` matches one
 path segment and `**` crosses directories). Patterns are relative to
