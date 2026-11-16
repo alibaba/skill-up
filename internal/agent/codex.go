@@ -497,7 +497,7 @@ func (a *CodexAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, 
 	}))
 	ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, opts.Env)
 
-	if err := ensureNodeRuntime(ctx, rt, codexEngineName, opts); err != nil {
+	if err := prepareCodexRuntime(ctx, rt, opts); err != nil {
 		return &SessionResult{
 			Engine:     a.Name(),
 			SessionID:  sessionID,
@@ -505,9 +505,6 @@ func (a *CodexAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, 
 			DurationMs: time.Since(start).Milliseconds(),
 			Artifacts:  &SessionArtifacts{},
 		}, err
-	}
-	if err := initializeIsolatedCodexAuth(ctx, rt, opts); err != nil {
-		return nil, err
 	}
 	runArtifactDir, lastMessagePath, stdoutPath, err := prepareCodexRunArtifacts(ctx, rt)
 	if err != nil {
@@ -572,16 +569,13 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))
 	ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, opts.Env)
 
-	if err := ensureNodeRuntime(ctx, rt, codexEngineName, opts); err != nil {
+	if err := prepareCodexRuntime(ctx, rt, opts); err != nil {
 		return &SessionResult{
 			Engine:     a.Name(),
 			ExitCode:   1,
 			DurationMs: time.Since(start).Milliseconds(),
 			Artifacts:  &SessionArtifacts{},
 		}, err
-	}
-	if err := initializeIsolatedCodexAuth(ctx, rt, opts); err != nil {
-		return nil, err
 	}
 	runArtifactDir, lastMessagePath, stdoutPath, err := prepareCodexRunArtifacts(ctx, rt)
 	if err != nil {
@@ -832,6 +826,13 @@ func downloadCodexJSONL(
 		return "", cleanup, fmt.Errorf("download %s JSONL artifact %s", source, remotePath)
 	}
 	return artifactPath, cleanup, nil
+}
+
+func prepareCodexRuntime(ctx context.Context, rt Runtime, opts ExecOptions) error {
+	if err := ensureNodeRuntime(ctx, rt, codexEngineName, opts); err != nil {
+		return err
+	}
+	return initializeIsolatedCodexAuth(ctx, rt, opts)
 }
 
 func prepareCodexRunArtifacts(ctx context.Context, rt Runtime) (dir, lastMessagePath, stdoutPath string, err error) {
