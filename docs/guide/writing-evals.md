@@ -187,6 +187,22 @@ to an adapter and are now explicitly ignored with migration warnings. Use
 | `bypass_sandbox` | `qwen_code` | No-op — `qwen_code` never imposes its own sandbox (`--yolo` only auto-approves tool calls; it does **not** isolate). Like `claude_code`/`qodercli`, isolation is the runtime's job | No-op |
 | `edition` | `qodercli` | Set to `cn` to use Qoder CLI CN (`qodercn`); switches the installer, credential env, user config/session root, MCP command, and run/resume command together | `global` (Qoder CLI from qoder.com) |
 
+For custom Codex providers (including `openai` with a custom `base_url`),
+`engine.kwargs.wire_api` selects `chat` or `responses`. The default is `chat`
+for the pinned Codex 0.80.0. Newer Codex versions, including 0.169.0, removed
+Chat Completions support: set `wire_api: responses` and use a backend that
+implements the Responses API. This option does not translate a Chat-only
+endpoint into a Responses endpoint. With the built-in OpenAI provider and no
+custom URL, Codex's own protocol configuration is left unchanged.
+
+```yaml
+engine:
+  name: codex
+  version: "0.169.0"
+  kwargs:
+    wire_api: responses
+```
+
 Codex also accepts byte limits for its JSONL artifacts:
 
 | key | default | behaviour |

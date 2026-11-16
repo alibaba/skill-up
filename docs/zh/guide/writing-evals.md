@@ -165,6 +165,23 @@ configuration，并将 applied version 留空。
 `engine.custom.local.command` 和 `args`；adapter 专用参数请使用
 `engine.kwargs` 或 `engine.custom.kwargs`。
 
+### Codex provider 协议
+
+自定义 Codex provider（包括设置了自定义 `base_url` 的 `openai`）可以通过
+`engine.kwargs.wire_api` 选择 `chat` 或 `responses`。默认值为 `chat`，兼容默认
+安装的 Codex 0.80.0。0.169.0 等新版 Codex 已移除 Chat Completions 支持，需设置
+`wire_api: responses` 并使用支持 Responses API 的后端。该选项不会把仅支持 Chat
+的接口转换为 Responses 接口。使用内置 OpenAI provider 且未设置自定义 URL 时，
+保留 Codex 自身的协议配置。
+
+```yaml
+engine:
+  name: codex
+  version: "0.169.0"
+  kwargs:
+    wire_api: responses
+```
+
 ### 采集 workspace 产物（`collect_artifacts`）
 
 `collect_artifacts` 用 glob 声明要从用例 workspace 采集的文件。每次 Agent 运行后——**无论成功、失败还是超时**——命中的文件都会被下载到：

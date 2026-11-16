@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Code.
 
 ### Fixed
+- Place Codex's `--output-last-message` before `resume` so resumed turns work
+  with the default Codex 0.80.0 CLI. Custom providers now accept
+  `engine.kwargs.wire_api: responses` for newer Codex versions that removed
+  Chat Completions support. The default remains `chat` for 0.80.0 compatibility;
+  selecting `responses` requires a Responses-capable endpoint.
 - Stop writing mocked MCP servers into the user's global Codex config. The
   `codex` engine now defines each mocked server on the `codex exec` command,
   including resumed turns, with `-c mcp_servers.<name>...` overrides, instead
