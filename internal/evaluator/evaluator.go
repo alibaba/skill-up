@@ -649,11 +649,33 @@ func (e *defaultEvaluator) evaluateCaseSession(
 	sessionResult *agent.SessionResult,
 	result *EvalResult,
 ) EvalResult {
+	plan, planErr := config.ResolveJudgePlan(e.evalCfg, caseCfg)
+	if planErr != nil {
+		result.Status, result.Error = judge.StatusError, planErr
+		return *result
+	}
+
+	defaultExpect := e.evalCfg.Cases.Defaults.Expect
+	mergedExpect := mergeExpectConfig(&defaultExpect, &caseCfg.Expect)
+	expectCfg := resolveExpectConfig(&mergedExpect)
+
+	workspacePath := rt.Workspace()
+	var cleanupWorkspace func()
+	if judgePlanNeedsWorkspaceFiles(plan) || expectNeedsWorkspaceFiles(expectCfg) {
+		var err error
+		workspacePath, cleanupWorkspace, err = e.materializeWorkspace(ctx, rt)
+		if err != nil {
+			result.Status, result.Error = judge.StatusError, fmt.Errorf("materialize workspace for judging: %w", err)
+			return *result
+		}
+		defer cleanupWorkspace()
+	}
+
 	judgeInput := judge.Input{
 		CaseID:         caseCfg.ID,
 		FinalMessage:   result.FinalMessage,
 		ExitCode:       result.ExitCode,
-		WorkspacePath:  rt.Workspace(),
+		WorkspacePath:  workspacePath,
 		SkillDir:       e.skillDir,
 		TurnsExecuted:  result.Turns,
 		TurnsTotal:     turnsTotal,
@@ -662,11 +684,6 @@ func (e *defaultEvaluator) evaluateCaseSession(
 		GeneratedFiles: sessionGeneratedFiles(sessionResult),
 		SessionResult:  sessionResult,
 		TurnResults:    toJudgeTurnResults(result.TurnResults),
-	}
-	plan, planErr := config.ResolveJudgePlan(e.evalCfg, caseCfg)
-	if planErr != nil {
-		result.Status, result.Error = judge.StatusError, planErr
-		return *result
 	}
 
 	if failed := e.runExpectPreCheck(ctx, caseCfg, configName, judgeCfg, judgeInput, result); failed {
@@ -699,6 +716,25 @@ func (e *defaultEvaluator) evaluateCaseSession(
 	}
 
 	return finalResult
+}
+
+// materializeWorkspace returns a host-accessible path to the runtime workspace.
+// Runtimes that own a host workspace return it directly. Remote runtimes such as
+// Docker and OpenSandbox download the workspace into a temporary directory so
+// expect and rule_based file checks can run outside the sandbox.
+func (e *defaultEvaluator) materializeWorkspace(ctx context.Context, rt runtime.Runtime) (string, func(), error) {
+	if _, ok := rt.(runtime.WorkspaceOwner); ok {
+		return rt.Workspace(), func() {}, nil
+	}
+	dir, err := os.MkdirTemp("", "skill-up-workspace-*")
+	if err != nil {
+		return "", nil, err
+	}
+	if err := rt.DownloadDir(ctx, rt.Workspace(), dir); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", nil, err
+	}
+	return dir, func() { _ = os.RemoveAll(dir) }, nil
 }
 
 func (e *defaultEvaluator) runExpectPreCheck(
