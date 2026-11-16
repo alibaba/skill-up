@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
@@ -20,14 +21,25 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// refNamePattern matches the part of a path mentioned in prose that follows
+// its leading directory. Prose has no delimiters, so the path is read
+// heuristically: it starts on a letter, digit, or underscore and may contain
+// letters and digits of any script, combining marks, _ - . / @ + ~ %, and
+// balanced parentheses (assets/icon@2x.png, references/指南.md,
+// assets/diagram(1).png). Whitespace ends it. It ends on an ASCII letter,
+// digit, or underscore, or on a closing parenthesis, so trailing sentence
+// punctuation (.,;:!?。) and closing brackets are never captured, and CJK
+// prose that directly follows a path (references/guide.md获取详情) is left
+// out.
+const refNamePattern = `(?:[\pL\pN_](?:[\pL\pN\pM_@+~%./-]|\([^()\s]*\))*(?:\w|\([^()\s]*\))|\w)`
+
 // skillRefPattern matches references/, assets/, scripts/ paths cited in
 // markdown prose — the conventional Agent Skill attachment directories. A
 // match must start at a boundary (the beginning of a text segment, after a
 // character that cannot be part of a URL, a home-dir path, or a longer path,
-// or after an explicit ./ prefix) and ends on a word character so trailing
-// sentence punctuation (.,;:!?。) and closing brackets are never captured.
+// or after an explicit ./ prefix); refNamePattern describes the rest.
 // Group 1 is the path.
-var skillRefPattern = regexp.MustCompile(`(?:^|[^\w./~-]|\./)((?:references|assets|scripts)/[\w](?:[\w./-]*[\w])?)`)
+var skillRefPattern = regexp.MustCompile(`(?:^|[^\w./~-]|\./)((?:references|assets|scripts)/` + refNamePattern + `)`)
 
 // skillRefPrefixes are the attachment directories a citation must point into.
 var skillRefPrefixes = []string{"references/", "assets/", "scripts/"}
@@ -47,7 +59,7 @@ var urlTokenPattern = regexp.MustCompile(`(?:[a-zA-Z][a-zA-Z0-9+.-]*://|\bwww\.)
 // relScriptPattern matches ./-prefixed relative path mentions inside script
 // and data files (`source ./lib.sh`). Group 1 is the path relative to the
 // mentioning file's own directory.
-var relScriptPattern = regexp.MustCompile(`(?:^|[^\w./~-])\./([\w](?:[\w./-]*[\w])?)`)
+var relScriptPattern = regexp.MustCompile(`(?:^|[^\w./~-])\./(` + refNamePattern + `)`)
 
 // CheckSkillIntegrity inspects the SKILL.md of the skill rooted at skillDir
 // and returns one human-readable warning per finding: a missing or
@@ -74,7 +86,8 @@ func CheckSkillIntegrity(skillDir string) []string {
 	}
 
 	body, warnings := splitSkillMD(data)
-	for _, ref := range missingSkillRefs(skillDir, extractSkillRefs(body)) {
+	exists := skillPathExists(skillDir)
+	for _, ref := range missingSkillRefs(extractSkillRefs(body, exists), exists) {
 		warnings = append(warnings, fmt.Sprintf("SKILL.md: references %q but it does not exist on disk", ref))
 	}
 	return warnings
@@ -101,7 +114,8 @@ func CheckSkillUncitedAttachments(skillDir string) []string {
 
 	body, _ := splitSkillMD(data)
 	var warnings []string
-	for _, file := range uncitedSkillFiles(skillDir, collectReachableRefs(skillDir, extractSkillRefs(body))) {
+	seeds := extractSkillRefs(body, skillPathExists(skillDir))
+	for _, file := range uncitedSkillFiles(skillDir, collectReachableRefs(skillDir, seeds)) {
 		warnings = append(warnings, fmt.Sprintf("SKILL.md: never references %q but the file exists on disk", file))
 	}
 	return warnings
@@ -157,19 +171,28 @@ func frontmatterFieldWarnings(frontmatter []byte) []string {
 }
 
 // missingSkillRefs returns the sorted references/, assets/, scripts/ paths
-// cited from the SKILL.md body that do not exist under skillDir. Only the
-// body feeds this check: it is the document the skill author maintains, so
-// its dangling citations are worth reporting, while attachments' own
-// dependencies only feed the reachability set.
-func missingSkillRefs(skillDir string, refs []string) []string {
+// cited from the SKILL.md body that do not exist on disk. Only the body feeds
+// this check: it is the document the skill author maintains, so its dangling
+// citations are worth reporting, while attachments' own dependencies only
+// feed the reachability set.
+func missingSkillRefs(refs []string, exists func(string) bool) []string {
 	var missing []string
 	for _, ref := range refs {
-		if _, err := os.Stat(filepath.Join(skillDir, filepath.FromSlash(ref))); err != nil {
+		if !exists(ref) {
 			missing = append(missing, ref)
 		}
 	}
 	slices.Sort(missing)
 	return missing
+}
+
+// skillPathExists returns a predicate reporting whether a canonical
+// root-relative path (references/guide.md) exists under skillDir.
+func skillPathExists(skillDir string) func(string) bool {
+	return func(rel string) bool {
+		_, err := os.Stat(filepath.Join(skillDir, filepath.FromSlash(rel)))
+		return err == nil
+	}
 }
 
 // collectReachableRefs walks the citation graph seeded by the SKILL.md body
@@ -277,7 +300,7 @@ func extractAttachmentRefs(skillDir, rel string) []string {
 		}
 	}
 	if isMarkdownRef(rel) {
-		walkMarkdownAttachmentRefs(rel, data, add)
+		walkMarkdownAttachmentRefs(rel, data, skillPathExists(skillDir), add)
 		return refs
 	}
 
@@ -297,7 +320,9 @@ func extractAttachmentRefs(skillDir, rel string) []string {
 // document's own directory otherwise ([details](details.md) inside
 // references/guide.md means references/details.md) — plus root-anchored
 // prose and code-span citations, matching the SKILL.md body conventions.
-func walkMarkdownAttachmentRefs(rel string, data []byte, add func(string)) {
+// exists reports whether a root-relative path exists; it settles where a
+// code span's file name ends (see collectCodeSpanRefs).
+func walkMarkdownAttachmentRefs(rel string, data []byte, exists func(string) bool, add func(string)) {
 	dir := path.Dir(rel)
 	addLinkTarget := func(dest []byte) {
 		target, ok := localLinkTarget(dest)
@@ -318,7 +343,7 @@ func walkMarkdownAttachmentRefs(rel string, data []byte, add func(string)) {
 		}
 		switch node := n.(type) {
 		case *ast.Text:
-			if !continuesProseRun(node) {
+			if !continuesProseRun(node) && !inLocalLinkLabel(node) {
 				collectProseRefs(proseRun(node, data), add)
 			}
 		case *ast.Link:
@@ -328,10 +353,8 @@ func walkMarkdownAttachmentRefs(rel string, data []byte, add func(string)) {
 		case *ast.CodeSpan:
 			// Same convention as the SKILL.md body: a code span whose first
 			// token is a path cites that path.
-			if content := codeSpanText(node, data); citesRefPath(content) {
-				for _, m := range skillRefPattern.FindAllStringSubmatch(content, -1) {
-					add(m[1])
-				}
+			if !inLocalLinkLabel(node) {
+				collectCodeSpanRefs(codeSpanText(node, data), exists, add)
 			}
 			return ast.WalkSkipChildren, nil
 		}
@@ -449,8 +472,16 @@ func isCitedAttachment(rel string, cited map[string]struct{}) bool {
 // and image destinations, and from inline code spans that cite a path.
 // Fenced and indented code blocks, remote URLs, autolinks, and raw HTML
 // never yield references — they are documentation examples or external
-// resources, not skill attachments.
-func extractSkillRefs(body []byte) []string {
+// resources, not skill attachments. The label of a link to a local file is
+// display text, not a citation of its own (see inLocalLinkLabel).
+//
+// File names keep every character their syntax allows: a link destination
+// is resolved the way CommonMark renders it (see localLinkTarget), and a
+// code span is read literally, with exists — whether a root-relative path
+// exists — telling a file name that contains spaces from a command line (see
+// collectCodeSpanRefs). Only prose, which has no delimiters, is read
+// heuristically (see refNamePattern).
+func extractSkillRefs(body []byte, exists func(string) bool) []string {
 	doc := goldmark.New().Parser().Parse(text.NewReader(body))
 	seen := make(map[string]struct{})
 	var refs []string
@@ -470,7 +501,7 @@ func extractSkillRefs(body []byte) []string {
 		}
 		switch node := n.(type) {
 		case *ast.Text:
-			if !continuesProseRun(node) {
+			if !continuesProseRun(node) && !inLocalLinkLabel(node) {
 				collectProseRefs(proseRun(node, body), add)
 			}
 		case *ast.Link:
@@ -482,19 +513,78 @@ func extractSkillRefs(body []byte) []string {
 				add(ref)
 			}
 		case *ast.CodeSpan:
-			// A code span whose first token is an attachment path cites that
-			// path (`references/install.md`); a span that merely contains a
-			// path inside a command (`cat scripts/x.sh`) is an example.
-			if content := codeSpanText(node, body); citesRefPath(content) {
-				for _, m := range skillRefPattern.FindAllStringSubmatch(content, -1) {
-					add(m[1])
-				}
+			if !inLocalLinkLabel(node) {
+				collectCodeSpanRefs(codeSpanText(node, body), exists, add)
 			}
 			return ast.WalkSkipChildren, nil
 		}
 		return ast.WalkContinue, nil
 	})
 	return refs
+}
+
+// collectCodeSpanRefs collects the attachment paths an inline code span
+// cites. A span whose first token is an attachment path cites it
+// (`references/install.md`); a span that merely contains a path inside a
+// command (`cat scripts/x.sh`) is an example and cites nothing.
+//
+// CommonMark keeps code span content literal — no backslash escapes, entity
+// references, or percent-decoding — so the span names a file verbatim,
+// whatever characters it contains (`assets/icon@2x.png`,
+// `references/指南.md`). Whitespace is ambiguous, though: it may be part of a
+// file name (`references/my guide.md`) or separate a command from its
+// arguments (`scripts/run.sh --verbose`). So the whole span, and then each
+// whitespace-separated token, is cited verbatim when it names an existing
+// path; anything else is read like prose, which keeps a missing citation
+// reportable and drops what cannot end a path (`scripts/run.sh;`,
+// `references/guide.md#setup`).
+func collectCodeSpanRefs(content string, exists func(string) bool, add func(string)) {
+	if !citesRefPath(content) {
+		return
+	}
+	if citeExistingPath(strings.TrimSpace(content), exists, add) {
+		return
+	}
+	for token := range strings.FieldsSeq(content) {
+		if !citeExistingPath(token, exists, add) {
+			collectProseRefs([]byte(token), add)
+		}
+	}
+}
+
+// citeExistingPath cites s when it names an existing path inside one of the
+// attachment directories and reports whether it did. A bare attachment root
+// (`references/`) mentions the convention rather than citing anything.
+func citeExistingPath(s string, exists func(string) bool, add func(string)) bool {
+	norm, ok := normalizeSkillRef(s)
+	if !ok || !hasRefPrefix(norm) || !exists(norm) {
+		return false
+	}
+	add(norm)
+	return true
+}
+
+// inLocalLinkLabel reports whether n sits in the label of a link, or the alt
+// text of an image, whose destination is local. Such a link cites its
+// destination; the label is display text that often spells the same path
+// for the reader ([references/my guide.md](<references/my guide.md>)), and
+// reading it as prose would cut the file name at its first space. The label
+// of a remote link is still read as prose.
+func inLocalLinkLabel(n ast.Node) bool {
+	for p := n.Parent(); p != nil; p = p.Parent() {
+		var dest []byte
+		switch link := p.(type) {
+		case *ast.Link:
+			dest = link.Destination
+		case *ast.Image:
+			dest = link.Destination
+		default:
+			continue
+		}
+		_, local := localLinkTarget(dest)
+		return local
+	}
+	return false
 }
 
 // proseRun returns the text of first and of the text siblings that directly
@@ -530,11 +620,76 @@ func continuesProseRun(t *ast.Text) bool {
 // text segment. Complete URL tokens are blanked out first so a query string
 // or fragment (view?file=assets/x.png) never yields a phantom citation.
 func collectProseRefs(prose []byte, add func(string)) {
-	scrubbed := urlTokenPattern.ReplaceAll(prose, []byte(" "))
-	for _, m := range skillRefPattern.FindAllSubmatch(scrubbed, -1) {
-		add(string(m[1]))
+	collectPatternRefs(urlTokenPattern.ReplaceAll(prose, []byte(" ")), add)
+}
+
+// collectPatternRefs collects the skillRefPattern matches in prose. CJK prose
+// often omits the spaces around a path, so a match may run on into the text
+// that follows it (references/guide.md和assets/x.png); such a match is cut
+// where gluedProseIndex places the end of the path, and the rest is scanned
+// again.
+func collectPatternRefs(prose []byte, add func(string)) {
+	for _, m := range skillRefPattern.FindAllSubmatch(prose, -1) {
+		ref := m[1]
+		cut := gluedProseIndex(ref)
+		if cut < 0 {
+			add(string(ref))
+			continue
+		}
+		// What is left must still end like a path (references/指南和... cut
+		// back to references/ is no citation).
+		if last := ref[cut-1]; last == ')' || last == '_' || isASCIIAlnum(rune(last)) {
+			add(string(ref[:cut]))
+		}
+		collectPatternRefs(ref[cut:], add)
 	}
 }
+
+// gluedProseIndex returns the byte offset where a prose path ends when CJK
+// prose directly follows it, or -1 when the whole match is the path. The path
+// ends before a non-ASCII run that directly follows a file extension — a dot,
+// an ASCII letter, then ASCII letters or digits (references/guide.md和b.md) —
+// or that is directly followed by the next attachment path
+// (references/a和references/b). Anywhere else a non-ASCII run belongs to the
+// file name (references/指南.md, references/v1.0版本说明.md).
+func gluedProseIndex(ref []byte) int {
+	s := string(ref)
+	afterDot, inExt := false, false
+	runStart := -1 // start of the current non-ASCII run
+	for i, r := range s {
+		if r >= utf8.RuneSelf {
+			if inExt {
+				return i
+			}
+			if runStart < 0 {
+				runStart = i
+			}
+			afterDot = false
+			continue
+		}
+		if runStart >= 0 {
+			if hasRefPrefix(s[i:]) {
+				return runStart
+			}
+			runStart = -1
+		}
+		switch {
+		case r == '.':
+			afterDot, inExt = true, false
+		case afterDot && isASCIILetter(r):
+			afterDot, inExt = false, true
+		case inExt && isASCIIAlnum(r):
+			// still inside the extension
+		default:
+			afterDot, inExt = false, false
+		}
+	}
+	return -1
+}
+
+func isASCIILetter(r rune) bool { return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' }
+
+func isASCIIAlnum(r rune) bool { return isASCIILetter(r) || r >= '0' && r <= '9' }
 
 // normalizeSkillRef converts a SKILL.md attachment citation into its
 // canonical root-relative form: a leading ./ is dropped and the path is
@@ -565,13 +720,17 @@ func normalizeSkillRef(ref string) (string, bool) {
 }
 
 // localLinkTarget reduces a link or image destination to a local path
-// candidate: the fragment and query are stripped, percent-encoding is
-// decoded the way a renderer resolves the link (references/my%20guide.md
-// names references/my guide.md), and remote URLs, pure anchors, and
+// candidate. goldmark keeps the destination as written, so it is first
+// resolved the way CommonMark renders it — backslash escapes, then numeric
+// and named character references (assets/diagram\(1\).png names
+// assets/diagram(1).png) — which gives the URL the link points to. Then the
+// fragment and query are stripped, percent-encoding is decoded the way a
+// renderer resolves the link (references/my%20guide.md names
+// references/my guide.md), and remote URLs, pure anchors, and
 // protocol-relative destinations are rejected. A destination that is not
 // valid percent-encoding (references/100%.md) is kept verbatim.
 func localLinkTarget(dest []byte) (string, bool) {
-	s := string(dest)
+	s := string(util.ResolveEntityNames(util.ResolveNumericReferences(util.UnescapePunctuations(dest))))
 	if i := strings.IndexAny(s, "#?"); i >= 0 {
 		s = s[:i]
 	}
@@ -603,12 +762,19 @@ func hasRefPrefix(s string) bool {
 	return false
 }
 
-// codeSpanText concatenates the text of a code span's children.
+// codeSpanText returns the content of a code span the way CommonMark renders
+// it: the text of its children, with each line ending turned into a space.
 func codeSpanText(span *ast.CodeSpan, src []byte) string {
 	var buf bytes.Buffer
 	for child := span.FirstChild(); child != nil; child = child.NextSibling() {
 		if t, ok := child.(*ast.Text); ok {
-			buf.Write(t.Segment.Value(src))
+			v := t.Segment.Value(src)
+			if line, ok := bytes.CutSuffix(v, []byte("\n")); ok {
+				buf.Write(line)
+				buf.WriteByte(' ')
+				continue
+			}
+			buf.Write(v)
 		}
 	}
 	return buf.String()

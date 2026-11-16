@@ -168,7 +168,12 @@ run 在 `skills.include`/`skills.exclude` 过滤后实际安装的内容，也�
   正文按 CommonMark 解析：正文行文、本地链接/图片目标、以及引用路径的行内代码
   均参与检查；代码块、远程 URL 和原始 HTML 视为文档示例或外部资源，不参与检查。
   引用路径带不带前导 `./` 均可识别，同一路径的等价写法（`references/./guide.md`，
-  或链接目标中的 `references/my%20guide.md`）会先归一化再比对
+  或链接目标中的 `references/my%20guide.md`）会先归一化再比对。文件名中的字符
+  完整保留：链接目标按 CommonMark 的渲染规则解析（`<references/my guide.md>`、
+  `assets/diagram\(1\).png`），本地链接只按链接目标检查，不检查链接文字；行内
+  代码按字面读取（`assets/icon@2x.png`；`references/my guide.md` 在该文件存在时
+  整体视为文件名）；正文行文中的路径也可以包含中文等非 ASCII 文字（`references/指南.md`）。
+  正文行文中遇到空格即视为路径结束，文件名含空格时请用链接目标或行内代码引用
 
 传入 `--uncited` 时，还会报出这些目录下存在、但从正文出发不可达的文件。
 SKILL.md 尾部被截断时，丢失段落引用过的附件会悄无声息地变成孤立文件，这项

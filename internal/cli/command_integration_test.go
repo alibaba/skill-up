@@ -319,6 +319,35 @@ func TestValidateCommandSkillFlagDotFollowsIndirectCitations(t *testing.T) {
 	}
 }
 
+func TestValidateCommandSkillFlagStrictAcceptsAtSignFileName(t *testing.T) {
+	var logBuf bytes.Buffer
+	restore := logging.SetOutputForTest(&logBuf)
+	defer restore()
+
+	// Regression (#281 review, 2026-11-16): the inline-code citation
+	// `assets/icon@2x.png` was cut to "assets/icon" and failed --strict
+	// although the file exists.
+	dir := writeSkillTree(t, map[string]string{
+		"SKILL.md":           "---\nname: retina-icon\ndescription: Valid skill citing an asset with an at sign in its name.\n---\n\nUse `assets/icon@2x.png` on high-DPI screens.\n",
+		"assets/icon@2x.png": "png\n",
+	})
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("skill", dir, "")
+	cmd.Flags().Bool("strict", true, "")
+	cmd.SetContext(context.Background())
+
+	output, err := captureStdout(t, func() error {
+		return validateCmd.RunE(cmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("validate RunE returned error: %v\n%s", err, logBuf.String())
+	}
+	if !strings.Contains(output, "skill content check passed") {
+		t.Fatalf("validate output = %q, want success message", output)
+	}
+}
+
 func TestValidateCommandEvalValidationSkipsSkillCheck(t *testing.T) {
 	var logBuf bytes.Buffer
 	restore := logging.SetOutputForTest(&logBuf)

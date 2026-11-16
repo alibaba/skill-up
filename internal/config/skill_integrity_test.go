@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -598,10 +599,137 @@ Read [the guide](references/guide.md).
 	}
 }
 
+func TestCheckSkillIntegrityInlineCodeAtSignFileName(t *testing.T) {
+	t.Parallel()
+
+	// Regression (#281 review, 2026-11-16): the inline-code citation
+	// assets/icon@2x.png was cut at the @ and reported as a missing
+	// "assets/icon". A code span is literal (CommonMark 0.31.2 §6.1), so it
+	// names the file verbatim.
+	dir := t.TempDir()
+	writeSkillFiles(t, dir, map[string]string{
+		"SKILL.md": `---
+name: retina-icon
+description: Skill citing an asset whose name contains an at sign.
+---
+
+Use ` + "`assets/icon@2x.png`" + ` on high-DPI screens.
+`,
+		"assets/icon@2x.png": "not really a png\n",
+	})
+	if got := allSkillWarnings(dir); len(got) != 0 {
+		t.Fatalf("allSkillWarnings() = %v, want no warnings for an existing assets/icon@2x.png", got)
+	}
+
+	// Once the file is gone, the warning names the whole file.
+	if err := os.Remove(filepath.Join(dir, "assets", "icon@2x.png")); err != nil {
+		t.Fatal(err)
+	}
+	got := CheckSkillIntegrity(dir)
+	if len(got) != 1 || !strings.Contains(got[0], `references "assets/icon@2x.png" but it does not exist on disk`) {
+		t.Fatalf("CheckSkillIntegrity() = %v, want exactly one missing-reference warning for assets/icon@2x.png", got)
+	}
+}
+
+func TestCheckSkillIntegrityNonASCIIFileNames(t *testing.T) {
+	t.Parallel()
+
+	// Every citation below is valid, and each must name the whole file:
+	//   - a code span is literal (CommonMark 0.31.2 §6.1);
+	//   - a bare link destination excludes only spaces, ASCII control
+	//     characters, and unbalanced parentheses (§6.3), so non-ASCII
+	//     characters may appear as they are, or percent-encoded as UTF-8;
+	//   - prose has no delimiters, so a path there is read heuristically: its
+	//     file name may hold letters of any script, and CJK text that follows
+	//     a path without a space ends it after the extension.
+	// The cited script mentions a non-ASCII sibling as ./工具.sh, which keeps
+	// the --uncited reachability walk honest for script dependencies too.
+	dir := t.TempDir()
+	writeSkillFiles(t, dir, map[string]string{
+		"SKILL.md": `---
+name: non-ascii
+description: Skill citing attachments with non-ASCII file names.
+---
+
+Read ` + "`references/指南.md`" + ` first, then [the notes](references/笔记.md) and
+[the FAQ](references/%E5%B8%B8%E8%A7%81%E9%97%AE%E9%A2%98.md).
+
+参见 references/使用说明-v2.md。详见references/版本记录.md获取更多信息。
+
+Run ` + "`scripts/run.sh`" + ` to build the report.
+`,
+		"references/指南.md":      "# 指南\n",
+		"references/笔记.md":      "# 笔记\n",
+		"references/常见问题.md":    "# 常见问题\n",
+		"references/使用说明-v2.md": "# 使用说明\n",
+		"references/版本记录.md":    "# 版本记录\n",
+		"scripts/run.sh":        "#!/bin/sh\n. ./工具.sh\n",
+		"scripts/工具.sh":         "# helpers\n",
+	})
+
+	if got := allSkillWarnings(dir); len(got) != 0 {
+		t.Fatalf("allSkillWarnings() = %v, want no warnings for non-ASCII file names", got)
+	}
+}
+
+func TestCheckSkillIntegritySpacesAndParenthesesInFileNames(t *testing.T) {
+	t.Parallel()
+
+	// The valid ways to cite references/my guide (v2).md and
+	// assets/diagram(1).png, per CommonMark 0.31.2:
+	//   - §6.3: a destination in pointy brackets may contain spaces and
+	//     parentheses. The link cites its destination; its label is display
+	//     text, so a label that spells the same path is not read as prose.
+	//   - §6.3: a bare destination cannot contain a space, so spaces are
+	//     percent-encoded; parentheses are allowed when balanced, or when
+	//     backslash-escaped (backslash escapes work in URLs, §2.4).
+	//   - §6.1: a code span is literal, spaces included. A span can also be a
+	//     command line (`scripts/run.sh --verbose`), so the whole span counts
+	//     as one file name when that file exists.
+	dir := t.TempDir()
+	writeSkillFiles(t, dir, map[string]string{
+		"SKILL.md": `---
+name: spaces-parens
+description: Skill citing attachments whose names contain spaces and parentheses.
+---
+
+Read [references/my guide (v2).md](<references/my guide (v2).md>), also linked as
+[the guide](references/my%20guide%20(v2).md), or open ` + "`references/my guide (v2).md`" + `.
+
+![diagram](assets/diagram\(1\).png) is also [here](assets/diagram(1).png).
+`,
+		"references/my guide (v2).md": "# Guide\n",
+		"assets/diagram(1).png":       "not really a png\n",
+	})
+
+	if got := allSkillWarnings(dir); len(got) != 0 {
+		t.Fatalf("allSkillWarnings() = %v, want no warnings for the CommonMark-valid spellings", got)
+	}
+
+	// Not a valid spelling: a bare destination cannot contain a space
+	// (§6.3), so CommonMark renders this as literal text rather than a link.
+	// Read as prose, the citation ends at the first space and the broken
+	// link is reported.
+	writeSkillFiles(t, dir, map[string]string{
+		"SKILL.md": `---
+name: spaces-parens
+description: Skill whose link destination contains an unencoded space.
+---
+
+Read [the guide](references/my guide (v2).md).
+`,
+	})
+	got := CheckSkillIntegrity(dir)
+	if len(got) != 1 || !strings.Contains(got[0], `references "references/my" but it does not exist on disk`) {
+		t.Fatalf("CheckSkillIntegrity() = %v, want the unencoded space to end the citation", got)
+	}
+}
+
 type extractRefsCase struct {
-	name string
-	body string
-	want []string // refs in order of first appearance; nil means none
+	name   string
+	body   string
+	onDisk []string // root-relative paths that exist; nil means none does
+	want   []string // refs in order of first appearance; nil means none
 }
 
 func runExtractRefsCases(t *testing.T, tests []extractRefsCase) {
@@ -610,7 +738,8 @@ func runExtractRefsCases(t *testing.T, tests []extractRefsCase) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := extractSkillRefs([]byte(tt.body))
+			exists := func(rel string) bool { return slices.Contains(tt.onDisk, rel) }
+			got := extractSkillRefs([]byte(tt.body), exists)
 			if len(got) != len(tt.want) {
 				t.Fatalf("extractSkillRefs(%q) = %v, want %v", tt.body, got, tt.want)
 			}
@@ -902,6 +1031,208 @@ func TestExtractSkillRefsNormalization(t *testing.T) {
 			name: "invalid percent escape is kept verbatim",
 			body: "[odd](references/100%.md)",
 			want: []string{"references/100%.md"},
+		},
+	})
+}
+
+// TestExtractSkillRefsFileNameProse covers file names with characters beyond
+// [A-Za-z0-9_.-] in prose, which has no delimiters: the path is read
+// heuristically (see refNamePattern and gluedProseIndex).
+func TestExtractSkillRefsFileNameProse(t *testing.T) {
+	t.Parallel()
+
+	runExtractRefsCases(t, []extractRefsCase{
+		{
+			name: "at sign stays in the name",
+			body: "See assets/icon@2x.png.",
+			want: []string{"assets/icon@2x.png"},
+		},
+		{
+			name: "balanced parentheses stay in the name",
+			body: "See assets/diagram(1).png.",
+			want: []string{"assets/diagram(1).png"},
+		},
+		{
+			name: "closing parenthesis of the sentence is not part of the path",
+			body: "(see references/guide.md)",
+			want: []string{"references/guide.md"},
+		},
+		{
+			name: "non-ASCII file name",
+			body: "参见 references/使用说明-v2.md。",
+			want: []string{"references/使用说明-v2.md"},
+		},
+		{
+			name: "non-ASCII directory",
+			body: "See references/中文/guide.md.",
+			want: []string{"references/中文/guide.md"},
+		},
+		{
+			name: "CJK prose after a non-ASCII file name is not part of it",
+			body: "详见references/指南.md获取详情",
+			want: []string{"references/指南.md"},
+		},
+		{
+			name: "CJK prose after an ASCII file name is not part of it",
+			body: "详见references/guide.md获取详情",
+			want: []string{"references/guide.md"},
+		},
+		{
+			name: "two paths joined by CJK prose stay separate",
+			body: "参见references/a.md和assets/图.png",
+			want: []string{"references/a.md", "assets/图.png"},
+		},
+		{
+			name: "two extensionless paths joined by CJK prose stay separate",
+			body: "参见references/advanced和references/basic目录",
+			want: []string{"references/advanced", "references/basic"},
+		},
+		{
+			name: "a version number before non-ASCII text stays in the name",
+			body: "See references/v1.0版本说明.md.",
+			want: []string{"references/v1.0版本说明.md"},
+		},
+		{
+			// Without an extension, where the name ends in glued CJK prose is
+			// undecidable; nothing is cited rather than a guess.
+			name: "non-ASCII name without an extension in glued prose is not cited",
+			body: "详见references/指南获取详情",
+			want: nil,
+		},
+	})
+}
+
+// TestExtractSkillRefsFileNameCodeSpans covers file names in inline code.
+// CommonMark keeps code span content literal (0.31.2 §6.1: no backslash
+// escapes or entity references, line endings become spaces), so a span names
+// a file verbatim. onDisk lists the files that exist: whitespace in a span is
+// part of a file name only when that file exists, because a span can also be
+// a command line.
+func TestExtractSkillRefsFileNameCodeSpans(t *testing.T) {
+	t.Parallel()
+
+	runExtractRefsCases(t, []extractRefsCase{
+		{
+			name:   "at sign stays in the name",
+			body:   "Use `assets/icon@2x.png` on high-DPI screens.",
+			onDisk: []string{"assets/icon@2x.png"},
+			want:   []string{"assets/icon@2x.png"},
+		},
+		{
+			name: "missing file with an at sign is cited whole",
+			body: "Use `assets/icon@2x.png` on high-DPI screens.",
+			want: []string{"assets/icon@2x.png"},
+		},
+		{
+			name: "non-ASCII file name",
+			body: "Read `references/指南.md` first.",
+			want: []string{"references/指南.md"},
+		},
+		{
+			name:   "spaces and parentheses name an existing file",
+			body:   "Open `references/my guide (v2).md` directly.",
+			onDisk: []string{"references/my guide (v2).md"},
+			want:   []string{"references/my guide (v2).md"},
+		},
+		{
+			name: "without such a file the span reads as a command",
+			body: "Open `references/my guide (v2).md` directly.",
+			want: []string{"references/my"},
+		},
+		{
+			name:   "a line ending inside the span is a space",
+			body:   "Open `references/my\nguide.md` directly.",
+			onDisk: []string{"references/my guide.md"},
+			want:   []string{"references/my guide.md"},
+		},
+		{
+			name:   "any character an existing file name holds is kept",
+			body:   "Use `assets/a=b,c.png` and run `scripts/run=fast.sh --flag`.",
+			onDisk: []string{"assets/a=b,c.png", "scripts/run=fast.sh"},
+			want:   []string{"assets/a=b,c.png", "scripts/run=fast.sh"},
+		},
+		{
+			name:   "an anchor is not part of the file name",
+			body:   "See `references/guide.md#setup`.",
+			onDisk: []string{"references/guide.md"},
+			want:   []string{"references/guide.md"},
+		},
+		{
+			name:   "shell punctuation is not part of the file name",
+			body:   "Run `scripts/setup.sh; scripts/run.sh`.",
+			onDisk: []string{"scripts/setup.sh", "scripts/run.sh"},
+			want:   []string{"scripts/setup.sh", "scripts/run.sh"},
+		},
+		{
+			name:   "a bare attachment directory is not a citation",
+			body:   "Put documents in `references/`.",
+			onDisk: []string{"references"},
+			want:   nil,
+		},
+	})
+}
+
+// TestExtractSkillRefsFileNameLinks covers file names in link destinations,
+// which CommonMark delimits exactly (0.31.2 §6.3): in pointy brackets a
+// destination may contain spaces and parentheses; a bare destination cannot
+// contain a space and allows parentheses only when balanced or
+// backslash-escaped. Backslash escapes (§2.4) and entity references (§2.5)
+// are resolved in destinations, as a renderer does before following them.
+func TestExtractSkillRefsFileNameLinks(t *testing.T) {
+	t.Parallel()
+
+	runExtractRefsCases(t, []extractRefsCase{
+		{
+			name: "pointy-bracket destination keeps spaces and parentheses",
+			body: "[guide](<references/my guide (v2).md>)",
+			want: []string{"references/my guide (v2).md"},
+		},
+		{
+			name: "percent-encoded spaces with balanced parentheses",
+			body: "[guide](references/my%20guide%20(v2).md)",
+			want: []string{"references/my guide (v2).md"},
+		},
+		{
+			name: "backslash-escaped parentheses",
+			body: `![diagram](assets/diagram\(1\).png)`,
+			want: []string{"assets/diagram(1).png"},
+		},
+		{
+			name: "named and numeric entity references",
+			body: "[a](references/caf&eacute;.md) and [b](references/caf&#233;.md)",
+			want: []string{"references/café.md"},
+		},
+		{
+			name: "non-ASCII destination, raw or percent-encoded",
+			body: "[a](references/指南.md) and [b](references/%E6%8C%87%E5%8D%97.md)",
+			want: []string{"references/指南.md"},
+		},
+		{
+			name: "at sign in a destination",
+			body: "![icon](assets/icon@2x.png)",
+			want: []string{"assets/icon@2x.png"},
+		},
+		{
+			name: "label of a local link is display text, not a citation",
+			body: "[references/my guide.md](<references/my guide.md>)",
+			want: []string{"references/my guide.md"},
+		},
+		{
+			name: "label of a remote link is still read as prose",
+			body: "[see references/a.md](https://example.com/a)",
+			want: []string{"references/a.md"},
+		},
+		{
+			name: "image inside a remote link is still a citation",
+			body: "[![badge](assets/badge.png)](https://ci.example.com)",
+			want: []string{"assets/badge.png"},
+		},
+		{
+			// Not a link: the space ends a bare destination (§6.3), so
+			// CommonMark renders the line as literal text, read as prose.
+			name: "unencoded space in a bare destination is not a link",
+			body: "[guide](references/my guide.md)",
+			want: []string{"references/my"},
 		},
 	})
 }

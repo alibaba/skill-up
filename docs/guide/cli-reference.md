@@ -196,7 +196,14 @@ before evaluations. Findings print one warning per item:
   examples or external resources. Citations may be written with or without a
   leading `./`, and equivalent spellings of one path
   (`references/./guide.md`, or `references/my%20guide.md` as a link
-  destination) are normalized before comparison
+  destination) are normalized before comparison. File names keep all their
+  characters: a link destination is resolved as CommonMark renders it
+  (`<references/my guide.md>`, `assets/diagram\(1\).png`), and a local link
+  is checked by its destination, not its link text; an inline code span is
+  read literally (`assets/icon@2x.png`, or `references/my guide.md` when that
+  file exists); prose citations may use letters of any script
+  (`references/指南.md`). A space ends a path in prose, so cite a file name
+  with spaces through a link destination or an inline code span
 
 Pass `--uncited` to also report files under those directories that are not
 reachable from the body. Truncating the tail of a SKILL.md silently orphans
