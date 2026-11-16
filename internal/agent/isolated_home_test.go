@@ -50,6 +50,55 @@ func TestIsolatedHomeCredentials(t *testing.T) {
 	}
 }
 
+func TestIsolatedHomeCredentialsWithShellTracing(t *testing.T) {
+	const fixtureValue = "test-value-that-must-not-be-logged"
+	for _, tc := range []struct{ source, key string }{
+		{"inherited", "ANTHROPIC_API_KEY"},
+		{"inherited", "ANTHROPIC_AUTH_TOKEN"},
+		{"inherited", "OPENAI_API_KEY"},
+		{"configured", "ANTHROPIC_API_KEY"},
+		{"configured", "ANTHROPIC_AUTH_TOKEN"},
+		{"configured", "OPENAI_API_KEY"},
+	} {
+		t.Run(tc.source+"/"+tc.key, func(t *testing.T) {
+			env := map[string]string{"OPENAI_API_KEY": "", "ANTHROPIC_API_KEY": "", "ANTHROPIC_AUTH_TOKEN": ""}
+			env[tc.key] = fixtureValue
+			if tc.source == "inherited" {
+				t.Setenv("SHELLOPTS", "xtrace")
+			} else {
+				env["SHELLOPTS"] = "xtrace"
+			}
+			rt, err := runtime.NewRuntime(runtime.Config{Type: "none", IsolateHome: true, Delete: true, Env: env})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := requireBashTargetShell(rt); err != nil {
+				t.Skip(err)
+			}
+			if err := rt.Create(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = rt.Close() })
+			var ag Agent = NewClaudeCodeAgent(Config{})
+			if tc.key == "OPENAI_API_KEY" {
+				ag = NewCodexAgent(Config{})
+			}
+			output := captureStdout(t, func() {
+				err = CheckIsolatedHome(context.Background(), rt, ag)
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(output, fixtureValue) {
+				t.Fatal("credential value appeared in runtime logs")
+			}
+			if !strings.Contains(output, "+ test -n") {
+				t.Fatal("credential probe did not run with shell tracing")
+			}
+		})
+	}
+}
+
 type isolatedCodexTestRuntime struct{ codexTestRuntime }
 
 func (*isolatedCodexTestRuntime) IsolatedHome() bool { return true }

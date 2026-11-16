@@ -23,14 +23,15 @@ func CheckIsolatedHome(ctx context.Context, rt Runtime, ag Agent) error {
 	}
 	var opts ExecOptions
 	var probe, key string
+	// Test a presence marker so shell tracing cannot log credential values.
 	switch a := ag.(type) {
 	case *ClaudeCodeAgent:
 		opts.Env = a.claudeRunEnvVars()
-		probe = `test -n "$ANTHROPIC_API_KEY" || test -n "$ANTHROPIC_AUTH_TOKEN"`
+		probe = `test -n "${ANTHROPIC_API_KEY:+present}" || test -n "${ANTHROPIC_AUTH_TOKEN:+present}"`
 		key = "ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN"
 	case *CodexAgent:
 		opts.Env = a.credentialEnvVars(credential.EnvOpenAIAPIKey, credential.EnvOpenAIBaseURL)
-		probe = `test -n "$OPENAI_API_KEY"`
+		probe = `test -n "${OPENAI_API_KEY:+present}"`
 		key = "OPENAI_API_KEY"
 	default:
 		return fmt.Errorf("environment.isolate_home supports only claude_code and codex; got %s", ag.Name())
