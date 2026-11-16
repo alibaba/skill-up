@@ -364,6 +364,23 @@ func TestLoadRunInputsFiltersBeforeStrictYAMLDecode(t *testing.T) {
 	}
 }
 
+func TestCountResultStatusBenchmark(t *testing.T) {
+	results := []evaluator.EvalResult{
+		{CaseID: "pass", Configuration: "without_skill", Status: judge.StatusFail},
+		{CaseID: "pass", Configuration: "with_skill", Status: judge.StatusPass},
+		{CaseID: "fail", Configuration: "with_skill", Status: judge.StatusFail},
+		{CaseID: "fail", Configuration: "without_skill", Status: judge.StatusPass},
+		{CaseID: "error", Configuration: "with_skill", Status: judge.StatusError},
+		{CaseID: "skip", Configuration: "with_skill", Status: judge.StatusSkip},
+		{CaseID: "skip", Configuration: "without_skill", Status: judge.StatusError},
+		{CaseID: "baseline-only", Configuration: "without_skill", Status: judge.StatusError},
+	}
+	passed, failed, errored := countResultStatus(results)
+	if passed != 1 || failed != 1 || errored != 2 {
+		t.Fatalf("counts = %d/%d/%d, want 1/1/2", passed, failed, errored)
+	}
+}
+
 func TestRunPhaseHelpers(t *testing.T) {
 	var out bytes.Buffer
 	observer := &uiProgressObserver{}
@@ -378,10 +395,10 @@ func TestRunPhaseHelpers(t *testing.T) {
 	}
 
 	results := []evaluator.EvalResult{
-		{Status: judge.StatusPass},
-		{Status: judge.StatusFail},
-		{Status: judge.StatusError},
-		{Status: judge.StatusSkip},
+		{CaseID: "pass", Status: judge.StatusPass},
+		{CaseID: "fail", Status: judge.StatusFail},
+		{CaseID: "error", Status: judge.StatusError},
+		{CaseID: "skip", Status: judge.StatusSkip},
 	}
 	passed, failed, errored := countResultStatus(results)
 	if passed != 1 || failed != 1 || errored != 1 {

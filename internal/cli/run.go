@@ -25,6 +25,7 @@ import (
 	"github.com/alibaba/skill-up/internal/judge"
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/observability"
+	"github.com/alibaba/skill-up/internal/report"
 	"github.com/alibaba/skill-up/internal/runner"
 	"github.com/alibaba/skill-up/internal/ui"
 	"github.com/alibaba/skill-up/internal/userconfig"
@@ -337,7 +338,13 @@ func (o *uiProgressObserver) OnCaseComplete(index, total int, caseID string, sta
 }
 
 func countResultStatus(results []evaluator.EvalResult) (passed, failed, errored int) {
+	input := report.Input{CaseResults: make([]report.CaseResult, 0, len(results))}
 	for _, r := range results {
+		input.CaseResults = append(input.CaseResults, report.CaseResult{
+			CaseID: r.CaseID, Configuration: r.Configuration, Status: r.Status,
+		})
+	}
+	for _, r := range input.PrimaryCaseResults() {
 		switch r.Status {
 		case judge.StatusPass:
 			passed++

@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Code.
 
 ### Fixed
+- Count primary cases consistently in Markdown and CLI summaries for benchmark
+  runs, without counting baseline rows as extra cases or discarding their details.
 - Warn when a non-empty case-level `judge` has no `type` and its fields are
   ignored in favor of the eval judge. `validate` and `run` preserve the
   existing fallback behavior; omitted, empty and null blocks inherit without

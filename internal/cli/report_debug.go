@@ -88,7 +88,7 @@ func runReportDebug(cmd *cobra.Command, args []string) error {
 	}
 	passRate := input.OverallPassRate()
 	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "[report] %s format — %d cases (pass_rate: %.0f%%)\n",
-		format, len(input.CaseResults), passRate*100)
+		format, len(input.PrimaryCaseResults()), passRate*100)
 	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "[output] %s\n", absPath)
 
 	return nil

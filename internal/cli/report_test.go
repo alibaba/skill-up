@@ -52,6 +52,48 @@ func newReportCmd() *cobra.Command {
 	return cmd
 }
 
+func TestBenchmarkReportSummaries(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	input := makeReportInput(judge.StatusPass)
+	for i := range input.CaseResults {
+		input.CaseResults[i].Configuration = "with_skill"
+	}
+	input.CaseResults = append(input.CaseResults,
+		report.CaseResult{CaseID: "case-1", Configuration: "without_skill", Status: judge.StatusFail},
+		report.CaseResult{CaseID: "case-2", Configuration: "without_skill", Status: judge.StatusPass},
+	)
+	path := writeResultJSON(t, dir, input)
+	cmd := newReportCmd()
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	if err := runReport(cmd, []string{path}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "Pass rate: 50.0% (1/2 cases)") {
+		t.Fatalf("report summary = %q", stdout.String())
+	}
+	debugCmd := newDebugReportCmd()
+	debugCmd.SetErr(&stderr)
+	if err := runReportDebug(debugCmd, []string{path}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr.String(), "2 cases (pass_rate: 50%)") {
+		t.Fatalf("debug report summary = %q", stderr.String())
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved report.Input
+	if err := json.Unmarshal(data, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.CaseResults) != 4 {
+		t.Fatal("JSON output lost baseline results")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // buildReporter
 // ---------------------------------------------------------------------------
