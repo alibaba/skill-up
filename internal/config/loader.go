@@ -189,6 +189,14 @@ func decodeConfig(data []byte, target any) (judgeSet, judgesSet bool, err error)
 	}
 	_, judgeSet = fields["judge"]
 	_, judgesSet = fields["judges"]
+	if c, ok := target.(*CaseConfig); ok && judgeSet {
+		node := fields["judge"]
+		var judgeFields map[string]yaml.Node
+		if err := node.Decode(&judgeFields); err != nil {
+			return false, false, err
+		}
+		c.judgeHasFields = len(judgeFields) > 0
+	}
 	return judgeSet, judgesSet, nil
 }
 

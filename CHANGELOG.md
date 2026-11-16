@@ -25,11 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Code.
 
 ### Fixed
-- Reject a case-level `judge` block that has no `type`. The eval judge used to
-  grade such a case and every field in the block, rules included, was ignored
-  without a warning. `validate` and `run` now report
-  `case judge.type is required when overriding the eval judge`, matching the
-  error already given when a case overrides an eval-level `judges` list.
+- Warn when a non-empty case-level `judge` has no `type` and its fields are
+  ignored in favor of the eval judge. `validate` and `run` preserve the
+  existing fallback behavior; omitted, empty and null blocks inherit without
+  a warning. Explicitly typed overrides and validation against an eval-level
+  `judges` list are unchanged.
 - Reject `report.formats` values other than `json`, `junit` and `html` during
   configuration validation. An unknown value used to pass validation and then be
   silently skipped by the runner, which still printed that the reports were

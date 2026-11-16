@@ -1113,9 +1113,11 @@ set, the eval's engine/model selection is inherited. `judges` lists retain their
 existing full-list replacement semantics; members do not inherit a singular
 judge's defaults.
 
-A case-level `judge` must set `type`. A block without one is rejected by
-`validate` and `run`, because the eval judge would otherwise grade the case
-and ignore every field in the block.
+When the eval uses a singular `judge`, an omitted, empty or null case-level
+`judge` inherits it. A non-empty case-level block without `type` also inherits
+the eval judge, ignoring every field in the case block; `validate` and `run`
+warn about this. Set `type` explicitly to apply a case override. When the eval
+uses a `judges` list, a case-level `judge` without `type` remains an error.
 
 The judge continues to use the case runtime; there is no `judge.environment`.
 An independent judge's CLI is installed and checked in Docker/OpenSandbox during

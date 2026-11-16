@@ -1,12 +1,15 @@
 package config
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/alibaba/skill-up/internal/logging"
 )
 
 func TestIndependentJudgeEngineValidation(t *testing.T) {
@@ -209,23 +212,29 @@ func TestMultiJudgeValidatesSimulatorBeforeJudgeBranch(t *testing.T) {
 	}
 }
 
-func TestCaseJudgeWithoutTypeIsRejected(t *testing.T) {
-	t.Parallel()
-	evalJudge := JudgeConfig{Type: "rule_based", Success: []Rule{{OutputContains: &OutputContainsRule{All: []string{"eval rule"}}}}}
+func TestCaseJudgeWithoutTypeWarnsAndInherits(t *testing.T) {
+	evalTimeout := 60
+	evalJudge := JudgeConfig{Type: "rule_based", TimeoutSeconds: &evalTimeout, Success: []Rule{{OutputContains: &OutputContainsRule{All: []string{"eval rule"}}}}}
 	for _, test := range []struct {
 		name     string
 		caseDoc  string
-		wantErr  string
+		wantWarn bool
 		wantRule string
 	}{
-		{name: "rules without type", caseDoc: "judge:\n  success:\n    - output_contains:\n        all: [case rule]\n", wantErr: "case judge.type is required"},
-		{name: "timeout only", caseDoc: "judge:\n  timeout_seconds: 30\n", wantErr: "case judge.type is required"},
-		{name: "empty block", caseDoc: "judge:\n", wantErr: "case judge.type is required"},
+		{name: "rules without type", caseDoc: "judge:\n  success:\n    - output_contains:\n        all: [case rule]\n", wantWarn: true, wantRule: "eval rule"},
+		{name: "timeout only", caseDoc: "judge:\n  timeout_seconds: 30\n", wantWarn: true, wantRule: "eval rule"},
+		{name: "zero timeout", caseDoc: "judge: {timeout_seconds: 0}\n", wantWarn: true, wantRule: "eval rule"},
+		{name: "empty field", caseDoc: "judge: {model: ''}\n", wantWarn: true, wantRule: "eval rule"},
+		{name: "null field", caseDoc: "judge: {model: null}\n", wantWarn: true, wantRule: "eval rule"},
+		{name: "empty block", caseDoc: "judge:\n", wantRule: "eval rule"},
+		{name: "empty map", caseDoc: "judge: {}\n", wantRule: "eval rule"},
+		{name: "null block", caseDoc: "judge: null\n", wantRule: "eval rule"},
+		{name: "merged block", caseDoc: "<<: {judge: {timeout_seconds: 30}}\n", wantWarn: true, wantRule: "eval rule"},
+		{name: "merged judge fields", caseDoc: "judge: {<<: {timeout_seconds: 30}}\n", wantWarn: true, wantRule: "eval rule"},
 		{name: "typed block", caseDoc: "judge:\n  type: rule_based\n  success:\n    - output_contains:\n        all: [case rule]\n", wantRule: "case rule"},
 		{name: "no block inherits the eval judge", wantRule: "eval rule"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
 			evalsDir := filepath.Join(t.TempDir(), "evals")
 			if err := os.MkdirAll(evalsDir, 0o755); err != nil {
 				t.Fatal(err)
@@ -238,27 +247,47 @@ func TestCaseJudgeWithoutTypeIsRejected(t *testing.T) {
 				t.Fatal(err)
 			}
 			eval := &EvalConfig{Judge: evalJudge, JudgeSet: true}
-
+			var logs bytes.Buffer
+			restore := logging.SetOutputForTest(&logs)
+			t.Cleanup(restore)
 			err = NewValidator().ValidateCasesWithEvalDefaults(eval, []*CaseConfig{caseCfg})
-			if test.wantErr == "" {
-				if err != nil {
-					t.Fatalf("validate error = %v", err)
-				}
-				plan, err := ResolveJudgePlan(eval, caseCfg)
-				if err != nil {
-					t.Fatalf("ResolveJudgePlan error = %v", err)
-				}
-				if got := plan.Judges[0].Success[0].OutputContains.All[0]; got != test.wantRule {
-					t.Fatalf("resolved rule = %q, want %q", got, test.wantRule)
-				}
-				return
+			if err != nil {
+				t.Fatalf("validate error = %v", err)
 			}
-			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
-				t.Fatalf("validate error = %v, want %q", err, test.wantErr)
+			wantCount := 0
+			if test.wantWarn {
+				wantCount = 1
 			}
-			if _, err := ResolveJudgePlan(eval, caseCfg); err == nil || !strings.Contains(err.Error(), test.wantErr) {
-				t.Fatalf("ResolveJudgePlan error = %v, want %q", err, test.wantErr)
+			if got := strings.Count(logs.String(), "case case: judge.type is missing; case judge fields are ignored"); got != wantCount {
+				t.Fatalf("warning count = %d, want %d; logs: %s", got, wantCount, logs.String())
+			}
+			plan, err := ResolveJudgePlan(eval, caseCfg)
+			if err != nil {
+				t.Fatalf("ResolveJudgePlan error = %v", err)
+			}
+			if got := plan.Judges[0].Success[0].OutputContains.All[0]; got != test.wantRule {
+				t.Fatalf("resolved rule = %q, want %q", got, test.wantRule)
+			}
+			if got := *plan.Judges[0].TimeoutSeconds; got != evalTimeout {
+				t.Fatalf("resolved timeout = %d, want %d", got, evalTimeout)
 			}
 		})
+	}
+}
+
+func TestCaseJudgeWithoutTypeKeepsEvalJudgeListValidation(t *testing.T) {
+	t.Parallel()
+	judges := []JudgeConfig{{ID: "check", Type: "rule_based"}}
+	eval := &EvalConfig{Judges: &judges}
+	for _, doc := range []string{"judge:\n", "judge: null\n", "judge: {}\n", "judge: {timeout_seconds: 30}\n"} {
+		var c CaseConfig
+		var err error
+		c.JudgeSet, c.JudgesSet, err = decodeConfig([]byte("input: {prompt: task}\n"+doc), &c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := NewValidator().ValidateCasesWithEvalDefaults(eval, []*CaseConfig{&c}); err == nil || !strings.Contains(err.Error(), "case judge.type is required when overriding eval judges") {
+			t.Fatalf("document %q: error = %v", doc, err)
+		}
 	}
 }
