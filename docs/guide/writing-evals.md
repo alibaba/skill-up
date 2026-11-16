@@ -203,6 +203,30 @@ engine:
     wire_api: responses
 ```
 
+The required CI matrix runs real Codex 0.169.0 (`responses`) and 0.80.0
+(`chat` and `responses`) against a local SSE provider. It checks the exact CLI
+version and verifies that the second request contains the first user message,
+the first assistant reply, and the second user message in order. The 0.80.0
+jobs temporarily restore the original option ordering, require this same test
+to fail on turn two with the parser error, then restore the fix and require a pass.
+
+To reproduce with a preinstalled CLI:
+
+```bash
+SKILL_UP_CODEX_COMPAT_E2E=1 SKILL_UP_CODEX_EXPECTED_VERSION=0.80.0 \
+  SKILL_UP_CODEX_WIRE_API=chat \
+  go test -race -tags e2e -count=1 -v -run '^TestCodexCLICompatibility$' ./e2e
+```
+
+The manual **Model E2E** workflow's `codex` suite separately runs real
+DashScope two-turn recall with 0.169.0 (`responses`) and 0.80.0 (`chat`).
+It requires `DASHSCOPE_API_KEY`; a local fixture pass does not establish
+live-provider compatibility. Responses access also depends on the endpoint,
+model, and the API key's workspace binding. Workflow inputs `codex_base_url`
+and `codex_model` can select the appropriate workspace endpoint and model.
+The default engine remains 0.80.0
+with `chat` to preserve existing Chat-only configurations.
+
 Codex also accepts byte limits for its JSONL artifacts:
 
 | key | default | behaviour |

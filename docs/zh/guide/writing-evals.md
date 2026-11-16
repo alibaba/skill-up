@@ -182,6 +182,19 @@ engine:
     wire_api: responses
 ```
 
+必需 CI 矩阵使用真实 Codex 0.169.0（`responses`）及 0.80.0（`chat`、
+`responses`）连接本地 SSE 服务，核对 CLI 版本，并检查第二轮请求按顺序包含
+第一轮用户消息、第一轮助手回复及第二轮用户消息。0.80.0 还会验证修复前的
+resume 参数顺序：临时恢复旧实现，要求同一测试在第二轮报参数解析错误，再还原
+修复并要求测试通过。
+
+手动 **Model E2E** 工作流的 `codex` 套件另行使用百炼真实模型验证两轮记忆，
+覆盖 0.169.0（`responses`）及 0.80.0（`chat`），需要 `DASHSCOPE_API_KEY`。
+本地模拟服务通过不能代表百炼实测通过；Responses 是否可用还取决于接入地址、
+模型及 API Key 的业务空间绑定。为兼容现有 Chat-only 配置，默认引擎仍保留
+0.80.0 和 `chat`。
+可通过工作流输入 `codex_base_url`、`codex_model` 指定业务空间接口和模型。
+
 ### 采集 workspace 产物（`collect_artifacts`）
 
 `collect_artifacts` 用 glob 声明要从用例 workspace 采集的文件。每次 Agent 运行后——**无论成功、失败还是超时**——命中的文件都会被下载到：
