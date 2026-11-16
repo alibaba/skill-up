@@ -127,6 +127,10 @@ report:
   artifacts: [transcript]
 ```
 
+`report.formats` only accepts `json`, `junit` and `html`; any other value is a
+configuration error, because the runner would otherwise skip the unknown format
+and still report that the reports were saved.
+
 `skills[].include` and `skills[].exclude` use
 [doublestar](https://github.com/bmatcuk/doublestar) syntax (`*` matches one
 path segment and `**` crosses directories). Patterns are relative to
@@ -135,6 +139,16 @@ path segment and `**` crosses directories). Patterns are relative to
 The evaluation harness directory `evals/` is always excluded. If an include
 list is provided, include `SKILL.md` explicitly so the installed directory
 remains a valid Skill. The same fields are supported by `judge.skills`.
+
+By default a Skill is installed into the Agent's skills directory under the
+`name` declared in its `SKILL.md` frontmatter. The Agent then sees it under
+the name its own text uses, even when the source folder is named differently
+(for example a snapshot copy). The declared name is used when it has only
+ASCII letters, digits, `-` and `_`, starts with a letter or digit, is at most
+64 characters, and is not a Windows device name such as `CON`; otherwise the
+source folder's name is used. Two entries without a `target` that would be
+installed into the same directory are rejected: rename one Skill or give it an
+explicit `target`. `judge.skills` follows the same rules.
 
 `cases.parallelism` is the file-level default. To override it for a single run, use `skill-up run --parallelism N` without modifying `eval.yaml`. Allowed range: **1 to 256**.
 
@@ -350,7 +364,7 @@ mcp:
       mode: mocked
 ```
 
-Or define tool responses through `config_ref`:
+Or define the mocked tools through `config_ref`:
 
 ```yaml
 mcp:
@@ -361,6 +375,32 @@ mcp:
 ```
 
 ```yaml
+tools:
+  create_publish_plan_simple:
+    description: Create a publish plan for a project release.
+    input_schema:
+      type: object
+      properties:
+        name: {type: string}
+        planReleaseDate: {type: string}
+      required: [name]
+    response:
+      default:
+        id: 999
+        name: "{{params.name}}"
+        status: ONGOING
+```
+
+Each entry under `tools` defines one tool:
+
+- `response` is required. Every call to the tool returns the value under its `default` key, or the whole value when there is no `default` key. String values can insert call arguments with the `params` template used in the example's `name` field, with an optional `| default:'<value>'` fallback. `response: null` returns null.
+- `description` and `input_schema` are optional and set what the Agent sees in `tools/list`. Without them the Agent sees the description `Mocked MCP tool <name>` and an input schema that accepts any object, not the real server's descriptions and parameters, so it may pick tools differently than against the real server. An empty `description` also keeps the placeholder.
+- `input_schema`, when set, must be a mapping with `type: object`, because MCP requires an object schema; an empty mapping (`{}`) is an error, while `input_schema: null` keeps the default. Nothing deeper is validated. The schema is advertised only: the mock does not check call arguments against it, so a call with missing or extra arguments still returns the response.
+- A tool entry accepts only `description`, `input_schema` and `response`. Any other key, such as the MCP wire name `inputSchema`, is an error.
+
+Fixtures that use the `tool_responses` map keep working unchanged. Each entry there is the tool's `response`, and the tool gets the default metadata:
+
+```yaml
 tool_responses:
   create_publish_plan_simple:
     default:
@@ -369,13 +409,13 @@ tool_responses:
       status: ONGOING
 ```
 
-A mocked server built from `tool_responses` behaves as follows:
+One fixture may use both maps for different tools. A tool name declared under both `tools` and `tool_responses` is an error.
+
+A mocked server built from a fixture behaves as follows:
 
 - It uses stdio only. For `mode: mocked`, skill-up rejects `transport: http`, `endpoint`, `command`, and `args`.
 - skill-up starts it with `node`, so `node` must be on `PATH` in the runtime. skill-up sets up Node.js only when it installs Claude Code, Codex, Qwen Code, or OpenCode itself. A preinstalled engine CLI or the Qoder CLI does not bring Node.js with it.
-- Every call to a tool returns that tool's `default` response. If a tool has no `default` key, the whole entry is the response. String values can insert call arguments with the `params` template used in the example's `name` field, with an optional `| default:'<value>'` fallback.
-- The Agent sees each tool with the description `Mocked MCP tool <name>` and an input schema that accepts any object, not the real server's descriptions or parameter schemas.
-- A call to a tool that is not listed under `tool_responses` returns an MCP error.
+- A call to a tool that the fixture does not declare returns an MCP error.
 
 Environment-variable references support both `${VAR}` and full-value `$VAR` forms; the variable name must match `[A-Za-z_][A-Za-z0-9_]*`. Variables listed in `required_env` are injected into the Agent process; full env-var references inside `headers` are also recorded by name so the Agent can pick the right transport mechanism when installing the MCP server.
 
@@ -424,9 +464,9 @@ Rules and constraints:
 
 #### Session cleanup
 
-An evaluation deletes its workspace, but an agent CLI may keep per-workspace state outside it. Claude Code writes a project directory under `~/.claude/projects/<workspace-key>/` with the session transcript and a `memory/` folder, so repeated runs add up in the user's own session history.
+An evaluation deletes its workspace, but an agent CLI may keep per-workspace state outside it. Claude Code writes a project directory under `~/.claude/projects/<workspace-key>/` with the session transcript and a `memory/` folder, and qodercli writes `~/.qoder/projects/<workspace-key>/` (or `~/.qoder-cn/` for the CN edition) with the transcript, sub-agent transcripts under `<sessionID>/subagents/`, and `*-session.json` metadata, so repeated runs add up in the user's own session history.
 
-`environment.cleanup_sessions: true` (or `--cleanup-sessions`) removes that directory together with the workspace. It is off by default because it deletes user-visible history, and only `claude_code` implements it today:
+`environment.cleanup_sessions: true` (or `--cleanup-sessions`) removes that directory together with the workspace. It is off by default because it deletes user-visible history, and `claude_code` and `qodercli` implement it today:
 
 ```yaml
 environment:
@@ -436,7 +476,7 @@ environment:
 
 An explicit `--cleanup-sessions=false` overrides `cleanup_sessions: true`; only an unset flag falls back to the config.
 
-`--no-delete` wins: the workspace and the sessions are both preserved, and the run reports that cleanup was skipped. Cleanup also does not run for an externally owned workspace (`--workspace`), when the runtime keeps the workspace, or when ownership cannot be proven. Ownership is parsed from each transcript's recorded working directory, not searched for as a string, so a path inside a tool argument never counts; a directory is removed only when every transcript in it records this workspace, and it is kept when the transcripts disagree, do not parse, or record nothing. Two workspaces whose paths differ only in punctuation share one project directory, so it is left untouched. For an agent that does not implement cleanup, the run reports that it is unsupported.
+`--no-delete` wins: the workspace and the sessions are both preserved, and the run reports that cleanup was skipped. Cleanup also does not run for an externally owned workspace (`--workspace`), when the runtime keeps the workspace, or when ownership cannot be proven. Ownership is parsed from each transcript's recorded working directory, not searched for as a string, so a path inside a tool argument never counts; a directory is removed only when every transcript in it records this workspace, and it is kept when the transcripts disagree, do not parse, or record nothing. Two workspaces whose paths differ only in punctuation share one project directory, so it is left untouched. For an agent that does not implement cleanup the run reports that it is unsupported; `qwen_code` falls in that group because its chat files record no working directory, so ownership cannot be proven.
 
 #### Branching setup by experiment group
 
