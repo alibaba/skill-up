@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Reject malformed `--include-case-name` and `--exclude-case-name` glob patterns
   before loading cases, including in auto mode, instead of silently ignoring them.
+- Warn when a non-empty case-level `judge` has no `type` and its fields are
+  ignored in favor of the eval judge. `validate` and `run` preserve the
+  existing fallback behavior; omitted, empty and null blocks inherit without
+  a warning. Explicitly typed overrides and validation against an eval-level
+  `judges` list are unchanged.
 - Stop writing mocked MCP servers into the user's global Codex config. The
   `codex` engine now defines each mocked server on the `codex exec` command,
   including resumed turns, with `-c mcp_servers.<name>...` overrides, instead

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"path"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/alibaba/skill-up/internal/agentkind"
 	"github.com/alibaba/skill-up/internal/customengine"
+	"github.com/alibaba/skill-up/internal/logging"
 )
 
 // Judge type constants.
@@ -619,6 +621,7 @@ func (v *Validator) ValidateCasesWithEvalDefaults(eval *EvalConfig, cases []*Cas
 			continue
 		}
 		effectiveJudge := mergeJudgeConfigForValidation(eval.Judge, c.Judge)
+		warnIgnoredCaseJudge(c)
 		if errs := validateJudgeTypeAndRequiredFields(effectiveJudge); len(errs) > 0 {
 			return fmt.Errorf("case %s: validation errors:\n  - %s", c.ID, strings.Join(errs, "\n  - "))
 		}
@@ -628,6 +631,12 @@ func (v *Validator) ValidateCasesWithEvalDefaults(eval *EvalConfig, cases []*Cas
 		}
 	}
 	return nil
+}
+
+func warnIgnoredCaseJudge(c *CaseConfig) {
+	if c.Judge.Type == "" && (c.judgeHasFields || !reflect.ValueOf(c.Judge).IsZero()) {
+		logging.Warnf("case %s: judge.type is missing; case judge fields are ignored and the eval judge is used. Set judge.type to apply a case override", c.ID)
+	}
 }
 
 func validateJudgeTurnRules(members []JudgeConfig, turnsTotal int) []string {
