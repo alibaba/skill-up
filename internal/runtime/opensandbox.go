@@ -841,8 +841,11 @@ func joinOutputMessages(messages []opensandbox.OutputMessage) string {
 	for _, msg := range messages {
 		total += len(msg.Text)
 	}
-	b.Grow(total)
-	for _, msg := range messages {
+	b.Grow(total + len(messages))
+	for i, msg := range messages {
+		if i > 0 && !strings.HasSuffix(messages[i-1].Text, "\n") && !strings.HasPrefix(msg.Text, "\n") {
+			b.WriteByte('\n')
+		}
 		b.WriteString(msg.Text)
 	}
 	return b.String()
