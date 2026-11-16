@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Code.
 
 ### Fixed
+- Check eval-level and case-level mocked MCP fixtures during `validate`, including
+  missing files, YAML errors and invalid tool definitions, without starting servers.
 - Reject `report.formats` values other than `json`, `junit` and `html` during
   configuration validation. An unknown value used to pass validation and then be
   silently skipped by the runner, which still printed that the reports were
