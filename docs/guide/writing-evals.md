@@ -462,6 +462,39 @@ Rules and constraints:
 
 > **Tip:** if your Skill does not touch the filesystem, `none` avoids sandbox provisioning and is significantly faster.
 
+#### Isolated local agent home
+
+For API-key-authenticated Claude Code and Codex runs, opt into a separate home
+directory for each case, benchmark arm and retry:
+
+```yaml
+environment:
+  type: none
+  isolate_home: true
+```
+
+The temporary home lives beside the workspace. The runtime redirects `HOME`,
+`USERPROFILE`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, XDG directories and Windows
+application-data directories there, including for setup steps, resumed turns
+and judges. Environment overrides cannot redirect those paths back to a personal
+home. Non-interactive shell startup files (`BASH_ENV` and `ENV`) are disabled.
+The existing executable search path and other environment variables are retained.
+
+This initial mode requires explicit API credentials: `ANTHROPIC_API_KEY` or
+`ANTHROPIC_AUTH_TOKEN` for Claude Code, and `OPENAI_API_KEY` for Codex. The normal
+skill-up credential configuration can supply them too. Codex initializes its
+API-key login through stdin inside the temporary home before each invocation.
+Personal login files and OS-keychain logins are not copied. Missing credentials
+and unsupported run or judge engines fail before setup or agent execution.
+
+The home is deleted when the case runtime closes, even with an externally owned
+`--workspace`. `--no-delete` preserves it; its location is logged during setup.
+Treat a preserved home as sensitive because Codex may store the supplied key there.
+This isolates conventional user configuration and state, not filesystem access:
+workspace instructions, system-wide configuration and other inherited environment
+variables remain available. Use a container for process isolation. Docker and
+OpenSandbox reject this option.
+
 #### Session cleanup
 
 An evaluation deletes its workspace, but an agent CLI may keep per-workspace state outside it. Claude Code writes a project directory under `~/.claude/projects/<workspace-key>/` with the session transcript and a `memory/` folder, and qodercli writes `~/.qoder/projects/<workspace-key>/` (or `~/.qoder-cn/` for the CN edition) with the transcript, sub-agent transcripts under `<sessionID>/subagents/`, and `*-session.json` metadata, so repeated runs add up in the user's own session history.

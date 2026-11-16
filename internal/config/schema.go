@@ -27,6 +27,7 @@ type EvalConfig struct {
 // Environment defines the runtime environment for evaluation.
 type Environment struct {
 	Type                  string            `yaml:"type"` // none, opensandbox, docker
+	IsolateHome           bool              `yaml:"isolate_home,omitempty"`
 	Image                 string            `yaml:"image,omitempty"`
 	SandboxTemplate       string            `yaml:"sandbox_template,omitempty"`
 	WorkspaceMount        string            `yaml:"workspace_mount,omitempty"`
@@ -56,6 +57,7 @@ func (e Environment) ToRuntimeConfig() runtime.Config {
 
 	return runtime.Config{
 		Type:            e.Type,
+		IsolateHome:     e.IsolateHome,
 		Image:           e.Image,
 		WorkspaceMount:  e.WorkspaceMount,
 		Env:             e.Env,

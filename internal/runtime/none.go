@@ -47,6 +47,7 @@ type NoneRuntime struct {
 	cfg              Config
 	workspace        string
 	ownsWorkspaceDir bool
+	isolatedHome     string
 }
 
 // MergeEnv layers entries into the runtime's persistent env baseline. See
@@ -58,6 +59,26 @@ func (r *NoneRuntime) MergeEnv(env map[string]string) {
 
 // Create selects an existing external workspace or allocates a temporary one.
 func (r *NoneRuntime) Create(ctx context.Context) error {
+	if err := r.createWorkspace(); err != nil {
+		return err
+	}
+	if r.cfg.IsolateHome {
+		dir, err := os.MkdirTemp(filepath.Dir(r.workspace), "skill-up-home-*")
+		if err != nil {
+			return fmt.Errorf("create isolated home: %w", err)
+		}
+		r.isolatedHome = dir
+		for _, name := range []string{".codex", ".claude", ".config", ".cache", ".local/share", ".local/state", "AppData/Roaming", "AppData/Local"} {
+			if err := os.MkdirAll(filepath.Join(dir, name), 0o700); err != nil {
+				return fmt.Errorf("create isolated config directory: %w", err)
+			}
+		}
+		logging.InfoContextf(ctx, "isolated agent home: %s", dir)
+	}
+	return nil
+}
+
+func (r *NoneRuntime) createWorkspace() error {
 	if r.cfg.WorkspaceDir != "" {
 		dir, err := filepath.Abs(filepath.Clean(r.cfg.WorkspaceDir))
 		if err != nil {
@@ -91,18 +112,22 @@ func (r *NoneRuntime) OwnsWorkspace() bool { return r.ownsWorkspaceDir }
 
 // Close removes the temporary workspace.
 func (r *NoneRuntime) Close() error {
+	var homeErr error
+	if r.isolatedHome != "" && r.cfg.Delete {
+		homeErr = os.RemoveAll(r.isolatedHome)
+	}
 	if r.workspace == "" {
-		return nil
+		return homeErr
 	}
 	if !r.ownsWorkspaceDir {
 		logging.Debugf("NoneRuntime.Close: externally owned workspace preserved at %s", r.workspace)
-		return nil
+		return homeErr
 	}
 	if !r.cfg.Delete {
 		logging.Debugf("NoneRuntime.Close: skipping cleanup, workspace preserved at %s", r.workspace)
 		return nil
 	}
-	return os.RemoveAll(r.workspace)
+	return errors.Join(homeErr, os.RemoveAll(r.workspace))
 }
 
 // Start is a no-op for the none runtime.
@@ -270,6 +295,12 @@ func (r *NoneRuntime) Exec(ctx context.Context, command string, opts ExecOptions
 	// Windows-bash, ...) — append them once here so the same "use bash →
 	// disable MSYS argv rewrite" decision lives in a single place.
 	env = append(env, shell.Env...)
+	if r.cfg.IsolateHome {
+		if r.isolatedHome == "" {
+			return ExecResult{}, errors.New("isolated home has not been created")
+		}
+		env = r.isolatedEnvironment(env)
+	}
 	cmd.Env = env
 
 	var stdout, stderr bytes.Buffer

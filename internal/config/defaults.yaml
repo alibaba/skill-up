@@ -2,6 +2,7 @@ schema_version: v1alpha1
 
 environment:
   type: none
+  isolate_home: false
   workspace_mount: /workspace
   env: {}
 

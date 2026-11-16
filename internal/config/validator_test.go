@@ -5,6 +5,24 @@ import (
 	"testing"
 )
 
+func TestEnvironmentIsolateHome(t *testing.T) {
+	for _, kind := range []string{runtimeTypeNone, runtimeTypeDocker, runtimeTypeOpenSandbox} {
+		t.Run(kind, func(t *testing.T) {
+			cfg := &EvalConfig{SchemaVersion: "v1alpha1", Environment: Environment{Type: kind, IsolateHome: true}, Engine: EngineConfig{Name: "claude_code"}, Cases: CasesConfig{Files: []string{"case.yaml"}}, Judge: JudgeConfig{Type: "rule_based"}}
+			err := NewValidator().ValidateEvalConfig(cfg)
+			if kind == runtimeTypeNone && err != nil {
+				t.Fatal(err)
+			}
+			if kind != runtimeTypeNone && (err == nil || !strings.Contains(err.Error(), "isolate_home requires")) {
+				t.Fatalf("error = %v", err)
+			}
+			if !cfg.Environment.ToRuntimeConfig().IsolateHome {
+				t.Fatal("isolate_home lost in runtime config")
+			}
+		})
+	}
+}
+
 //nolint:maintidx,funlen // table-driven test cases drive the line count; splitting hurts readability.
 func TestValidator_ValidateEvalConfig(t *testing.T) {
 	t.Parallel()

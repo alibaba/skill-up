@@ -422,6 +422,34 @@ mcp:
 
 > **建议**：如果你的 Skill 不涉及文件操作，使用 `none` 可以省去沙箱准备时间。
 
+#### 隔离本地 agent 主目录
+
+使用 API 凭据的 Claude Code 和 Codex 评测可启用独立主目录：
+
+```yaml
+environment:
+  type: none
+  isolate_home: true
+```
+
+每个 case、基线分组和重试使用不同的临时主目录，位于 workspace 旁。
+runtime 将 `HOME`、`USERPROFILE`、`CODEX_HOME`、`CLAUDE_CONFIG_DIR`、XDG 目录和
+Windows 应用数据目录指向此处，覆盖 setup、续轮和 judge 的执行。
+单次命令的环境变量不能覆盖这些目录；`BASH_ENV` 和 `ENV` 启动文件被禁用。
+可执行文件搜索路径及其他环境变量仍然保留。
+
+首版要求显式 API 凭据：Claude Code 使用 `ANTHROPIC_API_KEY` 或
+`ANTHROPIC_AUTH_TOKEN`，Codex 使用 `OPENAI_API_KEY`，也可通过 skill-up 的常规
+凭据配置提供。Codex 每次调用前通过 stdin 在临时主目录内初始化 API-key 登录。
+不复制个人登录文件或系统钥匙串登录；凭据缺失或 run/judge 引擎不受支持时，
+会在 setup 或 agent 执行前报错。
+
+case runtime 关闭时删除临时主目录，使用外部 `--workspace` 时也一样。
+`--no-delete` 会保留主目录，setup 日志会显示路径；其中可能保存 Codex API key，
+应按敏感文件处理。此选项隔离常规用户配置和状态，并非文件系统安全边界：
+workspace 指令、系统配置及其他继承的环境变量仍然可用。
+进程隔离请使用容器；Docker 和 OpenSandbox 不支持此选项。
+
 #### 会话清理
 
 评测会删除它创建的 workspace，但 agent CLI 可能在 workspace 之外保留按 workspace 保存的状态。Claude Code 会写入 `~/.claude/projects/<workspace-key>/`，其中包含会话记录与 `memory/` 目录；qodercli 会写入 `~/.qoder/projects/<workspace-key>/`（CN 版为 `~/.qoder-cn/`），其中包含会话记录、`<sessionID>/subagents/` 下的子代理记录以及 `*-session.json` 元数据。重复评测会不断堆积在用户自己的会话历史里。

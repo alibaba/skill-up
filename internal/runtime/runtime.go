@@ -180,6 +180,7 @@ type SetupStep struct {
 // Config holds all runtime configuration options.
 type Config struct {
 	Type           string
+	IsolateHome    bool
 	Image          string
 	WorkspaceMount string
 	// WorkspaceDir reuses an existing host directory as the workspace for the
@@ -247,6 +248,9 @@ func (c SkillConfig) DirName() string {
 
 // NewRuntime creates a Runtime based on the config type.
 func NewRuntime(cfg Config) (Runtime, error) {
+	if cfg.IsolateHome && cfg.Type != "none" {
+		return nil, errors.New("isolate_home requires the none runtime")
+	}
 	var (
 		rt  Runtime
 		err error

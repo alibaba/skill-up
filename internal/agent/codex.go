@@ -368,6 +368,9 @@ func (a *CodexAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, 
 			Artifacts:  &SessionArtifacts{},
 		}, err
 	}
+	if err := initializeIsolatedCodexAuth(ctx, rt, opts); err != nil {
+		return nil, err
+	}
 	runArtifactDir, lastMessagePath, stdoutPath, err := prepareCodexRunArtifacts(ctx, rt)
 	if err != nil {
 		return nil, err
@@ -433,6 +436,9 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 			DurationMs: time.Since(start).Milliseconds(),
 			Artifacts:  &SessionArtifacts{},
 		}, err
+	}
+	if err := initializeIsolatedCodexAuth(ctx, rt, opts); err != nil {
+		return nil, err
 	}
 	runArtifactDir, lastMessagePath, stdoutPath, err := prepareCodexRunArtifacts(ctx, rt)
 	if err != nil {

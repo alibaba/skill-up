@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Add opt-in `environment.isolate_home` for local Claude Code and Codex runs
+  with explicit API credentials. Each case uses a separate temporary home for
+  user settings, skills and session state; unsupported engines and personal-login-only
+  configurations fail before setup. `--no-delete` preserves the temporary home.
 
 - Mocked MCP fixtures accept a `tools` map that defines each tool in one
   place: a required `response`, plus an optional `description` and
