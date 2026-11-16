@@ -208,6 +208,30 @@ func (r *NoneRuntime) DownloadFile(ctx context.Context, sourcePath, targetPath s
 	return nil
 }
 
+// Exists reports whether a file or directory exists in the host workspace.
+func (r *NoneRuntime) Exists(ctx context.Context, sourcePath string) (bool, error) {
+	_, err := os.Stat(r.pathInWorkspaceOrAbs(sourcePath))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// ReadFile returns the contents of a file in the host workspace.
+func (r *NoneRuntime) ReadFile(ctx context.Context, sourcePath string) ([]byte, error) {
+	data, err := os.ReadFile(r.pathInWorkspaceOrAbs(sourcePath))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrFileNotFound
+		}
+		return nil, err
+	}
+	return data, nil
+}
+
 // DownloadDir recursively copies a directory from the runtime workspace to the host.
 // sourceDir is relative to the workspace root, or an absolute host path (same rule as DownloadFile).
 func (r *NoneRuntime) DownloadDir(ctx context.Context, sourceDir, targetDir string) error {

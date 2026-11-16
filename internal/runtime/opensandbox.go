@@ -366,6 +366,46 @@ func (r *OpenSandboxRuntime) DownloadFile(ctx context.Context, sourcePath, targe
 	return r.downloadRemoteFile(ctx, source, targetPath, 0)
 }
 
+// Exists reports whether a file or directory exists in the sandbox workspace.
+func (r *OpenSandboxRuntime) Exists(ctx context.Context, sourcePath string) (bool, error) {
+	if err := r.ensureCreated(); err != nil {
+		return false, err
+	}
+	source := r.remotePath(sourcePath)
+	files, err := r.sandbox.SearchFiles(ctx, path.Dir(source), path.Base(source))
+	if err != nil {
+		return false, fmt.Errorf("search sandbox file %s: %w", source, err)
+	}
+	for _, file := range files {
+		if file.Path == source {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// ReadFile returns the contents of a file in the sandbox workspace.
+func (r *OpenSandboxRuntime) ReadFile(ctx context.Context, sourcePath string) ([]byte, error) {
+	exists, err := r.Exists(ctx, sourcePath)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrFileNotFound
+	}
+	source := r.remotePath(sourcePath)
+	rc, err := r.sandbox.DownloadFile(ctx, source, "")
+	if err != nil {
+		return nil, fmt.Errorf("download sandbox file %s: %w", source, err)
+	}
+	defer func() { _ = rc.Close() }()
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return nil, fmt.Errorf("read sandbox file %s: %w", source, err)
+	}
+	return data, nil
+}
+
 func (r *OpenSandboxRuntime) downloadRemoteFile(ctx context.Context, source, targetPath string, mode int) error {
 	rc, err := r.sandbox.DownloadFile(ctx, source, "")
 	if err != nil {

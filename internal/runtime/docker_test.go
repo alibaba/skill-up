@@ -98,6 +98,89 @@ func TestDockerRuntimeShellIsLinuxPOSIX(t *testing.T) {
 	}
 }
 
+func TestDockerRuntimeExistsAndReadFileErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		call     func(ctx context.Context, r *DockerRuntime) (bool, []byte, error)
+		wantBool bool
+		wantErr  bool
+	}{
+		{
+			name: "exists",
+			call: func(ctx context.Context, r *DockerRuntime) (bool, []byte, error) {
+				ok, err := r.Exists(ctx, "x")
+				return ok, nil, err
+			},
+			wantBool: true,
+		},
+		{
+			name: "missing",
+			call: func(ctx context.Context, r *DockerRuntime) (bool, []byte, error) {
+				ok, err := r.Exists(ctx, "x")
+				return ok, nil, err
+			},
+		},
+		{
+			name: "exists access error",
+			call: func(ctx context.Context, r *DockerRuntime) (bool, []byte, error) {
+				ok, err := r.Exists(ctx, "x")
+				return ok, nil, err
+			},
+			wantErr: true,
+		},
+		{
+			name: "read missing",
+			call: func(ctx context.Context, r *DockerRuntime) (bool, []byte, error) {
+				data, err := r.ReadFile(ctx, "x")
+				return false, data, err
+			},
+			wantErr: true,
+		},
+		{
+			name: "read directory",
+			call: func(ctx context.Context, r *DockerRuntime) (bool, []byte, error) {
+				data, err := r.ReadFile(ctx, "x")
+				return false, data, err
+			},
+			wantErr: true,
+		},
+	}
+	responses := map[string]fakeDockerResponse{
+		"exists":              {},
+		"missing":             {exitCode: 1, stderr: "No such file or directory"},
+		"exists access error": {exitCode: 1, stderr: "Permission denied"},
+		"read missing":        {exitCode: 1, stderr: "No such file or directory"},
+		"read directory":      {exitCode: 1, stderr: "Is a directory"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fd := newFakeDocker(t, []scriptedCall{{
+				match:    "exec",
+				response: responses[tt.name],
+			}})
+			r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+			r.containerID = "docker-stat-test"
+			ok, data, err := tt.call(context.Background(), r)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected an error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.name == "exists" && !ok {
+				t.Fatal("expected path to exist")
+			}
+			if tt.name == "missing" && ok {
+				t.Fatal("expected path to be absent")
+			}
+			_ = data
+		})
+	}
+}
+
 // createScript returns the canonical scripted-call sequence that Create
 // performs (docker create → docker start → docker exec mkdir -p workspace).
 // Test scripts prepend this before the steps they actually want to exercise.

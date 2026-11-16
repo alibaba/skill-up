@@ -2199,6 +2199,14 @@ func (r *codexTestRuntime) DownloadFile(_ context.Context, sourcePath, targetPat
 	return os.WriteFile(targetPath, r.sessionBytes, 0o600)
 }
 func (r *codexTestRuntime) DownloadDir(context.Context, string, string) error { return nil }
+func (r *codexTestRuntime) Exists(context.Context, string) (bool, error) {
+	return false, runtime.ErrFileNotFound
+}
+
+func (r *codexTestRuntime) ReadFile(context.Context, string) ([]byte, error) {
+	return nil, runtime.ErrFileNotFound
+}
+
 func (r *codexTestRuntime) Exec(_ context.Context, command string, opts runtime.ExecOptions) (runtime.ExecResult, error) {
 	// Probe calls (agent.Install via probeAndMergePATH) get a canned
 	// literal PATH and are NOT recorded as a real command. Exact-match

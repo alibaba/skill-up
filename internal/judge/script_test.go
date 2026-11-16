@@ -277,6 +277,14 @@ func (r *scriptJudgeRuntime) UploadFile(_ context.Context, _, targetPath string)
 func (r *scriptJudgeRuntime) UploadDir(context.Context, string, string) error    { return nil }
 func (r *scriptJudgeRuntime) DownloadFile(context.Context, string, string) error { return nil }
 func (r *scriptJudgeRuntime) DownloadDir(context.Context, string, string) error  { return nil }
+func (r *scriptJudgeRuntime) Exists(_ context.Context, _ string) (bool, error) {
+	return false, evalruntime.ErrFileNotFound
+}
+
+func (r *scriptJudgeRuntime) ReadFile(_ context.Context, _ string) ([]byte, error) {
+	return nil, evalruntime.ErrFileNotFound
+}
+
 func (r *scriptJudgeRuntime) Exec(_ context.Context, _ string, opts evalruntime.ExecOptions) (evalruntime.ExecResult, error) {
 	if opts.Cwd != "" {
 		r.cwd = opts.Cwd

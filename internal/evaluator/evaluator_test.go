@@ -162,6 +162,28 @@ func (m *mockRuntime) DownloadDir(ctx context.Context, sourceDir, targetDir stri
 	return copyDir(source, targetDir)
 }
 
+func (m *mockRuntime) Exists(_ context.Context, sourcePath string) (bool, error) {
+	_, err := os.Stat(filepath.Join(m.workspace, sourcePath))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (m *mockRuntime) ReadFile(_ context.Context, sourcePath string) ([]byte, error) {
+	data, err := os.ReadFile(filepath.Join(m.workspace, sourcePath))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, runtime.ErrFileNotFound
+		}
+		return nil, err
+	}
+	return data, nil
+}
+
 func (m *mockRuntime) Exec(ctx context.Context, command string, opts runtime.ExecOptions) (runtime.ExecResult, error) {
 	m.execCall.Add(1)
 	if m.execFunc != nil {

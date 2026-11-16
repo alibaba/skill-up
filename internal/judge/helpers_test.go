@@ -200,6 +200,14 @@ func (m *mockJudgeTestRuntime) UploadFile(_ context.Context, _, _ string) error 
 func (m *mockJudgeTestRuntime) UploadDir(_ context.Context, _, _ string) error    { return nil }
 func (m *mockJudgeTestRuntime) DownloadFile(_ context.Context, _, _ string) error { return nil }
 func (m *mockJudgeTestRuntime) DownloadDir(_ context.Context, _, _ string) error  { return nil }
+func (m *mockJudgeTestRuntime) Exists(_ context.Context, _ string) (bool, error) {
+	return false, runtime.ErrFileNotFound
+}
+
+func (m *mockJudgeTestRuntime) ReadFile(_ context.Context, _ string) ([]byte, error) {
+	return nil, runtime.ErrFileNotFound
+}
+
 func (m *mockJudgeTestRuntime) Exec(_ context.Context, _ string, _ runtime.ExecOptions) (runtime.ExecResult, error) {
 	return runtime.ExecResult{}, nil
 }
