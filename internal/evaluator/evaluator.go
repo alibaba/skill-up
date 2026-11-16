@@ -509,6 +509,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 		}
 		defer func() {
 			e.cleanupSessionDir(ctx, runAgent, rt)
+			agent.ReleaseRuntime(runAgent, rt)
 			_ = rt.Close()
 		}()
 	}
@@ -1346,6 +1347,7 @@ func (e *defaultEvaluator) prepareRuntimeForCase(ctx context.Context, caseCfg *c
 	}
 	observation, err := e.setupCaseEnvironment(ctx, rt, caseCfg, configName, ag, mcpCfg)
 	if err != nil {
+		agent.ReleaseRuntime(ag, rt)
 		_ = rt.Close()
 		return nil, agent.RuntimeObservation{}, fmt.Errorf("failed to setup case environment: %w", err)
 	}

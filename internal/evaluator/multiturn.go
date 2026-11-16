@@ -30,7 +30,7 @@ const (
 	TurnCompleted TurnStatus = "completed"
 	// TurnSkipped indicates the turn was skipped due to a prior post_condition failure.
 	TurnSkipped TurnStatus = "skipped"
-	// TurnFailed indicates the turn's post_condition failed with on_fail=fail.
+	// TurnFailed indicates the turn's post_condition failed.
 	TurnFailed TurnStatus = "failed"
 	// TurnError indicates a runtime or agent execution error.
 	TurnError TurnStatus = "error"
@@ -1002,23 +1002,15 @@ func lastCompletedResponse(results []TurnResult) string {
 }
 
 // multiTurnStatus determines the overall case status from turn results.
-func multiTurnStatus(results []TurnResult) judge.Status {
-	for i, r := range results {
+// turns is the case's configured conversation, used to look up the on_fail
+// policy of a failed turn.
+func multiTurnStatus(results []TurnResult, turns []config.Turn) judge.Status {
+	for _, r := range results {
 		switch r.Status {
 		case TurnError:
 			return judge.StatusError
 		case TurnFailed:
-			// Distinguish hard failure (on_fail=fail) from skip_remaining.
-			// on_fail=skip_remaining fills subsequent turns as TurnSkipped;
-			// if skipped entries follow the failure, proceed to judge.
-			hasSkippedAfter := false
-			for j := i + 1; j < len(results); j++ {
-				if results[j].Status == TurnSkipped {
-					hasSkippedAfter = true
-					break
-				}
-			}
-			if !hasSkippedAfter {
+			if turnOnFail(turns, r.TurnNumber) != "skip_remaining" {
 				return judge.StatusFail
 			}
 			// skip_remaining: fall through to judge evaluation.
@@ -1044,6 +1036,20 @@ func multiTurnStatus(results []TurnResult) judge.Status {
 		return "" // proceed to judge evaluation
 	}
 	return judge.StatusError
+}
+
+// turnOnFail returns the on_fail policy configured for the 1-based turn
+// number, defaulting to "fail".
+func turnOnFail(turns []config.Turn, turnNum int) string {
+	idx := turnNum - 1
+	if idx < 0 || idx >= len(turns) {
+		return "fail"
+	}
+	pc := turns[idx].PostCondition
+	if pc == nil || pc.OnFail == "" {
+		return "fail"
+	}
+	return pc.OnFail
 }
 
 // executeMultiTurnCase is the top-level entry point that executeCaseOnce
@@ -1098,7 +1104,7 @@ func (e *defaultEvaluator) executeMultiTurnCase(
 	}
 
 	// Determine status from turn results.
-	status := multiTurnStatus(turnResults)
+	status := multiTurnStatus(turnResults, caseCfg.Input.Turns)
 	switch status {
 	case judge.StatusError:
 		recordSkippedJudges(result, plan, "turn_error")
