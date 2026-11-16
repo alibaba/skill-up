@@ -376,8 +376,34 @@ func TestCountResultStatusBenchmark(t *testing.T) {
 		{CaseID: "baseline-only", Configuration: "without_skill", Status: judge.StatusError},
 	}
 	passed, failed, errored := countResultStatus(results)
-	if passed != 1 || failed != 1 || errored != 2 {
-		t.Fatalf("counts = %d/%d/%d, want 1/1/2", passed, failed, errored)
+	if passed != 1 || failed != 1 || errored != 1 {
+		t.Fatalf("counts = %d/%d/%d, want 1/1/1", passed, failed, errored)
+	}
+}
+
+func TestCountResultStatusPreservesTrials(t *testing.T) {
+	for _, configuration := range []string{"", evaluator.ConfigurationWithSkill} {
+		t.Run(configuration, func(t *testing.T) {
+			results := []evaluator.EvalResult{
+				{CaseID: "repeated", Configuration: configuration, Status: judge.StatusFail},
+				{CaseID: "repeated", Configuration: configuration, Status: judge.StatusError},
+				{CaseID: "repeated", Configuration: configuration, Status: judge.StatusPass},
+				{CaseID: "repeated", Configuration: configuration, Status: judge.StatusSkip},
+			}
+			if configuration != "" {
+				for _, result := range results {
+					result.Configuration = evaluator.ConfigurationWithoutSkill
+					results = append(results, result)
+				}
+			}
+			passed, failed, errored := countResultStatus(results)
+			if passed != 1 || failed != 1 || errored != 1 {
+				t.Fatalf("counts = %d/%d/%d, want 1/1/1", passed, failed, errored)
+			}
+			if err := exitStatusError(io.Discard, results); err == nil {
+				t.Fatal("earlier failed trials must still fail the run")
+			}
+		})
 	}
 }
 
