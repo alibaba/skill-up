@@ -466,13 +466,14 @@ jobs:
   summary:
     name: Model E2E Summary
     if: always()
-    needs: [e2e, e2e-opensandbox, e2e-docker, e2e-windows]
+    needs: [codex, e2e, e2e-opensandbox, e2e-docker, e2e-windows]
     runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 5
     permissions: {}
     steps:
       - name: Write job summary
         env:
+          CODEX_RESULT: ${{ needs.codex.result }}
           NONE_RESULT: ${{ needs.e2e.result }}
           WINDOWS_RESULT: ${{ needs.e2e-windows.result }}
           OPENSANDBOX_RESULT: ${{ needs.e2e-opensandbox.result }}
@@ -487,12 +488,13 @@ jobs:
             echo
             echo "| Runtime | Result |"
             echo "|---|---|"
+            echo "| Codex DashScope (modern + legacy) | ${CODEX_RESULT} |"
             echo "| none | ${NONE_RESULT} |"
             echo "| none (Windows, Claude) | ${WINDOWS_RESULT} |"
             echo "| OpenSandbox | ${OPENSANDBOX_RESULT} |"
             echo "| Docker | ${DOCKER_RESULT} |"
           } >> "$GITHUB_STEP_SUMMARY"
-          for result in "$NONE_RESULT" "$WINDOWS_RESULT" "$OPENSANDBOX_RESULT" "$DOCKER_RESULT"; do
+          for result in "$CODEX_RESULT" "$NONE_RESULT" "$WINDOWS_RESULT" "$OPENSANDBOX_RESULT" "$DOCKER_RESULT"; do
             if [ "$result" != success ] && [ "$result" != skipped ]; then
               echo "::error::One or more selected live-model suites failed"
               exit 1
