@@ -111,8 +111,9 @@ type RuntimeInspector interface {
 
 // SessionDirCleaner is implemented by agents that keep per-workspace state
 // outside the workspace itself — Claude Code writes a project directory under
-// $HOME/.claude/projects for every workspace it runs in. Deleting the workspace
-// leaves that directory behind, which is what this removes.
+// $HOME/.claude/projects and qodercli under $HOME/.qoder/projects for every
+// workspace they run in. Deleting the workspace leaves that directory behind,
+// which is what this removes.
 //
 // The evaluator calls it only when the workspace is deleted, so --no-delete
 // keeps both.
@@ -344,7 +345,7 @@ func (a *BaseAgent) credentialEnvVars(apiKeyEnv, baseURLEnv string) map[string]s
 func (a *BaseAgent) installSkillDefault(ctx context.Context, rt Runtime, skillCfg runtime.SkillConfig) error {
 	target := skillCfg.Target
 	if target == "" && a.Cfg.SkillPath != "" {
-		target = filepath.Join(a.Cfg.SkillPath, filepath.Base(skillCfg.Source))
+		target = filepath.Join(a.Cfg.SkillPath, skillCfg.DirName())
 	}
 	return installSkill(ctx, rt, skillCfg.Source, target, skillCfg.Include, skillCfg.Exclude)
 }

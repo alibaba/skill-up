@@ -97,7 +97,7 @@ func (a *CLIAgent) InstallSkill(ctx context.Context, rt Runtime, skillCfg runtim
 	workspace := rt.Workspace()
 	target := skillCfg.Target
 	if target == "" {
-		target = filepath.Join(workspace, "skills", filepath.Base(skillCfg.Source))
+		target = filepath.Join(workspace, "skills", skillCfg.DirName())
 	}
 
 	data := struct {

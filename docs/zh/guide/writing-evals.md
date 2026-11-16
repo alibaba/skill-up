@@ -128,12 +128,22 @@ report:
   artifacts: [transcript]         # 报告中包含的产物
 ```
 
+`report.formats` 只接受 `json`、`junit`、`html`；其它值会直接报配置错误，因为运行时
+原本会跳过未知格式、却仍然打印"报告已保存"。
+
 `skills[].include` 和 `skills[].exclude` 使用
 [doublestar](https://github.com/bmatcuk/doublestar) 语法（`*` 匹配单层路径，
 `**` 可跨目录）。pattern 相对 `skills[].path`，统一使用 `/` 分隔；
 `exclude` 优先于 `include`。未配置 `include` 时默认选择全部文件。
 评测框架目录 `evals/` 始终排除。配置 include 列表时，应显式包含
 `SKILL.md`，确保安装后的目录仍是有效 Skill。`judge.skills` 同样支持这两个字段。
+
+默认情况下，Skill 以其 `SKILL.md` frontmatter 中声明的 `name` 作为目录名安装到
+Agent 的 skills 目录。这样即使源目录名称不同（例如快照副本），Agent 看到的也是
+Skill 自身文本使用的名称。声明的名称只包含 ASCII 字母、数字、`-` 和 `_`，以字母或
+数字开头，不超过 64 个字符，且不是 `CON` 这类 Windows 设备名时才会被采用；否则使用
+源目录名。如果两个未设置 `target` 的条目会被安装到同一个目录，运行会报错：请重命名
+其中一个 Skill，或为它显式设置 `target`。`judge.skills` 遵循同样的规则。
 
 `cases.parallelism` 是配置文件中的默认用例并行数；临时运行时可以用 `skill-up run --parallelism N` 覆盖它，不需要修改 `eval.yaml`。命令行覆盖值必须在 1 到 256 之间。
 
@@ -411,6 +421,22 @@ mcp:
 | `docker`      | 本地容器隔离，无需远程服务       | 自定义工具链、可复现 CI、离线环境 |
 
 > **建议**：如果你的 Skill 不涉及文件操作，使用 `none` 可以省去沙箱准备时间。
+
+#### 会话清理
+
+评测会删除它创建的 workspace，但 agent CLI 可能在 workspace 之外保留按 workspace 保存的状态。Claude Code 会写入 `~/.claude/projects/<workspace-key>/`，其中包含会话记录与 `memory/` 目录；qodercli 会写入 `~/.qoder/projects/<workspace-key>/`（CN 版为 `~/.qoder-cn/`），其中包含会话记录、`<sessionID>/subagents/` 下的子代理记录以及 `*-session.json` 元数据。重复评测会不断堆积在用户自己的会话历史里。
+
+`environment.cleanup_sessions: true`（或 `--cleanup-sessions`）会在删除 workspace 的同时删除该目录。它默认关闭，因为会删除用户可见的历史；目前由 `claude_code` 与 `qodercli` 实现：
+
+```yaml
+environment:
+  type: none
+  cleanup_sessions: true
+```
+
+显式的 `--cleanup-sessions=false` 会覆盖 `cleanup_sessions: true`；只有未显式设置时才会回落到配置。
+
+`--no-delete` 优先：workspace 与会话都会保留，并报告跳过清理。清理也不会在以下情况运行：workspace 由外部拥有（`--workspace`）、runtime 会保留 workspace、或无法证明归属。归属通过解析每份会话记录中的工作目录来判定，而不是字符串搜索，因此工具参数里出现的路径不会被当作身份；只有目录内每份记录都指向本 workspace 才会删除，记录互相冲突、无法解析或没有记录身份时保留。路径仅标点不同的两个 workspace 会共用一个项目目录，此时同样保留。对未实现清理的 agent，运行时会报告不支持；`qwen_code` 属于这一类，因为它的会话文件不记录工作目录，无法证明归属。
 
 #### 按实验分组执行初始化
 

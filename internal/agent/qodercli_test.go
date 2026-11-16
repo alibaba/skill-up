@@ -1058,3 +1058,182 @@ func TestQoderCLIModelFallbackPreservesClassificationOnFailure(t *testing.T) {
 		}
 	}
 }
+
+type qoderCleanupCase struct {
+	name      string
+	edition   string
+	configDir string
+	dirName   string
+	sessions  map[string]string
+	wantKept  bool
+}
+
+func TestQoderCleanupSessionDir(t *testing.T) {
+	if goruntime.GOOS == platform.GOOSWindows {
+		// The workspace-key path layout embeds a POSIX workspace path, which
+		// cannot be a directory component on Windows.
+		t.Skip("qoder workspace-key path layout is POSIX-only")
+	}
+
+	identity := func(cwd string) string { return `{"cwd":"` + cwd + `"}` }
+	directories := func(dirs ...string) string {
+		quoted := make([]string, 0, len(dirs))
+		for _, d := range dirs {
+			quoted = append(quoted, `"`+d+`"`)
+		}
+		return `{"type":"workspace-directories","directories":[` + strings.Join(quoted, ",") + `]}`
+	}
+	for _, tc := range []qoderCleanupCase{
+		{
+			name:     "removes the directory whose sessions record this workspace as directories",
+			sessions: map[string]string{"a.jsonl": directories("{{workspace}}")},
+		},
+		{
+			name:     "removes the directory whose sessions record this workspace as cwd",
+			sessions: map[string]string{"a.jsonl": identity("{{workspace}}")},
+		},
+		{
+			name:     "keeps a directory whose workspace-directories entry names another workspace",
+			sessions: map[string]string{"a.jsonl": directories("{{workspace}}", "/elsewhere/a-b")},
+			wantKept: true,
+		},
+		{
+			name: "keeps a directory with one transcript for another workspace",
+			sessions: map[string]string{
+				"a.jsonl": identity("{{workspace}}"),
+				"b.jsonl": identity("/elsewhere/a-b"),
+			},
+			wantKept: true,
+		},
+		{
+			name:     "keeps a directory whose sessions record no working directory",
+			sessions: map[string]string{"a.jsonl": `{"type":"workspace-directories","directories":[]}`},
+			wantKept: true,
+		},
+		{
+			name:     "keeps a directory whose transcript does not parse",
+			sessions: map[string]string{"a.jsonl": "not json"},
+			wantKept: true,
+		},
+		{
+			// The lookup can find a directory whose name does not match the
+			// workspace key; cleanup must not silently skip it.
+			name:     "removes a directory whose name does not match the workspace key",
+			dirName:  "-hashed-9f2c7a",
+			sessions: map[string]string{"a.jsonl": identity("{{workspace}}")},
+		},
+		{
+			name:      "removes the CN edition directory under .qoder-cn",
+			edition:   qoderEditionCN,
+			configDir: ".qoder-cn",
+			sessions:  map[string]string{"a.jsonl": identity("{{workspace}}")},
+		},
+		{
+			// Sub-agent transcripts and the *-session.json metadata live inside
+			// the same per-workspace directory and belong to this run too.
+			name: "removes the directory along with sub-agent transcripts and session metadata",
+			sessions: map[string]string{
+				"a.jsonl":                        identity("{{workspace}}"),
+				"nested/subagents/agent-1.jsonl": identity("{{workspace}}"),
+				"a-session.json":                 `{"sessionId":"a"}`,
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) { assertQoderCleanupCase(t, tc) })
+	}
+}
+
+func assertQoderCleanupCase(t *testing.T, tc qoderCleanupCase) {
+	t.Helper()
+
+	rt, projectDir, unrelated, globalDir := qoderCleanupFixture(t, tc)
+	defer func() { _ = rt.Close() }()
+
+	ag := qoderCleanupAgent(tc)
+	if err := ag.CleanupSessionDir(context.Background(), rt); err != nil {
+		t.Fatalf("CleanupSessionDir: %v", err)
+	}
+	assertQoderCleanupOutcome(t, tc, projectDir, unrelated, globalDir)
+	if err := ag.CleanupSessionDir(context.Background(), rt); err != nil {
+		t.Fatalf("CleanupSessionDir is not idempotent: %v", err)
+	}
+}
+
+// qoderCleanupFixture lays out a fake HOME with this workspace's project
+// directory, another workspace's directory, and (for the CN edition) the global
+// edition's root, all before cleanup runs.
+func qoderCleanupFixture(t *testing.T, tc qoderCleanupCase) (rt runtime.Runtime, projectDir, unrelated, globalDir string) {
+	t.Helper()
+
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	rt, err := runtime.NewRuntime(runtime.Config{Type: "none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	configDir := tc.configDir
+	if configDir == "" {
+		configDir = ".qoder"
+	}
+	workspace := workspaceForRuntime(rt)
+	dirName := tc.dirName
+	if dirName == "" {
+		dirName = canonicalWorkspaceKey(workspace)
+	}
+	projectDir = filepath.Join(tmpHome, configDir, "projects", dirName)
+	for name, body := range tc.sessions {
+		path := filepath.Join(projectDir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body = strings.ReplaceAll(body, "{{workspace}}", workspace)
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	unrelated = filepath.Join(tmpHome, configDir, "projects", "-another-workspace")
+	if err := os.MkdirAll(unrelated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if configDir == ".qoder-cn" {
+		globalDir = filepath.Join(tmpHome, ".qoder", "projects", dirName)
+		if err := os.MkdirAll(globalDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return rt, projectDir, unrelated, globalDir
+}
+
+func qoderCleanupAgent(tc qoderCleanupCase) *QoderCLIAgent {
+	kwargs := map[string]string{}
+	if tc.edition == qoderEditionCN {
+		kwargs[KwargEdition] = qoderEditionCN
+	}
+	return NewQoderCLIAgent(Config{Kwargs: kwargs})
+}
+
+func assertQoderCleanupOutcome(t *testing.T, tc qoderCleanupCase, projectDir, unrelated, globalDir string) {
+	t.Helper()
+
+	_, statErr := os.Stat(projectDir)
+	if kept := statErr == nil; kept != tc.wantKept {
+		t.Fatalf("project directory kept = %t, want %t (stat err=%v)", kept, tc.wantKept, statErr)
+	}
+	if _, err := os.Stat(unrelated); err != nil {
+		t.Fatalf("unrelated project directory was removed: %v", err)
+	}
+	if globalDir != "" {
+		if _, err := os.Stat(globalDir); err != nil {
+			t.Fatalf("global edition directory was removed by CN cleanup: %v", err)
+		}
+	}
+}

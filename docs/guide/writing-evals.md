@@ -127,6 +127,10 @@ report:
   artifacts: [transcript]
 ```
 
+`report.formats` only accepts `json`, `junit` and `html`; any other value is a
+configuration error, because the runner would otherwise skip the unknown format
+and still report that the reports were saved.
+
 `skills[].include` and `skills[].exclude` use
 [doublestar](https://github.com/bmatcuk/doublestar) syntax (`*` matches one
 path segment and `**` crosses directories). Patterns are relative to
@@ -135,6 +139,16 @@ path segment and `**` crosses directories). Patterns are relative to
 The evaluation harness directory `evals/` is always excluded. If an include
 list is provided, include `SKILL.md` explicitly so the installed directory
 remains a valid Skill. The same fields are supported by `judge.skills`.
+
+By default a Skill is installed into the Agent's skills directory under the
+`name` declared in its `SKILL.md` frontmatter. The Agent then sees it under
+the name its own text uses, even when the source folder is named differently
+(for example a snapshot copy). The declared name is used when it has only
+ASCII letters, digits, `-` and `_`, starts with a letter or digit, is at most
+64 characters, and is not a Windows device name such as `CON`; otherwise the
+source folder's name is used. Two entries without a `target` that would be
+installed into the same directory are rejected: rename one Skill or give it an
+explicit `target`. `judge.skills` follows the same rules.
 
 `cases.parallelism` is the file-level default. To override it for a single run, use `skill-up run --parallelism N` without modifying `eval.yaml`. Allowed range: **1 to 256**.
 
@@ -450,9 +464,9 @@ Rules and constraints:
 
 #### Session cleanup
 
-An evaluation deletes its workspace, but an agent CLI may keep per-workspace state outside it. Claude Code writes a project directory under `~/.claude/projects/<workspace-key>/` with the session transcript and a `memory/` folder, so repeated runs add up in the user's own session history.
+An evaluation deletes its workspace, but an agent CLI may keep per-workspace state outside it. Claude Code writes a project directory under `~/.claude/projects/<workspace-key>/` with the session transcript and a `memory/` folder, and qodercli writes `~/.qoder/projects/<workspace-key>/` (or `~/.qoder-cn/` for the CN edition) with the transcript, sub-agent transcripts under `<sessionID>/subagents/`, and `*-session.json` metadata, so repeated runs add up in the user's own session history.
 
-`environment.cleanup_sessions: true` (or `--cleanup-sessions`) removes that directory together with the workspace. It is off by default because it deletes user-visible history, and only `claude_code` implements it today:
+`environment.cleanup_sessions: true` (or `--cleanup-sessions`) removes that directory together with the workspace. It is off by default because it deletes user-visible history, and `claude_code` and `qodercli` implement it today:
 
 ```yaml
 environment:
@@ -462,7 +476,7 @@ environment:
 
 An explicit `--cleanup-sessions=false` overrides `cleanup_sessions: true`; only an unset flag falls back to the config.
 
-`--no-delete` wins: the workspace and the sessions are both preserved, and the run reports that cleanup was skipped. Cleanup also does not run for an externally owned workspace (`--workspace`), when the runtime keeps the workspace, or when ownership cannot be proven. Ownership is parsed from each transcript's recorded working directory, not searched for as a string, so a path inside a tool argument never counts; a directory is removed only when every transcript in it records this workspace, and it is kept when the transcripts disagree, do not parse, or record nothing. Two workspaces whose paths differ only in punctuation share one project directory, so it is left untouched. For an agent that does not implement cleanup, the run reports that it is unsupported.
+`--no-delete` wins: the workspace and the sessions are both preserved, and the run reports that cleanup was skipped. Cleanup also does not run for an externally owned workspace (`--workspace`), when the runtime keeps the workspace, or when ownership cannot be proven. Ownership is parsed from each transcript's recorded working directory, not searched for as a string, so a path inside a tool argument never counts; a directory is removed only when every transcript in it records this workspace, and it is kept when the transcripts disagree, do not parse, or record nothing. Two workspaces whose paths differ only in punctuation share one project directory, so it is left untouched. For an agent that does not implement cleanup the run reports that it is unsupported; `qwen_code` falls in that group because its chat files record no working directory, so ownership cannot be proven.
 
 #### Branching setup by experiment group
 
