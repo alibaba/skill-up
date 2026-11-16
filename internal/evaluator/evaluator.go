@@ -661,9 +661,9 @@ func (e *defaultEvaluator) evaluateCaseSession(
 
 	workspacePath := rt.Workspace()
 	var cleanupWorkspace func()
-	if judgePlanNeedsWorkspaceFiles(plan) || expectNeedsWorkspaceFiles(expectCfg) {
+	if expectNeedsWorkspaceFiles(expectCfg) {
 		var err error
-		workspacePath, cleanupWorkspace, err = e.materializeWorkspace(ctx, rt)
+		workspacePath, cleanupWorkspace, err = e.materializeForHostChecks(ctx, rt, workspacePath)
 		if err != nil {
 			result.Status, result.Error = judge.StatusError, fmt.Errorf("materialize workspace for judging: %w", err)
 			return *result
@@ -672,18 +672,19 @@ func (e *defaultEvaluator) evaluateCaseSession(
 	}
 
 	judgeInput := judge.Input{
-		CaseID:         caseCfg.ID,
-		FinalMessage:   result.FinalMessage,
-		ExitCode:       result.ExitCode,
-		WorkspacePath:  workspacePath,
-		SkillDir:       e.skillDir,
-		TurnsExecuted:  result.Turns,
-		TurnsTotal:     turnsTotal,
-		Transcript:     sessionTranscript(sessionResult),
-		WorkspaceDiff:  sessionWorkspaceDiff(sessionResult),
-		GeneratedFiles: sessionGeneratedFiles(sessionResult),
-		SessionResult:  sessionResult,
-		TurnResults:    toJudgeTurnResults(result.TurnResults),
+		CaseID:            caseCfg.ID,
+		FinalMessage:      result.FinalMessage,
+		ExitCode:          result.ExitCode,
+		WorkspacePath:     rt.Workspace(),
+		HostWorkspacePath: workspacePath,
+		SkillDir:          e.skillDir,
+		TurnsExecuted:     result.Turns,
+		TurnsTotal:        turnsTotal,
+		Transcript:        sessionTranscript(sessionResult),
+		WorkspaceDiff:     sessionWorkspaceDiff(sessionResult),
+		GeneratedFiles:    sessionGeneratedFiles(sessionResult),
+		SessionResult:     sessionResult,
+		TurnResults:       toJudgeTurnResults(result.TurnResults),
 	}
 
 	if failed := e.runExpectPreCheck(ctx, caseCfg, configName, judgeCfg, judgeInput, result); failed {
@@ -695,6 +696,32 @@ func (e *defaultEvaluator) evaluateCaseSession(
 		return *result
 	}
 
+	if judgePlanNeedsWorkspaceFiles(plan) {
+		var err error
+		workspacePath, cleanupWorkspace, err = e.materializeForHostChecks(ctx, rt, workspacePath)
+		if err != nil {
+			result.Status, result.Error = judge.StatusError, fmt.Errorf("materialize workspace for judging: %w", err)
+			return *result
+		}
+		defer cleanupWorkspace()
+		judgeInput.HostWorkspacePath = workspacePath
+	}
+
+	return e.runConfiguredJudges(ctx, rt, caseCfg, configName, plan, judgeCfg, turnsTotal, runAgent, judgeInput, result)
+}
+
+func (e *defaultEvaluator) runConfiguredJudges(
+	ctx context.Context,
+	rt runtime.Runtime,
+	caseCfg *config.CaseConfig,
+	configName string,
+	plan config.JudgePlan,
+	judgeCfg config.JudgeConfig,
+	turnsTotal int,
+	runAgent agent.Agent,
+	judgeInput judge.Input,
+	result *EvalResult,
+) EvalResult {
 	var expectAssertions []judge.AssertionResult
 	if result.ExpectResult != nil {
 		expectAssertions = result.ExpectResult.ToAssertionResults()
@@ -735,6 +762,13 @@ func (e *defaultEvaluator) materializeWorkspace(ctx context.Context, rt runtime.
 		return "", nil, err
 	}
 	return dir, func() { _ = os.RemoveAll(dir) }, nil
+}
+
+func (e *defaultEvaluator) materializeForHostChecks(ctx context.Context, rt runtime.Runtime, current string) (string, func(), error) {
+	if current != rt.Workspace() {
+		return current, func() {}, nil
+	}
+	return e.materializeWorkspace(ctx, rt)
 }
 
 func (e *defaultEvaluator) runExpectPreCheck(

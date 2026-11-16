@@ -67,19 +67,19 @@ func CheckExpect(expect *config.Expect, in Input) *ExpectResult {
 	}
 	if len(expect.FilesExist) > 0 {
 		configuredRules = append(configuredRules, "files_exist")
-		failures = append(failures, checkFilesExist(expect.FilesExist, in.WorkspacePath)...)
+		failures = append(failures, checkFilesExist(expect.FilesExist, hostWorkspacePath(in))...)
 	}
 	if len(expect.FilesNotExist) > 0 {
 		configuredRules = append(configuredRules, "files_not_exist")
-		failures = append(failures, checkFilesNotExist(expect.FilesNotExist, in.WorkspacePath)...)
+		failures = append(failures, checkFilesNotExist(expect.FilesNotExist, hostWorkspacePath(in))...)
 	}
 	if expect.GoldenFile != "" {
 		configuredRules = append(configuredRules, "golden_file")
-		failures = append(failures, checkGoldenFile(expect.GoldenFile, in.FinalMessage, in.SkillDir, in.WorkspacePath)...)
+		failures = append(failures, checkGoldenFile(expect.GoldenFile, in.FinalMessage, in.SkillDir, hostWorkspacePath(in))...)
 	}
 	if len(expect.FileContains) > 0 {
 		configuredRules = append(configuredRules, "file_contains")
-		failures = append(failures, checkFileContains(expect.FileContains, in.WorkspacePath)...)
+		failures = append(failures, checkFileContains(expect.FileContains, hostWorkspacePath(in))...)
 	}
 
 	return &ExpectResult{

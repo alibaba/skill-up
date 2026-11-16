@@ -98,9 +98,9 @@ func evaluateAssertion(rule config.Rule, in Input) AssertionResult {
 	case rule.ToolCalled != nil:
 		return evalToolCalled(rule.ToolCalled, in.Transcript)
 	case len(rule.FilesExist) > 0:
-		return evalFilesExist(rule.FilesExist, in.WorkspacePath)
+		return evalFilesExist(rule.FilesExist, hostWorkspacePath(in))
 	case len(rule.FilesNotExist) > 0:
-		return evalFilesNotExist(rule.FilesNotExist, in.WorkspacePath)
+		return evalFilesNotExist(rule.FilesNotExist, hostWorkspacePath(in))
 	case rule.TurnResponseContains != nil:
 		return evalTurnResponseContains(rule.TurnResponseContains, in.TurnResults)
 	case rule.TurnResponseNotContains != nil:

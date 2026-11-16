@@ -66,8 +66,12 @@ type Input struct {
 	ExitCode int
 
 	// WorkspacePath is the absolute path to the case workspace root directory.
-	// Used by workspace-scoped file checks and script judge.
+	// It is the path used by runtime-executed judges such as script judges.
 	WorkspacePath string
+
+	// HostWorkspacePath is a host-accessible mirror of WorkspacePath. Host-side
+	// file checks use this path when the runtime workspace is remote.
+	HostWorkspacePath string
 
 	// SkillDir is the absolute path to the directory containing SKILL.md.
 	// Fixture-style references such as golden_file are resolved from here.
@@ -308,6 +312,13 @@ func NewErrorResult(err error, turnsExecuted, turnsTotal int) *Result {
 		AssertionResults: []AssertionResult{},
 		Summary:          ResultSummary{},
 	}
+}
+
+func hostWorkspacePath(in Input) string {
+	if in.HostWorkspacePath != "" {
+		return in.HostWorkspacePath
+	}
+	return in.WorkspacePath
 }
 
 // fileExistsInWorkspace checks whether a file exists within the workspace.
