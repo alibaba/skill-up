@@ -24,7 +24,10 @@ func SkillInfosFromRefs(refs []config.SkillRef) []SkillInfo {
 	}
 	infos := make([]SkillInfo, 0, len(refs))
 	for _, ref := range refs {
-		name := skillInfoName(ref.Path)
+		name := ref.InstallName
+		if name == "" {
+			name = skillInfoName(ref.Path)
+		}
 		infos = append(infos, SkillInfo{
 			Source:  ref.Source,
 			Path:    ref.Path,
