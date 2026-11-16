@@ -339,15 +339,19 @@ func walkMarkdownAttachmentRefs(rel string, data []byte, add func(string)) {
 	})
 }
 
-// readSkillLocalFile reads abs only when it resolves inside the skill root,
+// readSkillLocalFile reads file only when it resolves inside the skill root,
 // so a symlinked attachment cannot leak the dependency scan into the wider
-// filesystem.
-func readSkillLocalFile(skillDir, abs string) ([]byte, bool) {
-	root, err := filepath.EvalSymlinks(skillDir)
+// filesystem. Both paths are made absolute before their symlinks are
+// resolved: for a relative skill root such as "." (skill-up validate --skill
+// .), EvalSymlinks keeps the root as "." while the attachment resolves to
+// "references/guide.md", which never starts with "./", so every attachment
+// would be rejected and its dependencies never followed.
+func readSkillLocalFile(skillDir, file string) ([]byte, bool) {
+	root, err := resolvedAbsPath(skillDir)
 	if err != nil {
 		return nil, false
 	}
-	resolved, err := filepath.EvalSymlinks(abs)
+	resolved, err := resolvedAbsPath(file)
 	if err != nil {
 		return nil, false
 	}
@@ -359,6 +363,16 @@ func readSkillLocalFile(skillDir, abs string) ([]byte, bool) {
 		return nil, false
 	}
 	return data, true
+}
+
+// resolvedAbsPath returns p as an absolute path with every symlink resolved,
+// so two locations on disk can be compared by prefix.
+func resolvedAbsPath(p string) (string, error) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(abs)
 }
 
 // isMarkdownRef reports whether rel names a markdown document.

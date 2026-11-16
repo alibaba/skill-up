@@ -211,12 +211,19 @@ func TestValidateCommandUncitedWithoutSkillFlagFails(t *testing.T) {
 // but which carries one attachment that SKILL.md never reaches.
 func writeUncitedSkill(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	files := map[string]string{
+	return writeSkillTree(t, map[string]string{
 		"SKILL.md":             "---\nname: uncited\ndescription: Valid skill with one unreachable attachment.\n---\n\nRead [the guide](references/guide.md).\n",
 		"references/guide.md":  "# Guide\n",
 		"references/orphan.md": "# Never cited\n",
-	}
+	})
+}
+
+// writeSkillTree materializes a skill in a new temporary directory from a map
+// of slash-separated relative paths to file contents and returns the
+// directory.
+func writeSkillTree(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
 	for rel, content := range files {
 		abs := filepath.Join(dir, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
@@ -277,6 +284,38 @@ func TestValidateCommandSkillFlagUncitedStrictFails(t *testing.T) {
 	}
 	if strings.Contains(logBuf.String(), "references/guide.md") {
 		t.Errorf("validate reported the cited references/guide.md:\n%s", logBuf.String())
+	}
+}
+
+func TestValidateCommandSkillFlagDotFollowsIndirectCitations(t *testing.T) {
+	var logBuf bytes.Buffer
+	restore := logging.SetOutputForTest(&logBuf)
+	defer restore()
+
+	// Regression (#281 review, 2026-11-16): `validate --skill . --uncited
+	// --strict`, run from inside the skill, reported references/details.md
+	// as uncited although SKILL.md reaches it through references/guide.md;
+	// the absolute path passed.
+	t.Chdir(writeSkillTree(t, map[string]string{
+		"SKILL.md":              "---\nname: indirect-chain\ndescription: Valid skill reaching an attachment through another one.\n---\n\nRead [the guide](references/guide.md).\n",
+		"references/guide.md":   "# Guide\n\nRead [details](details.md) when needed.\n",
+		"references/details.md": "# Details\n",
+	}))
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("skill", ".", "")
+	cmd.Flags().Bool("uncited", true, "")
+	cmd.Flags().Bool("strict", true, "")
+	cmd.SetContext(context.Background())
+
+	output, err := captureStdout(t, func() error {
+		return validateCmd.RunE(cmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("validate RunE returned error: %v\n%s", err, logBuf.String())
+	}
+	if !strings.Contains(output, "skill content check passed") {
+		t.Fatalf("validate output = %q, want success message", output)
 	}
 }
 

@@ -570,6 +570,34 @@ Read [the doc](references/evil.md).
 	}
 }
 
+func TestCheckSkillUncitedAttachmentsRelativeSkillRoot(t *testing.T) {
+	// Not parallel: t.Chdir changes the working directory of the process.
+	//
+	// Regression (#281 review, 2026-11-16): with --skill . the containment
+	// check compared the attachment "references/guide.md" against the root
+	// prefix "./", rejected it, and never followed its link, so details.md
+	// was reported as uncited while the absolute path worked.
+	dir := t.TempDir()
+	writeSkillFiles(t, dir, map[string]string{
+		"SKILL.md": `---
+name: indirect-chain
+description: Skill whose SKILL.md reaches an attachment through another attachment.
+---
+
+Read [the guide](references/guide.md).
+`,
+		"references/guide.md":   "# Guide\n\nRead [details](details.md) when needed.\n",
+		"references/details.md": "# Details\n",
+	})
+	t.Chdir(dir)
+
+	for _, root := range []string{".", "./", "references/.."} {
+		if got := allSkillWarnings(root); len(got) != 0 {
+			t.Errorf("allSkillWarnings(%q) = %v, want no warnings for a valid indirect reference chain", root, got)
+		}
+	}
+}
+
 type extractRefsCase struct {
 	name string
 	body string
