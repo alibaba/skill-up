@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `engine.kwargs.wire_api: responses` for newer Codex versions that removed
   Chat Completions support. The default remains `chat` for 0.80.0 compatibility;
   selecting `responses` requires a Responses-capable endpoint.
+- Warn when a non-empty case-level `judge` has no `type` and its fields are
+  ignored in favor of the eval judge. `validate` and `run` preserve the
+  existing fallback behavior; omitted, empty and null blocks inherit without
+  a warning. Explicitly typed overrides and validation against an eval-level
+  `judges` list are unchanged.
 - Stop writing mocked MCP servers into the user's global Codex config. The
   `codex` engine now defines each mocked server on the `codex exec` command,
   including resumed turns, with `-c mcp_servers.<name>...` overrides, instead
