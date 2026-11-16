@@ -199,8 +199,8 @@ jobs:
         run: |
           set -euo pipefail
           prefix=$(mktemp -d "$RUNNER_TEMP/codex-compat.XXXXXX")
-          npm install --prefix "$prefix" --no-save --package-lock=false --ignore-scripts \
-            --registry=https://registry.npmjs.org "@openai/codex@$CODEX_VERSION"
+          cp ".github/codex-compat/$CODEX_VERSION/"package*.json "$prefix/"
+          npm ci --prefix "$prefix" --ignore-scripts --registry=https://registry.npmjs.org
           echo "$prefix/node_modules/.bin" >> "$GITHUB_PATH"
 
       - name: Prove the regression test fails before the fix
