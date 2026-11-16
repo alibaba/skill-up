@@ -52,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fields rather than string-matched, and directories whose ownership is unclear
   are kept. An agent without support for cleanup is reported instead of
   silently skipped.
+- Run judges when `post_condition.on_fail: skip_remaining` fails on the final conversation turn, including single-turn conversations.
 - Install a Skill under the `name` declared in its `SKILL.md` frontmatter
   instead of its source folder's name, so the Agent lists and invokes it by its
   own name when the folder is named differently (for example a snapshot copy).
