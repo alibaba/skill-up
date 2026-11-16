@@ -299,8 +299,15 @@ func TestOpenSandboxExecutionToResult(t *testing.T) {
 		Stderr:   []opensandbox.OutputMessage{{Text: "err"}},
 		ExitCode: &exitCode,
 	})
-	if result.Stdout != "output" || result.Stderr != "err" || result.ExitCode != 7 {
+	if result.Stdout != "out\nput" || result.Stderr != "err" || result.ExitCode != 7 {
 		t.Fatalf("executionToResult = %+v, want combined stdout/stderr and exit 7", result)
+	}
+
+	result = executionToResult(&opensandbox.Execution{
+		Stdout: []opensandbox.OutputMessage{{Text: "a\n"}, {Text: "b\n"}},
+	})
+	if result.Stdout != "a\nb\n" {
+		t.Fatalf("executionToResult newline-bearing stdout = %q, want %q", result.Stdout, "a\nb\n")
 	}
 
 	result = executionToResult(&opensandbox.Execution{
