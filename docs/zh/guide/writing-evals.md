@@ -971,6 +971,11 @@ OpenAI/Anthropic 协议冲突，以及 adapter 会忽略的评分模型，会在
 切换为旧模式；两者都未指定时继承 eval 的 engine/model 选择。`judges` 列表仍整体替换，
 成员不会继承单个 judge 的默认配置。
 
+当 eval 使用单个 `judge` 时，省略、空或 null 的 case 级 `judge` 会继承它。
+非空但未设置 `type` 的 case 级块也会继承 eval 的 judge，其自身字段全部被忽略；
+`validate` 和 `run` 会对此发出警告。要应用 case 级覆盖，请显式设置 `type`。
+当 eval 使用 `judges` 列表时，未设置 `type` 的 case 级 `judge` 仍会报错。
+
 Judge 继续使用 case 的 runtime，不新增 `judge.environment`。独立 judge 的 CLI
 在 Docker/OpenSandbox 的评分阶段安装和检查，发生在被测 agent 完成之后。
 `none` 环境需要预先安装所需 CLI，skill-up 只检查可用性；版本选择遵循现有 adapter
