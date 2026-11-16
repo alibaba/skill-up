@@ -62,7 +62,9 @@ runtime_kwargs:                                       # 按 environment.type 提
 
 - **`telemetry` 与 `env`**：每个 key 对应一个 `OTEL_*` 或自定义环境变量，**仅在
   对应环境变量未被设置时才会注入**——命令行或 shell 中已有的值优先。
-- **`env` 中的 `${VAR}`** 在加载时从当前进程环境展开，密钥不会被写进文件本身。
+- **`env` 中的 `${VAR}`** 在应用默认值之前从当前进程环境展开。未设置的变量保留原文，
+  已设置为空字符串的变量展开为空字符串。只展开一次，不读取同一配置中的其他默认值。
+  `$VAR` 和 `${VAR:-fallback}` 等 shell 表达式保留原文。
 - **`runtime_kwargs`**：`run` 命令按 `environment.type`（如 `opensandbox`）查找
   默认值。`eval.yaml` 中显式给的值优先；未提供的字段在这里兜底。Key 的形态与
   对应 environment provider 的 kwargs 一致。

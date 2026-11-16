@@ -4,9 +4,12 @@ import (
 	"context"
 	"maps"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 )
+
+var envPlaceholderPattern = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*\}`)
 
 const (
 	envOtelServiceName             = "OTEL_SERVICE_NAME"
@@ -29,7 +32,14 @@ func ApplyEnv(c Config) ([]string, error) {
 			continue
 		}
 		if _, exists := pending[k]; !exists {
-			pending[k] = v
+			// Resolve before setting any defaults, so config entries cannot
+			// become expansion sources based on map or key ordering.
+			pending[k] = envPlaceholderPattern.ReplaceAllStringFunc(v, func(ref string) string {
+				if value, exists := os.LookupEnv(ref[2 : len(ref)-1]); exists {
+					return value
+				}
+				return ref
+			})
 		}
 	}
 

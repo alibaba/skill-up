@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Code.
 
 ### Fixed
+- Expand `${VAR}` references in user-config `env` defaults from the process
+  environment, preserving unset references and existing environment values.
 - Warn when a non-empty case-level `judge` has no `type` and its fields are
   ignored in favor of the eval judge. `validate` and `run` preserve the
   existing fallback behavior; omitted, empty and null blocks inherit without

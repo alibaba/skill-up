@@ -69,7 +69,10 @@ Semantics:
   is not already set**, so a value on the command line or in your shell
   always wins.
 - **`${VAR}` placeholders** in `env` values are expanded from the process
-  environment at load time, so secrets stay out of the file.
+  environment before defaults are applied. Unset variables remain literal;
+  variables set to an empty string expand to an empty string. Expansion is
+  single-pass and does not read other defaults from the same config. Bare
+  `$VAR` and shell expressions such as `${VAR:-fallback}` remain literal.
 - **`runtime_kwargs`** — defaults for `run` keyed by `environment.type` (e.g.
   `opensandbox`). `eval.yaml` values take precedence; missing keys fall back
   here. Keys mirror the environment provider's kwargs schema.
