@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Code.
 
 ### Fixed
+- Reject malformed `--include-case-name` and `--exclude-case-name` glob patterns
+  before loading cases, including in auto mode, instead of silently ignoring them.
 - Reject `report.formats` values other than `json`, `junit` and `html` during
   configuration validation. An unknown value used to pass validation and then be
   silently skipped by the runner, which still printed that the reports were
