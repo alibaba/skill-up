@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Use prompt-file delivery for resumed Claude Code and Qoder turns when the
+  prompt exceeds the inline limit or the target is Windows, preserving prompt
+  delivery metadata and failing before execution if the file cannot be uploaded.
 - Match environment variable names case-insensitively in the `none` runtime on
   native Windows. A host `Path` and a configured or probed `PATH` were both
   passed to the child, and which one it kept followed map order. Per-call
