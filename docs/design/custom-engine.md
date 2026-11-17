@@ -125,7 +125,9 @@ Before completing an integration, confirm each item:
   `SessionInput` itself carries no kwargs map.
 - When it needs workspace files, it relies only on `custom.http.files` or on explicit
   paths inside the local runtime workspace.
-- It returns a parseable `SessionResult` for both success and failure.
+- It returns a parseable `SessionResult` for both success and failure, and the
+  config reads it from where the adapter writes it: a local adapter that writes a
+  file needs `local.output_file` set to that path, since stdout is read otherwise.
 - It returns at least `exit_code` and `final_message`.
 - Every file that needs to be archived is written into `SessionResult.artifacts`,
   not relying on `skill-up` to auto-scan.
@@ -609,7 +611,14 @@ engine:
         - --output
         - ${output_file}
       cwd: ${workspace}
+      output_file: ${output_file}
 ```
+
+`output_file` repeats the `--output` argument above on purpose. The adapter writes
+its `SessionResult` to that file and prints nothing to stdout, and a local transport
+reads the result from stdout unless `local.output_file` names the file — so without
+the last line the run completes and reports no usable result. Keep the two values
+the same path.
 
 Three behaviours are worth knowing before copying it:
 
