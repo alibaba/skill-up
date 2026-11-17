@@ -36,6 +36,31 @@ func TestRunCommand_UsesUsageAwareArgs(t *testing.T) {
 	}
 }
 
+func TestLoadRunInputsRejectsMalformedCasePatterns(t *testing.T) {
+	for _, flag := range []string{"include-case-name", "exclude-case-name"} {
+		for _, auto := range []bool{false, true} {
+			for _, pattern := range []string{"[abc", "trailing\\", "[z-a", "[]"} {
+				t.Run(fmt.Sprintf("%s/auto=%t/%s", flag, auto, pattern), func(t *testing.T) {
+					cmd := newRunPhaseTestCommand(t)
+					for _, value := range []string{"*", pattern} {
+						if err := cmd.Flags().Set(flag, value); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if err := cmd.Flags().Set("auto", strconv.FormatBool(auto)); err != nil {
+						t.Fatal(err)
+					}
+					_, _, _, err := loadRunInputs(cmd.Context(), cmd, []string{filepath.Join(t.TempDir(), "missing.yaml")})
+					want := fmt.Sprintf("invalid --%s pattern %q", flag, pattern)
+					if err == nil || !strings.Contains(err.Error(), want) {
+						t.Fatalf("error = %v, want %s before reading any files", err, want)
+					}
+				})
+			}
+		}
+	}
+}
+
 func newRunPhaseTestCommand(t *testing.T) *cobra.Command {
 	t.Helper()
 	cmd := &cobra.Command{Use: "run"}
@@ -364,6 +389,49 @@ func TestLoadRunInputsFiltersBeforeStrictYAMLDecode(t *testing.T) {
 	}
 }
 
+func TestCountResultStatusBenchmark(t *testing.T) {
+	results := []evaluator.EvalResult{
+		{CaseID: "pass", Configuration: "without_skill", Status: judge.StatusFail},
+		{CaseID: "pass", Configuration: "with_skill", Status: judge.StatusPass},
+		{CaseID: "fail", Configuration: "with_skill", Status: judge.StatusFail},
+		{CaseID: "fail", Configuration: "without_skill", Status: judge.StatusPass},
+		{CaseID: "error", Configuration: "with_skill", Status: judge.StatusError},
+		{CaseID: "skip", Configuration: "with_skill", Status: judge.StatusSkip},
+		{CaseID: "skip", Configuration: "without_skill", Status: judge.StatusError},
+		{CaseID: "baseline-only", Configuration: "without_skill", Status: judge.StatusError},
+	}
+	passed, failed, errored := countResultStatus(results)
+	if passed != 1 || failed != 1 || errored != 1 {
+		t.Fatalf("counts = %d/%d/%d, want 1/1/1", passed, failed, errored)
+	}
+}
+
+func TestCountResultStatusPreservesTrials(t *testing.T) {
+	for _, configuration := range []string{"", evaluator.ConfigurationWithSkill} {
+		t.Run(configuration, func(t *testing.T) {
+			results := []evaluator.EvalResult{
+				{CaseID: "repeated", Configuration: configuration, Status: judge.StatusFail},
+				{CaseID: "repeated", Configuration: configuration, Status: judge.StatusError},
+				{CaseID: "repeated", Configuration: configuration, Status: judge.StatusPass},
+				{CaseID: "repeated", Configuration: configuration, Status: judge.StatusSkip},
+			}
+			if configuration != "" {
+				for _, result := range results {
+					result.Configuration = evaluator.ConfigurationWithoutSkill
+					results = append(results, result)
+				}
+			}
+			passed, failed, errored := countResultStatus(results)
+			if passed != 1 || failed != 1 || errored != 1 {
+				t.Fatalf("counts = %d/%d/%d, want 1/1/1", passed, failed, errored)
+			}
+			if err := exitStatusError(io.Discard, results); err == nil {
+				t.Fatal("earlier failed trials must still fail the run")
+			}
+		})
+	}
+}
+
 func TestRunPhaseHelpers(t *testing.T) {
 	var out bytes.Buffer
 	observer := &uiProgressObserver{}
@@ -378,10 +446,10 @@ func TestRunPhaseHelpers(t *testing.T) {
 	}
 
 	results := []evaluator.EvalResult{
-		{Status: judge.StatusPass},
-		{Status: judge.StatusFail},
-		{Status: judge.StatusError},
-		{Status: judge.StatusSkip},
+		{CaseID: "pass", Status: judge.StatusPass},
+		{CaseID: "fail", Status: judge.StatusFail},
+		{CaseID: "error", Status: judge.StatusError},
+		{CaseID: "skip", Status: judge.StatusSkip},
 	}
 	passed, failed, errored := countResultStatus(results)
 	if passed != 1 || failed != 1 || errored != 1 {

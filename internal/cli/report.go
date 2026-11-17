@@ -83,10 +83,12 @@ func runReport(cmd *cobra.Command, args []string) error {
 	}
 
 	// 4. Print summary
+	primary := input
+	primary.CaseResults = input.PrimaryCaseResults()
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nPass rate: %.1f%% (%d/%d cases)\n",
 		input.OverallPassRate()*100,
-		countByStatus(&input, judge.StatusPass),
-		len(input.CaseResults))
+		countByStatus(&primary, judge.StatusPass),
+		len(primary.CaseResults))
 
 	return nil
 }

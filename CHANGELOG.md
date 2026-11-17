@@ -12,6 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use prompt-file delivery for resumed Claude Code and Qoder turns when the
   prompt exceeds the inline limit or the target is Windows, preserving prompt
   delivery metadata and failing before execution if the file cannot be uploaded.
+- Match environment variable names case-insensitively in the `none` runtime on
+  native Windows. A host `Path` and a configured or probed `PATH` were both
+  passed to the child, and which one it kept followed map order. Per-call
+  values now always override the runtime configuration, which overrides the
+  process environment, whatever case each one uses. Unix hosts keep
+  case-sensitive names.
+- Count primary cases consistently in Markdown and CLI summaries for benchmark
+  runs, without counting baseline rows as extra cases or discarding their details.
+- Reject malformed `--include-case-name` and `--exclude-case-name` glob patterns
+  before loading cases, including in auto mode, instead of silently ignoring them.
 
 ## [0.16.0] - 2026-11-17
 
