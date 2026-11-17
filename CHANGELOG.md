@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Code.
 
 ### Fixed
+- Correct the contribution guide to describe the existing CLA Assistant process
+  and employer-authorization considerations.
 - Place Codex's `--output-last-message` before `resume` so resumed turns work
   with the default Codex 0.80.0 CLI. Custom providers now accept
   `engine.kwargs.wire_api: responses` for newer Codex versions that removed
