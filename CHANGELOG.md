@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   values now always override the runtime configuration, which overrides the
   process environment, whatever case each one uses. Unix hosts keep
   case-sensitive names.
+- Count primary cases consistently in Markdown and CLI summaries for benchmark
+  runs, without counting baseline rows as extra cases or discarding their details.
+- Reject malformed `--include-case-name` and `--exclude-case-name` glob patterns
+  before loading cases, including in auto mode, instead of silently ignoring them.
 
 ## [0.16.0] - 2026-11-17
 
