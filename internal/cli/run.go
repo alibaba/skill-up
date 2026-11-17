@@ -338,6 +338,9 @@ func (o *uiProgressObserver) OnCaseComplete(index, total int, caseID string, sta
 
 func countResultStatus(results []evaluator.EvalResult) (passed, failed, errored int) {
 	for _, r := range results {
+		if r.Configuration == "without_skill" {
+			continue
+		}
 		switch r.Status {
 		case judge.StatusPass:
 			passed++
