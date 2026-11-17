@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Code.
 
 ### Fixed
+- Use prompt-file delivery for resumed Claude Code and Qoder turns when the
+  prompt exceeds the inline limit or the target is Windows, preserving prompt
+  delivery metadata and failing before execution if the file cannot be uploaded.
 - Place Codex's `--output-last-message` before `resume` so resumed turns work
   with the default Codex 0.80.0 CLI. Custom providers now accept
   `engine.kwargs.wire_api: responses` for newer Codex versions that removed
