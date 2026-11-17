@@ -117,6 +117,74 @@ func TestCodexCheckCredentials(t *testing.T) {
 	}
 }
 
+func TestCodexWireAPI(t *testing.T) {
+	t.Parallel()
+
+	for _, provider := range []string{"", "openai", "dashscope"} {
+		for _, wireAPI := range []string{"", "chat", "responses"} {
+			t.Run(provider+"/"+wireAPI, func(t *testing.T) {
+				t.Parallel()
+				ag := NewCodexAgent(Config{
+					ModelProvider: provider,
+					BaseURL:       "https://example.com/v1",
+					Kwargs:        map[string]string{KwargWireAPI: wireAPI},
+				})
+				if err := ag.CheckCredentials(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				want := wireAPI
+				if want == "" {
+					want = codexCustomWireAPI
+				}
+				cfg := ag.runProviderConfig(context.Background())
+				if cfg.WireAPI != want {
+					t.Fatalf("WireAPI = %q, want %q", cfg.WireAPI, want)
+				}
+				flag := ".wire_api=" + strconv.Quote(want)
+				commands := []string{
+					buildCodexRunCmd("hello", "", cfg, codexBypassSandbox),
+					buildCodexRunStdinCmdWithLastMessage("/tmp/prompt", "", cfg, codexBypassSandbox, ""),
+					buildCodexResumeCmdWithLastMessage("sess-123", "hello", "", cfg, "", ""),
+				}
+				for _, cmd := range commands {
+					if !strings.Contains(cmd, flag) {
+						t.Fatalf("missing %q in %q", flag, cmd)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestCodexWireAPIInvalid(t *testing.T) {
+	t.Parallel()
+	ag := NewCodexAgent(Config{Kwargs: map[string]string{KwargWireAPI: "invalid"}})
+	rt := &codexTestRuntime{workspace: t.TempDir()}
+	message := transcript.Message{Role: transcript.RoleUser, Content: "hello"}
+	checks := []struct {
+		name string
+		run  func() error
+	}{
+		{"credentials", func() error { return ag.CheckCredentials(context.Background()) }},
+		{"run", func() error {
+			_, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{message})
+			return err
+		}},
+		{"resume", func() error {
+			_, err := ag.RunTurn(context.Background(), rt, ExecOptions{}, message, "sess-123")
+			return err
+		}},
+	}
+	for _, check := range checks {
+		if err := check.run(); err == nil || !strings.Contains(err.Error(), "wire_api must be chat or responses") {
+			t.Errorf("%s: expected actionable wire_api error, got %v", check.name, err)
+		}
+	}
+	if len(rt.commands) != 0 {
+		t.Fatalf("invalid wire_api executed commands: %v", rt.commands)
+	}
+}
+
 func TestCodexCheckCredentials_LogsTokenPresenceAndBaseURL(t *testing.T) {
 	// Not parallel: captureStdout redirects package-level log output.
 
@@ -451,7 +519,7 @@ func TestCodexRunTurn_ResumeUsesCorrectCommand(t *testing.T) {
 		t.Fatalf("expected SessionID = %q, got %q", "thread-xyz-456", result.SessionID)
 	}
 	// Should use "codex exec resume" with the session ID
-	if !containsCommand(rt.commands, "codex exec resume") {
+	if !containsCommand(rt.commands, " resume --json") {
 		t.Fatalf("expected codex exec resume command, got %v", rt.commands)
 	}
 	if !containsCommand(rt.commands, "'thread-xyz-456'") {
@@ -471,8 +539,8 @@ func TestBuildCodexResumeCmdWithLastMessage(t *testing.T) {
 		"/tmp/last.txt",
 		"",
 	)
-	if !strings.HasPrefix(cmd, "codex exec resume --json --skip-git-repo-check") {
-		t.Fatalf("expected codex exec resume prefix, got %q", cmd)
+	if !strings.HasPrefix(cmd, "codex exec --output-last-message '/tmp/last.txt' resume --json --skip-git-repo-check") {
+		t.Fatalf("expected output-last-message before resume for Codex 0.80.0, got %q", cmd)
 	}
 	if !strings.Contains(cmd, "--dangerously-bypass-approvals-and-sandbox") {
 		t.Fatalf("expected bypass flag, got %q", cmd)
@@ -488,6 +556,10 @@ func TestBuildCodexResumeCmdWithLastMessage(t *testing.T) {
 	}
 	if !strings.Contains(cmd, "--output-last-message") {
 		t.Fatalf("expected --output-last-message flag, got %q", cmd)
+	}
+	cmd = buildCodexResumeCmdWithLastMessage("sess-123", "continue", "", codexProviderConfig{}, "", "")
+	if !strings.HasPrefix(cmd, "codex exec resume --json") || strings.Contains(cmd, "--output-last-message") {
+		t.Fatalf("unexpected resume command without last-message artifact: %q", cmd)
 	}
 }
 
@@ -1501,7 +1573,7 @@ func TestCodexRunTurn_ResumeDefinesMockedServers(t *testing.T) {
 		t.Fatalf("RunTurn failed: %v", err)
 	}
 	resumeCmd := codexRunCommand(t, rt)
-	if !strings.Contains(resumeCmd, "codex exec resume") {
+	if !strings.Contains(resumeCmd, " resume --json") {
 		t.Fatalf("expected a resume command, got %s", resumeCmd)
 	}
 	assertCodexMockDefined(t, rt, resumeCmd, mocked, 0)

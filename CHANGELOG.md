@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Code.
 
 ### Fixed
+- Place Codex's `--output-last-message` before `resume` so resumed turns work
+  with the default Codex 0.80.0 CLI. Custom providers now accept
+  `engine.kwargs.wire_api: responses` for newer Codex versions that removed
+  Chat Completions support. The default remains `chat` for 0.80.0 compatibility;
+  selecting `responses` requires a Responses-capable endpoint.
 - Check eval-level and case-level mocked MCP fixtures during `validate`, including
   missing files, YAML errors and invalid tool definitions, without starting servers.
 - Warn when a non-empty case-level `judge` has no `type` and its fields are
@@ -90,11 +95,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Skill names:** installation now uses the `SKILL.md` frontmatter name when
   available. Correct duplicate declared names that would share an installation
   directory before upgrading.
-- **Codex multi-turn compatibility:** the default Codex 0.80.0 CLI still rejects
-  the placement of `--output-last-message` on resumed turns. The fix and explicit
-  Responses API selection proposed in
-  [#415](https://github.com/alibaba/skill-up/pull/415) are not included. Resolve
-  this known limitation before relying on the default Codex multi-turn path.
+- **Codex wire API:** the default remains `chat` for Codex 0.80.0. For newer
+  CLIs that removed Chat Completions, explicitly select
+  `engine.kwargs.wire_api: responses` and use a Responses-capable endpoint.
 - **GitHub Action availability:** this CLI release does not update the official
   Action's pinned runner image, which still bundles skill-up `0.7.0`. Its
   `skill-up-version` input does not override the preinstalled binary. Using these

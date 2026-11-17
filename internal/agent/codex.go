@@ -466,6 +466,9 @@ func defaultCodexInstallCmdForVersion(configuredVersion string) string {
 // CheckCredentials checks if OPENAI_API_KEY is set.
 // Codex can also rely on local login state, so missing env var is informational only.
 func (a *CodexAgent) CheckCredentials(ctx context.Context) error {
+	if err := a.checkWireAPI(); err != nil {
+		return err
+	}
 	a.logCredentialStatus(
 		ctx,
 		credential.EnvOpenAIAPIKey,
@@ -484,8 +487,7 @@ func (a *CodexAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, 
 		// First turn — delegate to Run which creates a new session.
 		return a.Run(ctx, rt, opts, []transcript.Message{message})
 	}
-
-	if err := requireBashTargetShell(rt); err != nil {
+	if err := errors.Join(a.checkWireAPI(), requireBashTargetShell(rt)); err != nil {
 		return nil, fmt.Errorf("%s: %w", a.Name(), err)
 	}
 	start := time.Now()
@@ -552,7 +554,7 @@ func (a *CodexAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, 
 //nolint:dupl
 func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (finalResult *SessionResult, finalErr error) {
 	defer func() { a.annotateSessionResult(finalResult) }()
-	if err := requireBashTargetShell(rt); err != nil {
+	if err := errors.Join(a.checkWireAPI(), requireBashTargetShell(rt)); err != nil {
 		return nil, fmt.Errorf("%s: %w", a.Name(), err)
 	}
 	start := time.Now()
@@ -650,6 +652,20 @@ type codexProviderConfig struct {
 	WireAPI string
 }
 
+func (a *CodexAgent) wireAPI() string {
+	if value := a.Cfg.Kwargs[KwargWireAPI]; value != "" {
+		return value
+	}
+	return codexCustomWireAPI
+}
+
+func (a *CodexAgent) checkWireAPI() error {
+	if value := a.wireAPI(); value != "chat" && value != "responses" {
+		return fmt.Errorf("codex engine kwarg wire_api must be chat or responses, got %q", value)
+	}
+	return nil
+}
+
 func (a *CodexAgent) runProviderConfig(ctx context.Context) codexProviderConfig {
 	// Empty provider + non-empty BaseURL is the same situation as
 	// provider="openai" + non-empty BaseURL: the caller pointed codex at a
@@ -661,7 +677,8 @@ func (a *CodexAgent) runProviderConfig(ctx context.Context) codexProviderConfig 
 	// with wire_api="responses"), which makes any /chat/completions-only
 	// upstream (idealab, dashscope OpenAI-compat, …) return 400 from
 	// `codex_api::endpoint::responses`. wire_api="chat" forces codex onto
-	// /chat/completions instead.
+	// /chat/completions instead. Keep that default for the pinned 0.80.0 CLI;
+	// newer CLIs require wire_api=responses and a Responses-capable endpoint.
 	//
 	// We can't reuse the literal "openai" name because codex ships a
 	// built-in provider config under that key and merging the override
@@ -677,7 +694,7 @@ func (a *CodexAgent) runProviderConfig(ctx context.Context) codexProviderConfig 
 			Label:   codexOpenAIOverrideProvider,
 			BaseURL: a.Cfg.BaseURL,
 			EnvKey:  credential.EnvOpenAIAPIKey,
-			WireAPI: codexCustomWireAPI,
+			WireAPI: a.wireAPI(),
 		}
 	}
 	if reason := codexCustomProviderUnavailableReason(a.Cfg.ModelProvider, a.Cfg.BaseURL); reason != "" {
@@ -689,7 +706,7 @@ func (a *CodexAgent) runProviderConfig(ctx context.Context) codexProviderConfig 
 		Label:   a.Cfg.ModelProvider,
 		BaseURL: a.Cfg.BaseURL,
 		EnvKey:  credential.EnvOpenAIAPIKey,
-		WireAPI: codexCustomWireAPI,
+		WireAPI: a.wireAPI(),
 	}
 }
 
@@ -988,13 +1005,15 @@ func buildCodexRunStdinCmdWithLastMessage(promptPath, model string, provider cod
 // sandbox mode from its initial creation. We use --dangerously-bypass-approvals-and-sandbox
 // to ensure non-interactive execution (approvals are skipped).
 func buildCodexResumeCmdWithLastMessage(sessionID, instruction, model string, provider codexProviderConfig, lastMessagePath, mcpFlags string) string {
-	cmd := "codex exec resume --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox" + mcpFlags
+	// In 0.80.0 this is an exec-only option, not a global resume option.
+	cmd := "codex exec"
+	if lastMessagePath != "" {
+		cmd += " --output-last-message " + shellQuote(lastMessagePath)
+	}
+	cmd += " resume --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox" + mcpFlags
 	cmd += codexProviderFlags(provider)
 	if model != "" {
 		cmd += " -m " + shellQuote(model)
-	}
-	if lastMessagePath != "" {
-		cmd += " --output-last-message " + shellQuote(lastMessagePath)
 	}
 	cmd += " " + shellQuote(sessionID)
 	cmd += " " + shellQuote(instruction)
