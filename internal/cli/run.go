@@ -338,6 +338,9 @@ func (o *uiProgressObserver) OnCaseComplete(index, total int, caseID string, sta
 
 func countResultStatus(results []evaluator.EvalResult) (passed, failed, errored int) {
 	for _, r := range results {
+		if r.Configuration == "without_skill" {
+			continue
+		}
 		switch r.Status {
 		case judge.StatusPass:
 			passed++
@@ -809,6 +812,12 @@ func resolveEvalPath(ctx context.Context, args []string) (string, error) {
 func loadRunInputs(ctx context.Context, cmd *cobra.Command, args []string) ([]*config.CaseConfig, *config.EvalConfig, *config.Loader, error) {
 	include, _ := cmd.Flags().GetStringArray("include-case-name")
 	exclude, _ := cmd.Flags().GetStringArray("exclude-case-name")
+	if err := validateCasePatterns("include-case-name", include); err != nil {
+		return nil, nil, nil, err
+	}
+	if err := validateCasePatterns("exclude-case-name", exclude); err != nil {
+		return nil, nil, nil, err
+	}
 	selected := func(caseID string) bool {
 		return len(filterCases([]*config.CaseConfig{{ID: caseID}}, include, exclude)) == 1
 	}
@@ -948,6 +957,15 @@ func loadAnthropicEvals(evalsJSONPath string, selected func(caseID string) bool)
 	}
 
 	return convertAnthropicEvals(evalsData, anthropicSkillRoot(evalsJSONPath), selected)
+}
+
+func validateCasePatterns(flag string, patterns []string) error {
+	for _, pattern := range patterns {
+		if _, err := path.Match(pattern, ""); err != nil {
+			return fmt.Errorf("invalid --%s pattern %q: %w", flag, pattern, err)
+		}
+	}
+	return nil
 }
 
 func filterCases(cases []*config.CaseConfig, include, exclude []string) []*config.CaseConfig {
