@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Reject malformed `--include-case-name` and `--exclude-case-name` glob patterns
+  before loading cases, including in auto mode, instead of silently ignoring them.
+
 ## [0.16.0] - 2026-11-17
 
 ### Added

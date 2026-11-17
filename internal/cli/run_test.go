@@ -36,6 +36,31 @@ func TestRunCommand_UsesUsageAwareArgs(t *testing.T) {
 	}
 }
 
+func TestLoadRunInputsRejectsMalformedCasePatterns(t *testing.T) {
+	for _, flag := range []string{"include-case-name", "exclude-case-name"} {
+		for _, auto := range []bool{false, true} {
+			for _, pattern := range []string{"[abc", "trailing\\", "[z-a", "[]"} {
+				t.Run(fmt.Sprintf("%s/auto=%t/%s", flag, auto, pattern), func(t *testing.T) {
+					cmd := newRunPhaseTestCommand(t)
+					for _, value := range []string{"*", pattern} {
+						if err := cmd.Flags().Set(flag, value); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if err := cmd.Flags().Set("auto", strconv.FormatBool(auto)); err != nil {
+						t.Fatal(err)
+					}
+					_, _, _, err := loadRunInputs(cmd.Context(), cmd, []string{filepath.Join(t.TempDir(), "missing.yaml")})
+					want := fmt.Sprintf("invalid --%s pattern %q", flag, pattern)
+					if err == nil || !strings.Contains(err.Error(), want) {
+						t.Fatalf("error = %v, want %s before reading any files", err, want)
+					}
+				})
+			}
+		}
+	}
+}
+
 func newRunPhaseTestCommand(t *testing.T) *cobra.Command {
 	t.Helper()
 	cmd := &cobra.Command{Use: "run"}
