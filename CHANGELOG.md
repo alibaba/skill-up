@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Count primary cases consistently in Markdown and CLI summaries for benchmark
+  runs, without counting baseline rows as extra cases or discarding their details.
+
+## [0.16.0] - 2026-11-17
+
 ### Added
 
 - Mocked MCP fixtures accept a `tools` map that defines each tool in one
@@ -25,8 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Code.
 
 ### Fixed
-- Count primary cases consistently in Markdown and CLI summaries for benchmark
-  runs, without counting baseline rows as extra cases or discarding their details.
+- Correct the contribution guide to describe the existing CLA Assistant process
+  and employer-authorization considerations.
 - Place Codex's `--output-last-message` before `resume` so resumed turns work
   with the default Codex 0.80.0 CLI. Custom providers now accept
   `engine.kwargs.wire_api: responses` for newer Codex versions that removed
@@ -81,6 +88,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prompt and reports name each judge Skill the same way. Two `skills` or
   `judge.skills` entries that would be installed into the same directory are
   now rejected instead of being merged.
+
+### Changed
+- Update the OpenAI Go SDK to 3.97.0 and pflag to 1.1.0.
+
+### Upgrade notes and known limitations
+- **Session cleanup is opt-in:** Claude Code and Qoder session directories are
+  removed only when cleanup is requested and ownership can be established.
+  `--no-delete` retains the workspace and session data.
+- **Validation:** invalid report formats and mocked MCP fixture definitions now
+  fail early. Non-empty case `judge` blocks without a `type` still inherit the
+  eval judge, but now warn when their fields are ignored.
+- **Skill names:** installation now uses the `SKILL.md` frontmatter name when
+  available. Correct duplicate declared names that would share an installation
+  directory before upgrading.
+- **Codex wire API:** the default remains `chat` for Codex 0.80.0. For newer
+  CLIs that removed Chat Completions, explicitly select
+  `engine.kwargs.wire_api: responses` and use a Responses-capable endpoint.
+- **GitHub Action availability:** this CLI release does not update the official
+  Action's pinned runner image, which still bundles skill-up `0.7.0`. Its
+  `skill-up-version` input does not override the preinstalled binary. Using these
+  CLI features in the Action requires a separately updated or custom image.
 
 ## [0.15.0] - 2026-11-09
 
@@ -932,7 +960,8 @@ The `v0.5.0` release tag is available at
   project and delivers the end-to-end capability to declare eval environments,
   run cases and emit structured reports as described in [README.md](README.md).
 
-[Unreleased]: https://github.com/alibaba/skill-up/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/alibaba/skill-up/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/alibaba/skill-up/releases/tag/v0.16.0
 [0.15.0]: https://github.com/alibaba/skill-up/releases/tag/v0.15.0
 [0.14.0]: https://github.com/alibaba/skill-up/releases/tag/v0.14.0
 [0.13.0]: https://github.com/alibaba/skill-up/releases/tag/v0.13.0
