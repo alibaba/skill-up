@@ -39,7 +39,12 @@ type Environment struct {
 	Metadata              map[string]string `yaml:"metadata,omitempty"`
 	Kwargs                map[string]string `yaml:"kwargs,omitempty"`
 	NetworkPolicy         string            `yaml:"network_policy,omitempty"` // deny_all, allow_declared
-	AllowedEgress         []string          `yaml:"allowed_egress,omitempty"` // FQDN/wildcard egress allowlist for allow_declared
+	// CleanupSessions deletes the agent's per-workspace session directory (for
+	// example Claude Code's ~/.claude/projects entry) together with the
+	// workspace. Off by default: it removes user-visible history that today
+	// survives an evaluation.
+	CleanupSessions bool     `yaml:"cleanup_sessions,omitempty"`
+	AllowedEgress   []string `yaml:"allowed_egress,omitempty"` // FQDN/wildcard egress allowlist for allow_declared
 }
 
 // ToRuntimeConfig converts Environment to runtime.Config.
@@ -96,6 +101,10 @@ type SkillRef struct {
 	Target  string   `yaml:"target,omitempty"`
 	Include []string `yaml:"include,omitempty"`
 	Exclude []string `yaml:"exclude,omitempty"`
+	// InstallName is the directory name the Skill is installed under when
+	// Target is empty, resolved by the evaluator from SKILL.md. It is not
+	// configurable.
+	InstallName string `yaml:"-" json:"-"`
 }
 
 // EngineConfig defines the Agent Engine configuration.
@@ -322,6 +331,9 @@ type CaseConfig struct {
 	// validation keys off it so the check is correct for any case subset (e.g.
 	// the filtered set `skill-up run` executes), not only the full suite.
 	SourceFile string `json:"-" yaml:"-"`
+
+	// judgeHasFields distinguishes an empty block from explicitly configured zero values.
+	judgeHasFields bool
 }
 
 // Input describes the agent input (prompt or turns).

@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -467,6 +469,7 @@ func TestBuildCodexResumeCmdWithLastMessage(t *testing.T) {
 		"sess-123", "do something", "o3",
 		codexProviderConfig{},
 		"/tmp/last.txt",
+		"",
 	)
 	if !strings.HasPrefix(cmd, "codex exec resume --json --skip-git-repo-check") {
 		t.Fatalf("expected codex exec resume prefix, got %q", cmd)
@@ -1403,6 +1406,323 @@ func TestCodexRun_ReinstallReplacesApprovedMCPServers(t *testing.T) {
 	}
 }
 
+func mockedCodexServer(name string) runtime.MCPServerConfig {
+	// The script mirrors a generated mock: quotes, a newline and a backslash.
+	script := "const fixtures = {\"tools\":{\"get\":{\"response\":\"it's ok\"}}};\nconsole.log(\"a\\\\b\");"
+	return runtime.MCPServerConfig{Name: name, Mode: "mocked", Transport: "stdio", Command: "node", Args: []string{"-e", script}}
+}
+
+// assertCodexMockDefined checks that cmd defines the mocked server with its
+// script written to a file in the run's artifact directory, not inline.
+func assertCodexMockDefined(t *testing.T, rt *codexTestRuntime, cmd string, server runtime.MCPServerConfig, index int) {
+	t.Helper()
+	scriptPath := targetPathJoin(rt.Shell().GOOS, rt.runArtifactDir, fmt.Sprintf("mcp-server-%d.cjs", index))
+	wantArgs, err := json.Marshal([]string{scriptPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, flag := range []string{
+		"-c " + shellQuote("mcp_servers."+server.Name+`.command="node"`),
+		"-c " + shellQuote("mcp_servers."+server.Name+".args="+string(wantArgs)),
+	} {
+		if !strings.Contains(cmd, flag) {
+			t.Fatalf("command missing %s: %s", flag, cmd)
+		}
+	}
+	if strings.Contains(cmd, "const fixtures") {
+		t.Fatalf("the mock script must not be inlined: %s", cmd)
+	}
+	rt.mu.Lock()
+	uploaded := rt.uploads[scriptPath]
+	rt.mu.Unlock()
+	if uploaded != server.Args[1] {
+		t.Fatalf("script at %s = %q, want the generated script", scriptPath, uploaded)
+	}
+}
+
+// Mocked servers are defined on the codex exec command line, so nothing is
+// written to the user's Codex config; other servers keep codex mcp add.
+func TestCodexInstallMCP_DefinesMockedServersOnCommandLine(t *testing.T) {
+	t.Parallel()
+
+	stdout := `{"type":"thread.started","thread_id":"thread-123"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"OK"}}`
+	mocked := mockedCodexServer("shop")
+	installed := runtime.MCPServerConfig{Name: "docs", Mode: "real", Transport: "stdio", Command: "docs-server"}
+	for _, tc := range []struct {
+		name      string
+		workspace string
+		kwargs    map[string]string
+		approval  bool
+	}{
+		{name: "workspace-write sandbox", workspace: t.TempDir(), approval: true},
+		{name: "bypass_sandbox", workspace: t.TempDir(), kwargs: map[string]string{KwargBypassSandbox: "true"}},
+		{name: "opensandbox", workspace: "opensandbox"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rt := &codexTestRuntime{workspace: tc.workspace, execResult: runtime.ExecResult{Stdout: stdout, ExitCode: 0}}
+			ag := NewCodexAgent(Config{Kwargs: tc.kwargs})
+			if err := ag.InstallMCP(context.Background(), rt, runtime.MCPConfig{Servers: []runtime.MCPServerConfig{mocked, installed}}); err != nil {
+				t.Fatalf("InstallMCP failed: %v", err)
+			}
+			if containsCommand(rt.commands, "codex mcp add 'shop'") || containsCommand(rt.commands, "codex mcp remove 'shop'") {
+				t.Fatalf("mocked server must not be written to the Codex config: %v", rt.commands)
+			}
+			if !containsCommand(rt.commands, "codex mcp add 'docs'") {
+				t.Fatalf("real server should still be installed: %v", rt.commands)
+			}
+			if _, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{Role: transcript.RoleUser, Content: "hi", Turn: 1}}); err != nil {
+				t.Fatalf("Run failed: %v", err)
+			}
+			runCmd := codexRunCommand(t, rt)
+			assertCodexMockDefined(t, rt, runCmd, mocked, 0)
+			if strings.Contains(runCmd, "mcp_servers.docs.command") {
+				t.Fatalf("installed server must not be redefined on the command line: %s", runCmd)
+			}
+			if got := strings.Contains(runCmd, codexApprovalFlag("shop")); got != tc.approval {
+				t.Fatalf("approval flag present = %t, want %t: %s", got, tc.approval, runCmd)
+			}
+		})
+	}
+}
+
+// A resumed turn is a new codex invocation, so it needs the definitions again.
+func TestCodexRunTurn_ResumeDefinesMockedServers(t *testing.T) {
+	t.Parallel()
+
+	rt := &codexTestRuntime{workspace: t.TempDir(), execResult: runtime.ExecResult{Stdout: `{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"OK"}}`, ExitCode: 0}}
+	ag := NewCodexAgent(Config{})
+	mocked := mockedCodexServer("shop")
+	if err := ag.InstallMCP(context.Background(), rt, runtime.MCPConfig{Servers: []runtime.MCPServerConfig{mocked}}); err != nil {
+		t.Fatalf("InstallMCP failed: %v", err)
+	}
+	if _, err := ag.RunTurn(context.Background(), rt, ExecOptions{}, transcript.Message{Role: transcript.RoleUser, Content: "next", Turn: 2}, "sess-1"); err != nil {
+		t.Fatalf("RunTurn failed: %v", err)
+	}
+	resumeCmd := codexRunCommand(t, rt)
+	if !strings.Contains(resumeCmd, "codex exec resume") {
+		t.Fatalf("expected a resume command, got %s", resumeCmd)
+	}
+	assertCodexMockDefined(t, rt, resumeCmd, mocked, 0)
+}
+
+// Names that differ only in case are distinct Codex servers, so their scripts
+// must not share a file on a case-insensitive disk.
+func TestCodexRun_CaseVariantMockNamesGetSeparateScripts(t *testing.T) {
+	t.Parallel()
+
+	rt := &codexTestRuntime{workspace: t.TempDir(), execResult: runtime.ExecResult{Stdout: `{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"OK"}}`, ExitCode: 0}}
+	upper, lower := mockedCodexServer("Shop"), mockedCodexServer("shop")
+	upper.Args = []string{"-e", "console.log('upper');"}
+	ag := NewCodexAgent(Config{})
+	if err := ag.InstallMCP(context.Background(), rt, runtime.MCPConfig{Servers: []runtime.MCPServerConfig{upper, lower}}); err != nil {
+		t.Fatalf("InstallMCP failed: %v", err)
+	}
+	if _, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{Role: transcript.RoleUser, Content: "hi", Turn: 1}}); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	runCmd := codexRunCommand(t, rt)
+	assertCodexMockDefined(t, rt, runCmd, upper, 0)
+	assertCodexMockDefined(t, rt, runCmd, lower, 1)
+}
+
+// A failed script upload stops the run before Codex starts and removes the
+// run's artifact directory.
+func TestCodexRun_ScriptUploadFailureCleansUp(t *testing.T) {
+	t.Parallel()
+
+	for _, resume := range []bool{false, true} {
+		t.Run("resume="+strconv.FormatBool(resume), func(t *testing.T) {
+			t.Parallel()
+			rt := &codexTestRuntime{workspace: t.TempDir(), failUploadSuffix: "mcp-server-1.cjs"}
+			ag := NewCodexAgent(Config{})
+			servers := []runtime.MCPServerConfig{mockedCodexServer("shop"), mockedCodexServer("docs")}
+			if err := ag.InstallMCP(context.Background(), rt, runtime.MCPConfig{Servers: servers}); err != nil {
+				t.Fatalf("InstallMCP failed: %v", err)
+			}
+			message := transcript.Message{Role: transcript.RoleUser, Content: "hi", Turn: 1}
+			var err error
+			if resume {
+				_, err = ag.RunTurn(context.Background(), rt, ExecOptions{}, message, "sess-1")
+			} else {
+				_, err = ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{message})
+			}
+			if err == nil || !strings.Contains(err.Error(), `write mocked MCP server "docs" script`) {
+				t.Fatalf("error = %v, want the upload failure", err)
+			}
+			if containsCommand(rt.commands, "codex exec") {
+				t.Fatalf("codex must not run after a failed upload: %v", rt.commands)
+			}
+			rt.mu.Lock()
+			removed := slices.Contains(rt.removed, rt.runArtifactDir)
+			rt.mu.Unlock()
+			if !removed {
+				t.Fatalf("run artifact directory %q was not removed: %v", rt.runArtifactDir, rt.removed)
+			}
+		})
+	}
+}
+
+// Docker and OpenSandbox runtimes of concurrent cases report the same
+// workspace path; each case must still get only its own mocked servers.
+func TestCodexRun_SameWorkspacePathKeepsCasesApart(t *testing.T) {
+	t.Parallel()
+
+	stdout := `{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"OK"}}`
+	caseA, caseB := mockedCodexServer("shop"), mockedCodexServer("shop")
+	caseA.Args = []string{"-e", "console.log('case A');"}
+	caseB.Args = []string{"-e", "console.log('case B');"}
+	rtA := &codexTestRuntime{workspace: "opensandbox", execResult: runtime.ExecResult{Stdout: stdout, ExitCode: 0}}
+	rtB := &codexTestRuntime{workspace: "opensandbox", execResult: runtime.ExecResult{Stdout: stdout, ExitCode: 0}}
+	ag := NewCodexAgent(Config{})
+
+	if err := ag.InstallMCP(context.Background(), rtA, runtime.MCPConfig{Servers: []runtime.MCPServerConfig{caseA}}); err != nil {
+		t.Fatalf("InstallMCP A failed: %v", err)
+	}
+	if err := ag.InstallMCP(context.Background(), rtB, runtime.MCPConfig{Servers: []runtime.MCPServerConfig{caseB}}); err != nil {
+		t.Fatalf("InstallMCP B failed: %v", err)
+	}
+	message := []transcript.Message{{Role: transcript.RoleUser, Content: "hi", Turn: 1}}
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i, rt := range []*codexTestRuntime{rtA, rtB} {
+		wg.Go(func() {
+			_, errs[i] = ag.Run(context.Background(), rt, ExecOptions{}, message)
+		})
+	}
+	wg.Wait()
+	if err := errors.Join(errs...); err != nil {
+		t.Fatalf("concurrent Run failed: %v", err)
+	}
+	assertCodexMockDefined(t, rtA, codexRunCommand(t, rtA), caseA, 0)
+	assertCodexMockDefined(t, rtB, codexRunCommand(t, rtB), caseB, 0)
+
+	// A case without mocks on another runtime with that path gets none.
+	rtC := &codexTestRuntime{workspace: "opensandbox", execResult: runtime.ExecResult{Stdout: stdout, ExitCode: 0}}
+	if err := ag.InstallMCP(context.Background(), rtC, runtime.MCPConfig{}); err != nil {
+		t.Fatalf("InstallMCP C failed: %v", err)
+	}
+	if _, err := ag.Run(context.Background(), rtC, ExecOptions{}, message); err != nil {
+		t.Fatalf("Run C failed: %v", err)
+	}
+	if runCmd := codexRunCommand(t, rtC); strings.Contains(runCmd, "mcp_servers.") {
+		t.Fatalf("a case without mocks received another case's servers: %s", runCmd)
+	}
+}
+
+// The evaluator creates a separate adapter for an agent judge and gives it an
+// empty MCP config; it runs in the case's runtime and must see the case's mocks.
+func TestCodexJudgeAdapter_SeesTheCasesMockedServers(t *testing.T) {
+	t.Parallel()
+
+	stdout := `{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"OK"}}`
+	rt := &codexTestRuntime{workspace: t.TempDir(), execResult: runtime.ExecResult{Stdout: stdout, ExitCode: 0}}
+	mocked := mockedCodexServer("shop")
+	runAgent := NewCodexAgent(Config{})
+	if err := runAgent.InstallMCP(context.Background(), rt, runtime.MCPConfig{Servers: []runtime.MCPServerConfig{mocked}}); err != nil {
+		t.Fatalf("InstallMCP failed: %v", err)
+	}
+
+	judgeAgent := NewCodexAgent(Config{})
+	if err := judgeAgent.InstallMCP(context.Background(), rt, runtime.MCPConfig{}); err != nil {
+		t.Fatalf("judge InstallMCP failed: %v", err)
+	}
+	if _, err := judgeAgent.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{Role: transcript.RoleUser, Content: "grade", Turn: 1}}); err != nil {
+		t.Fatalf("judge Run failed: %v", err)
+	}
+	judgeCmd := codexRunCommand(t, rt)
+	assertCodexMockDefined(t, rt, judgeCmd, mocked, 0)
+	if !strings.Contains(judgeCmd, codexApprovalFlag("shop")) {
+		t.Fatalf("judge run should approve the case's mocked server: %s", judgeCmd)
+	}
+
+	// The run adapter clears its own record for the next case on this runtime.
+	if err := runAgent.InstallMCP(context.Background(), rt, runtime.MCPConfig{}); err != nil {
+		t.Fatalf("InstallMCP reset failed: %v", err)
+	}
+	if got := codexMCPForRuntime(rt); len(got.defined) != 0 || len(got.approve) != 0 {
+		t.Fatalf("record after reset = %+v, want empty", got)
+	}
+}
+
+func TestCodexReleaseRuntime_DropsTheCasesServers(t *testing.T) {
+	t.Parallel()
+
+	stdout := `{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"OK"}}`
+	rt := &codexTestRuntime{workspace: t.TempDir(), execResult: runtime.ExecResult{Stdout: stdout, ExitCode: 0}}
+	ag := NewCodexAgent(Config{})
+	if err := ag.InstallMCP(context.Background(), rt, runtime.MCPConfig{Servers: []runtime.MCPServerConfig{mockedCodexServer("shop")}}); err != nil {
+		t.Fatalf("InstallMCP failed: %v", err)
+	}
+
+	ag.ReleaseRuntime(rt)
+
+	if got := codexMCPForRuntime(rt); len(got.defined) != 0 || len(got.approve) != 0 || got.owner != nil {
+		t.Fatalf("record after release = %+v, want none", got)
+	}
+	if _, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{Role: transcript.RoleUser, Content: "hi", Turn: 1}}); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if runCmd := codexRunCommand(t, rt); strings.Contains(runCmd, "mcp_servers.") {
+		t.Fatalf("a released runtime still received servers: %s", runCmd)
+	}
+}
+
+func TestCodexInstallMCP_RejectsNameAlreadyInCodexConfig(t *testing.T) {
+	t.Parallel()
+
+	rt := &codexTestRuntime{workspace: t.TempDir(), existingMCP: []string{"docs", "shop"}}
+	ag := NewCodexAgent(Config{})
+	err := ag.InstallMCP(context.Background(), rt, runtime.MCPConfig{Servers: []runtime.MCPServerConfig{mockedCodexServer("shop")}})
+	if err == nil || !strings.Contains(err.Error(), `codex already has an MCP server named "shop"`) || !strings.Contains(err.Error(), "codex mcp remove shop") {
+		t.Fatalf("InstallMCP error = %v, want the name conflict", err)
+	}
+	if containsCommand(rt.commands, "codex mcp remove") || containsCommand(rt.commands, "codex mcp add") {
+		t.Fatalf("the user's server must be left alone: %v", rt.commands)
+	}
+}
+
+func TestCodexInstallMCP_FailsWhenServerListIsUnreadable(t *testing.T) {
+	t.Parallel()
+
+	rt := &codexTestRuntime{workspace: t.TempDir(), listMCPFails: true}
+	ag := NewCodexAgent(Config{})
+	err := ag.InstallMCP(context.Background(), rt, runtime.MCPConfig{Servers: []runtime.MCPServerConfig{mockedCodexServer("shop")}})
+	if err == nil || !strings.Contains(err.Error(), "list the MCP servers in the Codex config: exit 1: Error: failed to load config") {
+		t.Fatalf("InstallMCP error = %v, want the listing failure", err)
+	}
+}
+
+// A mocked server that cannot be defined on the command line is rejected; it
+// is never installed into the user's Codex config.
+func TestCodexInstallMCP_RejectsMockedServerItCannotDefine(t *testing.T) {
+	t.Parallel()
+
+	withEnv := mockedCodexServer("shop")
+	withEnv.Env = map[string]string{"TOKEN": "x"}
+	for _, tc := range []struct {
+		name   string
+		server runtime.MCPServerConfig
+		want   string
+	}{
+		{"dotted name", mockedCodexServer("shop.tools"), "the name must match"},
+		{"environment values", withEnv, "only a generated stdio command"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rt := &codexTestRuntime{workspace: t.TempDir()}
+			err := NewCodexAgent(Config{}).InstallMCP(context.Background(), rt, runtime.MCPConfig{Servers: []runtime.MCPServerConfig{tc.server}})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("InstallMCP error = %v, want containing %q", err, tc.want)
+			}
+			if containsCommand(rt.commands, "codex mcp add") || containsCommand(rt.commands, "codex mcp remove") {
+				t.Fatalf("a mocked server must never reach the Codex config: %v", rt.commands)
+			}
+		})
+	}
+}
+
 func TestCodexRun_NoMCPApprovalWhenApprovalsAreBypassed(t *testing.T) {
 	t.Parallel()
 
@@ -1756,6 +2076,12 @@ type codexTestRuntime struct {
 	lastMessageBytes    []byte
 	execResult          runtime.ExecResult
 	commands            []string
+	existingMCP         []string // server names `codex mcp list --json` reports as configured
+	listMCPFails        bool
+	uploads             map[string]string // target path -> uploaded content
+	failUploadSuffix    string            // UploadFile fails for a target path with this suffix
+	removed             []string          // paths removed with rm -rf
+	mu                  sync.Mutex
 	lastCommand         string
 	lastExecEnv         map[string]string
 	runArtifactDir      string
@@ -1767,7 +2093,20 @@ func (r *codexTestRuntime) Create(context.Context) error { return nil }
 func (r *codexTestRuntime) Close() error                 { return nil }
 func (r *codexTestRuntime) Start(context.Context) error  { return nil }
 func (r *codexTestRuntime) Stop(context.Context) error   { return nil }
-func (r *codexTestRuntime) UploadFile(context.Context, string, string) error {
+func (r *codexTestRuntime) UploadFile(_ context.Context, sourcePath, targetPath string) error {
+	if r.failUploadSuffix != "" && strings.HasSuffix(targetPath, r.failUploadSuffix) {
+		return errors.New("disk full")
+	}
+	data, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.uploads == nil {
+		r.uploads = make(map[string]string)
+	}
+	r.uploads[targetPath] = string(data)
 	return nil
 }
 
@@ -1812,7 +2151,10 @@ func (r *codexTestRuntime) Exec(_ context.Context, command string, opts runtime.
 		r.runArtifactDir = strings.Trim(dir, "'")
 		return runtime.ExecResult{ExitCode: 0}, nil
 	}
-	if strings.HasPrefix(command, "rm -rf -- ") {
+	if dir, ok := strings.CutPrefix(command, "rm -rf -- "); ok {
+		r.mu.Lock()
+		r.removed = append(r.removed, strings.Trim(dir, "'"))
+		r.mu.Unlock()
 		return runtime.ExecResult{ExitCode: 0}, nil
 	}
 	if strings.HasPrefix(command, "wc -c <") {
@@ -1824,6 +2166,20 @@ func (r *codexTestRuntime) Exec(_ context.Context, command string, opts runtime.
 	}
 	r.commands = append(r.commands, command)
 	r.lastCommand = command
+	if command == "codex mcp list --json" {
+		if r.listMCPFails {
+			return runtime.ExecResult{ExitCode: 1, Stderr: "Error: failed to load config"}, nil
+		}
+		listed := make([]codexConfiguredMCPServer, 0, len(r.existingMCP))
+		for _, name := range r.existingMCP {
+			listed = append(listed, codexConfiguredMCPServer{Name: name})
+		}
+		out, err := json.Marshal(listed)
+		if err != nil {
+			return runtime.ExecResult{}, err
+		}
+		return runtime.ExecResult{Stdout: string(out)}, nil
+	}
 	if strings.Contains(command, "SKILL_UP_CODEX_THREAD_ID") {
 		if opts.Env["SKILL_UP_CODEX_THREAD_ID"] != "thread-123" {
 			return runtime.ExecResult{}, fmt.Errorf("unexpected thread id: %q", opts.Env["SKILL_UP_CODEX_THREAD_ID"])

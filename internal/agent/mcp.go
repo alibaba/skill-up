@@ -13,6 +13,8 @@ import (
 const (
 	mcpTransportHTTP  = "http"
 	mcpTransportStdio = "stdio"
+	// mcpModeMocked is the mode of a server skill-up generates from a fixture.
+	mcpModeMocked = "mocked"
 )
 
 var (

@@ -3015,6 +3015,196 @@ func TestEvaluateAll_WithBaseline(t *testing.T) {
 	}
 }
 
+func TestResolveSkillConfig_DeclaredName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		skillMD     string
+		wantName    string
+		wantDirName string
+	}{
+		{"name differs from folder", "---\nname: my-skill\n---\n# Skill", "my-skill", "my-skill"},
+		{"name matches folder", "---\nname: snapshot\n---\n# Skill", "snapshot", "snapshot"},
+		{"no frontmatter", "# Skill", "", "snapshot"},
+		{"no SKILL.md", "", "", "snapshot"},
+		{"name with underscore and capitals", "---\nname: My_Skill-2\n---\n", "My_Skill-2", "My_Skill-2"},
+		{"name with a path separator", "---\nname: ../escape\n---\n", "", "snapshot"},
+		{"name with a space", "---\nname: my skill\n---\n", "", "snapshot"},
+		{"name with a dot", "---\nname: my.skill\n---\n", "", "snapshot"},
+		{"name with a control character", "---\nname: \"my\\0skill\"\n---\n", "", "snapshot"},
+		{"windows reserved name", "---\nname: CON\n---\n", "", "snapshot"},
+		{"name longer than 64 characters", "---\nname: " + strings.Repeat("a", 65) + "\n---\n", "", "snapshot"},
+		{"name with a backslash", "---\nname: 'a\\b'\n---\n", "", "snapshot"},
+		{"name is a parent reference", "---\nname: '..'\n---\n", "", "snapshot"},
+		{"name with padding", "---\nname: ' my-skill '\n---\n", "my-skill", "my-skill"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			skillDir := filepath.Join(root, "snapshot")
+			if err := os.MkdirAll(skillDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if tt.skillMD != "" {
+				if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(tt.skillMD), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			for _, path := range []string{".", skillDir} {
+				got := resolveSkillConfig(skillDir, config.SkillRef{Path: path})
+				if got.Name != tt.wantName || got.DirName() != tt.wantDirName {
+					t.Fatalf("path %q: Name = %q, DirName = %q; want %q, %q", path, got.Name, got.DirName(), tt.wantName, tt.wantDirName)
+				}
+			}
+		})
+	}
+}
+
+func TestExecuteCase_JudgePromptNamesDeclaredSkillName(t *testing.T) {
+	skillDir := t.TempDir()
+	snapshot := filepath.Join(skillDir, "evals", "fixtures", "snapshot")
+	if err := os.MkdirAll(snapshot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapshot, "SKILL.md"), []byte("---\nname: rubric-skill\n---\n# Rubric"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	judgeAgent := &mockAgent{
+		name:   "judge",
+		output: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["rubric applied"],"failures":[]}]}`,
+	}
+	runAgent := &mockAgent{name: "run", output: "main response"}
+
+	origDetect := agentDetectWithResolvedConfig
+	agentDetectWithResolvedConfig = func(_ credential.ResolvedAgentConfig) (agent.Agent, error) {
+		return judgeAgent, nil
+	}
+	defer func() { agentDetectWithResolvedConfig = origDetect }()
+
+	skills := []config.SkillRef{{Source: "local_path", Path: "evals/fixtures/snapshot"}}
+	e := newTestEvaluator(EvalOptions{
+		SkillDir: skillDir,
+		Agent:    runAgent,
+		EvalCfg: &config.EvalConfig{
+			Engine: config.EngineConfig{Name: "mock"},
+			Judge:  config.JudgeConfig{Type: "agent_judge", Model: "judge-model", Criteria: []string{"uses rubric"}, Skills: skills},
+		},
+	})
+
+	result := e.executeCase(
+		context.Background(),
+		&config.CaseConfig{ID: "case-judge-skill-name", Input: config.Input{Prompt: "hello"}},
+		"without_skill",
+		&mockRuntime{workspace: t.TempDir()},
+		runAgent,
+	)
+
+	if result.Status != judge.StatusPass {
+		t.Fatalf("status = %s, err=%v", result.Status, result.Error)
+	}
+	if len(judgeAgent.skills) != 1 || judgeAgent.skills[0].DirName() != "rubric-skill" {
+		t.Fatalf("judge skill installed as %#v, want directory rubric-skill", judgeAgent.skills)
+	}
+	if len(judgeAgent.lastMessages) != 1 {
+		t.Fatalf("judge messages = %#v", judgeAgent.lastMessages)
+	}
+	prompt := judgeAgent.lastMessages[0].Content
+	if !strings.Contains(prompt, `invoke Skill tool with name "rubric-skill"`) || strings.Contains(prompt, `"snapshot"`) {
+		t.Fatalf("judge prompt does not name the installed Skill:\n%s", prompt)
+	}
+	if len(result.JudgeSkills) != 1 || result.JudgeSkills[0].Name != "rubric-skill" || result.JudgeSkills[0].Path != "evals/fixtures/snapshot" {
+		t.Fatalf("result JudgeSkills = %#v", result.JudgeSkills)
+	}
+	if skills[0].InstallName != "" || e.evalCfg.Judge.Skills[0].InstallName != "" {
+		t.Fatal("the shared eval config must not be modified")
+	}
+}
+
+func TestWithJudgeSkillInstallNames_FallsBackToFolderName(t *testing.T) {
+	t.Parallel()
+
+	skillDir := filepath.Join(t.TempDir(), "rubric-folder")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: not a dir name\n---\n# Rubric"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e := newTestEvaluator(EvalOptions{SkillDir: skillDir, EvalCfg: &config.EvalConfig{}})
+
+	got := e.withJudgeSkillInstallNames(config.JudgeConfig{Skills: []config.SkillRef{
+		{Source: "local_path", Path: "."},
+		{Source: "local_path", Path: ".", Target: "~/.claude/skills/explicit"},
+	}})
+	if got.Skills[0].InstallName != "rubric-folder" {
+		t.Fatalf("InstallName = %q, want the folder name rubric-folder", got.Skills[0].InstallName)
+	}
+	if got.Skills[1].InstallName != "" {
+		t.Fatalf("an explicit target must keep its existing name, got %q", got.Skills[1].InstallName)
+	}
+	if infos := judge.SkillInfosFromRefs(got.Skills); infos[0].Name != "rubric-folder" {
+		t.Fatalf("judge prompt name = %q, want rubric-folder", infos[0].Name)
+	}
+}
+
+func TestCheckSkillDirCollisions(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeSkill := func(folder, name string) {
+		dir := filepath.Join(root, folder)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := "# Skill"
+		if name != "" {
+			body = "---\nname: " + name + "\n---\n# Skill"
+		}
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeSkill("one", "shared")
+	writeSkill("two", "shared")
+	writeSkill("three", "Shared")
+	writeSkill("four", "other")
+	writeSkill("other", "")
+
+	tests := []struct {
+		name    string
+		refs    []config.SkillRef
+		wantErr string
+	}{
+		{"distinct names", []config.SkillRef{{Path: "one"}, {Path: "four"}}, ""},
+		{"same declared name", []config.SkillRef{{Path: "one"}, {Path: "two"}}, `skills: "one" and "two" would both be installed as "shared"`},
+		{"names differing only in case", []config.SkillRef{{Path: "one"}, {Path: "three"}}, `skills: "one" and "three" would both be installed as "Shared"`},
+		{"declared name equals another folder", []config.SkillRef{{Path: "four"}, {Path: "other"}}, `skills: "four" and "other" would both be installed as "other"`},
+		{"explicit target avoids the collision", []config.SkillRef{{Path: "one"}, {Path: "two", Target: "elsewhere"}}, ""},
+		{"empty path is left to its own check", []config.SkillRef{{Path: ""}, {Path: ""}}, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := checkSkillDirCollisions(root, "skills", tt.refs)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestResolveExpectConfig(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -4245,5 +4435,160 @@ func TestNonBenchmarkVariantWithEmptySkills(t *testing.T) {
 	}
 	if len(results) != 1 || results[0].Status != judge.StatusPass || results[0].Configuration != ConfigurationWithSkill || results[0].FinalMessage != ConfigurationWithSkill {
 		t.Fatalf("unexpected non-benchmark results: %+v", results)
+	}
+}
+
+// cleanupRecordingAgent wraps mockAgent with the optional SessionDirCleaner
+// hook so a test can see whether the evaluator called it.
+type cleanupRecordingAgent struct {
+	*mockAgent
+
+	cleanupCalls atomic.Int32
+}
+
+func (m *cleanupRecordingAgent) CleanupSessionDir(context.Context, runtime.Runtime) error {
+	m.cleanupCalls.Add(1)
+	return nil
+}
+
+func TestExecuteCaseCleansAgentSessionDirOnlyWhenRequested(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		deleteWS     bool
+		cleanup      bool
+		workspaceDir string
+		want         int32
+	}{
+		{name: "requested and workspace deleted", deleteWS: true, cleanup: true, want: 1},
+		{name: "not requested", deleteWS: true, want: 0},
+		{name: "requested but --no-delete keeps the workspace", deleteWS: false, cleanup: true, want: 0},
+		{name: "requested on an externally owned workspace", deleteWS: true, cleanup: true, workspaceDir: t.TempDir(), want: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ag := &cleanupRecordingAgent{mockAgent: &mockAgent{name: "claude_code", output: "ok"}}
+			e := newTestEvaluator(EvalOptions{
+				DeleteWorkspace: tc.deleteWS,
+				CleanupSessions: tc.cleanup,
+				WorkspaceDir:    tc.workspaceDir,
+				SkillDir:        t.TempDir(),
+				EvalCfg: &config.EvalConfig{
+					Environment: config.Environment{Type: "none"},
+					Judge: config.JudgeConfig{
+						Type:    "rule_based",
+						Success: []config.Rule{{OutputContains: &config.OutputContainsRule{All: []string{"ok"}}}},
+					},
+				},
+			})
+			caseCfg := &config.CaseConfig{ID: "cleanup", Input: config.Input{Prompt: "hi"}}
+
+			result := e.executeCase(context.Background(), caseCfg, "with_skill", nil, ag)
+			if result.Error != nil {
+				t.Fatalf("case failed before the cleanup check: %v", result.Error)
+			}
+
+			if got := ag.cleanupCalls.Load(); got != tc.want {
+				t.Fatalf("CleanupSessionDir calls = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// releaseRecordingAgent wraps mockAgent with the optional RuntimeReleaser hook.
+type releaseRecordingAgent struct {
+	*mockAgent
+
+	released atomic.Int32
+}
+
+func (m *releaseRecordingAgent) ReleaseRuntime(runtime.Runtime) {
+	m.released.Add(1)
+}
+
+func TestExecuteCaseReleasesTheRuntimeFromTheAgent(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		skillErr error
+		wantErr  bool
+	}{
+		{name: "case completes"},
+		{name: "setup fails after MCP install", skillErr: errors.New("install unsupported"), wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ag := &releaseRecordingAgent{mockAgent: &mockAgent{name: "codex", output: "ok", skillErr: tc.skillErr}}
+			e := newTestEvaluator(EvalOptions{
+				DeleteWorkspace: true,
+				SkillDir:        t.TempDir(),
+				Loader:          config.NewLoader(filepath.Join(t.TempDir(), "eval.yaml")),
+				EvalCfg: &config.EvalConfig{
+					Environment: config.Environment{Type: "none"},
+					Skills:      []config.SkillRef{{Source: "local_path", Path: "skill"}},
+					Judge: config.JudgeConfig{
+						Type:    "rule_based",
+						Success: []config.Rule{{OutputContains: &config.OutputContainsRule{All: []string{"ok"}}}},
+					},
+				},
+			})
+			caseCfg := &config.CaseConfig{ID: "release", Input: config.Input{Prompt: "hi"}}
+
+			result := e.executeCase(context.Background(), caseCfg, "with_skill", nil, ag)
+			if (result.Error != nil) != tc.wantErr {
+				t.Fatalf("case error = %v, want error: %v", result.Error, tc.wantErr)
+			}
+			if got := ag.mcpCall.Load(); got != 1 {
+				t.Fatalf("InstallMCP calls = %d, want 1", got)
+			}
+			if got := ag.released.Load(); got != 1 {
+				t.Fatalf("ReleaseRuntime calls = %d, want 1", got)
+			}
+		})
+	}
+}
+
+func TestExecuteCaseReportsWhyRequestedSessionCleanupDidNotRun(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		deleteWS    bool
+		agent       agent.Agent
+		wantOutputs []string
+	}{
+		{
+			name:        "no-delete wins",
+			deleteWS:    false,
+			agent:       &cleanupRecordingAgent{mockAgent: &mockAgent{name: "claude_code", output: "ok"}},
+			wantOutputs: []string{"--no-delete keeps both the workspace and its sessions"},
+		},
+		{
+			name:     "agent without the hook",
+			deleteWS: true,
+			agent:    &mockAgent{name: "qwen_code", output: "ok"},
+			// slog quotes the agent name, so match the pieces rather than the
+			// escaped rendering.
+			wantOutputs: []string{"qwen_code", "does not support it"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newTestEvaluator(EvalOptions{
+				DeleteWorkspace: tc.deleteWS,
+				CleanupSessions: true,
+				SkillDir:        t.TempDir(),
+				EvalCfg: &config.EvalConfig{
+					Environment: config.Environment{Type: "none"},
+					Judge: config.JudgeConfig{
+						Type:    "rule_based",
+						Success: []config.Rule{{OutputContains: &config.OutputContainsRule{All: []string{"ok"}}}},
+					},
+				},
+			})
+			caseCfg := &config.CaseConfig{ID: "cleanup", Input: config.Input{Prompt: "hi"}}
+
+			out := captureStdout(t, func() {
+				_ = e.executeCase(context.Background(), caseCfg, "with_skill", nil, tc.agent)
+			})
+			for _, want := range tc.wantOutputs {
+				if !strings.Contains(out, want) {
+					t.Fatalf("output does not report %q: %q", want, out)
+				}
+			}
+		})
 	}
 }

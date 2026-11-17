@@ -35,3 +35,18 @@ func TestSkillInfosFromRefs_OmitsDotName(t *testing.T) {
 		t.Fatalf("third filters = include %v exclude %v", infos[2].Include, infos[2].Exclude)
 	}
 }
+
+func TestSkillInfosFromRefs_PrefersInstallName(t *testing.T) {
+	t.Parallel()
+
+	infos := SkillInfosFromRefs([]config.SkillRef{
+		{Source: "local_path", Path: "evals/fixtures/snapshot", InstallName: "rubric-skill"},
+		{Source: "local_path", Path: "evals/fixtures/judge-skill"},
+	})
+	if infos[0].Name != "rubric-skill" || infos[0].Path != "evals/fixtures/snapshot" {
+		t.Fatalf("first info = %#v, want name rubric-skill and the configured path", infos[0])
+	}
+	if infos[1].Name != "judge-skill" {
+		t.Fatalf("second Name = %q, want judge-skill", infos[1].Name)
+	}
+}

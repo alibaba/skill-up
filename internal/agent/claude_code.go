@@ -647,14 +647,25 @@ func buildClaudeTextSessionResult(engine, instruction string, start time.Time, r
 	return sessionResult
 }
 
+// claudeSessionLookup describes where Claude Code keeps its per-workspace
+// session directories. The lookup and the post-run cleanup share it so they
+// cannot disagree about which directory belongs to this run.
+var claudeSessionLookup = agentSessionLookup{
+	projectsRootTmpl: "$home/.claude/projects",
+	sessionDepth:     1,
+}
+
 // findClaudeSessionFile resolves the newest session JSONL under the Claude
 // projects tree (~/.claude/projects/<workspace-key>/) for this workspace.
 func findClaudeSessionFile(ctx context.Context, rt Runtime) string {
-	return findAgentSessionJSONL(ctx, rt, agentSessionLookup{
-		projectsRootTmpl: "$home/.claude/projects",
-		sessionDepth:     1,
-		findExtra:        "",
-	})
+	return findAgentSessionJSONL(ctx, rt, claudeSessionLookup)
+}
+
+// CleanupSessionDir removes the project directory Claude Code created for this
+// workspace. Without it, every run deposits a transcript into the user's own
+// session history even though the workspace itself is deleted.
+func (a *ClaudeCodeAgent) CleanupSessionDir(ctx context.Context, rt Runtime) error {
+	return removeAgentSessionDir(ctx, rt, claudeSessionLookup)
 }
 
 // buildStreamJSON converts messages to stream-json format for input.

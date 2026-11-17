@@ -85,6 +85,10 @@ func (r *NoneRuntime) Create(ctx context.Context) error {
 	return nil
 }
 
+// OwnsWorkspace reports whether Close deletes the workspace. A workspace passed
+// through Config.WorkspaceDir belongs to the caller and is preserved.
+func (r *NoneRuntime) OwnsWorkspace() bool { return r.ownsWorkspaceDir }
+
 // Close removes the temporary workspace.
 func (r *NoneRuntime) Close() error {
 	if r.workspace == "" {

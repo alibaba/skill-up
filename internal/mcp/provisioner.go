@@ -57,6 +57,20 @@ func (p Provisioner) Provision(mcpCfg config.MCPConfig) (runtime.MCPConfig, map[
 	return runtime.MCPConfig{Servers: servers}, runEnv, nil
 }
 
+// ValidateMockedFixtures checks mocked fixtures using the same loading and
+// normalization as Provision, without resolving real servers or starting processes.
+func (p Provisioner) ValidateMockedFixtures(mcpCfg config.MCPConfig) error {
+	for _, server := range mcpCfg.Servers {
+		if server.Mode != modeMocked {
+			continue
+		}
+		if _, err := p.resolveServer(server, nil); err != nil {
+			return fmt.Errorf("mocked MCP server %q: %w", server.Name, err)
+		}
+	}
+	return nil
+}
+
 func (p Provisioner) resolveServer(server config.MCPServer, lookupEnv func(string) (string, bool)) (runtime.MCPServerConfig, error) {
 	if err := validateServerMode(server); err != nil {
 		return runtime.MCPServerConfig{}, err
@@ -211,14 +225,30 @@ func (p Provisioner) resolveConfigRef(configRef string) string {
 }
 
 type mcpServerFile struct {
-	Transport     string            `yaml:"transport"`
-	Command       string            `yaml:"command"`
-	Args          []string          `yaml:"args"`
-	Endpoint      string            `yaml:"endpoint"`
-	Env           map[string]string `yaml:"env"`
-	RequiredEnv   []string          `yaml:"required_env"`
-	Headers       map[string]string `yaml:"headers"`
-	ToolResponses map[string]any    `yaml:"tool_responses"`
+	Transport     string                 `yaml:"transport"`
+	Command       string                 `yaml:"command"`
+	Args          []string               `yaml:"args"`
+	Endpoint      string                 `yaml:"endpoint"`
+	Env           map[string]string      `yaml:"env"`
+	RequiredEnv   []string               `yaml:"required_env"`
+	Headers       map[string]string      `yaml:"headers"`
+	Tools         map[string]mcpMockTool `yaml:"tools"`
+	ToolResponses map[string]any         `yaml:"tool_responses"`
+}
+
+// mcpMockTool is one tool in a fixture's tools map: the metadata it advertises
+// in tools/list and the response tools/call returns. Description and
+// InputSchema are optional; Response is required. InputSchema is untyped so a
+// scalar in the fixture is reported as a named validation error instead of a
+// YAML decode failure. Response is kept as a node so a missing response can be
+// told apart from an explicit null. Unknown collects any other key so a
+// misspelled field (for example the MCP wire name inputSchema) is rejected
+// instead of silently ignored.
+type mcpMockTool struct {
+	Description string         `yaml:"description"`
+	InputSchema any            `yaml:"input_schema"`
+	Response    yaml.Node      `yaml:"response"`
+	Unknown     map[string]any `yaml:",inline"`
 }
 
 func loadServerFile(path string) (mcpServerFile, error) {

@@ -189,6 +189,14 @@ func decodeConfig(data []byte, target any) (judgeSet, judgesSet bool, err error)
 	}
 	_, judgeSet = fields["judge"]
 	_, judgesSet = fields["judges"]
+	if c, ok := target.(*CaseConfig); ok && judgeSet {
+		node := fields["judge"]
+		var judgeFields map[string]yaml.Node
+		if err := node.Decode(&judgeFields); err != nil {
+			return false, false, err
+		}
+		c.judgeHasFields = len(judgeFields) > 0
+	}
 	return judgeSet, judgesSet, nil
 }
 
@@ -231,6 +239,12 @@ func (l *Loader) SkillDir() string {
 // name — callers should fall back to the directory basename in that case.
 func (l *Loader) SkillName() (string, bool) {
 	return parseSkillName(l.skillDir)
+}
+
+// SkillNameInDir returns the `name:` declared in the YAML frontmatter of
+// skillDir's SKILL.md, with the same ("", false) fallbacks as Loader.SkillName.
+func SkillNameInDir(skillDir string) (string, bool) {
+	return parseSkillName(skillDir)
 }
 
 // CasesDir returns the path to the cases directory.

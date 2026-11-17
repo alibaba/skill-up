@@ -128,12 +128,22 @@ report:
   artifacts: [transcript]         # 报告中包含的产物
 ```
 
+`report.formats` 只接受 `json`、`junit`、`html`；其它值会直接报配置错误，因为运行时
+原本会跳过未知格式、却仍然打印"报告已保存"。
+
 `skills[].include` 和 `skills[].exclude` 使用
 [doublestar](https://github.com/bmatcuk/doublestar) 语法（`*` 匹配单层路径，
 `**` 可跨目录）。pattern 相对 `skills[].path`，统一使用 `/` 分隔；
 `exclude` 优先于 `include`。未配置 `include` 时默认选择全部文件。
 评测框架目录 `evals/` 始终排除。配置 include 列表时，应显式包含
 `SKILL.md`，确保安装后的目录仍是有效 Skill。`judge.skills` 同样支持这两个字段。
+
+默认情况下，Skill 以其 `SKILL.md` frontmatter 中声明的 `name` 作为目录名安装到
+Agent 的 skills 目录。这样即使源目录名称不同（例如快照副本），Agent 看到的也是
+Skill 自身文本使用的名称。声明的名称只包含 ASCII 字母、数字、`-` 和 `_`，以字母或
+数字开头，不超过 64 个字符，且不是 `CON` 这类 Windows 设备名时才会被采用；否则使用
+源目录名。如果两个未设置 `target` 的条目会被安装到同一个目录，运行会报错：请重命名
+其中一个 Skill，或为它显式设置 `target`。`judge.skills` 遵循同样的规则。
 
 `cases.parallelism` 是配置文件中的默认用例并行数；临时运行时可以用 `skill-up run --parallelism N` 覆盖它，不需要修改 `eval.yaml`。命令行覆盖值必须在 1 到 256 之间。
 
@@ -269,7 +279,7 @@ SessionInput / SessionResult 的完整 JSON 契约见 `docs/design/custom-engine
 
 ### MCP 配置说明
 
-MCP 支持 `mode: real` 和 `mode: mocked`。`real` 用于把真实 MCP Server 安装到 `claude_code`、`qodercli`、`codex` 或 `qwen_code` 等 Agent；`mocked` 会由 `internal/mcp` 生成本地 stdio Mock Server，并按普通 MCP 配置安装到 Agent。
+MCP 支持 `mode: real` 和 `mode: mocked`。`real` 用于把真实 MCP Server 安装到 `claude_code`、`qodercli`、`codex` 或 `qwen_code` 等 Agent；`mocked` 会由 `internal/mcp` 生成本地 stdio Mock Server，并按普通 MCP 配置安装到 Agent。对于 `codex`，mocked Server 改为在每条 `codex exec` 命令上通过 `-c mcp_servers.<name>...` 覆盖项定义，不会写入用户的 Codex 配置（`~/.codex/config.toml`）。其脚本在每次运行时写入临时文件。如果该配置中已有同名 Server，或 mocked Server 名称不能作为 Codex 配置键（只能包含字母、数字、`-` 和 `_`），运行会提前报错。
 
 HTTP MCP 可以直接在 `eval.yaml` 中声明，也可以用 `config_ref` 引用 `evals/fixtures/mcp/*.yaml`：
 
@@ -314,7 +324,7 @@ mcp:
       mode: mocked
 ```
 
-也可以通过 `config_ref` 定义工具响应：
+或者通过 `config_ref` 定义 mocked 工具：
 
 ```yaml
 mcp:
@@ -325,6 +335,32 @@ mcp:
 ```
 
 ```yaml
+tools:
+  create_publish_plan_simple:
+    description: Create a publish plan for a project release.
+    input_schema:
+      type: object
+      properties:
+        name: {type: string}
+        planReleaseDate: {type: string}
+      required: [name]
+    response:
+      default:
+        id: 999
+        name: "{{params.name}}"
+        status: ONGOING
+```
+
+`tools` 下的每个条目定义一个工具：
+
+- `response` 必填。每次调用该工具都返回其 `default` 键下的值；若没有 `default` 键，则整个值即为响应。字符串值可以像示例中的 `name` 字段那样用 `params` 模板引用调用参数，并可用 `| default:'<value>'` 指定缺省值。`response: null` 返回 null。
+- `description` 和 `input_schema` 可选，决定 Agent 在 `tools/list` 中看到的内容。不填写时，Agent 看到的描述为 `Mocked MCP tool <name>`，输入 schema 接受任意对象，而不是真实 Server 的描述和参数，因此选择工具的方式可能与面对真实 Server 时不同。空的 `description` 同样沿用占位描述。
+- `input_schema` 一旦填写，就必须是 `type: object` 的映射，因为 MCP 要求输入 schema 是对象类型；空映射（`{}`）会报错，而 `input_schema: null` 沿用默认值。更深层的 JSON Schema 不做校验。schema 只用于声明：Mock Server 不会按它校验调用参数，参数缺失或多余的调用仍然返回该响应。
+- 工具条目只接受 `description`、`input_schema` 和 `response`；出现其他键（例如 MCP 协议里的 `inputSchema`）会报错。
+
+使用 `tool_responses` 映射的 fixture 无需修改，行为不变。其中每个条目即为该工具的 `response`，工具使用默认元数据：
+
+```yaml
 tool_responses:
   create_publish_plan_simple:
     default:
@@ -333,13 +369,13 @@ tool_responses:
       status: ONGOING
 ```
 
-基于 `tool_responses` 的 Mock Server 行为如下：
+同一个 fixture 可以用两种映射声明不同的工具；同一个工具名同时出现在 `tools` 和 `tool_responses` 中会报错。
+
+基于 fixture 的 Mock Server 行为如下：
 
 - 仅支持 stdio。`mode: mocked` 时，skill-up 会拒绝 `transport: http`、`endpoint`、`command` 和 `args`。
 - skill-up 使用 `node` 启动 Mock Server，因此运行环境的 `PATH` 中必须有 `node`。只有当 skill-up 自行安装 Claude Code、Codex、Qwen Code 或 OpenCode 时才会准备 Node.js；预先安装的引擎 CLI 或 Qoder CLI 不会附带 Node.js。
-- 每次调用某个工具都返回该工具的 `default` 响应；若没有 `default` 键，则整个条目即为响应。字符串值可以像示例中的 `name` 字段那样用 `params` 模板引用调用参数，并可用 `| default:'<value>'` 指定缺省值。
-- Agent 看到的每个工具描述均为 `Mocked MCP tool <name>`，输入 schema 接受任意对象，而不是真实 Server 的描述和参数 schema。
-- 调用未在 `tool_responses` 中声明的工具会返回 MCP 错误。
+- 调用 fixture 中未声明的工具会返回 MCP 错误。
 
 环境变量引用支持 `${VAR}` 和完整值 `$VAR` 两种形式，变量名必须匹配 `[A-Za-z_][A-Za-z0-9_]*`。`required_env` 会把变量注入 Agent 运行环境；`headers` 中完整的环境变量引用会额外记录变量名，供 Agent 安装 MCP 时选择合适的传递方式。
 
@@ -385,6 +421,22 @@ mcp:
 | `docker`      | 本地容器隔离，无需远程服务       | 自定义工具链、可复现 CI、离线环境 |
 
 > **建议**：如果你的 Skill 不涉及文件操作，使用 `none` 可以省去沙箱准备时间。
+
+#### 会话清理
+
+评测会删除它创建的 workspace，但 agent CLI 可能在 workspace 之外保留按 workspace 保存的状态。Claude Code 会写入 `~/.claude/projects/<workspace-key>/`，其中包含会话记录与 `memory/` 目录；qodercli 会写入 `~/.qoder/projects/<workspace-key>/`（CN 版为 `~/.qoder-cn/`），其中包含会话记录、`<sessionID>/subagents/` 下的子代理记录以及 `*-session.json` 元数据。重复评测会不断堆积在用户自己的会话历史里。
+
+`environment.cleanup_sessions: true`（或 `--cleanup-sessions`）会在删除 workspace 的同时删除该目录。它默认关闭，因为会删除用户可见的历史；目前由 `claude_code` 与 `qodercli` 实现：
+
+```yaml
+environment:
+  type: none
+  cleanup_sessions: true
+```
+
+显式的 `--cleanup-sessions=false` 会覆盖 `cleanup_sessions: true`；只有未显式设置时才会回落到配置。
+
+`--no-delete` 优先：workspace 与会话都会保留，并报告跳过清理。清理也不会在以下情况运行：workspace 由外部拥有（`--workspace`）、runtime 会保留 workspace、或无法证明归属。归属通过解析每份会话记录中的工作目录来判定，而不是字符串搜索，因此工具参数里出现的路径不会被当作身份；只有目录内每份记录都指向本 workspace 才会删除，记录互相冲突、无法解析或没有记录身份时保留。路径仅标点不同的两个 workspace 会共用一个项目目录，此时同样保留。对未实现清理的 agent，运行时会报告不支持；`qwen_code` 属于这一类，因为它的会话文件不记录工作目录，无法证明归属。
 
 #### 按实验分组执行初始化
 
@@ -918,6 +970,11 @@ OpenAI/Anthropic 协议冲突，以及 adapter 会忽略的评分模型，会在
 单个 case 的 `judge.engine` 会整体替换 eval 的 judge engine；显式 `judge.model`
 切换为旧模式；两者都未指定时继承 eval 的 engine/model 选择。`judges` 列表仍整体替换，
 成员不会继承单个 judge 的默认配置。
+
+当 eval 使用单个 `judge` 时，省略、空或 null 的 case 级 `judge` 会继承它。
+非空但未设置 `type` 的 case 级块也会继承 eval 的 judge，其自身字段全部被忽略；
+`validate` 和 `run` 会对此发出警告。要应用 case 级覆盖，请显式设置 `type`。
+当 eval 使用 `judges` 列表时，未设置 `type` 的 case 级 `judge` 仍会报错。
 
 Judge 继续使用 case 的 runtime，不新增 `judge.environment`。独立 judge 的 CLI
 在 Docker/OpenSandbox 的评分阶段安装和检查，发生在被测 agent 完成之后。

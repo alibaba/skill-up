@@ -7,15 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Mocked MCP fixtures accept a `tools` map that defines each tool in one
+  place: a required `response`, plus an optional `description` and
+  `input_schema` advertised in `tools/list`, so Agents see the same tool
+  metadata as against the real server. A tool that leaves the metadata out
+  keeps the placeholder description and open object schema; the schema is
+  advertised only, not enforced on calls. Existing `tool_responses` fixtures
+  keep working unchanged and may sit beside `tools` for other tool names.
+
+- Remove the qodercli project directory a run creates under
+  `~/.qoder/projects` (or `~/.qoder-cn/projects` for the CN edition) when
+  session cleanup is requested. The directory is removed only when every
+  transcript in it records this workspace, so the shared-directory and
+  unproven-ownership safeguards apply to qodercli exactly as they do to Claude
+  Code.
+
 ### Fixed
 - Correct the contribution guide to describe the existing CLA Assistant process
   and employer-authorization considerations.
+- Check eval-level and case-level mocked MCP fixtures during `validate`, including
+  missing files, YAML errors and invalid tool definitions, without starting servers.
+- Warn when a non-empty case-level `judge` has no `type` and its fields are
+  ignored in favor of the eval judge. `validate` and `run` preserve the
+  existing fallback behavior; omitted, empty and null blocks inherit without
+  a warning. Explicitly typed overrides and validation against an eval-level
+  `judges` list are unchanged.
+- Stop writing mocked MCP servers into the user's global Codex config. The
+  `codex` engine now defines each mocked server on the `codex exec` command,
+  including resumed turns, with `-c mcp_servers.<name>...` overrides, instead
+  of running `codex mcp add`, which replaced a same-named server of the user's
+  and left the mock in `~/.codex/config.toml` after the run. The mock's script
+  is written to a temporary file per run. A run fails early when that config
+  already has a server with the mocked server's name, when the config cannot
+  be listed, or when the name is not a valid Codex config key. Real MCP servers
+  are still installed with `codex mcp add`.
+- Reject `report.formats` values other than `json`, `junit` and `html` during
+  configuration validation. An unknown value used to pass validation and then be
+  silently skipped by the runner, which still printed that the reports were
+  saved, so a typo produced no report at all. The runner now also returns an
+  error if an unsupported format reaches it without going through validation.
 - Stop reporting a successful Claude Code answer as a provider rate-limit or
   authentication failure when its text mentions phrases such as "rate limit" or
   "authentication error". Answer text is scanned for these failures only when
   the run exits non-zero or the text is an error report; stderr, Claude Code
   `API Error:` output, JSON result events flagged `is_error`, and API errors
   recorded in the session are still detected.
+- Preserve OpenSandbox stdout/stderr line boundaries when joining execution
+  output messages. Multi-line commands such as artifact listing now split
+  correctly, while messages that already carry a trailing newline are not
+  double-spaced.
+- Remove the Claude Code project directory a run creates under
+  `~/.claude/projects` when `environment.cleanup_sessions: true` or
+  `--cleanup-sessions` asks for it and the workspace is deleted, so eval
+  sessions stop accumulating in the user's own history. Off by default; an
+  explicit `--cleanup-sessions=false` overrides `cleanup_sessions: true`, and
+  `--no-delete` keeps both and reports the skip. A directory is removed only
+  when every transcript in it records this workspace, parsed from its identity
+  fields rather than string-matched, and directories whose ownership is unclear
+  are kept. An agent without support for cleanup is reported instead of
+  silently skipped.
+- Run judges when `post_condition.on_fail: skip_remaining` fails on the final conversation turn, including single-turn conversations.
+- Install a Skill under the `name` declared in its `SKILL.md` frontmatter
+  instead of its source folder's name, so the Agent lists and invokes it by its
+  own name when the folder is named differently (for example a snapshot copy).
+  A Skill without a usable declared name keeps the folder name. The agent judge
+  prompt and reports name each judge Skill the same way. Two `skills` or
+  `judge.skills` entries that would be installed into the same directory are
+  now rejected instead of being merged.
 
 ## [0.15.0] - 2026-11-09
 

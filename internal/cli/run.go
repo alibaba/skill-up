@@ -122,6 +122,7 @@ func init() {
 	runCmd.Flags().Lookup("verbose").NoOptDefVal = "true"
 	runCmd.Flags().Int("iteration", 0, "Repeat selected eval cases N times for stability/flakiness sampling. Positive N writes iteration-<N> artifacts and prints a current-command summary when N > 1. 0 = auto-append one run after the last existing iteration without summarizing history")
 	runCmd.Flags().Bool("no-delete", false, "Skip cleanup of workspace after evaluation (useful for debugging)")
+	runCmd.Flags().Bool("cleanup-sessions", false, "Also delete the agent's session directory for the workspace after evaluation (currently claude_code only, which removes its ~/.claude/projects entry including sessions and memory); --no-delete takes precedence")
 	runCmd.Flags().Bool("dry-run", false, "Validate and show what would run without executing")
 	runCmd.Flags().String(eventLogFlagName, "", "Write v1 evaluation events as JSON Lines to path")
 	runCmd.Flags().StringArray(eventAttributeFlagName, nil, "Attach a namespaced string attribute to every event (can be specified multiple times)")
@@ -421,6 +422,13 @@ func evaluateOptionsFromFlags(cmd *cobra.Command) (runner.EvaluateOptions, error
 	if err != nil {
 		return runner.EvaluateOptions{}, fmt.Errorf("read --no-delete: %w", err)
 	}
+	cleanupSessions, err := cmd.Flags().GetBool("cleanup-sessions")
+	if err != nil {
+		return runner.EvaluateOptions{}, fmt.Errorf("read --cleanup-sessions: %w", err)
+	}
+	// An explicit --cleanup-sessions=false overrides a YAML cleanup_sessions:
+	// true; only an unset flag falls back to the config.
+	cleanupSessionsSet := cmd.Flags().Changed("cleanup-sessions")
 	outputDir, err := cmd.Flags().GetString("output-dir")
 	if err != nil {
 		return runner.EvaluateOptions{}, fmt.Errorf("read --output-dir: %w", err)
@@ -455,11 +463,13 @@ func evaluateOptionsFromFlags(cmd *cobra.Command) (runner.EvaluateOptions, error
 	}
 
 	return runner.EvaluateOptions{
-		DeleteWorkspace: !noDelete,
-		OutputDir:       outputDir,
-		WorkspaceDir:    workspaceDir,
-		Iteration:       iteration,
-		Formats:         formats,
+		DeleteWorkspace:    !noDelete,
+		CleanupSessions:    cleanupSessions,
+		CleanupSessionsSet: cleanupSessionsSet,
+		OutputDir:          outputDir,
+		WorkspaceDir:       workspaceDir,
+		Iteration:          iteration,
+		Formats:            formats,
 	}, nil
 }
 
