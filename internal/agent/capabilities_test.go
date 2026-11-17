@@ -647,3 +647,18 @@ func containsWarning(warnings []string, substring string) bool {
 		return strings.Contains(warning, substring)
 	})
 }
+
+func TestResolveAdapterConfig_CodexWireAPI(t *testing.T) {
+	t.Parallel()
+	for _, wireAPI := range []string{"chat", "responses"} {
+		t.Run(wireAPI, func(t *testing.T) {
+			t.Parallel()
+			got := ResolveAdapterConfig(credential.ResolvedAgentConfig{
+				Engine: "codex", Kwargs: map[string]string{KwargWireAPI: wireAPI},
+			}, nil)
+			if got.Kwargs[KwargWireAPI] != wireAPI {
+				t.Fatalf("resolved wire_api = %q, want %q", got.Kwargs[KwargWireAPI], wireAPI)
+			}
+		})
+	}
+}
