@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Use prompt-file delivery for resumed Claude Code and Qoder turns when the
+  prompt exceeds the inline limit or the target is Windows, preserving prompt
+  delivery metadata and failing before execution if the file cannot be uploaded.
 - Expand `${VAR}` references in user-config `env` defaults from the process
   environment only for user-level or explicitly selected (`--config`) values.
   Automatically discovered project values remain literal. Preserve unset

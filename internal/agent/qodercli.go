@@ -391,7 +391,20 @@ func (a *QoderCLIAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOption
 	start := time.Now()
 
 	instruction := message.Content
-	cmd := buildQoderResumeCmdForBinary(a.profile.binary, instruction, a.appliedModelName(ctx), sessionID)
+	cmd, promptDelivery, err := deliverPrompt(ctx, rt, opts, instruction, promptCommandBuilder{
+		Inline: func(prompt string) string {
+			return buildQoderResumeCmdForBinary(a.profile.binary, prompt, a.appliedModelName(ctx), sessionID)
+		},
+		StdinFile: func(path string) string {
+			return "cat " + shellQuote(path) + " | " + buildQoderResumeCmdForBinary(a.profile.binary, "-", a.appliedModelName(ctx), sessionID)
+		},
+	})
+	if err != nil {
+		return &SessionResult{
+			Engine: a.Name(), SessionID: sessionID, ExitCode: 1,
+			DurationMs: time.Since(start).Milliseconds(), Artifacts: &SessionArtifacts{},
+		}, err
+	}
 
 	envVars := a.qoderRunEnvVars()
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))
@@ -402,6 +415,7 @@ func (a *QoderCLIAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOption
 	resultErr := qoderResultError(result.Stdout, result.Stderr, a.appliedModelName(ctx))
 	if sessionResult != nil {
 		sessionResult.SessionID = sessionID
+		sessionResult.PromptDelivery = promptDelivery
 	}
 	if err != nil {
 		if sessionResult == nil {
