@@ -153,6 +153,11 @@ Unlike `run` (which validates only the selected cases), `validate` always
 checks the **whole** suite — the eval config and every referenced case file —
 ignoring any case-name filters.
 
+It also loads every mocked MCP fixture declared by the eval or its cases and
+applies the same fixture checks as `run`. Missing files, invalid YAML and invalid
+tool definitions fail validation before any server starts. Real-server credentials
+and connectivity are not checked.
+
 ```bash
 skill-up validate [path to eval.yaml]
 ```

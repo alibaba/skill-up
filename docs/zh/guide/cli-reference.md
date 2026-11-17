@@ -129,6 +129,10 @@ skill-up run ./evals/eval.yaml -v
 
 校验评测配置文件是否合法。建议在运行前先执行校验。
 
+同时读取 eval 和所有 case 声明的 mocked MCP fixture，并使用与 `run` 相同的检查。
+文件缺失、YAML 错误或工具定义无效时校验失败，不会启动服务器。
+不检查真实服务器的凭据或连接状态。
+
 ```bash
 skill-up validate [path to eval.yaml]
 ```

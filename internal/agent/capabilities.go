@@ -52,6 +52,7 @@ type Capabilities struct {
 
 var (
 	codexKwargs = []string{
+		KwargWireAPI,
 		KwargBypassSandbox,
 		KwargMaxJSONLRecordBytes,
 		KwargMaxJSONLOutputBytes,
