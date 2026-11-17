@@ -263,6 +263,25 @@ func TestNoneRuntime_UploadDownloadDir(t *testing.T) {
 	}
 }
 
+func TestNoneRuntime_UploadDirSymlinkRoot(t *testing.T) {
+	t.Parallel()
+
+	source := writeSymlinkedUploadDirFixture(t)
+	rt := &NoneRuntime{workspace: t.TempDir()}
+	if err := rt.UploadDir(context.Background(), source, "."); err != nil {
+		t.Fatalf("UploadDir returned error: %v", err)
+	}
+	for rel, want := range map[string]string{"file.txt": "content", "nested/other.txt": "other"} {
+		data, err := os.ReadFile(filepath.Join(rt.Workspace(), filepath.FromSlash(rel)))
+		if err != nil || string(data) != want {
+			t.Errorf("uploaded %s = %q, %v; want %q", rel, data, err, want)
+		}
+	}
+	if info, err := os.Stat(filepath.Join(rt.Workspace(), "empty")); err != nil || !info.IsDir() {
+		t.Fatalf("empty directory was not copied: %v", err)
+	}
+}
+
 func TestNoneRuntime_Exec(t *testing.T) {
 	t.Parallel()
 

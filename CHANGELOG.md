@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Copy fixture contents when the upload source directory is a symlink in the
+  `none` and OpenSandbox runtimes. Local uploads no longer fail with a directory
+  read error, and OpenSandbox no longer silently uploads an empty fixture.
 - Use prompt-file delivery for resumed Claude Code and Qoder turns when the
   prompt exceeds the inline limit or the target is Windows, preserving prompt
   delivery metadata and failing before execution if the file cannot be uploaded.

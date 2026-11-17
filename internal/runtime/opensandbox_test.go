@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -773,6 +774,55 @@ func writeUploadDirFixture(t *testing.T, dir string) {
 		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(rel)), []byte(content), noneFileMode); err != nil {
 			t.Fatalf("write %s: %v", rel, err)
 		}
+	}
+}
+
+func writeSymlinkedUploadDirFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeUploadDirFixture(t, filepath.Join(dir, "source"))
+	link := filepath.Join(dir, "fixture")
+	if err := os.Symlink("source", link); err != nil {
+		if goruntime.GOOS == osWindows {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		t.Fatal(err)
+	}
+	return link
+}
+
+func TestOpenSandboxUploadDirSymlinkRoot(t *testing.T) {
+	source := writeSymlinkedUploadDirFixture(t)
+	fake := &fakeOpenSandbox{execResult: &opensandbox.Execution{ExitCode: new(0)}}
+	rt := &OpenSandboxRuntime{workspace: "/workspace", sandbox: fake}
+	if err := rt.UploadDir(context.Background(), source, "."); err != nil {
+		t.Fatalf("UploadDir returned error: %v", err)
+	}
+	for rel, want := range map[string]string{"file.txt": "content", "nested/other.txt": "other"} {
+		if got := string(fake.uploads["/workspace/"+rel]); got != want {
+			t.Errorf("uploaded %s = %q, want %q", rel, got, want)
+		}
+	}
+	if len(fake.execs) != 1 || !strings.Contains(fake.execs[0].Command, "'/workspace/empty'") {
+		t.Fatalf("empty directory missing from mkdir command: %+v", fake.execs)
+	}
+	if fake.uploadFilesCalls != 1 {
+		t.Fatalf("UploadFiles calls = %d, want 1", fake.uploadFilesCalls)
+	}
+}
+
+func TestOpenSandboxUploadDirBrokenSymlinkRoot(t *testing.T) {
+	source := writeSymlinkedUploadDirFixture(t)
+	if err := os.RemoveAll(filepath.Join(filepath.Dir(source), "source")); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeOpenSandbox{execResult: &opensandbox.Execution{ExitCode: new(0)}}
+	rt := &OpenSandboxRuntime{workspace: "/workspace", sandbox: fake}
+	if err := rt.UploadDir(context.Background(), source, "."); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("UploadDir error = %v, want missing source error", err)
+	}
+	if len(fake.execs) != 0 || fake.uploadFilesCalls != 0 {
+		t.Fatal("broken source must fail before remote operations")
 	}
 }
 

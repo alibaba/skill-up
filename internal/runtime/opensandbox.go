@@ -278,13 +278,18 @@ type uploadItem struct {
 }
 
 func collectUploadItems(sourceDir, targetRoot string) ([]uploadItem, []string, error) {
+	// Walk does not descend into a symlinked root.
+	resolvedDir, err := filepath.EvalSymlinks(sourceDir)
+	if err != nil {
+		return nil, nil, err
+	}
 	var items []uploadItem
 	dirs := []string{targetRoot}
-	err := filepath.Walk(sourceDir, func(localPath string, info os.FileInfo, walkErr error) error {
+	err = filepath.Walk(resolvedDir, func(localPath string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		rel, err := filepath.Rel(sourceDir, localPath)
+		rel, err := filepath.Rel(resolvedDir, localPath)
 		if err != nil {
 			return err
 		}

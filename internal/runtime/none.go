@@ -154,11 +154,16 @@ func (r *NoneRuntime) UploadFile(ctx context.Context, sourcePath, targetPath str
 // UploadDir recursively copies a directory into the runtime workspace.
 // targetDir may be relative to the workspace or an absolute host path (tree rooted there).
 func (r *NoneRuntime) UploadDir(ctx context.Context, sourceDir, targetDir string) error {
-	return filepath.Walk(sourceDir, func(path string, info os.FileInfo, err error) error {
+	// Walk does not descend into a symlinked root.
+	resolvedDir, err := filepath.EvalSymlinks(sourceDir)
+	if err != nil {
+		return fmt.Errorf("failed to resolve upload source %s: %w", sourceDir, err)
+	}
+	return filepath.Walk(resolvedDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(sourceDir, path)
+		rel, err := filepath.Rel(resolvedDir, path)
 		if err != nil {
 			return err
 		}
