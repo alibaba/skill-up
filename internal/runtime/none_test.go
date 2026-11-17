@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -830,6 +832,190 @@ func TestNoneRuntime_MergeEnv(t *testing.T) {
 	rt.MergeEnv(map[string]string{})
 	if len(rt.cfg.Env) != 3 {
 		t.Fatalf("env length = %d, want 3 after no-op calls", len(rt.cfg.Env))
+	}
+}
+
+// TestMergeEnv covers the layering NoneRuntime.Exec applies: host env, then
+// runtime config, then per-call env. Windows treats names that differ only in
+// case as one variable, so on a Windows target a later layer must replace the
+// earlier spelling instead of travelling beside it; POSIX targets keep each
+// spelling distinct.
+func TestMergeEnv(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		host       []string
+		persistent map[string]string
+		call       map[string]string
+		goos       string
+		want       []string
+	}{
+		{
+			name:       "posix keeps every spelling",
+			host:       []string{"Path=host", "HOME=/home/user"},
+			persistent: map[string]string{"PATH": "config"},
+			call:       map[string]string{"path": "call"},
+			goos:       platform.GOOSLinux,
+			want:       []string{"HOME=/home/user", "PATH=config", "Path=host", "path=call"},
+		},
+		{
+			name:       "posix same spelling still layers",
+			host:       []string{"PATH=host"},
+			persistent: map[string]string{"PATH": "config"},
+			call:       map[string]string{"PATH": "call"},
+			goos:       platform.GOOSDarwin,
+			want:       []string{"PATH=call"},
+		},
+		{
+			name:       "windows runtime config replaces host spelling",
+			host:       []string{"Path=host", `SystemRoot=C:\Windows`},
+			persistent: map[string]string{"PATH": "config"},
+			goos:       platform.GOOSWindows,
+			want:       []string{"PATH=config", `SystemRoot=C:\Windows`},
+		},
+		{
+			name:       "windows per-call replaces runtime config and host",
+			host:       []string{"Path=host", `SystemRoot=C:\Windows`},
+			persistent: map[string]string{"PATH": "config"},
+			call:       map[string]string{"path": "call"},
+			goos:       platform.GOOSWindows,
+			want:       []string{`SystemRoot=C:\Windows`, "path=call"},
+		},
+		{
+			name: "windows per-call replaces host without runtime config",
+			host: []string{"PATH=host"},
+			call: map[string]string{"Path": "call"},
+			goos: platform.GOOSWindows,
+			want: []string{"Path=call"},
+		},
+		{
+			name:       "windows spellings inside one layer resolve to the last sorted",
+			host:       []string{"Path=host"},
+			persistent: map[string]string{"PATH": "upper", "Path": "mixed", "path": "lower"},
+			goos:       platform.GOOSWindows,
+			want:       []string{"path=lower"},
+		},
+		{
+			name: "windows keeps drive working directory entries",
+			host: []string{`=C:=C:\work`, `=D:=D:\data`, "Path=host"},
+			goos: platform.GOOSWindows,
+			want: []string{`=C:=C:\work`, `=D:=D:\data`, "Path=host"},
+		},
+		{
+			name: "values keep later equals signs and malformed entries are dropped",
+			host: []string{"OPTS=a=b", "malformed"},
+			goos: platform.GOOSLinux,
+			want: []string{"OPTS=a=b"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// Repeat: the defect this guards against followed map iteration
+			// order, so a single merge could produce the right answer by luck.
+			for range 50 {
+				got := mergeEnv(tt.host, tt.persistent, tt.call, tt.goos)
+				if !slices.Equal(got, tt.want) {
+					t.Fatalf("mergeEnv() = %q, want %q", got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+func TestDropEnvKeySpellings(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		goos string
+		want map[string]string
+	}{
+		{
+			name: "windows drops other spellings of an incoming name",
+			goos: platform.GOOSWindows,
+			want: map[string]string{"HOME": "home", "PATH_EXTRA": "extra", "TOKEN": "old"},
+		},
+		{
+			name: "posix drops nothing",
+			goos: platform.GOOSLinux,
+			want: map[string]string{"HOME": "home", "PATH_EXTRA": "extra", "Path": "config", "TOKEN": "old"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			target := map[string]string{"Path": "config", "HOME": "home", "PATH_EXTRA": "extra", "TOKEN": "old"}
+			dropEnvKeySpellings(target, map[string]string{"PATH": "probed", "TOKEN": "new"}, tt.goos)
+			if !maps.Equal(target, tt.want) {
+				t.Fatalf("target = %v, want %v", target, tt.want)
+			}
+		})
+	}
+}
+
+// TestDropEnvKeySpellings_SameMap covers a caller that merges the map the
+// runtime already holds: target and src are then one map, and dropping the
+// names about to be set would empty it before the merge could copy them back.
+func TestDropEnvKeySpellings_SameMap(t *testing.T) {
+	t.Parallel()
+
+	for _, goos := range []string{platform.GOOSWindows, platform.GOOSLinux} {
+		env := map[string]string{"PATH": "configured", "Path": "other"}
+		dropEnvKeySpellings(env, env, goos)
+		if want := map[string]string{"PATH": "configured", "Path": "other"}; !maps.Equal(env, want) {
+			t.Fatalf("%s: env = %v, want %v", goos, env, want)
+		}
+	}
+}
+
+// TestNoneRuntime_MergeEnv_ConfigEnvMergedIntoItself guards the idempotent
+// merge: NewRuntime keeps Config.Env by reference, so merging that same map
+// back must leave it intact.
+func TestNoneRuntime_MergeEnv_ConfigEnvMergedIntoItself(t *testing.T) {
+	t.Parallel()
+
+	env := map[string]string{"PATH": "configured"}
+	rt, err := NewRuntime(Config{Type: "none", Env: env})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt.MergeEnv(env)
+
+	if want := map[string]string{"PATH": "configured"}; !maps.Equal(env, want) {
+		t.Fatalf("env after merging into itself = %v, want %v", env, want)
+	}
+}
+
+// TestNoneRuntime_EnvKeysStayCaseSensitiveOnPOSIX pins the other half of the
+// Windows key folding: on a POSIX host, spellings that differ only in case
+// are separate variables at every layer and all of them reach the child.
+func TestNoneRuntime_EnvKeysStayCaseSensitiveOnPOSIX(t *testing.T) {
+	if goruntime.GOOS == osWindows {
+		t.Skip("Windows folds environment variable names; covered by the Windows e2e test")
+	}
+	t.Setenv("Skill_Up_Env_Probe", "process")
+
+	rt := &NoneRuntime{cfg: Config{Env: map[string]string{"SKILL_UP_ENV_PROBE": "config"}}}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+	rt.MergeEnv(map[string]string{"skill_up_ENV_probe": "merged"})
+
+	res, err := rt.Exec(
+		context.Background(),
+		`printf '%s|%s|%s|%s' "$Skill_Up_Env_Probe" "$SKILL_UP_ENV_PROBE" "$skill_up_ENV_probe" "$skill_up_env_probe"`,
+		ExecOptions{Env: map[string]string{"skill_up_env_probe": "call"}},
+	)
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if want := "process|config|merged|call"; res.Stdout != want {
+		t.Fatalf("stdout = %q, want %q", res.Stdout, want)
 	}
 }
 

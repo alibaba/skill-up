@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Code.
 
 ### Fixed
+- Match environment variable names case-insensitively in the `none` runtime on
+  native Windows. A host `Path` and a configured or probed `PATH` were both
+  passed to the child, and which one it kept followed map order. Per-call
+  values now always override the runtime configuration, which overrides the
+  process environment, whatever case each one uses. Unix hosts keep
+  case-sensitive names.
 - Place Codex's `--output-last-message` before `resume` so resumed turns work
   with the default Codex 0.80.0 CLI. Custom providers now accept
   `engine.kwargs.wire_api: responses` for newer Codex versions that removed
