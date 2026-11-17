@@ -135,15 +135,15 @@ func TestQwenCodeRun_ForwardsResolvedSlashedModel(t *testing.T) {
 	t.Setenv("ZCODE_API_KEY", "sk-test")
 
 	// Full path: credential resolution splits the provider prefix only to pick
-	// credentials, the adapter contract keeps the requested ref, and both -m and
-	// OPENAI_MODEL must receive it (#383).
+	// credentials and records the split; the adapter materializes the id, so -m,
+	// OPENAI_MODEL, and the value annotateSessionResult reports are one value (#383).
 	resolved := credential.ResolveRunnerConfig(
 		config.EngineConfig{Name: "qwen_code"}, nil,
 		credential.CLIOverrides{Model: "zcode/GLM-5.3-Flash"},
 	)
 	applied := ResolveAdapterConfig(resolved, nil)
-	if applied.AppliedProvider != "zcode" || applied.AppliedModel != "zcode/GLM-5.3-Flash" {
-		t.Fatalf("applied provider/model = %q/%q, want zcode/zcode/GLM-5.3-Flash", applied.AppliedProvider, applied.AppliedModel)
+	if applied.AppliedProvider != "zcode" || !applied.ModelSplit {
+		t.Fatalf("adapter config provider/split = %q/%v, want zcode/split", applied.AppliedProvider, applied.ModelSplit)
 	}
 	ag, err := DetectAgentWithResolvedConfig(applied)
 	if err != nil {

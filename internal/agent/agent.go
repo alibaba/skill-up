@@ -103,6 +103,16 @@ type RuntimeObservation struct {
 	Version string
 }
 
+// ModelMaterializer is implemented by an adapter whose model id differs from
+// the one the credential layer resolved. The adapter assembles the id it passes
+// to its CLI, and reporting uses that same value so a run never claims a model
+// it did not ask the CLI for (#383, #399).
+type ModelMaterializer interface {
+	// MaterializedModel returns the model id this adapter passes to its CLI for
+	// the resolved configuration, "" when it passes none.
+	MaterializedModel() string
+}
+
 // RuntimeInspector is implemented by agents that can inspect runtime metadata
 // after the executable availability check succeeds.
 type RuntimeInspector interface {
@@ -187,10 +197,15 @@ type Config struct {
 	RequestedModelName string
 	RequestedProvider  string
 	ModelProvider      string
-	Protocol           string
-	Warnings           []string
-	APIKey             string
-	BaseURL            string
+	// ModelSplit reports that the credential layer split a legacy
+	// "provider/model" reference to pick credentials, leaving the bare model in
+	// ModelName and the provider in ModelProvider. Only the adapter may rejoin
+	// them: it is the layer that knows how its CLI receives a model id (#383).
+	ModelSplit bool
+	Protocol   string
+	Warnings   []string
+	APIKey     string
+	BaseURL    string
 	// Kwargs carries agent-specific key/value options forwarded from
 	// EngineConfig.Kwargs. Each agent reads only the keys it understands;
 	// unknown keys are ignored. See agent kwargs helpers in kwargs.go.
@@ -242,6 +257,11 @@ var (
 type BaseAgent struct {
 	Cfg     Config
 	Version string
+	// inspector is the adapter holding this BaseAgent. An embedded BaseAgent is
+	// a plain *BaseAgent method receiver, so it cannot see the adapter it is
+	// embedded in; adapters that report or materialize something of their own set
+	// this in their constructor (see ModelMaterializer).
+	inspector any
 }
 
 // ExitCodeSignalKilled is the ExitCode value in SessionResult when the agent
@@ -469,9 +489,9 @@ func (a *BaseAgent) buildAgentObservabilityAttrs(extra map[string]string) map[st
 	if a.Cfg.RequestedProvider != "" {
 		attrs["skill_up.provider.requested"] = a.Cfg.RequestedProvider
 	}
-	if a.Cfg.ModelName != "" {
-		attrs["skill_up.model"] = formatAgentModel(a.Cfg.ModelProvider, a.Cfg.ModelName)
-		attrs["skill_up.model.applied"] = formatAgentModel(a.Cfg.ModelProvider, a.Cfg.ModelName)
+	if model := materializedModel(a.Cfg.ModelName, a.inspector); model != "" {
+		attrs["skill_up.model"] = formatAgentModel(a.Cfg.ModelProvider, model)
+		attrs["skill_up.model.applied"] = formatAgentModel(a.Cfg.ModelProvider, model)
 	}
 	if a.Cfg.RequestedModelName != "" {
 		attrs["skill_up.model.requested"] = formatAgentModel(a.Cfg.RequestedProvider, a.Cfg.RequestedModelName)
@@ -490,10 +510,19 @@ func (a *BaseAgent) annotateSessionResult(result *SessionResult) {
 	result.RequestedProvider = a.Cfg.RequestedProvider
 	result.AppliedProvider = a.Cfg.ModelProvider
 	result.RequestedModel = a.Cfg.RequestedModelName
-	result.AppliedModel = a.Cfg.ModelName
+	result.AppliedModel = materializedModel(a.Cfg.ModelName, a.inspector)
 	for _, warning := range a.Cfg.Warnings {
 		result.Warnings = appendUniqueWarning(result.Warnings, warning)
 	}
+}
+
+// materializedModel returns the model the agent in hand materializes, defaulting
+// to the resolved one for adapters that pass it through unchanged.
+func materializedModel(resolved string, agent any) string {
+	if materializer, ok := agent.(ModelMaterializer); ok {
+		return materializer.MaterializedModel()
+	}
+	return resolved
 }
 
 func formatAgentModel(provider, model string) string {

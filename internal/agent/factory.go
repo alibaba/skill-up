@@ -69,6 +69,7 @@ func DetectAgentWithResolvedConfig(params credential.ResolvedAgentConfig) (Agent
 		RequestedModelName: params.Model,
 		RequestedProvider:  params.Provider,
 		ModelProvider:      connection.Provider,
+		ModelSplit:         params.ModelSplit,
 		Protocol:           string(connection.Protocol),
 		Warnings:           params.Warnings,
 		APIKey:             connection.APIKey,
