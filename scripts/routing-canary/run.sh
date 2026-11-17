@@ -28,9 +28,20 @@ else
   engines=("${supported_engines[@]}")
 fi
 
+# Engine names are matched as strings, never as patterns: `grep -x` reads a
+# newline in the argument as two patterns, and bash's `case` without quoting
+# reads `*` as a glob. Both would let a name reach the artifact paths below.
+is_supported_engine() {
+  local candidate="$1" supported
+  for supported in "${supported_engines[@]}"; do
+    [ "$candidate" = "$supported" ] && return 0
+  done
+  return 1
+}
+
 # Reject unknown engine names before they reach any filesystem operation below.
 for engine in "${engines[@]}"; do
-  if ! printf '%s\n' "${supported_engines[@]}" | grep -qx "$engine"; then
+  if ! is_supported_engine "$engine"; then
     echo "!! unsupported engine: $engine (supported: ${supported_engines[*]})" >&2
     exit 1
   fi
