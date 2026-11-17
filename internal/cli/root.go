@@ -169,7 +169,7 @@ func init() {
 		return err
 	})
 
-	rootCmd.PersistentFlags().String(configFlagName, "", "Path to skill-up user config (overrides discovered defaults)")
+	rootCmd.PersistentFlags().String(configFlagName, "", "Path to trusted skill-up user config (overrides defaults; allows ${VAR} expansion)")
 
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(validateCmd)

@@ -124,6 +124,115 @@ func TestLoadEffective_EnvVarPath(t *testing.T) {
 	}
 }
 
+type envExpansionCase struct {
+	name            string
+	user            string
+	project         string
+	explicit        string
+	explicitProject bool
+	userEnvPath     bool
+	want            map[string]string
+}
+
+func TestLoadEffective_EnvExpansionTrust(t *testing.T) {
+	const secret = "test-token"
+	const literal = "leaked=${SKILL_UP_TEST_SECRET}"
+	const expanded = "leaked=" + secret
+	const userOnly = "SKILL_UP_TEST_USER_ONLY"
+	const explicitOnly = "SKILL_UP_TEST_EXPLICIT_ONLY"
+	const project = `env:
+  OTEL_EXPORTER_OTLP_ENDPOINT: https://collector.example.invalid
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  OTEL_RESOURCE_ATTRIBUTES: leaked=${SKILL_UP_TEST_SECRET}
+`
+	const user = `env:
+  OTEL_RESOURCE_ATTRIBUTES: leaked=${SKILL_UP_TEST_SECRET}
+  SKILL_UP_TEST_USER_ONLY: leaked=${SKILL_UP_TEST_SECRET}
+`
+	const explicit = `env:
+  SKILL_UP_TEST_EXPLICIT_ONLY: leaked=${SKILL_UP_TEST_SECRET}
+`
+	t.Setenv("SKILL_UP_TEST_SECRET", secret)
+	for _, tc := range []envExpansionCase{
+		{
+			name: "automatic project stays literal", project: project,
+			want: map[string]string{envOtelResourceAttributes: literal},
+		},
+		{
+			name: "user defaults expand", user: user,
+			want: map[string]string{envOtelResourceAttributes: expanded, userOnly: expanded},
+		},
+		{
+			name: "project override loses user trust", user: user, project: project,
+			want: map[string]string{envOtelResourceAttributes: literal, userOnly: expanded},
+		},
+		{
+			name: "explicit config does not trust unrelated project keys", user: user, project: project, explicit: explicit,
+			want: map[string]string{envOtelResourceAttributes: literal, userOnly: expanded, explicitOnly: expanded},
+		},
+		{
+			name: "explicitly selected project expands", project: project, explicitProject: true,
+			want: map[string]string{envOtelResourceAttributes: expanded},
+		},
+		{
+			name: "explicit key overrides project trust", project: project, explicit: user,
+			want: map[string]string{envOtelResourceAttributes: expanded, userOnly: expanded},
+		},
+		{
+			name: "user environment path expands", user: user, userEnvPath: true,
+			want: map[string]string{envOtelResourceAttributes: expanded, userOnly: expanded},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testEnvExpansionTrust(t, tc)
+		})
+	}
+}
+
+func testEnvExpansionTrust(t *testing.T, tc envExpansionCase) {
+	t.Helper()
+	for _, key := range []string{envOtelResourceAttributes, "OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_PROTOCOL", "SKILL_UP_TEST_USER_ONLY", "SKILL_UP_TEST_EXPLICIT_ONLY"} {
+		t.Setenv(key, "")
+		_ = os.Unsetenv(key)
+	}
+	home, wd := t.TempDir(), t.TempDir()
+	userPath := filepath.Join(home, ".config", UserConfigDir, UserConfigFile)
+	if tc.userEnvPath {
+		userPath = filepath.Join(t.TempDir(), "user.yaml")
+	}
+	projectPath := filepath.Join(wd, ProjectConfigFile)
+	writeFile(t, userPath, tc.user)
+	writeFile(t, projectPath, tc.project)
+	opts := LoadOptions{HomeDir: home, WorkingDir: wd, Env: emptyEnv}
+	if tc.userEnvPath {
+		opts.Env = func(key string) string {
+			if key == ConfigEnvVar {
+				return userPath
+			}
+			return ""
+		}
+	}
+	if tc.explicit != "" {
+		opts.ExplicitPath = filepath.Join(t.TempDir(), "explicit.yaml")
+		writeFile(t, opts.ExplicitPath, tc.explicit)
+	}
+	if tc.explicitProject {
+		opts.ExplicitPath = projectPath
+	}
+	cfg, _, err := LoadEffective(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApplyEnv(cfg); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range tc.want {
+		if got := os.Getenv(key); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
+
 func TestLoadEffective_CorruptFile(t *testing.T) {
 	tmp := t.TempDir()
 	bad := filepath.Join(tmp, "bad.yaml")

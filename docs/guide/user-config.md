@@ -68,8 +68,14 @@ Semantics:
   environment variable. Values are only applied **if the corresponding env var
   is not already set**, so a value on the command line or in your shell
   always wins.
-- **`${VAR}` placeholders** in `env` values are expanded from the process
-  environment before defaults are applied. Unset variables remain literal;
+- **`${VAR}` placeholders** in `env` values from the `user` and `explicit`
+  layers are expanded from the process environment before defaults are applied.
+  Automatically discovered project values stay literal. To opt in for a trusted
+  project file, pass `--config ./.skill-up.yaml`. This grants that file access to
+  host environment variables, including secrets, so review it before opting in.
+  Permission follows each winning value: a project override of a user value
+  stays literal, and selecting a different explicit file does not enable
+  expansion for project entries it leaves unchanged. Unset variables remain literal;
   variables set to an empty string expand to an empty string. Expansion is
   single-pass and does not read other defaults from the same config. Bare
   `$VAR` and shell expressions such as `${VAR:-fallback}` remain literal.

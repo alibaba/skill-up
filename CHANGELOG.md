@@ -10,7 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Expand `${VAR}` references in user-config `env` defaults from the process
-  environment, preserving unset references and existing environment values.
+  environment only for user-level or explicitly selected (`--config`) values.
+  Automatically discovered project values remain literal. Preserve unset
+  references and existing environment values.
 - Count primary cases consistently in Markdown and CLI summaries for benchmark
   runs, without counting baseline rows as extra cases or discarding their details.
 - Reject malformed `--include-case-name` and `--exclude-case-name` glob patterns

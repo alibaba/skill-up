@@ -89,7 +89,8 @@ func TestApplyEnv_ExpandsPlaceholders(t *testing.T) {
 			const target = "SKILL_UP_TEST_TARGET"
 			t.Setenv(target, "")
 			_ = os.Unsetenv(target)
-			cfg := Config{Env: map[string]string{target: tc.value}}
+			var cfg Config
+			cfg.overlay(Config{Env: map[string]string{target: tc.value}}, "user")
 			applied, err := ApplyEnv(cfg)
 			if err != nil {
 				t.Fatal(err)
@@ -110,7 +111,8 @@ func TestApplyEnv_ExpansionPreservesPrecedence(t *testing.T) {
 	_ = os.Unsetenv(source)
 	t.Setenv(target, "")
 	_ = os.Unsetenv(target)
-	cfg := Config{Env: map[string]string{source: "from-config", target: "${" + source + "}"}}
+	var cfg Config
+	cfg.overlay(Config{Env: map[string]string{source: "from-config", target: "${" + source + "}"}}, "user")
 	if _, err := ApplyEnv(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -126,6 +128,20 @@ func TestApplyEnv_ExpansionPreservesPrecedence(t *testing.T) {
 		if got := os.Getenv(target); got != existing {
 			t.Fatalf("existing value overwritten: %q", got)
 		}
+	}
+}
+
+func TestApplyEnv_WithoutSourceKeepsPlaceholders(t *testing.T) {
+	const target = "SKILL_UP_TEST_TARGET"
+	t.Setenv("SKILL_UP_TEST_SOURCE", "example-value")
+	t.Setenv(target, "")
+	_ = os.Unsetenv(target)
+	cfg := Config{Env: map[string]string{target: "${SKILL_UP_TEST_SOURCE}"}}
+	if _, err := ApplyEnv(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv(target); got != cfg.Env[target] {
+		t.Fatalf("config without a trusted source expanded: %q", got)
 	}
 }
 

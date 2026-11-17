@@ -33,6 +33,13 @@ const UserConfigDir = "skill-up"
 // UserConfigFile is the default user-layer file name.
 const UserConfigFile = "config.yaml"
 
+const (
+	sourceEmbed    = "embed"
+	sourceUser     = "user"
+	sourceProject  = "project"
+	sourceExplicit = "explicit"
+)
+
 // LoadOptions controls config discovery.
 type LoadOptions struct {
 	ExplicitPath string
@@ -65,14 +72,14 @@ func LoadEffective(opts LoadOptions) (Config, []Source, error) {
 	}
 
 	cfg := Config{}
-	sources := []Source{{Kind: "embed"}}
+	sources := []Source{{Kind: sourceEmbed}}
 
 	// Auto-discovered layers (user, project) downgrade parse/validate errors to
 	// warnings so a corrupt ~/.config/skill-up/config.yaml does not block
 	// unrelated commands (run/validate/init/...). Only --config, which the user
 	// explicitly opted into, treats errors as fatal.
-	sources = mergeOptionalLayer(&cfg, sources, "user", resolveUserConfigPath(opts, getenv), warn)
-	sources = mergeOptionalLayer(&cfg, sources, "project", resolveProjectConfigPath(opts), warn)
+	sources = mergeOptionalLayer(&cfg, sources, sourceUser, resolveUserConfigPath(opts, getenv), warn)
+	sources = mergeOptionalLayer(&cfg, sources, sourceProject, resolveProjectConfigPath(opts), warn)
 
 	if opts.ExplicitPath != "" {
 		loaded, ok, err := loadConfigFile(opts.ExplicitPath)
@@ -82,8 +89,8 @@ func LoadEffective(opts LoadOptions) (Config, []Source, error) {
 		if !ok {
 			return Config{}, nil, fmt.Errorf("config file not found: %s", opts.ExplicitPath)
 		}
-		cfg.overlay(loaded)
-		sources = append(sources, Source{Kind: "explicit", Path: opts.ExplicitPath})
+		cfg.overlay(loaded, sourceExplicit)
+		sources = append(sources, Source{Kind: sourceExplicit, Path: opts.ExplicitPath})
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -117,7 +124,7 @@ func mergeOptionalLayer(cfg *Config, sources []Source, kind, path string, warn i
 	if !ok {
 		return sources
 	}
-	cfg.overlay(loaded)
+	cfg.overlay(loaded, kind)
 	return append(sources, Source{Kind: kind, Path: path})
 }
 
