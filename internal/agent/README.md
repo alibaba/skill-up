@@ -140,7 +140,7 @@ rejected Codex provider cannot leak its key or endpoint into local fallback.
 | Adapter | Protocol | Model behavior | Base URL | Supported kwargs |
 |---------|----------|----------------|----------|------------------|
 | Claude Code | `anthropic` | pass through | yes | none |
-| Codex | `openai` | requires a usable Codex provider configuration | yes | `bypass_sandbox`, JSONL size limits |
+| Codex | `openai` | requires a usable Codex provider configuration | yes | `bypass_sandbox`, `wire_api` (`chat` default; `responses` for newer CLIs and Responses-capable endpoints), JSONL size limits |
 | QoderCLI | `qoder` | trimmed model name/ID passthrough, including historical tiers; availability validated by Qoder | no | `edition` |
 | Qwen Code | `openai` | pass through | yes | none |
 | Custom Engine | `custom` | pass through | no; use `engine.custom.http.url` | none; use `engine.custom.kwargs` |

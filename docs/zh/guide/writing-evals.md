@@ -165,6 +165,36 @@ configuration，并将 applied version 留空。
 `engine.custom.local.command` 和 `args`；adapter 专用参数请使用
 `engine.kwargs` 或 `engine.custom.kwargs`。
 
+### Codex provider 协议
+
+自定义 Codex provider（包括设置了自定义 `base_url` 的 `openai`）可以通过
+`engine.kwargs.wire_api` 选择 `chat` 或 `responses`。默认值为 `chat`，兼容默认
+安装的 Codex 0.80.0。0.169.0 等新版 Codex 已移除 Chat Completions 支持，需设置
+`wire_api: responses` 并使用支持 Responses API 的后端。该选项不会把仅支持 Chat
+的接口转换为 Responses 接口。使用内置 OpenAI provider 且未设置自定义 URL 时，
+保留 Codex 自身的协议配置。
+
+```yaml
+engine:
+  name: codex
+  version: "0.169.0"
+  kwargs:
+    wire_api: responses
+```
+
+必需 CI 矩阵使用真实 Codex 0.169.0（`responses`）及 0.80.0（`chat`、
+`responses`）连接本地 SSE 服务，核对 CLI 版本，并检查第二轮请求按顺序包含
+第一轮用户消息、第一轮助手回复及第二轮用户消息。0.80.0 还会验证修复前的
+resume 参数顺序：临时恢复旧实现，要求同一测试在第二轮报参数解析错误，再还原
+修复并要求测试通过。
+
+手动 **Model E2E** 工作流的 `codex` 套件另行使用百炼真实模型验证两轮记忆，
+覆盖 0.169.0（`responses`）及 0.80.0（`chat`），需要 `DASHSCOPE_API_KEY`。
+本地模拟服务通过不能代表百炼实测通过；Responses 是否可用还取决于接入地址、
+模型及 API Key 的业务空间绑定。为兼容现有 Chat-only 配置，默认引擎仍保留
+0.80.0 和 `chat`。
+可通过工作流输入 `codex_base_url`、`codex_model` 指定业务空间接口和模型。
+
 ### 采集 workspace 产物（`collect_artifacts`）
 
 `collect_artifacts` 用 glob 声明要从用例 workspace 采集的文件。每次 Agent 运行后——**无论成功、失败还是超时**——命中的文件都会被下载到：

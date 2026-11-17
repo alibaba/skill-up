@@ -1,0 +1,7 @@
+{
+  "name": "skill-up-codex-compat",
+  "private": true,
+  "dependencies": {
+    "@openai/codex": "0.80.0"
+  }
+}
