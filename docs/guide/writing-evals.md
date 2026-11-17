@@ -187,6 +187,46 @@ to an adapter and are now explicitly ignored with migration warnings. Use
 | `bypass_sandbox` | `qwen_code` | No-op — `qwen_code` never imposes its own sandbox (`--yolo` only auto-approves tool calls; it does **not** isolate). Like `claude_code`/`qodercli`, isolation is the runtime's job | No-op |
 | `edition` | `qodercli` | Set to `cn` to use Qoder CLI CN (`qodercn`); switches the installer, credential env, user config/session root, MCP command, and run/resume command together | `global` (Qoder CLI from qoder.com) |
 
+For custom Codex providers (including `openai` with a custom `base_url`),
+`engine.kwargs.wire_api` selects `chat` or `responses`. The default is `chat`
+for the pinned Codex 0.80.0. Newer Codex versions, including 0.169.0, removed
+Chat Completions support: set `wire_api: responses` and use a backend that
+implements the Responses API. This option does not translate a Chat-only
+endpoint into a Responses endpoint. With the built-in OpenAI provider and no
+custom URL, Codex's own protocol configuration is left unchanged.
+
+```yaml
+engine:
+  name: codex
+  version: "0.169.0"
+  kwargs:
+    wire_api: responses
+```
+
+The required CI matrix runs real Codex 0.169.0 (`responses`) and 0.80.0
+(`chat` and `responses`) against a local SSE provider. It checks the exact CLI
+version and verifies that the second request contains the first user message,
+the first assistant reply, and the second user message in order. The 0.80.0
+jobs temporarily restore the original option ordering, require this same test
+to fail on turn two with the parser error, then restore the fix and require a pass.
+
+To reproduce with a preinstalled CLI:
+
+```bash
+SKILL_UP_CODEX_COMPAT_E2E=1 SKILL_UP_CODEX_EXPECTED_VERSION=0.80.0 \
+  SKILL_UP_CODEX_WIRE_API=chat \
+  go test -race -tags e2e -count=1 -v -run '^TestCodexCLICompatibility$' ./e2e
+```
+
+The manual **Model E2E** workflow's `codex` suite separately runs real
+DashScope two-turn recall with 0.169.0 (`responses`) and 0.80.0 (`chat`).
+It requires `DASHSCOPE_API_KEY`; a local fixture pass does not establish
+live-provider compatibility. Responses access also depends on the endpoint,
+model, and the API key's workspace binding. Workflow inputs `codex_base_url`
+and `codex_model` can select the appropriate workspace endpoint and model.
+The default engine remains 0.80.0
+with `chat` to preserve existing Chat-only configurations.
+
 Codex also accepts byte limits for its JSONL artifacts:
 
 | key | default | behaviour |
