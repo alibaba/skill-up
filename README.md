@@ -391,7 +391,14 @@ For `runtime_kwargs`: explicit `--runtime-kwarg` on `run` > `eval.yaml` `environ
 
 ### Secrets
 
-Prefer `${ENV_VAR}` references inside the config file rather than baking secret literals. The redaction mechanism (`userconfig.Redact`) masks fields tagged `secret:"true"` when printing; currently no Config field carries the tag, but the mechanism is in place for future fields.
+Use `${ENV_VAR}` references in `env` values from user-level or explicitly selected
+configuration. Automatically discovered project values stay literal; pass
+`--config ./.skill-up.yaml` only after reviewing and trusting that file. See
+[user-config semantics](docs/guide/user-config.md#schema) for precedence and
+remaining trust limitations.
+
+The redaction mechanism (`userconfig.Redact`) masks fields tagged `secret:"true"`
+when printing; currently no Config field carries the tag.
 
 ## Importing `evals.json`
 

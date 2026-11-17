@@ -157,7 +157,8 @@ telemetry:
   # verbose: false
 
 # Arbitrary additional env vars. Same only-if-unset semantics as telemetry.
-# Use ${VAR} placeholders for secrets so they are not baked into the file.
+# ${VAR} expands only in user-level or explicitly selected (--config) files.
+# Project files stay literal unless trusted with --config ./.skill-up.yaml.
 # env:
 #   OTEL_EXPORTER_OTLP_HEADERS: authorization=${OTLP_TOKEN}
 

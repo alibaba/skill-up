@@ -131,6 +131,7 @@ type envExpansionCase struct {
 	explicit        string
 	explicitProject bool
 	userEnvPath     bool
+	userIsProject   bool
 	want            map[string]string
 }
 
@@ -182,6 +183,10 @@ func TestLoadEffective_EnvExpansionTrust(t *testing.T) {
 			name: "user environment path expands", user: user, userEnvPath: true,
 			want: map[string]string{envOtelResourceAttributes: expanded, userOnly: expanded},
 		},
+		{
+			name: "user path also discovered as project stays literal", project: project, userEnvPath: true, userIsProject: true,
+			want: map[string]string{envOtelResourceAttributes: literal},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			testEnvExpansionTrust(t, tc)
@@ -201,6 +206,9 @@ func testEnvExpansionTrust(t *testing.T, tc envExpansionCase) {
 		userPath = filepath.Join(t.TempDir(), "user.yaml")
 	}
 	projectPath := filepath.Join(wd, ProjectConfigFile)
+	if tc.userIsProject {
+		userPath = projectPath
+	}
 	writeFile(t, userPath, tc.user)
 	writeFile(t, projectPath, tc.project)
 	opts := LoadOptions{HomeDir: home, WorkingDir: wd, Env: emptyEnv}

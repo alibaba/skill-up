@@ -75,13 +75,19 @@ Semantics:
   host environment variables, including secrets, so review it before opting in.
   Permission follows each winning value: a project override of a user value
   stays literal, and selecting a different explicit file does not enable
-  expansion for project entries it leaves unchanged. Unset variables remain literal;
+  expansion for project entries it leaves unchanged. If `SKILL_UP_CONFIG` points
+  to the same automatically discovered project file, the project layer still
+  wins and stays literal; use `--config` to opt in. Unset variables remain literal;
   variables set to an empty string expand to an empty string. Expansion is
   single-pass and does not read other defaults from the same config. Bare
   `$VAR` and shell expressions such as `${VAR:-fallback}` remain literal.
 - **`runtime_kwargs`** — defaults for `run` keyed by `environment.type` (e.g.
   `opensandbox`). `eval.yaml` values take precedence; missing keys fall back
   here. Keys mirror the environment provider's kwargs schema.
+
+Expansion permission does not bind credentials to a destination. Project files
+can still override literal telemetry endpoints, so inspect their settings before
+using credentials from your environment or user config.
 
 ---
 
