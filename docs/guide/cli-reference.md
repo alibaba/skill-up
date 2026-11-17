@@ -408,7 +408,10 @@ skill-up init [flags]
 | `--print`  | `false`                                            | Print to stdout instead of writing to disk                                                   |
 | `--force`  | `false`                                            | Overwrite an existing target                                                                 |
 
-> Note: for `init`, `--config` names the *source* to read. For every other subcommand (`run`, `validate`, …) it is the *load-path override* sitting at the top of the discovery chain.
+> For `init`, `--config` names the source to copy without expanding placeholders.
+> For other subcommands it selects the highest-precedence config and permits
+> `${VAR}` expansion in that file's `env` values. Use it only with trusted files;
+> see [user configuration](./user-config.md#schema) for the trust boundary.
 
 ### Examples
 

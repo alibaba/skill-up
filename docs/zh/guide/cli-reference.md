@@ -242,7 +242,9 @@ skill-up init [flags]
 | `--print`  | `false`      | 输出到 stdout，而不是写盘                                                                        |
 | `--force`  | `false`      | 覆盖已存在的目标文件                                                                             |
 
-> 注意：对 `init` 子命令，`--config` 是**读取源**；对其他子命令（`run`、`validate` …），`--config` 是加载链最顶层的覆盖路径。
+> 对 `init`，`--config` 指定要复制的源文件，不展开占位符。对其他子命令，它选择
+> 优先级最高的配置，并允许展开该文件 `env` 值中的 `${VAR}`。仅应指定可信文件；
+> 信任边界见[用户配置](./user-config.md#schema)。
 
 ### 示例
 

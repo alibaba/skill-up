@@ -50,6 +50,20 @@ func TestExecuteArgsVersionInitializesRoot(t *testing.T) {
 }
 
 func TestExecuteArgsProjectEnvTrust(t *testing.T) {
+	configFlag := rootCmd.PersistentFlags().Lookup(configFlagName)
+	configValue, configChanged := configFlag.Value.String(), configFlag.Changed
+	printFlag := initCmd.Flags().Lookup("print")
+	printValue, printChanged := printFlag.Value.String(), printFlag.Changed
+	t.Cleanup(func() {
+		if err := configFlag.Value.Set(configValue); err != nil {
+			t.Error(err)
+		}
+		configFlag.Changed = configChanged
+		if err := printFlag.Value.Set(printValue); err != nil {
+			t.Error(err)
+		}
+		printFlag.Changed = printChanged
+	})
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("SKILL_UP_CONFIG", "")
 	t.Setenv("SKILL_UP_TEST_SECRET", "test-token")
@@ -66,23 +80,29 @@ func TestExecuteArgsProjectEnvTrust(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
-		name string
-		args []string
-		want string
+		name       string
+		args       []string
+		want       string
+		wantOutput string
 	}{
-		{"automatic", []string{"--version"}, "leaked=${SKILL_UP_TEST_SECRET}"},
-		{"explicit", []string{"--version", "--config", project}, "leaked=test-token"},
-		{"explicit equals", []string{"--version", "--config=" + project}, "leaked=test-token"},
+		{"automatic", []string{"--version"}, "leaked=${SKILL_UP_TEST_SECRET}", "test-version"},
+		{"explicit", []string{"--version", "--config", project}, "leaked=test-token", "test-version"},
+		{"explicit equals", []string{"--version", "--config=" + project}, "leaked=test-token", "test-version"},
+		{"init source", []string{"init", "--config", project, "--print"}, "leaked=${SKILL_UP_TEST_SECRET}", "leaked=${SKILL_UP_TEST_SECRET}"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, key := range []string{"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_PROTOCOL", "OTEL_RESOURCE_ATTRIBUTES"} {
 				t.Setenv(key, "")
 				_ = os.Unsetenv(key)
 			}
-			if _, err := captureStdout(t, func() error {
+			output, err := captureStdout(t, func() error {
 				return ExecuteArgs("test-version", tc.args)
-			}); err != nil {
+			})
+			if err != nil {
 				t.Fatal(err)
+			}
+			if !strings.Contains(output, tc.wantOutput) {
+				t.Fatalf("command output = %q, want %q", output, tc.wantOutput)
 			}
 			if got := os.Getenv("OTEL_RESOURCE_ATTRIBUTES"); got != tc.want {
 				t.Fatalf("resource attributes = %q, want %q", got, tc.want)

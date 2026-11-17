@@ -85,9 +85,10 @@ Semantics:
   `opensandbox`). `eval.yaml` values take precedence; missing keys fall back
   here. Keys mirror the environment provider's kwargs schema.
 
-Expansion permission does not bind credentials to a destination. Project files
-can still override literal telemetry endpoints, so inspect their settings before
-using credentials from your environment or user config.
+Expansion permission does not bind credentials to a destination. Expanding a
+token in user-level telemetry headers makes it available to the exporter, and
+a project's literal endpoint override can receive that token. Inspect project
+settings before using credentials from your environment or user config.
 
 ---
 
