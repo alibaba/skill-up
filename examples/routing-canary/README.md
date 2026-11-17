@@ -52,7 +52,8 @@ ITERATIONS=3 scripts/routing-canary/run.sh    # repeat for stability
 The script copies this directory to a temporary location so evaluation
 artifacts do not land inside the repository, runs `skill-up run` with
 `--no-delete`, and copies the artifacts to `out/<engine>/` in the current
-directory. `scripts/routing-canary/summarize.py out/<engine>` prints the
+directory. Engine arguments are checked against the supported list before any
+filesystem work, so an unknown name fails fast instead of reaching the run. `scripts/routing-canary/summarize.py out/<engine>` prints the
 Skill-related events found in each transcript.
 
 `CANARY_MODEL` pins the model for engines that need it:

@@ -21,11 +21,20 @@ iterations="${ITERATIONS:-1}"
 model="${CANARY_MODEL:-}"
 failed=""
 
+supported_engines=(claude_code codex opencode)
 if [ "$#" -gt 0 ]; then
   engines=("$@")
 else
-  engines=(claude_code codex opencode)
+  engines=("${supported_engines[@]}")
 fi
+
+# Reject unknown engine names before they reach any filesystem operation below.
+for engine in "${engines[@]}"; do
+  if ! printf '%s\n' "${supported_engines[@]}" | grep -qx "$engine"; then
+    echo "!! unsupported engine: $engine (supported: ${supported_engines[*]})" >&2
+    exit 1
+  fi
+done
 
 cleanup() {
   rm -rf "$work"
@@ -50,7 +59,7 @@ for engine in "${engines[@]}"; do
 
   if ! "$work/skill-up" run "$fixture/evals/eval.yaml" \
     --engine "$engine" \
-    "${model_args[@]}" \
+    ${model_args[@]+"${model_args[@]}"} \
     --output-dir "$work/$engine/reports" \
     --no-delete \
     --iteration "$iterations"; then
