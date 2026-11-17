@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/alibaba/skill-up/internal/agent"
+	"github.com/alibaba/skill-up/internal/credential"
 	evalruntime "github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
@@ -52,10 +53,14 @@ func TestCodexCLICompatibility(t *testing.T) {
 		codexCompatResponse(w, r, reply)
 	}))
 	defer server.Close()
-	ag := agent.NewCodexAgent(agent.Config{
-		ModelProvider: "compat", ModelName: "gpt-5.4",
+	params := agent.ResolveAdapterConfig(credential.ResolvedAgentConfig{
+		Engine: "codex", Provider: "compat", Model: "gpt-5.4",
 		BaseURL: server.URL + "/v1", APIKey: "local-fixture-key",
 		Kwargs: map[string]string{"wire_api": wireAPI, "bypass_sandbox": "true"},
+	}, nil)
+	ag := agent.NewCodexAgent(agent.Config{
+		ModelProvider: params.AppliedProvider, ModelName: params.AppliedModel,
+		BaseURL: params.AppliedBaseURL, APIKey: params.AppliedAPIKey, Kwargs: params.Kwargs,
 	})
 	sessionID := ""
 	for i, prompt := range []string{codexFirstPrompt, codexSecondPrompt} {
