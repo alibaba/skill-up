@@ -57,6 +57,20 @@ func (p Provisioner) Provision(mcpCfg config.MCPConfig) (runtime.MCPConfig, map[
 	return runtime.MCPConfig{Servers: servers}, runEnv, nil
 }
 
+// ValidateMockedFixtures checks mocked fixtures using the same loading and
+// normalization as Provision, without resolving real servers or starting processes.
+func (p Provisioner) ValidateMockedFixtures(mcpCfg config.MCPConfig) error {
+	for _, server := range mcpCfg.Servers {
+		if server.Mode != modeMocked {
+			continue
+		}
+		if _, err := p.resolveServer(server, nil); err != nil {
+			return fmt.Errorf("mocked MCP server %q: %w", server.Name, err)
+		}
+	}
+	return nil
+}
+
 func (p Provisioner) resolveServer(server config.MCPServer, lookupEnv func(string) (string, bool)) (runtime.MCPServerConfig, error) {
 	if err := validateServerMode(server); err != nil {
 		return runtime.MCPServerConfig{}, err

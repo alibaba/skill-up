@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `engine.kwargs.wire_api: responses` for newer Codex versions that removed
   Chat Completions support. The default remains `chat` for 0.80.0 compatibility;
   selecting `responses` requires a Responses-capable endpoint.
+- Check eval-level and case-level mocked MCP fixtures during `validate`, including
+  missing files, YAML errors and invalid tool definitions, without starting servers.
 - Warn when a non-empty case-level `judge` has no `type` and its fields are
   ignored in favor of the eval judge. `validate` and `run` preserve the
   existing fallback behavior; omitted, empty and null blocks inherit without
