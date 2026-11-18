@@ -15,7 +15,7 @@ func (r *NoneRuntime) isolatedEnvironment(env []string) []string {
 		"USERPROFILE":       home,
 		"HOMEDRIVE":         filepath.VolumeName(home),
 		"HOMEPATH":          strings.TrimPrefix(home, filepath.VolumeName(home)),
-		"CODEX_HOME":        filepath.Join(home, ".codex"),
+		"CODEX_HOME":        home,
 		"CLAUDE_CONFIG_DIR": filepath.Join(home, ".claude"),
 		"XDG_CONFIG_HOME":   filepath.Join(home, ".config"),
 		"XDG_DATA_HOME":     filepath.Join(home, ".local", "share"),

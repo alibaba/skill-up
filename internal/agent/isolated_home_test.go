@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"maps"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -128,5 +130,64 @@ func TestIsolatedHomeCodexInitializesAuthOnRunAndResume(t *testing.T) {
 				t.Fatalf("login must precede exec: %v", rt.commands)
 			}
 		})
+	}
+}
+
+func TestIsolatedHomeCodexSessionCollection(t *testing.T) {
+	for _, external := range []bool{false, true} {
+		t.Run(map[bool]string{false: "temporary workspace", true: "external workspace"}[external], func(t *testing.T) {
+			cfg := runtime.Config{Type: "none", IsolateHome: true, Delete: true}
+			if external {
+				cfg.WorkspaceDir = t.TempDir()
+			}
+			checkIsolatedHomeCodexSessionCollection(t, cfg)
+		})
+	}
+}
+
+func checkIsolatedHomeCodexSessionCollection(t *testing.T, cfg runtime.Config) {
+	t.Helper()
+	rt, err := runtime.NewRuntime(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := requireBashTargetShell(rt); err != nil {
+		t.Skip(err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+	if err := rt.Create(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	homeResult, err := rt.Exec(t.Context(), `printf '%s' "$CODEX_HOME"`, runtime.ExecOptions{})
+	if err != nil || homeResult.ExitCode != 0 || homeResult.Stdout == "" {
+		t.Fatalf("get Codex home: %+v, %v", homeResult, err)
+	}
+	home := homeResult.Stdout
+	sessions := filepath.Join(home, "sessions", "2026", "01", "01")
+	if err := os.MkdirAll(sessions, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sessionPath := filepath.Join(sessions, "rollout-test-thread.jsonl")
+	const sessionData = "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"test answer\"}]}}\n"
+	if err := os.WriteFile(sessionPath, []byte(sessionData), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	found := findCodexSessionPath(t.Context(), rt, "test-thread")
+	if found == "" {
+		t.Fatal("session collector did not find the isolated session")
+	}
+	artifactPath := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := rt.DownloadFile(t.Context(), found, artifactPath); err != nil {
+		t.Fatal(err)
+	}
+	parsed := parseCodexSessionFile(artifactPath)
+	if parsed.err != nil || parsed.finalMsg != "test answer" {
+		t.Fatalf("collected session: %q, %v", parsed.finalMsg, parsed.err)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
+		t.Fatalf("isolated session survived runtime cleanup: %v", err)
 	}
 }

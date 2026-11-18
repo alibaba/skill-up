@@ -462,9 +462,14 @@ environment:
   isolate_home: true
 ```
 
-每个 case、基线分组和重试使用不同的临时主目录，位于 workspace 旁。
-runtime 将 `HOME`、`USERPROFILE`、`CODEX_HOME`、`CLAUDE_CONFIG_DIR`、XDG 目录和
-Windows 应用数据目录指向此处，覆盖 setup、续轮和 judge 的执行。
+每个 case、基线分组和重试使用不同的临时主目录，case workspace 位于其
+`workspace/` 子目录。`HOME`、`USERPROFILE` 和 `CODEX_HOME` 指向临时根目录，
+因此 Codex 的 `auth.json` 和 `sessions/` 不会进入 workspace 产物和 diff。
+会话收集器仍从 `$CODEX_HOME/sessions` 读取记录。显式指定的 `--workspace`
+保持原位，并使用单独的临时主目录。
+
+`CLAUDE_CONFIG_DIR`、XDG 目录和 Windows 应用数据目录也位于临时主目录下，
+这些设置覆盖 setup、续轮和 judge 的执行。
 单次命令的环境变量不能覆盖这些目录；`BASH_ENV` 和 `ENV` 启动文件被禁用。
 可执行文件搜索路径及其他环境变量仍然保留。
 
@@ -474,8 +479,8 @@ Windows 应用数据目录指向此处，覆盖 setup、续轮和 judge 的执�
 不复制个人登录文件或系统钥匙串登录；凭据缺失或 run/judge 引擎不受支持时，
 会在 setup 或 agent 执行前报错。
 
-case runtime 关闭时删除临时主目录，使用外部 `--workspace` 时也一样。
-`--no-delete` 会保留主目录，setup 日志会显示路径；其中可能保存 Codex API key，
+case runtime 关闭时删除整个临时目录树。显式指定 `--workspace` 时只删除临时
+主目录，保留 workspace。`--no-delete` 会保留临时目录树，setup 日志会显示路径；其中可能保存 Codex API key，
 应按敏感文件处理。此选项隔离常规用户配置和状态，并非文件系统安全边界：
 workspace 指令、系统配置及其他继承的环境变量仍然可用。
 进程隔离请使用容器；Docker 和 OpenSandbox 不支持此选项。

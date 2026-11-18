@@ -61,22 +61,33 @@ func (r *NoneRuntime) MergeEnv(env map[string]string) {
 
 // Create selects an existing external workspace or allocates a temporary one.
 func (r *NoneRuntime) Create(ctx context.Context) error {
-	if err := r.createWorkspace(); err != nil {
-		return err
+	if !r.cfg.IsolateHome {
+		return r.createWorkspace()
 	}
-	if r.cfg.IsolateHome {
-		dir, err := os.MkdirTemp(filepath.Dir(r.workspace), "skill-up-home-*")
-		if err != nil {
-			return fmt.Errorf("create isolated home: %w", err)
+	if r.cfg.WorkspaceDir != "" {
+		if err := r.createWorkspace(); err != nil {
+			return err
 		}
-		r.isolatedHome = dir
-		for _, name := range []string{".codex", ".claude", ".config", ".cache", ".local/share", ".local/state", "AppData/Roaming", "AppData/Local"} {
-			if err := os.MkdirAll(filepath.Join(dir, name), 0o700); err != nil {
-				return fmt.Errorf("create isolated config directory: %w", err)
-			}
-		}
-		logging.InfoContextf(ctx, "isolated agent home: %s", dir)
 	}
+	dir, err := os.MkdirTemp("", "skill-up-home-*")
+	if err != nil {
+		return fmt.Errorf("create isolated home: %w", err)
+	}
+	r.isolatedHome = dir
+	for _, name := range []string{".claude", ".config", ".cache", ".local/share", ".local/state", "AppData/Roaming", "AppData/Local"} {
+		if err := os.MkdirAll(filepath.Join(dir, name), 0o700); err != nil {
+			return fmt.Errorf("create isolated config directory: %w", err)
+		}
+	}
+	if r.cfg.WorkspaceDir == "" {
+		workspace := filepath.Join(dir, "workspace")
+		if err := os.Mkdir(workspace, noneDirMode); err != nil {
+			return fmt.Errorf("create isolated workspace: %w", err)
+		}
+		r.workspace = workspace
+		r.ownsWorkspaceDir = true
+	}
+	logging.InfoContextf(ctx, "isolated agent home: %s", dir)
 	return nil
 }
 

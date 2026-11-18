@@ -513,10 +513,15 @@ environment:
   isolate_home: true
 ```
 
-The temporary home lives beside the workspace. The runtime redirects `HOME`,
-`USERPROFILE`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, XDG directories and Windows
-application-data directories there, including for setup steps, resumed turns
-and judges. Environment overrides cannot redirect those paths back to a personal
+The runtime creates a temporary home and uses its `workspace/` subdirectory as
+the case workspace. `HOME`, `USERPROFILE` and `CODEX_HOME` point to the temporary
+root, so Codex's `auth.json` and `sessions/` stay outside workspace artifacts and
+diffs. The session collector still reads transcripts from `$CODEX_HOME/sessions`.
+An explicit `--workspace` stays in place and gets a separate temporary home.
+
+`CLAUDE_CONFIG_DIR`, XDG directories and Windows application-data directories
+also live under the temporary home. These settings apply to setup steps, resumed
+turns and judges. Environment overrides cannot redirect those paths back to a personal
 home. Non-interactive shell startup files (`BASH_ENV` and `ENV`) are disabled.
 The existing executable search path and other environment variables are retained.
 
@@ -527,8 +532,9 @@ API-key login through stdin inside the temporary home before each invocation.
 Personal login files and OS-keychain logins are not copied. Missing credentials
 and unsupported run or judge engines fail before setup or agent execution.
 
-The home is deleted when the case runtime closes, even with an externally owned
-`--workspace`. `--no-delete` preserves it; its location is logged during setup.
+The whole temporary tree is deleted when the case runtime closes. With an explicit
+`--workspace`, only the temporary home is deleted; the workspace is preserved.
+`--no-delete` preserves the tree; its location is logged during setup.
 Treat a preserved home as sensitive because Codex may store the supplied key there.
 This isolates conventional user configuration and state, not filesystem access:
 workspace instructions, system-wide configuration and other inherited environment

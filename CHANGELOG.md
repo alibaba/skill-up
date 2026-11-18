@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add opt-in `environment.isolate_home` for local Claude Code and Codex runs
+  with explicit API credentials. Each case uses a separate temporary home for
+  user settings, skills and session state, with its workspace in a `workspace/`
+  subdirectory. An explicit `--workspace` stays in place with a separate home.
+  Unsupported engines and personal-login-only configurations fail before setup.
+  `--no-delete` preserves the temporary tree.
+
 ### Fixed
 
 - Use prompt-file delivery for resumed Claude Code and Qoder turns when the
@@ -26,10 +35,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.16.0] - 2026-11-17
 
 ### Added
-- Add opt-in `environment.isolate_home` for local Claude Code and Codex runs
-  with explicit API credentials. Each case uses a separate temporary home for
-  user settings, skills and session state; unsupported engines and personal-login-only
-  configurations fail before setup. `--no-delete` preserves the temporary home.
 
 - Mocked MCP fixtures accept a `tools` map that defines each tool in one
   place: a required `response`, plus an optional `description` and
