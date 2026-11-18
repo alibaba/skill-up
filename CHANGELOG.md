@@ -12,11 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `environment.agent_home: temporary` for local Claude Code and Codex runs
   with explicit API credentials. Each case uses a separate temporary home for
   user settings, skills and session state. The default `inherited` mode keeps
-  inherited home settings. Both modes put automatically created workspaces at
-  `$TMPDIR/skill-up-*/workspace/`. An explicit `--workspace` stays in place,
-  with a separate home in `temporary` mode.
+  inherited home settings. An explicit `--workspace` stays in place, with a
+  separate home in `temporary` mode.
   Unsupported engines and personal-login-only configurations fail before setup.
   `--no-delete` preserves the temporary tree.
+
+### Changed
+
+- Put automatically created local workspaces at `$TMPDIR/skill-up-*/workspace/`
+  in both agent home modes. The workspace's parent is now a run directory,
+  instead of the system temporary directory. Runtime cleanup removes that
+  whole run directory; explicit `--workspace` paths remain unchanged.
 
 ### Fixed
 

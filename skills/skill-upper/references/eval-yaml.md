@@ -9,6 +9,7 @@ schema_version: v1alpha1
 
 environment:
   type: none                      # none | opensandbox | docker
+  agent_home: inherited           # inherited (default) | temporary
 
 mcp:
   servers:
@@ -83,6 +84,15 @@ report:
 | `none` | Text I/O without a required sandbox | Fastest startup |
 | `opensandbox` | Remote sandbox for files and commands | `OPENSANDBOX_API_KEY`; service settings in `environment.kwargs` or `OPENSANDBOX_BASE_URL` |
 | `docker` | Local container isolation | Docker CLI and daemon; pull the image beforehand |
+
+For `none`, `environment.agent_home: temporary` gives each case, benchmark arm
+and retry a separate home. It requires Claude Code or Codex and explicit API
+credentials for the run and any agent judges. The default `inherited` mode keeps
+inherited home settings. Both modes use `$TMPDIR/skill-up-*/workspace/` for an
+automatic workspace. An explicit `--workspace` stays in place; temporary mode
+gives it a separate home. `--no-delete` retains the temporary tree, which can
+contain credentials. See the [local agent home guide](https://alibaba.github.io/skill-up/guide/writing-evals.html#local-agent-home)
+for credential requirements and cleanup behavior.
 
 ### OpenSandbox example
 

@@ -123,11 +123,11 @@ func (r *NoneRuntime) OwnsWorkspace() bool { return r.ownsWorkspaceDir }
 // Close removes the temporary run directory when cleanup is enabled.
 // An explicit workspace is outside that directory and remains untouched.
 func (r *NoneRuntime) Close() error {
-	if !r.cfg.Delete {
-		logging.Debugf("NoneRuntime.Close: skipping cleanup, run directory preserved at %s", r.runDir)
+	if r.runDir == "" {
 		return nil
 	}
-	if r.runDir == "" {
+	if !r.cfg.Delete {
+		logging.Debugf("NoneRuntime.Close: skipping cleanup, run directory preserved at %s", r.runDir)
 		return nil
 	}
 	return os.RemoveAll(r.runDir)
