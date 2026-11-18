@@ -333,6 +333,9 @@ type CaseConfig struct {
 	// validation keys off it so the check is correct for any case subset (e.g.
 	// the filtered set `skill-up run` executes), not only the full suite.
 	SourceFile string `json:"-" yaml:"-"`
+
+	// judgeHasFields distinguishes an empty block from explicitly configured zero values.
+	judgeHasFields bool
 }
 
 // Input describes the agent input (prompt or turns).

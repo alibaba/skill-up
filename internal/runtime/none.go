@@ -52,8 +52,10 @@ type NoneRuntime struct {
 
 // MergeEnv layers entries into the runtime's persistent env baseline. See
 // Runtime.MergeEnv for the contract (callers MUST sequence MergeEnv before
-// any concurrent Exec; the intended use is a one-time setup step).
+// any concurrent Exec; the intended use is a one-time setup step). On a
+// Windows host a later call also replaces other spellings of the same name.
 func (r *NoneRuntime) MergeEnv(env map[string]string) {
+	dropEnvKeySpellings(r.cfg.Env, env, platform.Host().Target.GOOS)
 	mergeIntoEnvBaseline(&r.cfg.Env, env)
 }
 
@@ -290,7 +292,7 @@ func (r *NoneRuntime) Exec(ctx context.Context, command string, opts ExecOptions
 		attribute.String("process.cwd", cmd.Dir),
 	)
 
-	env := mergeEnv(r.cfg.Env, opts.Env)
+	env := mergeEnv(os.Environ(), r.cfg.Env, opts.Env, shell.Target.GOOS)
 	// The shell descriptor may need its own env tweaks (MSYS_NO_PATHCONV on
 	// Windows-bash, ...) — append them once here so the same "use bash →
 	// disable MSYS argv rewrite" decision lives in a single place.

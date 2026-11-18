@@ -517,6 +517,38 @@ func TestMarkdownReporter_Write(t *testing.T) {
 	}
 }
 
+func TestMarkdownReporter_BenchmarkSummary(t *testing.T) {
+	const withSkill, withoutSkill = "with_skill", "without_skill"
+	input := sampleInput()
+	input.StartTime, input.EndTime = time.Time{}, time.Time{}
+	for i := range input.CaseResults {
+		input.CaseResults[i].Configuration = withSkill
+		input.CaseResults[i].DurationMs = 1000
+	}
+	for _, primary := range input.CaseResults {
+		baseline := primary
+		baseline.Configuration = withoutSkill
+		baseline.Status = judge.StatusPass
+		input.CaseResults = append(input.CaseResults, baseline)
+	}
+	path := filepath.Join(t.TempDir(), "report.md")
+	if err := (&MarkdownReporter{OutputPath: path}).Write(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"| Total Cases | 4 |", "| Passed | 1 |", "| Failed | 1 |", "| Errors | 1 |", "| Skipped | 1 |", "| Pass Rate | 25.0% |", "| Evaluation Wall Time | 8.0s |", withoutSkill} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("report missing %q", want)
+		}
+	}
+	if len(input.CaseResults) != 8 {
+		t.Fatal("report discarded baseline results")
+	}
+}
+
 func TestMarkdownReporter_EscapesTableCells(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "report.md")

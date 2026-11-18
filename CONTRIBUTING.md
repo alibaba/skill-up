@@ -33,7 +33,20 @@ We welcome bug reports, feature requests, documentation improvements, and code c
 
 ### Sign-off / CLA
 
-This project does not currently require a CLA or DCO sign-off. By submitting a Pull Request, you agree to license your contribution under the project's [Apache-2.0 License](LICENSE).
+This repository uses [CLA Assistant](https://cla-assistant.io/alibaba/skill-up)
+to check whether contributors have signed the applicable Contributor License
+Agreement (CLA). Before contributing, review the agreement linked there. When
+you open a Pull Request, follow the CLAassistant bot's instructions to complete
+any required signing steps and check the `license/cla` status on your PR.
+
+If you are contributing work on behalf of your employer, or your employer may
+own rights to the contribution, confirm that you have the necessary authorization
+before submitting the contribution or signing an agreement. If you are unsure
+which agreement applies, ask the maintainers before proceeding.
+
+The CLA is separate from the project's [Apache-2.0 License](LICENSE). A DCO
+`Signed-off-by` commit trailer is not currently required and does not replace
+the CLA process.
 
 ### Reporting security issues
 
