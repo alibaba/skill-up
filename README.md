@@ -357,6 +357,9 @@ skill-up init --config foo.yaml          # reads foo.yaml, writes it to ~/.confi
 skill-up init --config foo.yaml --local  # reads foo.yaml, writes it to $PWD/.skill-up.yaml
 ```
 
+Files written with `--local` require explicit selection. Review the file, then
+use `--config ./.skill-up.yaml` on commands that should apply its defaults.
+
 With `--config <path>`, `init` reads that file (validating it as a skill-up
 config) and writes its raw bytes to the target — comments and formatting are
 preserved. Without `--config`, `init` writes a commented YAML template.

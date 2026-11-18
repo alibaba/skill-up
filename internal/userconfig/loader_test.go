@@ -392,7 +392,7 @@ func TestLoadEffective_CorruptUserLayerDowngradedToWarning(t *testing.T) {
 	}
 }
 
-func TestLoadEffective_CorruptProjectLayerDowngradedToWarning(t *testing.T) {
+func TestLoadEffective_IgnoresProjectBeforeParsing(t *testing.T) {
 	tmp := t.TempDir()
 	writeFile(t, filepath.Join(tmp, ".skill-up.yaml"), "telemetry: : :\n")
 
@@ -403,7 +403,7 @@ func TestLoadEffective_CorruptProjectLayerDowngradedToWarning(t *testing.T) {
 		Env:        emptyEnv,
 		Warnings:   &warnings,
 	}); err != nil {
-		t.Fatalf("expected corrupt project layer to be a warning, got error: %v", err)
+		t.Fatalf("unselected project contents must not be parsed: %v", err)
 	}
 	if !strings.Contains(warnings.String(), "warning: ignoring project config") {
 		t.Errorf("expected project-config warning, got %q", warnings.String())

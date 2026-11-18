@@ -98,6 +98,10 @@ loading. Review the file and add `--config ./.skill-up.yaml` to each invocation,
 or move trusted defaults to the user-level config. Inspect destinations as well
 as credential references before opting in: an explicit file can combine its
 endpoint with credentials from user config or the shell.
+Trust applies to the selected path, not a saved copy of its contents. Review
+changes before reusing that path after a repository update. For stable local
+defaults, copy a reviewed file to user config with
+`skill-up init --config ./.skill-up.yaml` or keep it outside the repository.
 
 This boundary covers user-config discovery. `skill-up run` treats evaluation
 configuration as executable input, whether supplied as a path or discovered
