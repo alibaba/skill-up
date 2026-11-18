@@ -206,9 +206,15 @@ before evaluations. Findings print one warning per item:
   (`<references/my guide.md>`, `assets/diagram\(1\).png`), and a local link
   is checked by its destination, not its link text; an inline code span is
   read literally (`assets/icon@2x.png`, or `references/my guide.md` when that
-  file exists); prose citations may use letters of any script
-  (`references/指南.md`). A space ends a path in prose, so cite a file name
-  with spaces through a link destination or an inline code span
+  file exists), less a trailing `#anchor`; prose citations may use letters of
+  any script (`references/指南.md`). A space ends a path in prose, so cite a
+  file name with spaces through a link destination or an inline code span.
+  An inline code span that does not name an existing file is read as a
+  command line, and only its first word, the script, is checked
+  (`scripts/build.sh --output assets/out.png` checks `scripts/build.sh`
+  alone). Arguments and further commands in the span are not citations, since
+  they often name files the command creates; cite a file a command reads in
+  its own code span or link
 
 Pass `--uncited` to also report files under those directories that are not
 reachable from the body. Truncating the tail of a SKILL.md silently orphans
@@ -220,7 +226,8 @@ cited even when SKILL.md never names it directly. Dotfiles (`.DS_Store`,
 cited as a link destination (e.g. `[docs](references/)`) covers everything
 beneath it. The report is opt-in because reachability is a heuristic: a file
 a script loads through a computed path (`$(dirname "$0")/lib.sh`, a Python
-import) is reported even though the skill works.
+import), or one SKILL.md names only as a command argument, is reported even
+though the skill works.
 
 A directory passed via `--skill` that has no SKILL.md is itself a finding.
 Pass `--strict` to promote warnings to failures (exit 1), including the

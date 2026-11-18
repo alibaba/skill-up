@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -345,6 +346,70 @@ func TestValidateCommandSkillFlagStrictAcceptsAtSignFileName(t *testing.T) {
 	}
 	if !strings.Contains(output, "skill content check passed") {
 		t.Fatalf("validate output = %q, want success message", output)
+	}
+}
+
+func TestValidateCommandSkillFlagStrictCodeSpanCitations(t *testing.T) {
+	// Regression (#281 review, 2026-11-18): --strict failed two valid skills.
+	// The file `scripts/build.sh --output assets/generated.png` writes was
+	// reported as a missing attachment, and `references/my guide.md#setup`
+	// was cut to a missing "references/my". A direct citation of a file that
+	// really is missing must still fail.
+	for _, tc := range []struct {
+		name    string
+		body    string
+		files   map[string]string
+		missing string // the citation reported as missing; empty means the check passes
+	}{
+		{
+			name:  "command that writes an output file",
+			body:  "Run `scripts/build.sh --output assets/generated.png` to render the chart.",
+			files: map[string]string{"scripts/build.sh": "#!/bin/sh\n"},
+		},
+		{
+			name:  "anchored file name with a space",
+			body:  "See `references/my guide.md#setup` before you start.",
+			files: map[string]string{"references/my guide.md": "# Guide\n\n## Setup\n"},
+		},
+		{
+			name:    "missing direct citation",
+			body:    "Read `references/missing.md` first.",
+			missing: "references/missing.md",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var logBuf bytes.Buffer
+			restore := logging.SetOutputForTest(&logBuf)
+			defer restore()
+
+			files := map[string]string{"SKILL.md": "---\nname: code-spans\ndescription: Skill citing attachments in inline code.\n---\n\n" + tc.body + "\n"}
+			maps.Copy(files, tc.files)
+			cmd := &cobra.Command{}
+			cmd.Flags().String("skill", writeSkillTree(t, files), "")
+			cmd.Flags().Bool("strict", true, "")
+			cmd.SetContext(context.Background())
+
+			output, err := captureStdout(t, func() error {
+				return validateCmd.RunE(cmd, nil)
+			})
+			if tc.missing != "" {
+				if err == nil || !strings.Contains(err.Error(), "skill integrity") {
+					t.Fatalf("validate error = %v, want skill integrity failure", err)
+				}
+				for _, want := range []string{tc.missing, "does not exist on disk"} {
+					if !strings.Contains(logBuf.String(), want) {
+						t.Errorf("validate warnings missing %q:\n%s", want, logBuf.String())
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("validate RunE returned error: %v\n%s", err, logBuf.String())
+			}
+			if !strings.Contains(output, "skill content check passed") {
+				t.Fatalf("validate output = %q, want success message", output)
+			}
+		})
 	}
 }
 

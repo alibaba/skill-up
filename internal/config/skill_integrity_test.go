@@ -725,6 +725,49 @@ Read [the guide](references/my guide (v2).md).
 	}
 }
 
+func TestCheckSkillIntegrityCodeSpanCommandsAndAnchors(t *testing.T) {
+	t.Parallel()
+
+	// Regression (#281 review, 2026-11-18): two valid citations failed
+	// --strict. The file `scripts/build.sh --output assets/generated.png`
+	// writes was reported as a missing attachment, and
+	// `references/my guide.md#setup` was cut at the space and reported as a
+	// missing "references/my". A span that names an existing file once its
+	// anchor is dropped cites that file; any other span is a command line
+	// that cites only its script.
+	dir := t.TempDir()
+	writeSkillFiles(t, dir, map[string]string{
+		"SKILL.md": `---
+name: code-span-commands
+description: Skill citing a command that writes a file and an anchored file name with a space.
+---
+
+Run ` + "`scripts/build.sh --output assets/generated.png`" + ` to render the chart, then
+read ` + "`references/my guide.md#setup`" + `.
+`,
+		"scripts/build.sh":       "#!/bin/sh\n",
+		"references/my guide.md": "# Guide\n\n## Setup\n",
+	})
+	if got := allSkillWarnings(dir); len(got) != 0 {
+		t.Fatalf("allSkillWarnings() = %v, want no warnings", got)
+	}
+
+	// A direct citation of a file that really is missing is still reported.
+	writeSkillFiles(t, dir, map[string]string{
+		"SKILL.md": `---
+name: code-span-commands
+description: Skill citing a reference file that does not exist.
+---
+
+Read ` + "`references/missing.md`" + ` first.
+`,
+	})
+	got := CheckSkillIntegrity(dir)
+	if len(got) != 1 || !strings.Contains(got[0], `references "references/missing.md" but it does not exist on disk`) {
+		t.Fatalf("CheckSkillIntegrity() = %v, want exactly one missing-reference warning for references/missing.md", got)
+	}
+}
+
 type extractRefsCase struct {
 	name   string
 	body   string
@@ -1105,9 +1148,10 @@ func TestExtractSkillRefsFileNameProse(t *testing.T) {
 // TestExtractSkillRefsFileNameCodeSpans covers file names in inline code.
 // CommonMark keeps code span content literal (0.31.2 §6.1: no backslash
 // escapes or entity references, line endings become spaces), so a span names
-// a file verbatim. onDisk lists the files that exist: whitespace in a span is
-// part of a file name only when that file exists, because a span can also be
-// a command line.
+// a file verbatim, less a trailing #anchor. onDisk lists the files that
+// exist: whitespace in a span is part of a file name only when that file
+// exists, because a span can also be a command line (see
+// TestExtractSkillRefsCodeSpanCommands).
 func TestExtractSkillRefsFileNameCodeSpans(t *testing.T) {
 	t.Parallel()
 
@@ -1158,16 +1202,71 @@ func TestExtractSkillRefsFileNameCodeSpans(t *testing.T) {
 			want:   []string{"references/guide.md"},
 		},
 		{
-			name:   "shell punctuation is not part of the file name",
-			body:   "Run `scripts/setup.sh; scripts/run.sh`.",
-			onDisk: []string{"scripts/setup.sh", "scripts/run.sh"},
-			want:   []string{"scripts/setup.sh", "scripts/run.sh"},
+			name: "an anchor is not part of a missing file's name",
+			body: "See `references/guide.md#setup`.",
+			want: []string{"references/guide.md"},
+		},
+		{
+			// Regression (#281 review, 2026-11-18): the span was cut at the
+			// space and reported as a missing "references/my".
+			name:   "an anchor after a file name with spaces",
+			body:   "See `references/my guide.md#setup`.",
+			onDisk: []string{"references/my guide.md"},
+			want:   []string{"references/my guide.md"},
+		},
+		{
+			name:   "a # that is part of an existing file name is kept",
+			body:   "Read `references/C# notes.md`.",
+			onDisk: []string{"references/C# notes.md"},
+			want:   []string{"references/C# notes.md"},
 		},
 		{
 			name:   "a bare attachment directory is not a citation",
 			body:   "Put documents in `references/`.",
 			onDisk: []string{"references"},
 			want:   nil,
+		},
+	})
+}
+
+// TestExtractSkillRefsCodeSpanCommands covers inline code that is a command
+// line rather than a file name. It cites only its first word, the script:
+// arguments often name a file the command writes, and later commands in the
+// span are not read, so a file a command reads must be cited on its own.
+func TestExtractSkillRefsCodeSpanCommands(t *testing.T) {
+	t.Parallel()
+
+	runExtractRefsCases(t, []extractRefsCase{
+		{
+			name:   "a command line cites its script",
+			body:   "Run `scripts/run.sh --verbose` to execute.",
+			onDisk: []string{"scripts/run.sh"},
+			want:   []string{"scripts/run.sh"},
+		},
+		{
+			// Regression (#281 review, 2026-11-18): the file the command
+			// writes was reported as a missing attachment.
+			name:   "an output file a command creates is not a citation",
+			body:   "Run `scripts/build.sh --output assets/generated.png`.",
+			onDisk: []string{"scripts/build.sh"},
+			want:   []string{"scripts/build.sh"},
+		},
+		{
+			name:   "command arguments are not citations, even of existing files",
+			body:   "Run `scripts/build.sh --config=assets/config.json references/notes.md`.",
+			onDisk: []string{"scripts/build.sh", "assets/config.json", "references/notes.md"},
+			want:   []string{"scripts/build.sh"},
+		},
+		{
+			name: "a missing script is cited without its arguments",
+			body: "Run `scripts/missing.sh --output assets/generated.png`.",
+			want: []string{"scripts/missing.sh"},
+		},
+		{
+			name:   "only the first command is read and shell punctuation ends its script",
+			body:   "Run `scripts/setup.sh; scripts/run.sh`.",
+			onDisk: []string{"scripts/setup.sh", "scripts/run.sh"},
+			want:   []string{"scripts/setup.sh"},
 		},
 	})
 }

@@ -176,8 +176,12 @@ run 在 `skills.include`/`skills.exclude` 过滤后实际安装的内容，也�
   完整保留：链接目标按 CommonMark 的渲染规则解析（`<references/my guide.md>`、
   `assets/diagram\(1\).png`），本地链接只按链接目标检查，不检查链接文字；行内
   代码按字面读取（`assets/icon@2x.png`；`references/my guide.md` 在该文件存在时
-  整体视为文件名）；正文行文中的路径也可以包含中文等非 ASCII 文字（`references/指南.md`）。
-  正文行文中遇到空格即视为路径结束，文件名含空格时请用链接目标或行内代码引用
+  整体视为文件名），末尾的 `#锚点` 不计入文件名；正文行文中的路径也可以包含中文等
+  非 ASCII 文字（`references/指南.md`）。正文行文中遇到空格即视为路径结束，文件名
+  含空格时请用链接目标或行内代码引用。不能对应到已存在文件的行内代码按命令行处理，
+  只检查第一个词，即脚本本身（`scripts/build.sh --output assets/out.png` 只检查
+  `scripts/build.sh`）。命令参数和同一段行内代码里的后续命令都不算引用，因为它们
+  常常是命令要生成的文件；命令要读取的附件，请单独用行内代码或链接引用
 
 传入 `--uncited` 时，还会报出这些目录下存在、但从正文出发不可达的文件。
 SKILL.md 尾部被截断时，丢失段落引用过的附件会悄无声息地变成孤立文件，这项
@@ -186,8 +190,8 @@ SKILL.md 尾部被截断时，丢失段落引用过的附件会悄无声息地�
 SKILL.md 从未直接点名。点文件（`.DS_Store`、`.gitkeep`、点目录）属于本地
 元数据，不参与检查；以链接目标形式引用目录（如 `[docs](references/)`）即视为
 覆盖其下所有文件。这项报告需要显式开启，因为可达性是启发式的：脚本通过计算
-得到的路径加载的文件（`$(dirname "$0")/lib.sh`、Python import），即使 skill
-能正常工作也会被报出。
+得到的路径加载的文件（`$(dirname "$0")/lib.sh`、Python import），以及 SKILL.md
+只作为命令参数提到的文件，即使 skill 能正常工作也会被报出。
 
 通过 `--skill` 传入的目录若没有 SKILL.md，本身即为一条告警。
 传入 `--strict` 可将 warning 提升为失败（退出码 1），同时传入 `--uncited` 时

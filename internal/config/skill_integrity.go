@@ -524,31 +524,38 @@ func extractSkillRefs(body []byte, exists func(string) bool) []string {
 }
 
 // collectCodeSpanRefs collects the attachment paths an inline code span
-// cites. A span whose first token is an attachment path cites it
-// (`references/install.md`); a span that merely contains a path inside a
-// command (`cat scripts/x.sh`) is an example and cites nothing.
+// cites. A span whose first word is an attachment path cites a path
+// (`references/install.md`, `scripts/run.sh --verbose`); a span that merely
+// contains a path inside a command (`cat scripts/x.sh`) is an example and
+// cites nothing.
 //
 // CommonMark keeps code span content literal — no backslash escapes, entity
 // references, or percent-decoding — so the span names a file verbatim,
 // whatever characters it contains (`assets/icon@2x.png`,
 // `references/指南.md`). Whitespace is ambiguous, though: it may be part of a
 // file name (`references/my guide.md`) or separate a command from its
-// arguments (`scripts/run.sh --verbose`). So the whole span, and then each
-// whitespace-separated token, is cited verbatim when it names an existing
-// path; anything else is read like prose, which keeps a missing citation
-// reportable and drops what cannot end a path (`scripts/run.sh;`,
-// `references/guide.md#setup`).
+// arguments (`scripts/run.sh --verbose`). So the whole span, as written or
+// less a trailing #anchor (`references/my guide.md#setup`), is cited when it
+// names an existing path. Anything else is a command line, and only its first
+// word — the script — is cited, read like prose so a missing script stays
+// reportable and what cannot end a path is dropped (`scripts/run.sh;`).
+// Arguments are not citations, since they often name a file the command
+// writes (`--output assets/generated.png`), and later commands in the span
+// are not read: a file a command reads must be cited on its own.
 func collectCodeSpanRefs(content string, exists func(string) bool, add func(string)) {
 	if !citesRefPath(content) {
 		return
 	}
-	if citeExistingPath(strings.TrimSpace(content), exists, add) {
+	whole := strings.TrimSpace(content)
+	if citeExistingPath(whole, exists, add) {
 		return
 	}
-	for token := range strings.FieldsSeq(content) {
-		if !citeExistingPath(token, exists, add) {
-			collectProseRefs([]byte(token), add)
-		}
+	if name, _, anchored := strings.Cut(whole, "#"); anchored && citeExistingPath(name, exists, add) {
+		return
+	}
+	script := strings.Fields(whole)[0]
+	if !citeExistingPath(script, exists, add) {
+		collectProseRefs([]byte(script), add)
 	}
 }
 
