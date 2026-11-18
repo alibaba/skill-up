@@ -88,7 +88,7 @@ report:
 For `none`, `environment.agent_home: temporary` gives each case, benchmark arm
 and retry a separate home. It requires Claude Code or Codex and explicit API
 credentials for the run and any agent judges. The default `inherited` mode keeps
-inherited home settings. Both modes use `$TMPDIR/skill-up-*/workspace/` for an
+inherited home settings. Both modes use `<system temp>/skill-up-*/workspace/` for an
 automatic workspace. An explicit `--workspace` stays in place; temporary mode
 gives it a separate home. `--no-delete` retains the temporary tree, which can
 contain credentials. See the [local agent home guide](https://alibaba.github.io/skill-up/guide/writing-evals.html#local-agent-home)

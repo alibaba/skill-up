@@ -454,8 +454,9 @@ mcp:
 
 #### 本地 agent 主目录
 
-自动创建的本地 workspace 统一位于 `$TMPDIR/skill-up-*/workspace/`，其父目录为
-临时运行目录。`environment.agent_home` 决定如何处理 agent 主目录设置：
+自动创建的本地 workspace 统一位于系统临时目录下，路径为
+`<system temp>/skill-up-*/workspace/`，其父目录为临时运行目录。
+`environment.agent_home` 决定如何处理 agent 主目录设置：
 
 - `inherited`（默认）：保留继承的主目录设置。
 - `temporary`：使用临时运行目录作为独立主目录，每个 case、基线分组和重试各自创建。
@@ -477,7 +478,8 @@ environment:
 `CLAUDE_CONFIG_DIR`、XDG 目录和 Windows 应用数据目录也位于临时主目录下，
 这些设置覆盖 setup、续轮和 judge 的执行。
 单次命令的环境变量不能覆盖这些目录；`BASH_ENV` 和 `ENV` 启动文件被禁用。
-可执行文件搜索路径及其他环境变量仍然保留。
+可执行文件搜索路径及其他环境变量仍然保留。setup 步骤不能依赖该主目录中的个人 Git
+或包管理器配置；请通过 setup 命令或 `environment.env` 显式提供所需设置。
 
 首版要求显式 API 凭据：Claude Code 使用 `ANTHROPIC_API_KEY` 或
 `ANTHROPIC_AUTH_TOKEN`，Codex 使用 `OPENAI_API_KEY`，也可通过 skill-up 的常规

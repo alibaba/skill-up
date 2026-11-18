@@ -504,9 +504,9 @@ Rules and constraints:
 
 #### Local agent home
 
-Every automatically created local workspace uses `$TMPDIR/skill-up-*/workspace/`,
-with a temporary run directory as its parent. `environment.agent_home` selects
-how agent home settings are handled:
+Automatic local workspaces use `<system temp>/skill-up-*/workspace/`, with a
+temporary run directory as their parent. `environment.agent_home` selects how
+agent home settings are handled:
 
 - `inherited` (default): keep the inherited home settings.
 - `temporary`: use the run directory as a separate home for each case, benchmark
@@ -531,6 +531,8 @@ also live under the temporary home. These settings apply to setup steps, resumed
 turns and judges. Environment overrides cannot redirect those paths back to a personal
 home. Non-interactive shell startup files (`BASH_ENV` and `ENV`) are disabled.
 The existing executable search path and other environment variables are retained.
+Setup steps cannot rely on personal Git or package-manager configuration in this
+home; supply required settings through setup commands or `environment.env`.
 
 This initial mode requires explicit API credentials: `ANTHROPIC_API_KEY` or
 `ANTHROPIC_AUTH_TOKEN` for Claude Code, and `OPENAI_API_KEY` for Codex. The normal
