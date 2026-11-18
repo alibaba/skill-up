@@ -8,13 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Mocked MCP fixtures accept a `tools` map that defines each tool in one
-  place: a required `response`, plus an optional `description` and
-  `input_schema` advertised in `tools/list`, so Agents see the same tool
-  metadata as against the real server. A tool that leaves the metadata out
-  keeps the placeholder description and open object schema; the schema is
-  advertised only, not enforced on calls. Existing `tool_responses` fixtures
-  keep working unchanged and may sit beside `tools` for other tool names.
+
 - `skill-up validate --skill <dir>` lints the content integrity of a single
   skill as authored on disk: SKILL.md must open with a closed YAML frontmatter
   block declaring non-empty `name` and `description` fields, and every
@@ -35,12 +29,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   filtering.
 
 ### Fixed
+
+- Use prompt-file delivery for resumed Claude Code and Qoder turns when the
+  prompt exceeds the inline limit or the target is Windows, preserving prompt
+  delivery metadata and failing before execution if the file cannot be uploaded.
+- Match environment variable names case-insensitively in the `none` runtime on
+  native Windows. A host `Path` and a configured or probed `PATH` were both
+  passed to the child, and which one it kept followed map order. Per-call
+  values now always override the runtime configuration, which overrides the
+  process environment, whatever case each one uses. Unix hosts keep
+  case-sensitive names.
+- Count primary cases consistently in Markdown and CLI summaries for benchmark
+  runs, without counting baseline rows as extra cases or discarding their details.
+- Reject malformed `--include-case-name` and `--exclude-case-name` glob patterns
+  before loading cases, including in auto mode, instead of silently ignoring them.
+
+## [0.16.0] - 2026-11-17
+
+### Added
+
+- Mocked MCP fixtures accept a `tools` map that defines each tool in one
+  place: a required `response`, plus an optional `description` and
+  `input_schema` advertised in `tools/list`, so Agents see the same tool
+  metadata as against the real server. A tool that leaves the metadata out
+  keeps the placeholder description and open object schema; the schema is
+  advertised only, not enforced on calls. Existing `tool_responses` fixtures
+  keep working unchanged and may sit beside `tools` for other tool names.
+
+- Remove the qodercli project directory a run creates under
+  `~/.qoder/projects` (or `~/.qoder-cn/projects` for the CN edition) when
+  session cleanup is requested. The directory is removed only when every
+  transcript in it records this workspace, so the shared-directory and
+  unproven-ownership safeguards apply to qodercli exactly as they do to Claude
+  Code.
+
+### Fixed
+- Correct the contribution guide to describe the existing CLA Assistant process
+  and employer-authorization considerations.
+- Place Codex's `--output-last-message` before `resume` so resumed turns work
+  with the default Codex 0.80.0 CLI. Custom providers now accept
+  `engine.kwargs.wire_api: responses` for newer Codex versions that removed
+  Chat Completions support. The default remains `chat` for 0.80.0 compatibility;
+  selecting `responses` requires a Responses-capable endpoint.
+- Check eval-level and case-level mocked MCP fixtures during `validate`, including
+  missing files, YAML errors and invalid tool definitions, without starting servers.
+- Warn when a non-empty case-level `judge` has no `type` and its fields are
+  ignored in favor of the eval judge. `validate` and `run` preserve the
+  existing fallback behavior; omitted, empty and null blocks inherit without
+  a warning. Explicitly typed overrides and validation against an eval-level
+  `judges` list are unchanged.
+- Stop writing mocked MCP servers into the user's global Codex config. The
+  `codex` engine now defines each mocked server on the `codex exec` command,
+  including resumed turns, with `-c mcp_servers.<name>...` overrides, instead
+  of running `codex mcp add`, which replaced a same-named server of the user's
+  and left the mock in `~/.codex/config.toml` after the run. The mock's script
+  is written to a temporary file per run. A run fails early when that config
+  already has a server with the mocked server's name, when the config cannot
+  be listed, or when the name is not a valid Codex config key. Real MCP servers
+  are still installed with `codex mcp add`.
+- Reject `report.formats` values other than `json`, `junit` and `html` during
+  configuration validation. An unknown value used to pass validation and then be
+  silently skipped by the runner, which still printed that the reports were
+  saved, so a typo produced no report at all. The runner now also returns an
+  error if an unsupported format reaches it without going through validation.
 - Stop reporting a successful Claude Code answer as a provider rate-limit or
   authentication failure when its text mentions phrases such as "rate limit" or
   "authentication error". Answer text is scanned for these failures only when
   the run exits non-zero or the text is an error report; stderr, Claude Code
   `API Error:` output, JSON result events flagged `is_error`, and API errors
   recorded in the session are still detected.
+- Preserve OpenSandbox stdout/stderr line boundaries when joining execution
+  output messages. Multi-line commands such as artifact listing now split
+  correctly, while messages that already carry a trailing newline are not
+  double-spaced.
 - Remove the Claude Code project directory a run creates under
   `~/.claude/projects` when `environment.cleanup_sessions: true` or
   `--cleanup-sessions` asks for it and the workspace is deleted, so eval
@@ -51,6 +112,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fields rather than string-matched, and directories whose ownership is unclear
   are kept. An agent without support for cleanup is reported instead of
   silently skipped.
+- Run judges when `post_condition.on_fail: skip_remaining` fails on the final conversation turn, including single-turn conversations.
+- Install a Skill under the `name` declared in its `SKILL.md` frontmatter
+  instead of its source folder's name, so the Agent lists and invokes it by its
+  own name when the folder is named differently (for example a snapshot copy).
+  A Skill without a usable declared name keeps the folder name. The agent judge
+  prompt and reports name each judge Skill the same way. Two `skills` or
+  `judge.skills` entries that would be installed into the same directory are
+  now rejected instead of being merged.
+
+### Changed
+- Update the OpenAI Go SDK to 3.97.0 and pflag to 1.1.0.
+
+### Upgrade notes and known limitations
+- **Session cleanup is opt-in:** Claude Code and Qoder session directories are
+  removed only when cleanup is requested and ownership can be established.
+  `--no-delete` retains the workspace and session data.
+- **Validation:** invalid report formats and mocked MCP fixture definitions now
+  fail early. Non-empty case `judge` blocks without a `type` still inherit the
+  eval judge, but now warn when their fields are ignored.
+- **Skill names:** installation now uses the `SKILL.md` frontmatter name when
+  available. Correct duplicate declared names that would share an installation
+  directory before upgrading.
+- **Codex wire API:** the default remains `chat` for Codex 0.80.0. For newer
+  CLIs that removed Chat Completions, explicitly select
+  `engine.kwargs.wire_api: responses` and use a Responses-capable endpoint.
+- **GitHub Action availability:** this CLI release does not update the official
+  Action's pinned runner image, which still bundles skill-up `0.7.0`. Its
+  `skill-up-version` input does not override the preinstalled binary. Using these
+  CLI features in the Action requires a separately updated or custom image.
 
 ## [0.15.0] - 2026-11-09
 
@@ -902,7 +992,8 @@ The `v0.5.0` release tag is available at
   project and delivers the end-to-end capability to declare eval environments,
   run cases and emit structured reports as described in [README.md](README.md).
 
-[Unreleased]: https://github.com/alibaba/skill-up/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/alibaba/skill-up/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/alibaba/skill-up/releases/tag/v0.16.0
 [0.15.0]: https://github.com/alibaba/skill-up/releases/tag/v0.15.0
 [0.14.0]: https://github.com/alibaba/skill-up/releases/tag/v0.14.0
 [0.13.0]: https://github.com/alibaba/skill-up/releases/tag/v0.13.0

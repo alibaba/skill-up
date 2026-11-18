@@ -127,6 +127,10 @@ report:
   artifacts: [transcript]
 ```
 
+`report.formats` only accepts `json`, `junit` and `html`; any other value is a
+configuration error, because the runner would otherwise skip the unknown format
+and still report that the reports were saved.
+
 `skills[].include` and `skills[].exclude` use
 [doublestar](https://github.com/bmatcuk/doublestar) syntax (`*` matches one
 path segment and `**` crosses directories). Patterns are relative to
@@ -135,6 +139,16 @@ path segment and `**` crosses directories). Patterns are relative to
 The evaluation harness directory `evals/` is always excluded. If an include
 list is provided, include `SKILL.md` explicitly so the installed directory
 remains a valid Skill. The same fields are supported by `judge.skills`.
+
+By default a Skill is installed into the Agent's skills directory under the
+`name` declared in its `SKILL.md` frontmatter. The Agent then sees it under
+the name its own text uses, even when the source folder is named differently
+(for example a snapshot copy). The declared name is used when it has only
+ASCII letters, digits, `-` and `_`, starts with a letter or digit, is at most
+64 characters, and is not a Windows device name such as `CON`; otherwise the
+source folder's name is used. Two entries without a `target` that would be
+installed into the same directory are rejected: rename one Skill or give it an
+explicit `target`. `judge.skills` follows the same rules.
 
 `cases.parallelism` is the file-level default. To override it for a single run, use `skill-up run --parallelism N` without modifying `eval.yaml`. Allowed range: **1 to 256**.
 
@@ -172,6 +186,46 @@ to an adapter and are now explicitly ignored with migration warnings. Use
 | `bypass_sandbox` | `qodercli` | No-op — no equivalent flag | No-op |
 | `bypass_sandbox` | `qwen_code` | No-op — `qwen_code` never imposes its own sandbox (`--yolo` only auto-approves tool calls; it does **not** isolate). Like `claude_code`/`qodercli`, isolation is the runtime's job | No-op |
 | `edition` | `qodercli` | Set to `cn` to use Qoder CLI CN (`qodercn`); switches the installer, credential env, user config/session root, MCP command, and run/resume command together | `global` (Qoder CLI from qoder.com) |
+
+For custom Codex providers (including `openai` with a custom `base_url`),
+`engine.kwargs.wire_api` selects `chat` or `responses`. The default is `chat`
+for the pinned Codex 0.80.0. Newer Codex versions, including 0.169.0, removed
+Chat Completions support: set `wire_api: responses` and use a backend that
+implements the Responses API. This option does not translate a Chat-only
+endpoint into a Responses endpoint. With the built-in OpenAI provider and no
+custom URL, Codex's own protocol configuration is left unchanged.
+
+```yaml
+engine:
+  name: codex
+  version: "0.169.0"
+  kwargs:
+    wire_api: responses
+```
+
+The required CI matrix runs real Codex 0.169.0 (`responses`) and 0.80.0
+(`chat` and `responses`) against a local SSE provider. It checks the exact CLI
+version and verifies that the second request contains the first user message,
+the first assistant reply, and the second user message in order. The 0.80.0
+jobs temporarily restore the original option ordering, require this same test
+to fail on turn two with the parser error, then restore the fix and require a pass.
+
+To reproduce with a preinstalled CLI:
+
+```bash
+SKILL_UP_CODEX_COMPAT_E2E=1 SKILL_UP_CODEX_EXPECTED_VERSION=0.80.0 \
+  SKILL_UP_CODEX_WIRE_API=chat \
+  go test -race -tags e2e -count=1 -v -run '^TestCodexCLICompatibility$' ./e2e
+```
+
+The manual **Model E2E** workflow's `codex` suite separately runs real
+DashScope two-turn recall with 0.169.0 (`responses`) and 0.80.0 (`chat`).
+It requires `DASHSCOPE_API_KEY`; a local fixture pass does not establish
+live-provider compatibility. Responses access also depends on the endpoint,
+model, and the API key's workspace binding. Workflow inputs `codex_base_url`
+and `codex_model` can select the appropriate workspace endpoint and model.
+The default engine remains 0.80.0
+with `chat` to preserve existing Chat-only configurations.
 
 Codex also accepts byte limits for its JSONL artifacts:
 
@@ -305,7 +359,7 @@ See `docs/design/custom-engine.md` for the full SessionInput / SessionResult sch
 
 ### MCP configuration
 
-MCP supports `mode: real` and `mode: mocked`. `real` installs a real MCP server into Agents such as `claude_code`, `qodercli`, `codex`, or `qwen_code`; `mocked` makes `internal/mcp` generate a local stdio mock server that is then installed into the Agent like any other MCP server.
+MCP supports `mode: real` and `mode: mocked`. `real` installs a real MCP server into Agents such as `claude_code`, `qodercli`, `codex`, or `qwen_code`; `mocked` makes `internal/mcp` generate a local stdio mock server that is then installed into the Agent like any other MCP server. For `codex`, a mocked server is instead defined on each `codex exec` command with `-c mcp_servers.<name>...` overrides, so nothing is written to the user's Codex config (`~/.codex/config.toml`). Its script is written to a temporary file for each run. A run fails early if that config already has a server with the same name, or if the mocked server's name is not usable as a Codex config key (letters, digits, `-` and `_`).
 
 HTTP MCP servers can be declared inline or pulled in via `config_ref`:
 
@@ -450,9 +504,9 @@ Rules and constraints:
 
 #### Session cleanup
 
-An evaluation deletes its workspace, but an agent CLI may keep per-workspace state outside it. Claude Code writes a project directory under `~/.claude/projects/<workspace-key>/` with the session transcript and a `memory/` folder, so repeated runs add up in the user's own session history.
+An evaluation deletes its workspace, but an agent CLI may keep per-workspace state outside it. Claude Code writes a project directory under `~/.claude/projects/<workspace-key>/` with the session transcript and a `memory/` folder, and qodercli writes `~/.qoder/projects/<workspace-key>/` (or `~/.qoder-cn/` for the CN edition) with the transcript, sub-agent transcripts under `<sessionID>/subagents/`, and `*-session.json` metadata, so repeated runs add up in the user's own session history.
 
-`environment.cleanup_sessions: true` (or `--cleanup-sessions`) removes that directory together with the workspace. It is off by default because it deletes user-visible history, and only `claude_code` implements it today:
+`environment.cleanup_sessions: true` (or `--cleanup-sessions`) removes that directory together with the workspace. It is off by default because it deletes user-visible history, and `claude_code` and `qodercli` implement it today:
 
 ```yaml
 environment:
@@ -462,7 +516,7 @@ environment:
 
 An explicit `--cleanup-sessions=false` overrides `cleanup_sessions: true`; only an unset flag falls back to the config.
 
-`--no-delete` wins: the workspace and the sessions are both preserved, and the run reports that cleanup was skipped. Cleanup also does not run for an externally owned workspace (`--workspace`), when the runtime keeps the workspace, or when ownership cannot be proven. Ownership is parsed from each transcript's recorded working directory, not searched for as a string, so a path inside a tool argument never counts; a directory is removed only when every transcript in it records this workspace, and it is kept when the transcripts disagree, do not parse, or record nothing. Two workspaces whose paths differ only in punctuation share one project directory, so it is left untouched. For an agent that does not implement cleanup, the run reports that it is unsupported.
+`--no-delete` wins: the workspace and the sessions are both preserved, and the run reports that cleanup was skipped. Cleanup also does not run for an externally owned workspace (`--workspace`), when the runtime keeps the workspace, or when ownership cannot be proven. Ownership is parsed from each transcript's recorded working directory, not searched for as a string, so a path inside a tool argument never counts; a directory is removed only when every transcript in it records this workspace, and it is kept when the transcripts disagree, do not parse, or record nothing. Two workspaces whose paths differ only in punctuation share one project directory, so it is left untouched. For an agent that does not implement cleanup the run reports that it is unsupported; `qwen_code` falls in that group because its chat files record no working directory, so ownership cannot be proven.
 
 #### Branching setup by experiment group
 
@@ -1098,6 +1152,12 @@ judge engine; an explicit legacy `model` selects the legacy mode. If neither is
 set, the eval's engine/model selection is inherited. `judges` lists retain their
 existing full-list replacement semantics; members do not inherit a singular
 judge's defaults.
+
+When the eval uses a singular `judge`, an omitted, empty or null case-level
+`judge` inherits it. A non-empty case-level block without `type` also inherits
+the eval judge, ignoring every field in the case block; `validate` and `run`
+warn about this. Set `type` explicitly to apply a case override. When the eval
+uses a `judges` list, a case-level `judge` without `type` remains an error.
 
 The judge continues to use the case runtime; there is no `judge.environment`.
 An independent judge's CLI is installed and checked in Docker/OpenSandbox during

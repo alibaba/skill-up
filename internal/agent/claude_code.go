@@ -417,6 +417,14 @@ func buildClaudeResumeCmd(sessionID, model, instruction string) string {
 	return cmd
 }
 
+func buildClaudeResumeStdinCmd(sessionID, model, promptPath string) string {
+	cmd := "cat " + shellQuote(promptPath) + " | claude --settings " + shellQuote(`{"disableAllHooks":true}`) + " --resume " + sessionID + " -p --permission-mode=bypassPermissions"
+	if model != "" {
+		cmd += " --model " + shellQuote(model)
+	}
+	return cmd
+}
+
 type claudePrintJSONResult struct {
 	Type      string `json:"type"`
 	Subtype   string `json:"subtype"`
@@ -562,11 +570,25 @@ func (a *ClaudeCodeAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOpti
 			Artifacts:  &SessionArtifacts{},
 		}, err
 	}
-	cmd := buildClaudeResumeCmd(sessionID, a.appliedModelName(ctx), instruction)
+	cmd, promptDelivery, err := deliverPrompt(ctx, rt, opts, instruction, promptCommandBuilder{
+		Inline: func(prompt string) string {
+			return buildClaudeResumeCmd(sessionID, a.appliedModelName(ctx), prompt)
+		},
+		StdinFile: func(path string) string {
+			return buildClaudeResumeStdinCmd(sessionID, a.appliedModelName(ctx), path)
+		},
+	})
+	if err != nil {
+		return &SessionResult{
+			Engine: a.Name(), SessionID: sessionID, ExitCode: 1,
+			DurationMs: time.Since(start).Milliseconds(), Artifacts: &SessionArtifacts{},
+		}, err
+	}
 
 	result, err := rt.Exec(ctx, cmd, opts)
 	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result)
 	if sessionResult != nil {
+		sessionResult.PromptDelivery = promptDelivery
 		sessionResult.SessionID = sessionID
 	}
 	return a.handleClaudeRunResult(sessionResult, result, err, sessionID, start)

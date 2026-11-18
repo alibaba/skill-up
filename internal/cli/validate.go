@@ -10,6 +10,7 @@ import (
 
 	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/logging"
+	"github.com/alibaba/skill-up/internal/mcp"
 )
 
 var validateCmd = &cobra.Command{
@@ -51,11 +52,27 @@ var validateCmd = &cobra.Command{
 		if err := config.ResolveCustomEngineConfig(result.Eval); err != nil {
 			return fmt.Errorf("validation failed: %w", err)
 		}
+		if err := validateMockedFixtures(loader.SkillDir(), result); err != nil {
+			return fmt.Errorf("validation failed: %w", err)
+		}
 
 		fmt.Printf("✓ eval.yaml is valid (loaded %d case(s))\n", len(result.Cases)) //nolint:forbidigo
 
 		return nil
 	},
+}
+
+func validateMockedFixtures(skillDir string, result *config.EvalResult) error {
+	provisioner := mcp.Provisioner{SkillDir: skillDir}
+	if err := provisioner.ValidateMockedFixtures(result.Eval.MCP); err != nil {
+		return fmt.Errorf("eval: %w", err)
+	}
+	for _, c := range result.Cases {
+		if err := provisioner.ValidateMockedFixtures(c.MCP); err != nil {
+			return fmt.Errorf("case %s: %w", c.ID, err)
+		}
+	}
+	return nil
 }
 
 // runSkillContentCheck lints the skill rooted at skillDir: SKILL.md

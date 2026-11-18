@@ -111,13 +111,29 @@ type RuntimeInspector interface {
 
 // SessionDirCleaner is implemented by agents that keep per-workspace state
 // outside the workspace itself — Claude Code writes a project directory under
-// $HOME/.claude/projects for every workspace it runs in. Deleting the workspace
-// leaves that directory behind, which is what this removes.
+// $HOME/.claude/projects and qodercli under $HOME/.qoder/projects for every
+// workspace they run in. Deleting the workspace leaves that directory behind,
+// which is what this removes.
 //
 // The evaluator calls it only when the workspace is deleted, so --no-delete
 // keeps both.
 type SessionDirCleaner interface {
 	CleanupSessionDir(ctx context.Context, rt Runtime) error
+}
+
+// RuntimeReleaser is implemented by agents that keep in-process state for a
+// runtime between InstallMCP and Run. The evaluator calls it once a case is
+// done with its runtime, before closing it, whether or not the case succeeded.
+type RuntimeReleaser interface {
+	ReleaseRuntime(rt Runtime)
+}
+
+// ReleaseRuntime lets ag drop any state it keeps for rt. Agents without such
+// state are left alone.
+func ReleaseRuntime(ag Agent, rt Runtime) {
+	if releaser, ok := ag.(RuntimeReleaser); ok {
+		releaser.ReleaseRuntime(rt)
+	}
 }
 
 // Preflight checks executable availability and then collects optional static
@@ -217,6 +233,8 @@ var (
 	_ SessionResumer = (*QoderCLIAgent)(nil)
 	_ SessionResumer = (*CodexAgent)(nil)
 	_ SessionResumer = (*OpenCodeAgent)(nil)
+
+	_ RuntimeReleaser = (*CodexAgent)(nil)
 )
 
 // BaseAgent provides common functionality for agents.
@@ -327,7 +345,7 @@ func (a *BaseAgent) credentialEnvVars(apiKeyEnv, baseURLEnv string) map[string]s
 func (a *BaseAgent) installSkillDefault(ctx context.Context, rt Runtime, skillCfg runtime.SkillConfig) error {
 	target := skillCfg.Target
 	if target == "" && a.Cfg.SkillPath != "" {
-		target = filepath.Join(a.Cfg.SkillPath, filepath.Base(skillCfg.Source))
+		target = filepath.Join(a.Cfg.SkillPath, skillCfg.DirName())
 	}
 	return installSkill(ctx, rt, skillCfg.Source, target, skillCfg.Include, skillCfg.Exclude)
 }

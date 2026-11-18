@@ -36,7 +36,7 @@ skill-up run [path] [flags]
 | `--baseline`           | From config                   | Override `benchmark.enabled` to `true` for this run                                                                                                         |
 | `--api-key`            | —                             | Pass an API key (higher precedence than env vars)                                                                                                          |
 | `--no-delete`          | `false`                       | Preserve workspaces or containers created by skill-up after evaluation for debugging.                                                                      |
-| `--cleanup-sessions`   | `false`                       | Also delete the agent's session directory for the workspace after evaluation. Only `claude_code` is supported today: it removes its `~/.claude/projects/<workspace-key>/` entry, sessions and memory included. Off by default because it deletes history that today survives an evaluation; an explicit `--cleanup-sessions=false` overrides `environment.cleanup_sessions: true`, and `--no-delete` takes precedence over both. |
+| `--cleanup-sessions`   | `false`                       | Also delete the agent's session directory for the workspace after evaluation. `claude_code` and `qodercli` implement it today: they remove `~/.claude/projects/<workspace-key>/` and `~/.qoder/projects/<workspace-key>/` (or `~/.qoder-cn/projects/<workspace-key>/` for the CN edition), sessions and memory included. Off by default because it deletes history that today survives an evaluation; an explicit `--cleanup-sessions=false` overrides `environment.cleanup_sessions: true`, and `--no-delete` takes precedence over both. |
 | `--event-log`          | —                             | Write an ordered v1 JSONL evaluation event stream to a local file. The parent directory must already exist                                                  |
 | `--event-attribute`    | —                             | Attach a namespaced `key=value` string attribute to every event (repeatable; requires `--event-log`)                                                        |
 | `-v, --verbose`        | `0`                           | Increase log verbosity. Default `info`; `-v` / `--verbose` / `--verbose=true` → `debug`; `-vv` / `--verbose=2` → `trace`; `--verbose=false` disables extra detail |
@@ -152,6 +152,11 @@ Validate the eval config files. Run this before `run` to catch issues early.
 Unlike `run` (which validates only the selected cases), `validate` always
 checks the **whole** suite — the eval config and every referenced case file —
 ignoring any case-name filters.
+
+It also loads every mocked MCP fixture declared by the eval or its cases and
+applies the same fixture checks as `run`. Missing files, invalid YAML and invalid
+tool definitions fail validation before any server starts. Real-server credentials
+and connectivity are not checked.
 
 ```bash
 skill-up validate [path to eval.yaml]

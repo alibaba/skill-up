@@ -391,7 +391,20 @@ func (a *QoderCLIAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOption
 	start := time.Now()
 
 	instruction := message.Content
-	cmd := buildQoderResumeCmdForBinary(a.profile.binary, instruction, a.appliedModelName(ctx), sessionID)
+	cmd, promptDelivery, err := deliverPrompt(ctx, rt, opts, instruction, promptCommandBuilder{
+		Inline: func(prompt string) string {
+			return buildQoderResumeCmdForBinary(a.profile.binary, prompt, a.appliedModelName(ctx), sessionID)
+		},
+		StdinFile: func(path string) string {
+			return "cat " + shellQuote(path) + " | " + buildQoderResumeCmdForBinary(a.profile.binary, "-", a.appliedModelName(ctx), sessionID)
+		},
+	})
+	if err != nil {
+		return &SessionResult{
+			Engine: a.Name(), SessionID: sessionID, ExitCode: 1,
+			DurationMs: time.Since(start).Milliseconds(), Artifacts: &SessionArtifacts{},
+		}, err
+	}
 
 	envVars := a.qoderRunEnvVars()
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))
@@ -402,6 +415,7 @@ func (a *QoderCLIAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOption
 	resultErr := qoderResultError(result.Stdout, result.Stderr, a.appliedModelName(ctx))
 	if sessionResult != nil {
 		sessionResult.SessionID = sessionID
+		sessionResult.PromptDelivery = promptDelivery
 	}
 	if err != nil {
 		if sessionResult == nil {
@@ -443,12 +457,29 @@ func (a *QoderCLIAgent) findSessionFile(ctx context.Context, rt Runtime) string 
 	return findQoderSessionFileInConfigDir(ctx, rt, a.profile.configDir)
 }
 
-func findQoderSessionFileInConfigDir(ctx context.Context, rt Runtime, configDir string) string {
-	return findAgentSessionJSONL(ctx, rt, agentSessionLookup{
+// qoderSessionLookup describes where qodercli keeps its per-workspace session
+// directories. The lookup and the post-run cleanup share it so they cannot
+// disagree about which directory belongs to this run; the projects root differs
+// between the global and CN editions.
+func qoderSessionLookup(configDir string) agentSessionLookup {
+	return agentSessionLookup{
 		projectsRootTmpl: "$home/" + configDir + "/projects",
 		sessionDepth:     1,
 		findExtra:        `! -name "*-session.json"`,
-	})
+	}
+}
+
+func findQoderSessionFileInConfigDir(ctx context.Context, rt Runtime, configDir string) string {
+	return findAgentSessionJSONL(ctx, rt, qoderSessionLookup(configDir))
+}
+
+// CleanupSessionDir removes the project directory qodercli created for this
+// workspace. Without it, every run deposits a transcript into the user's own
+// session history even though the workspace itself is deleted. The directory
+// also holds the sub-agent transcripts under <sessionID>/subagents/ and the
+// <sessionID>-session.json metadata; both belong to this run and go with it.
+func (a *QoderCLIAgent) CleanupSessionDir(ctx context.Context, rt Runtime) error {
+	return removeAgentSessionDir(ctx, rt, qoderSessionLookup(a.profile.configDir))
 }
 
 // Install installs the selected Qoder CLI edition via its official install script.

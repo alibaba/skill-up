@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"path"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/alibaba/skill-up/internal/agentkind"
 	"github.com/alibaba/skill-up/internal/customengine"
+	"github.com/alibaba/skill-up/internal/logging"
 )
 
 // Judge type constants.
@@ -89,6 +91,8 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 
 	// engine.model.provider and engine.model.name are optional.
 	// When omitted, the engine uses its local default model configuration.
+
+	errs = append(errs, validateReportFormats(cfg.Report.Formats)...)
 
 	// cases.files is required and must have at least one file
 	if len(cfg.Cases.Files) == 0 {
@@ -442,6 +446,26 @@ func validateSkillPatterns(field string, patterns []string) []string {
 	return errs
 }
 
+// validateReportFormats rejects report.formats values that both the runner and
+// the offline report command would otherwise ignore. An unknown value used to
+// pass validation and then produce no report at all, so a typo looked like a
+// successful run.
+func validateReportFormats(formats []string) []string {
+	var errs []string
+	for i, format := range formats {
+		if strings.TrimSpace(format) == "" {
+			errs = append(errs, fmt.Sprintf("report.formats[%d] must not be empty", i))
+			continue
+		}
+		switch format {
+		case "json", "junit", "html":
+		default:
+			errs = append(errs, fmt.Sprintf("report.formats[%d] must be one of json, junit, html (got %q)", i, format))
+		}
+	}
+	return errs
+}
+
 // validateCollectArtifacts checks that every collect_artifacts entry is a
 // non-empty, valid doublestar glob. field is the YAML path used in error
 // messages (e.g. "cases.defaults.collect_artifacts").
@@ -597,6 +621,7 @@ func (v *Validator) ValidateCasesWithEvalDefaults(eval *EvalConfig, cases []*Cas
 			continue
 		}
 		effectiveJudge := mergeJudgeConfigForValidation(eval.Judge, c.Judge)
+		warnIgnoredCaseJudge(c)
 		if errs := validateJudgeTypeAndRequiredFields(effectiveJudge); len(errs) > 0 {
 			return fmt.Errorf("case %s: validation errors:\n  - %s", c.ID, strings.Join(errs, "\n  - "))
 		}
@@ -606,6 +631,12 @@ func (v *Validator) ValidateCasesWithEvalDefaults(eval *EvalConfig, cases []*Cas
 		}
 	}
 	return nil
+}
+
+func warnIgnoredCaseJudge(c *CaseConfig) {
+	if c.Judge.Type == "" && (c.judgeHasFields || !reflect.ValueOf(c.Judge).IsZero()) {
+		logging.Warnf("case %s: judge.type is missing; case judge fields are ignored and the eval judge is used. Set judge.type to apply a case override", c.ID)
+	}
 }
 
 func validateJudgeTurnRules(members []JudgeConfig, turnsTotal int) []string {

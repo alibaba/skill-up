@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -22,32 +23,75 @@ const (
 	ClaudeFileMode = 0o600
 )
 
-// mergeEnv returns the host env (os.Environ) with persistentEnv and callEnv
+// mergeEnv returns hostEnv (os.Environ form) with persistentEnv and callEnv
 // overlaid, in that order (callEnv wins). Values are forwarded LITERALLY: no
 // $VAR / ${VAR} expansion. This matches the docker and opensandbox runtimes,
 // which also pass env literally — callers that need shell expansion should
 // either resolve the value first or prepend `export X=...` to the command.
-func mergeEnv(persistentEnv, callEnv map[string]string) []string {
-	envMap := envMapFromList(os.Environ())
-	maps.Copy(envMap, persistentEnv)
-	maps.Copy(envMap, callEnv)
-
-	env := make([]string, 0, len(envMap))
-	for k, v := range envMap {
-		env = append(env, k+"="+v)
-	}
-	return env
-}
-
-func envMapFromList(env []string) map[string]string {
-	envMap := make(map[string]string, len(env))
-	for _, item := range env {
-		key, value, ok := strings.Cut(item, "=")
-		if ok {
-			envMap[key] = value
+//
+// goos is the target the child runs on. Windows treats names that differ only
+// in case (Path, PATH) as one variable, so there a later layer replaces the
+// earlier entry and its spelling. Without that, both spellings reach os/exec,
+// which keeps the last one on Windows, so precedence would follow map
+// iteration order. When one layer itself holds several spellings, the one
+// sorting last wins. Entries are returned sorted.
+func mergeEnv(hostEnv []string, persistentEnv, callEnv map[string]string, goos string) []string {
+	keyName := envKeyName(goos)
+	entries := make(map[string]string, len(hostEnv))
+	for _, item := range hostEnv {
+		if key, value, ok := cutEnvEntry(item); ok {
+			entries[keyName(key)] = key + "=" + value
 		}
 	}
-	return envMap
+	for _, layer := range []map[string]string{persistentEnv, callEnv} {
+		for _, key := range slices.Sorted(maps.Keys(layer)) {
+			entries[keyName(key)] = key + "=" + layer[key]
+		}
+	}
+	return slices.Sorted(maps.Values(entries))
+}
+
+// envKeyName returns the mapping from a variable's spelling to the name the
+// goos target knows it by: upper-cased on Windows, the spelling itself
+// elsewhere.
+func envKeyName(goos string) func(string) string {
+	if goos == platform.GOOSWindows {
+		return strings.ToUpper
+	}
+	return func(key string) string { return key }
+}
+
+// cutEnvEntry splits a "KEY=value" entry. Windows stores per-drive working
+// directories as entries such as `=C:=C:\dir`, whose name starts with "=".
+func cutEnvEntry(item string) (key, value string, ok bool) {
+	key, value, ok = strings.Cut(item, "=")
+	if ok && key == "" {
+		if name, rest, found := strings.Cut(value, "="); found {
+			return "=" + name, rest, true
+		}
+	}
+	return key, value, ok
+}
+
+// dropEnvKeySpellings deletes from target every other spelling of a variable
+// that src is about to set on the goos target, so that merging src next
+// replaces the variable instead of adding a second spelling of it. Keys that
+// src spells identically stay: the merge overwrites them, and target and src
+// may be the same map.
+func dropEnvKeySpellings(target, src map[string]string, goos string) {
+	keyName := envKeyName(goos)
+	names := make(map[string]struct{}, len(src))
+	for key := range src {
+		names[keyName(key)] = struct{}{}
+	}
+	for key := range target {
+		if _, same := src[key]; same {
+			continue
+		}
+		if _, ok := names[keyName(key)]; ok {
+			delete(target, key)
+		}
+	}
 }
 
 func mergeEnvMaps(persistentEnv, callEnv map[string]string) map[string]string {
@@ -225,10 +269,23 @@ type MCPConfig struct {
 
 // SkillConfig identifies a skill source and its target install location.
 type SkillConfig struct {
-	Source  string
-	Target  string
+	Source string
+	Target string
+	// Name is the skill's declared name (SKILL.md frontmatter), when it is
+	// known and usable as a directory name.
+	Name    string
 	Include []string
 	Exclude []string
+}
+
+// DirName returns the directory a skill is installed under when Target is not
+// set: its declared Name, so the agent sees the skill under the name its own
+// text uses, or the source directory's basename when no name is known.
+func (c SkillConfig) DirName() string {
+	if c.Name != "" {
+		return c.Name
+	}
+	return filepath.Base(c.Source)
 }
 
 // NewRuntime creates a Runtime based on the config type.

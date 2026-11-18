@@ -101,6 +101,10 @@ type SkillRef struct {
 	Target  string   `yaml:"target,omitempty"`
 	Include []string `yaml:"include,omitempty"`
 	Exclude []string `yaml:"exclude,omitempty"`
+	// InstallName is the directory name the Skill is installed under when
+	// Target is empty, resolved by the evaluator from SKILL.md. It is not
+	// configurable.
+	InstallName string `yaml:"-" json:"-"`
 }
 
 // EngineConfig defines the Agent Engine configuration.
@@ -327,6 +331,9 @@ type CaseConfig struct {
 	// validation keys off it so the check is correct for any case subset (e.g.
 	// the filtered set `skill-up run` executes), not only the full suite.
 	SourceFile string `json:"-" yaml:"-"`
+
+	// judgeHasFields distinguishes an empty block from explicitly configured zero values.
+	judgeHasFields bool
 }
 
 // Input describes the agent input (prompt or turns).
