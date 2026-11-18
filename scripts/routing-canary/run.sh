@@ -15,7 +15,6 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 example="$root/examples/routing-canary"
-work="$(mktemp -d "${TMPDIR:-/tmp}/routing-canary.XXXXXX")"
 artifacts="${OUT:-out}"
 iterations="${ITERATIONS:-1}"
 model="${CANARY_MODEL:-}"
@@ -46,6 +45,10 @@ for engine in "${engines[@]}"; do
     exit 1
   fi
 done
+
+# Allocate the temporary workspace only once the arguments are known good: a
+# rejected engine name must not leave an empty directory behind.
+work="$(mktemp -d "${TMPDIR:-/tmp}/routing-canary.XXXXXX")"
 
 cleanup() {
   rm -rf "$work"

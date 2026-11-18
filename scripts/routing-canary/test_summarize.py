@@ -146,13 +146,16 @@ class EngineNameValidationTest(unittest.TestCase):
     patterns) would otherwise be able to select a directory outside `out/`.
     """
 
-    def run_script(self, *args: str, cwd: Path) -> subprocess.CompletedProcess:
+    def run_script(
+        self, *args: str, cwd: Path, env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess:
         return subprocess.run(
             ["bash", str(HERE / "run.sh"), *args],
             cwd=cwd,
             capture_output=True,
             text=True,
             timeout=120,
+            env=env,
         )
 
     def test_rejects_unknown_pattern_and_multiline_names(self) -> None:
@@ -161,38 +164,44 @@ class EngineNameValidationTest(unittest.TestCase):
             victim = cwd / "victim"
             victim.mkdir()
 
+            # Point mktemp at a directory of its own: a rejected name must not
+            # leave a temporary workspace behind either.
+            scratch = cwd / "tmp"
+            scratch.mkdir()
+            env = {**os.environ, "TMPDIR": str(scratch)}
+
             names = ["evil", "co*", "claude*", "../victim", "../victim\ncodex", ""]
             for name in names:
                 with self.subTest(name=name):
-                    result = self.run_script(name, cwd=cwd)
+                    result = self.run_script(name, cwd=cwd, env=env)
                     self.assertEqual(result.returncode, 1, result.stderr)
                     self.assertIn("unsupported engine", result.stderr)
                     self.assertIn("supported: claude_code codex opencode", result.stderr)
                     # Nothing ran: no build output, no artifacts, no deletion.
-                    self.assertEqual(sorted(p.name for p in cwd.iterdir()), ["victim"], result.stdout)
+                    self.assertEqual(sorted(p.name for p in cwd.iterdir()), ["tmp", "victim"], result.stdout)
+                    self.assertEqual(list(scratch.iterdir()), [], "a rejected name left a temp dir")
 
             self.assertTrue(victim.is_dir())
 
     def test_accepts_each_supported_name_syntax(self) -> None:
-        # Reaching the build step proves the name passed validation; the build
-        # itself is stubbed out so the test does not need Go.
-        with tempfile.TemporaryDirectory() as tmp:
-            cwd = Path(tmp)
-            fake_bin = cwd / "bin"
-            fake_bin.mkdir()
-            (fake_bin / "go").write_text("#!/bin/sh\nexit 1\n")
-            (fake_bin / "go").chmod(0o755)
+        # Reaching the build step proves the name passed validation. The build
+        # itself is stubbed out so the test does not need Go, and a failing
+        # stub stops the run before the fixture is copied.
+        for name in ("claude_code", "codex", "opencode"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                cwd = Path(tmp)
+                fake_bin = cwd / "bin"
+                fake_bin.mkdir()
+                (fake_bin / "go").write_text("#!/bin/sh\nexit 1\n")
+                (fake_bin / "go").chmod(0o755)
 
-            result = subprocess.run(
-                ["bash", str(HERE / "run.sh"), "claude_code"],
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=120,
-                env={**os.environ, "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}"},
-            )
-            self.assertNotIn("unsupported engine", result.stderr)
-            self.assertIn("building skill-up", result.stdout)
+                result = self.run_script(
+                    name,
+                    cwd=cwd,
+                    env={**os.environ, "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}"},
+                )
+                self.assertNotIn("unsupported engine", result.stderr)
+                self.assertIn("building skill-up", result.stdout)
 
 
 if __name__ == "__main__":
