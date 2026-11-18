@@ -18,6 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reject a `rule_based` matcher that is present but holds no values to match.
+  `output_contains: {all: []}`, `output_matches: {}`, `turn_response_contains`
+  without `contains_all`/`contains_any`, and `turn_response_not_contains`
+  without `not_contains` used to validate and then report a passing assertion
+  with zero checks, so a half-filled rule became a silent pass (the same class
+  of bug as the unknown-matcher check for #294). `validate` now names the
+  matcher and asks for at least one value, and rejects an entry that is the
+  empty string in any of them, since `""` is a substring of every response and
+  an empty pattern matches every response. Whitespace entries stay valid: they
+  are compared as written, so a matcher holding only a newline can assert a
+  single-line output.
 - Use prompt-file delivery for resumed Claude Code and Qoder turns when the
   prompt exceeds the inline limit or the target is Windows, preserving prompt
   delivery metadata and failing before execution if the file cannot be uploaded.

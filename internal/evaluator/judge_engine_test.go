@@ -18,6 +18,10 @@ import (
 )
 
 func TestIndependentJudgeEngineLifecycle(t *testing.T) {
+	// Provider-scoped env (ANTHROPIC_*) overrides the judge config, so keep host values out.
+	t.Setenv("ANTHROPIC_MODEL", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_BASE_URL", "")
 	for _, test := range []struct {
 		name, runtimeType    string
 		installErr, checkErr error
