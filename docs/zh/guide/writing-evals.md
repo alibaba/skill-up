@@ -465,7 +465,7 @@ environment:
 每个 case、基线分组和重试使用不同的临时主目录，case workspace 位于其
 `workspace/` 子目录。`HOME`、`USERPROFILE` 和 `CODEX_HOME` 指向临时根目录，
 因此 Codex 的 `auth.json` 和 `sessions/` 不会进入 workspace 产物和 diff。
-会话收集器仍从 `$CODEX_HOME/sessions` 读取记录。显式指定的 `--workspace`
+会话记录从 `$CODEX_HOME/sessions` 收集。显式指定的 `--workspace`
 保持原位，并使用单独的临时主目录。
 
 `CLAUDE_CONFIG_DIR`、XDG 目录和 Windows 应用数据目录也位于临时主目录下，

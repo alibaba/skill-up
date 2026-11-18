@@ -41,8 +41,8 @@ func (r *NoneRuntime) pathInWorkspaceOrAbs(p string) string {
 	return filepath.Join(r.workspace, c)
 }
 
-// NoneRuntime executes commands directly on the host with either an isolated
-// temporary workspace or an explicitly supplied, externally owned workspace.
+// NoneRuntime executes commands on the host with a temporary or caller-owned
+// workspace and an optional isolated agent home.
 type NoneRuntime struct {
 	cfg              Config
 	workspace        string
@@ -59,7 +59,7 @@ func (r *NoneRuntime) MergeEnv(env map[string]string) {
 	mergeIntoEnvBaseline(&r.cfg.Env, env)
 }
 
-// Create selects an existing external workspace or allocates a temporary one.
+// Create prepares the workspace and, when requested, an isolated agent home.
 func (r *NoneRuntime) Create(ctx context.Context) error {
 	if !r.cfg.IsolateHome {
 		return r.createWorkspace()
@@ -74,6 +74,7 @@ func (r *NoneRuntime) Create(ctx context.Context) error {
 		return fmt.Errorf("create isolated home: %w", err)
 	}
 	r.isolatedHome = dir
+	logging.InfoContextf(ctx, "isolated agent home: %s", dir)
 	for _, name := range []string{".claude", ".config", ".cache", ".local/share", ".local/state", "AppData/Roaming", "AppData/Local"} {
 		if err := os.MkdirAll(filepath.Join(dir, name), 0o700); err != nil {
 			return fmt.Errorf("create isolated config directory: %w", err)
@@ -87,7 +88,6 @@ func (r *NoneRuntime) Create(ctx context.Context) error {
 		r.workspace = workspace
 		r.ownsWorkspaceDir = true
 	}
-	logging.InfoContextf(ctx, "isolated agent home: %s", dir)
 	return nil
 }
 
@@ -123,7 +123,7 @@ func (r *NoneRuntime) createWorkspace() error {
 // through Config.WorkspaceDir belongs to the caller and is preserved.
 func (r *NoneRuntime) OwnsWorkspace() bool { return r.ownsWorkspaceDir }
 
-// Close removes the temporary workspace.
+// Close removes the owned workspace and agent home when cleanup is enabled.
 func (r *NoneRuntime) Close() error {
 	var homeErr error
 	if r.isolatedHome != "" && r.cfg.Delete {

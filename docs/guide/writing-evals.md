@@ -516,7 +516,7 @@ environment:
 The runtime creates a temporary home and uses its `workspace/` subdirectory as
 the case workspace. `HOME`, `USERPROFILE` and `CODEX_HOME` point to the temporary
 root, so Codex's `auth.json` and `sessions/` stay outside workspace artifacts and
-diffs. The session collector still reads transcripts from `$CODEX_HOME/sessions`.
+diffs. Session transcripts are collected from `$CODEX_HOME/sessions`.
 An explicit `--workspace` stays in place and gets a separate temporary home.
 
 `CLAUDE_CONFIG_DIR`, XDG directories and Windows application-data directories
