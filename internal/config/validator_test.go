@@ -129,6 +129,202 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			errMsg:  "judge.failure[0]: assertion has no recognizable matcher field",
 		},
 		{
+			name: "empty output_contains matcher is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{OutputContains: &OutputContainsRule{}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0].output_contains must include at least one of all, any, or not",
+		},
+		{
+			name: "empty output_matches lists are rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Failure: []Rule{{OutputMatches: &OutputMatchesRule{Any: []string{}}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.failure[0].output_matches must include at least one of all, any, or not",
+		},
+		{
+			name: "empty turn_response_contains matcher is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{TurnResponseContains: &TurnResponseContainsRule{Turn: 1}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0].turn_response_contains must include at least one of contains_all or contains_any",
+		},
+		{
+			name: "empty turn_response_not_contains matcher is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{TurnResponseNotContains: &TurnResponseNotContainsRule{Turn: 1}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0].turn_response_not_contains.not_contains must not be empty",
+		},
+		{
+			name: "blank output_contains entry is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{OutputContains: &OutputContainsRule{All: []string{""}}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0].output_contains.all[0] must not be empty",
+		},
+		{
+			name: "blank turn_response matcher entry is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{TurnResponseContains: &TurnResponseContainsRule{Turn: 1, ContainsAll: []string{"ok", ""}}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0].turn_response_contains.contains_all[1] must not be empty",
+		},
+		{
+			// Whitespace is a matcher: the runtime passes it to strings.Contains
+			// and regexp.MatchString as written, so ["\n"] asserts a single-line
+			// output and ["  "] rejects a double space.
+			name: "whitespace matchers are accepted",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{OutputContains: &OutputContainsRule{Not: []string{"\n"}}},
+						{OutputContains: &OutputContainsRule{All: []string{" ", "\t"}}},
+						{OutputMatches: &OutputMatchesRule{Not: []string{"  ", "\\s{3}"}}},
+						{TurnResponseContains: &TurnResponseContainsRule{Turn: 1, ContainsAny: []string{"\n"}}},
+						{TurnResponseNotContains: &TurnResponseNotContainsRule{Turn: 1, NotContains: []string{"  "}}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "matchers with values are accepted",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{OutputContains: &OutputContainsRule{Not: []string{"error"}}},
+						{OutputMatches: &OutputMatchesRule{Any: []string{"^ok$"}}},
+						{TurnResponseContains: &TurnResponseContainsRule{Turn: 1, ContainsAll: []string{"ok"}}},
+						{TurnResponseNotContains: &TurnResponseNotContainsRule{Turn: 1, NotContains: []string{"error"}}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name: "rules with supported matchers are accepted",
 			cfg: &EvalConfig{
 				SchemaVersion: "v1alpha1",
@@ -1038,6 +1234,19 @@ func TestValidator_ValidateCaseConfig(t *testing.T) {
 			},
 			wantErr: true,
 			errMsg:  "judge.failure[0]: assertion has no recognizable matcher field",
+		},
+		{
+			name: "empty output_contains matcher is rejected in a case judge",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{OutputContains: &OutputContainsRule{All: []string{}, Any: []string{}, Not: []string{}}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0].output_contains must include at least one of all, any, or not",
 		},
 		{
 			name: "turn-level matcher rules with valid turn references are accepted",
