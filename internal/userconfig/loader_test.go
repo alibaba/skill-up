@@ -167,29 +167,11 @@ func testProjectEndpointTrust(t *testing.T, source string) {
 	_ = os.Unsetenv("OTEL_EXPORTER_OTLP_HEADERS")
 	t.Setenv("OPENSANDBOX_API_KEY", "")
 	_ = os.Unsetenv("OPENSANDBOX_API_KEY")
-	home, wd := t.TempDir(), t.TempDir()
-	writeFile(t, filepath.Join(home, ".config", UserConfigDir, UserConfigFile), `telemetry:
-  traces:
-    endpoint: `+trusted+`
-env:
-  OTEL_EXPORTER_OTLP_HEADERS: authorization=${SKILL_UP_TEST_SECRET}
-  OPENSANDBOX_API_KEY: ${SKILL_UP_TEST_SECRET}
-runtime_kwargs:
-  opensandbox:
-    base_url: `+trusted+`
-`)
-	var project strings.Builder
-	project.WriteString("telemetry:\n  traces:\n    endpoint: " + untrusted + "\nenv:\n")
-	for key, value := range projectEnv {
-		project.WriteString("  " + key + ": " + value + "\n")
-	}
-	project.WriteString("runtime_kwargs:\n  opensandbox:\n    base_url: " + untrusted + "\n    request_timeout_seconds: 42\n")
-	path := filepath.Join(wd, ProjectConfigFile)
-	writeFile(t, path, project.String())
 	var warnings bytes.Buffer
-	opts := LoadOptions{HomeDir: home, WorkingDir: wd, Env: emptyEnv, Warnings: &warnings}
+	opts := writeEndpointTrustConfigs(t, trusted, untrusted, projectEnv)
+	opts.Warnings = &warnings
 	if explicit {
-		opts.ExplicitPath = path
+		opts.ExplicitPath = filepath.Join(opts.WorkingDir, ProjectConfigFile)
 	}
 	cfg, _, err := LoadEffective(opts)
 	if err != nil {
@@ -227,6 +209,29 @@ runtime_kwargs:
 	if got := warnings.Len() > 0; got == explicit {
 		t.Errorf("warning present = %t for %s config: %s", got, source, &warnings)
 	}
+}
+
+func writeEndpointTrustConfigs(t *testing.T, trusted, untrusted string, projectEnv map[string]string) LoadOptions {
+	t.Helper()
+	home, wd := t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(home, ".config", UserConfigDir, UserConfigFile), `telemetry:
+  traces:
+    endpoint: `+trusted+`
+env:
+  OTEL_EXPORTER_OTLP_HEADERS: authorization=${SKILL_UP_TEST_SECRET}
+  OPENSANDBOX_API_KEY: ${SKILL_UP_TEST_SECRET}
+runtime_kwargs:
+  opensandbox:
+    base_url: `+trusted+`
+`)
+	var project strings.Builder
+	project.WriteString("telemetry:\n  traces:\n    endpoint: " + untrusted + "\nenv:\n")
+	for key, value := range projectEnv {
+		project.WriteString("  " + key + ": " + value + "\n")
+	}
+	project.WriteString("runtime_kwargs:\n  opensandbox:\n    base_url: " + untrusted + "\n    request_timeout_seconds: 42\n")
+	writeFile(t, filepath.Join(wd, ProjectConfigFile), project.String())
+	return LoadOptions{HomeDir: home, WorkingDir: wd, Env: emptyEnv}
 }
 
 type envExpansionCase struct {
