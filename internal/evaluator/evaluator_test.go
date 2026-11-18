@@ -4361,7 +4361,7 @@ func TestIsolatedHomeRejectsUnsupportedJudgeBeforeSetup(t *testing.T) {
 	}
 	workspace := t.TempDir()
 	cfg := &config.EvalConfig{
-		Environment: config.Environment{Type: "none", IsolateHome: true, SetupSteps: []config.SetupStep{{Run: "touch setup-ran"}}},
+		Environment: config.Environment{Type: "none", AgentHome: "temporary", SetupSteps: []config.SetupStep{{Run: "touch setup-ran"}}},
 		Engine:      config.EngineConfig{Name: "claude_code"},
 		Judge:       config.JudgeConfig{Type: "agent_judge", Engine: &config.EngineConfig{Name: "qwen_code", Model: config.ModelConfig{Provider: "openai", Name: "test-model"}}},
 	}

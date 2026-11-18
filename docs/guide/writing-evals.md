@@ -502,22 +502,29 @@ Rules and constraints:
 
 > **Tip:** if your Skill does not touch the filesystem, `none` avoids sandbox provisioning and is significantly faster.
 
-#### Isolated local agent home
+#### Local agent home
 
-For API-key-authenticated Claude Code and Codex runs, opt into a separate home
-directory for each case, benchmark arm and retry:
+Every automatically created local workspace uses `$TMPDIR/skill-up-*/workspace/`,
+with a temporary run directory as its parent. `environment.agent_home` selects
+how agent home settings are handled:
+
+- `inherited` (default): keep the inherited home settings.
+- `temporary`: use the run directory as a separate home for each case, benchmark
+  arm and retry. This mode supports API-key-authenticated Claude Code and Codex runs.
+
+Both modes use the same workspace layout, so switching modes does not change the
+meaning of `..`. An explicit `--workspace` stays at the supplied path in both modes;
+`temporary` gives it a separate temporary home.
 
 ```yaml
 environment:
   type: none
-  isolate_home: true
+  agent_home: temporary
 ```
 
-The runtime creates a temporary home and uses its `workspace/` subdirectory as
-the case workspace. `HOME`, `USERPROFILE` and `CODEX_HOME` point to the temporary
+In `temporary` mode, `HOME`, `USERPROFILE` and `CODEX_HOME` point to the temporary
 root, so Codex's `auth.json` and `sessions/` stay outside workspace artifacts and
 diffs. Session transcripts are collected from `$CODEX_HOME/sessions`.
-An explicit `--workspace` stays in place and gets a separate temporary home.
 
 `CLAUDE_CONFIG_DIR`, XDG directories and Windows application-data directories
 also live under the temporary home. These settings apply to setup steps, resumed
@@ -532,14 +539,15 @@ API-key login through stdin inside the temporary home before each invocation.
 Personal login files and OS-keychain logins are not copied. Missing credentials
 and unsupported run or judge engines fail before setup or agent execution.
 
-The whole temporary tree is deleted when the case runtime closes. With an explicit
-`--workspace`, only the temporary home is deleted; the workspace is preserved.
-`--no-delete` preserves the tree; its location is logged during setup.
+In both modes, the whole temporary run directory is deleted when the case runtime
+closes. With an explicit `--workspace`, the workspace is preserved and only a
+temporary home, if requested, is deleted. `--no-delete` preserves the temporary
+tree; temporary home locations are logged during setup.
 Treat a preserved home as sensitive because Codex may store the supplied key there.
 This isolates conventional user configuration and state, not filesystem access:
 workspace instructions, system-wide configuration and other inherited environment
 variables remain available. Use a container for process isolation. Docker and
-OpenSandbox reject this option.
+OpenSandbox reject `agent_home: temporary`.
 
 #### Session cleanup
 

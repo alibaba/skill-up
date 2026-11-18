@@ -6,10 +6,10 @@ import (
 )
 
 // IsolatedHome reports whether this runtime redirects personal agent state.
-func (r *NoneRuntime) IsolatedHome() bool { return r.cfg.IsolateHome }
+func (r *NoneRuntime) IsolatedHome() bool { return r.cfg.AgentHome == AgentHomeTemporary }
 
 func (r *NoneRuntime) isolatedEnvironment(env []string) []string {
-	home := r.isolatedHome
+	home := r.runDir
 	owned := map[string]string{
 		"HOME":              home,
 		"USERPROFILE":       home,

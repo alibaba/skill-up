@@ -9,10 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Add opt-in `environment.isolate_home` for local Claude Code and Codex runs
+- Add `environment.agent_home: temporary` for local Claude Code and Codex runs
   with explicit API credentials. Each case uses a separate temporary home for
-  user settings, skills and session state, with its workspace in a `workspace/`
-  subdirectory. An explicit `--workspace` stays in place with a separate home.
+  user settings, skills and session state. The default `inherited` mode keeps
+  inherited home settings. Both modes put automatically created workspaces at
+  `$TMPDIR/skill-up-*/workspace/`. An explicit `--workspace` stays in place,
+  with a separate home in `temporary` mode.
   Unsupported engines and personal-login-only configurations fail before setup.
   `--no-delete` preserves the temporary tree.
 

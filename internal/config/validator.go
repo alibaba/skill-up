@@ -955,8 +955,14 @@ func isValidRuntimeType(t string) bool {
 }
 
 func validateHomeIsolation(env Environment) []string {
-	if env.IsolateHome && env.Type != runtimeTypeNone {
-		return []string{"environment.isolate_home requires environment.type: none"}
+	switch env.AgentHome {
+	case "", "inherited":
+	case "temporary":
+		if env.Type != runtimeTypeNone {
+			return []string{"environment.agent_home: temporary requires environment.type: none"}
+		}
+	default:
+		return []string{fmt.Sprintf("environment.agent_home %q must be inherited or temporary", env.AgentHome)}
 	}
 	return nil
 }

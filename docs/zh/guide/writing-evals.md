@@ -452,21 +452,27 @@ mcp:
 
 > **建议**：如果你的 Skill 不涉及文件操作，使用 `none` 可以省去沙箱准备时间。
 
-#### 隔离本地 agent 主目录
+#### 本地 agent 主目录
 
-使用 API 凭据的 Claude Code 和 Codex 评测可启用独立主目录：
+自动创建的本地 workspace 统一位于 `$TMPDIR/skill-up-*/workspace/`，其父目录为
+临时运行目录。`environment.agent_home` 决定如何处理 agent 主目录设置：
+
+- `inherited`（默认）：保留继承的主目录设置。
+- `temporary`：使用临时运行目录作为独立主目录，每个 case、基线分组和重试各自创建。
+  此模式支持使用 API 凭据的 Claude Code 和 Codex 评测。
+
+两种模式采用相同的 workspace 布局，切换模式不会改变 `..` 的含义。
+显式指定的 `--workspace` 在两种模式下均保持原位；`temporary` 会为其创建单独的临时主目录。
 
 ```yaml
 environment:
   type: none
-  isolate_home: true
+  agent_home: temporary
 ```
 
-每个 case、基线分组和重试使用不同的临时主目录，case workspace 位于其
-`workspace/` 子目录。`HOME`、`USERPROFILE` 和 `CODEX_HOME` 指向临时根目录，
+在 `temporary` 模式下，`HOME`、`USERPROFILE` 和 `CODEX_HOME` 指向临时根目录，
 因此 Codex 的 `auth.json` 和 `sessions/` 不会进入 workspace 产物和 diff。
-会话记录从 `$CODEX_HOME/sessions` 收集。显式指定的 `--workspace`
-保持原位，并使用单独的临时主目录。
+会话记录从 `$CODEX_HOME/sessions` 收集。
 
 `CLAUDE_CONFIG_DIR`、XDG 目录和 Windows 应用数据目录也位于临时主目录下，
 这些设置覆盖 setup、续轮和 judge 的执行。
@@ -479,11 +485,12 @@ environment:
 不复制个人登录文件或系统钥匙串登录；凭据缺失或 run/judge 引擎不受支持时，
 会在 setup 或 agent 执行前报错。
 
-case runtime 关闭时删除整个临时目录树。显式指定 `--workspace` 时只删除临时
-主目录，保留 workspace。`--no-delete` 会保留临时目录树，setup 日志会显示路径；其中可能保存 Codex API key，
+两种模式下，case runtime 关闭时均删除整个临时运行目录。显式指定 `--workspace`
+时保留 workspace，只删除按需创建的临时主目录。`--no-delete` 会保留临时目录树，
+setup 日志会显示临时主目录路径；其中可能保存 Codex API key，
 应按敏感文件处理。此选项隔离常规用户配置和状态，并非文件系统安全边界：
 workspace 指令、系统配置及其他继承的环境变量仍然可用。
-进程隔离请使用容器；Docker 和 OpenSandbox 不支持此选项。
+进程隔离请使用容器；Docker 和 OpenSandbox 不支持 `agent_home: temporary`。
 
 #### 会话清理
 

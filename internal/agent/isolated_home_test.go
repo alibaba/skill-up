@@ -30,7 +30,7 @@ func TestIsolatedHomeCredentials(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			env := map[string]string{"OPENAI_API_KEY": "", "ANTHROPIC_API_KEY": "", "ANTHROPIC_AUTH_TOKEN": ""}
 			maps.Copy(env, tc.env)
-			rt, err := runtime.NewRuntime(runtime.Config{Type: "none", IsolateHome: true, Delete: true, Env: env})
+			rt, err := runtime.NewRuntime(runtime.Config{Type: "none", AgentHome: "temporary", Delete: true, Env: env})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -70,7 +70,7 @@ func TestIsolatedHomeCredentialsWithShellTracing(t *testing.T) {
 			} else {
 				env["SHELLOPTS"] = "xtrace"
 			}
-			rt, err := runtime.NewRuntime(runtime.Config{Type: "none", IsolateHome: true, Delete: true, Env: env})
+			rt, err := runtime.NewRuntime(runtime.Config{Type: "none", AgentHome: "temporary", Delete: true, Env: env})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -136,7 +136,7 @@ func TestIsolatedHomeCodexInitializesAuthOnRunAndResume(t *testing.T) {
 func TestIsolatedHomeCodexSessionCollection(t *testing.T) {
 	for _, external := range []bool{false, true} {
 		t.Run(map[bool]string{false: "temporary workspace", true: "external workspace"}[external], func(t *testing.T) {
-			cfg := runtime.Config{Type: "none", IsolateHome: true, Delete: true}
+			cfg := runtime.Config{Type: "none", AgentHome: "temporary", Delete: true}
 			if external {
 				cfg.WorkspaceDir = t.TempDir()
 			}

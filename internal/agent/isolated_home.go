@@ -34,14 +34,14 @@ func CheckIsolatedHome(ctx context.Context, rt Runtime, ag Agent) error {
 		probe = `test -n "${OPENAI_API_KEY:+present}"`
 		key = "OPENAI_API_KEY"
 	default:
-		return fmt.Errorf("environment.isolate_home supports only claude_code and codex; got %s", ag.Name())
+		return fmt.Errorf("environment.agent_home: temporary supports only claude_code and codex; got %s", ag.Name())
 	}
 	result, err := rt.Exec(ctx, probe, opts)
 	if err != nil {
 		return fmt.Errorf("check isolated-home credentials for %s: %w", ag.Name(), err)
 	}
 	if result.ExitCode != 0 {
-		return fmt.Errorf("environment.isolate_home requires %s for %s; personal CLI logins are not copied", key, ag.Name())
+		return fmt.Errorf("environment.agent_home: temporary requires %s for %s; personal CLI logins are not copied", key, ag.Name())
 	}
 	return nil
 }

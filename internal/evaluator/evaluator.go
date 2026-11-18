@@ -1396,7 +1396,7 @@ func (e *defaultEvaluator) setupCaseEnvironment(ctx context.Context, rt runtime.
 }
 
 func (e *defaultEvaluator) checkIsolatedHomeAgents(ctx context.Context, rt runtime.Runtime, c *config.CaseConfig, ag agent.Agent) error {
-	if !e.evalCfg.Environment.IsolateHome {
+	if e.evalCfg.Environment.AgentHome != runtime.AgentHomeTemporary {
 		return nil
 	}
 	if err := agent.CheckIsolatedHome(ctx, rt, ag); err != nil {
