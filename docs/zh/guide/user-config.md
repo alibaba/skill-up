@@ -15,7 +15,6 @@ OpenTelemetry 默认值、共享的环境变量、以及不想在命令行或每
 ```text
 embed (空)
   < user      (~/.config/skill-up/config.yaml，遵循 XDG)
-  < project   ($PWD/.skill-up.yaml)
   < explicit  (--config <path>)
 ```
 
@@ -23,11 +22,15 @@ embed (空)
 | :--------- | :---------------------------------------------------------------------------------------------- | :------- |
 | `embed`    | 空的 `Config{}`，不内嵌任何厂商默认值                                                           | 永远存在 |
 | `user`     | `$SKILL_UP_CONFIG` → `$XDG_CONFIG_HOME/skill-up/config.yaml` → `~/.config/skill-up/config.yaml` | 跳过     |
-| `project`  | `$PWD/.skill-up.yaml`                                                                           | 跳过     |
 | `explicit` | 任意子命令的 `--config <path>`                                                                  | 报错     |
 
-`user` / `project` 层文件不存在或解析失败会降级为 stderr 上的 `warning:`，命令
-继续执行。`--config` 显式路径如果缺失或不合法则直接报错。
+`user` 文件不存在时静默跳过，读取或解析失败时在 stderr 上输出 `warning:`。
+`--config` 显式路径如果缺失或不合法则直接报错。
+
+自动发现的 `$PWD/.skill-up.yaml` 会被忽略并输出警告。审阅文件后，使用
+`--config ./.skill-up.yaml` 显式加载。这项授权覆盖整个文件，包括 `runtime_kwargs`。
+指定其他显式文件不会授权项目文件。通过 `SKILL_UP_CONFIG` 选择的项目文件也会作为
+可信的用户层加载。
 
 高优先级层只**覆盖非零字段**；map 类字段（`telemetry.resource_attributes`、
 `env`、`runtime_kwargs`）按 key 逐项合并，而不是整体替换。
@@ -63,20 +66,27 @@ runtime_kwargs:                                       # 按 environment.type 提
 - **`telemetry` 与 `env`**：每个 key 对应一个 `OTEL_*` 或自定义环境变量，**仅在
   对应环境变量未被设置时才会注入**——命令行或 shell 中已有的值优先。
 - **`env` 中的 `${VAR}`** 仅在值来自 `user` 或 `explicit` 层时，才在应用默认值之前
-  从当前进程环境展开。自动发现的项目配置保留原文。要允许可信的项目文件展开变量，
-  请传入 `--config ./.skill-up.yaml`。这会授权该文件读取宿主进程的环境变量（包括密钥），
-  因此应先审阅文件。权限跟随最终生效的值：项目层覆盖用户层的值仍保留原文；
-  指定另一份显式配置不会授权其中未覆盖的项目条目。如果 `SKILL_UP_CONFIG` 指向同一份
-  自动发现的项目文件，项目层仍优先且保留原文；请用 `--config` 显式授权。未设置的变量保留原文，
+  从当前进程环境展开。选择文件会授权其读取宿主环境变量（包括密钥），因此应先审阅。
+  未设置的变量保留原文，
   已设置为空字符串的变量展开为空字符串。只展开一次，不读取同一配置中的其他默认值。
   `$VAR` 和 `${VAR:-fallback}` 等 shell 表达式保留原文。
 - **`runtime_kwargs`**：`run` 命令按 `environment.type`（如 `opensandbox`）查找
   默认值。`eval.yaml` 中显式给的值优先；未提供的字段在这里兜底。Key 的形态与
   对应 environment provider 的 kwargs 一致。
 
-展开权限不会将凭据绑定到特定目标。用户级遥测请求头中的令牌展开后会提供给导出器，
-而项目配置中的字面量端点覆盖可能接收到该令牌。因此在使用环境变量或用户配置中的
-凭据前，应先检查项目配置。
+### 端点信任策略
+
+只有可信的用户配置或显式选择的配置文件才能提供默认值。未选择的项目文件不能覆盖
+遥测端点、通过 `env` 注入代理或 agent 基础 URL，也不能通过 `runtime_kwargs`
+重定向 OpenSandbox。即使项目值是字面量，也无法通过这些默认值将可信配置或进程
+环境中的凭据发送到项目指定的目标。
+
+这是对自动加载 `.skill-up.yaml` 行为的不兼容变更。审阅文件后，为每次调用添加
+`--config ./.skill-up.yaml`，或将可信默认值移到用户配置中。授权前应同时检查目标
+地址和凭据引用：显式配置的端点可以与用户配置或 shell 中的凭据组合使用。
+
+此边界仅针对用户配置发现，不会对 `eval.yaml`、脚本或 agent 执行提供沙箱保护。
+携带凭据运行评测前仍需审阅评测内容。
 
 ---
 
@@ -196,7 +206,14 @@ runtime_kwargs:
     base_url: http://sandbox.internal:9090
 ```
 
-这样只对当前项目生效，`~/.config/skill-up/config.yaml` 在其他地方依然有效。
+审阅后，为本次运行显式选择文件：
+
+```bash
+skill-up run ./evals/eval.yaml --config ./.skill-up.yaml
+```
+
+这会为本次调用提供 `opensandbox.base_url` 默认值。未传 `--config` 时，项目文件会被
+忽略，用户级默认值仍生效。
 
 ### 命令行一次性覆盖
 
@@ -204,4 +221,4 @@ runtime_kwargs:
 skill-up run ./evals/eval.yaml --config /tmp/debug-config.yaml
 ```
 
-`--config` 在本次执行中覆盖 user 和 project 两层。
+`--config` 在本次执行中覆盖用户级默认值。

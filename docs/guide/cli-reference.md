@@ -410,7 +410,8 @@ skill-up init [flags]
 
 > For `init`, `--config` names the source to copy without expanding placeholders.
 > For other subcommands it selects the highest-precedence config and permits
-> `${VAR}` expansion in that file's `env` values. Use it only with trusted files;
+> all its defaults and `${VAR}` expansion in its `env` values. Automatically
+> discovered `.skill-up.yaml` files are ignored. Use `--config` only with trusted files;
 > see [user configuration](./user-config.md#schema) for the trust boundary.
 
 ### Examples

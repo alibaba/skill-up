@@ -14,8 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   delivery metadata and failing before execution if the file cannot be uploaded.
 - Expand `${VAR}` references in user-config `env` defaults from the process
   environment only for user-level or explicitly selected (`--config`) values.
-  Automatically discovered project values remain literal. Preserve unset
-  references and existing environment values.
+  Preserve unset references and existing environment values. Project
+  `.skill-up.yaml` files now require explicit selection with `--config` or
+  `SKILL_UP_CONFIG`; automatic discovery warns and ignores the entire file,
+  including runtime defaults, so project endpoints cannot redirect trusted
+  credentials. Review existing project configs before opting in.
 - Match environment variable names case-insensitively in the `none` runtime on
   native Windows. A host `Path` and a configured or probed `PATH` were both
   passed to the child, and which one it kept followed map order. Per-call

@@ -24,7 +24,7 @@ type Config struct {
 	Telemetry     Telemetry         `yaml:"telemetry,omitempty"`
 	Env           map[string]string `yaml:"env,omitempty"`
 	RuntimeKwargs map[string]Kwargs `yaml:"runtime_kwargs,omitempty"`
-	// Preserve provenance so project overrides cannot inherit user-layer trust.
+	// Only values loaded through trusted discovery layers may expand ${VAR}.
 	envSources map[string]string
 }
 

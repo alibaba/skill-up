@@ -124,7 +124,8 @@ func resolveUserConfigTarget() (string, error) {
 // default behavior is a no-op.
 const initTemplateContent = `# skill-up user config -- auto-loaded by every command.
 # Discovery order (lowest to highest precedence):
-#   embedded defaults < ~/.config/skill-up/config.yaml < $PWD/.skill-up.yaml < --config
+#   embedded defaults < ~/.config/skill-up/config.yaml < --config
+# Project files apply only when explicitly selected with --config or SKILL_UP_CONFIG.
 # Use ` + "`skill-up init --print`" + ` to regenerate this template.
 
 schema_version: v1alpha1
@@ -158,7 +159,7 @@ telemetry:
 
 # Arbitrary additional env vars. Same only-if-unset semantics as telemetry.
 # ${VAR} expands only in user-level or explicitly selected (--config) files.
-# Project files stay literal unless trusted with --config ./.skill-up.yaml.
+# Project files require --config ./.skill-up.yaml to apply any defaults.
 # env:
 #   OTEL_EXPORTER_OTLP_HEADERS: authorization=${OTLP_TOKEN}
 
