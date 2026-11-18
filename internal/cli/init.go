@@ -27,12 +27,15 @@ contents to the target, preserving comments and formatting.
 Target selection:
   default        $XDG_CONFIG_HOME/skill-up/config.yaml (or ~/.config/...)
   --local        $PWD/.skill-up.yaml
-  --print        stdout (no file written)`,
+  --print        stdout (no file written)
+
+Project files are not loaded automatically. After reviewing a local file,
+select it on subsequent commands with --config ./.skill-up.yaml.`,
 	RunE: runInit,
 }
 
 func init() {
-	initCmd.Flags().Bool("local", false, "Write target is $PWD/.skill-up.yaml instead of the XDG path")
+	initCmd.Flags().Bool("local", false, "Write $PWD/.skill-up.yaml (requires --config to apply on subsequent commands)")
 	initCmd.Flags().Bool("print", false, "Print to stdout instead of writing to disk")
 	initCmd.Flags().Bool("force", false, "Overwrite an existing file")
 	rootCmd.AddCommand(initCmd)
@@ -74,6 +77,9 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "wrote %s\n", target)
+	if local {
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "After reviewing this file, select it on subsequent commands with --config ./.skill-up.yaml")
+	}
 	return nil
 }
 
@@ -95,8 +101,7 @@ func resolveInitContent(sourcePath string) (string, error) {
 	return string(data), nil
 }
 
-// resolveProjectConfigTarget returns $PWD/.skill-up.yaml — the per-project
-// config layer.
+// resolveProjectConfigTarget returns $PWD/.skill-up.yaml.
 func resolveProjectConfigTarget() (string, error) {
 	wd, err := os.Getwd()
 	if err != nil {

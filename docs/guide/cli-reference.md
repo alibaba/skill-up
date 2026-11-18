@@ -403,7 +403,7 @@ skill-up init [flags]
 
 | Flag       | Default                                            | Description                                                                                  |
 | :--------: | :-------------------------------------------------: | :-------------------------------------------------------------------------------------------: |
-| `--local`  | `false`                                            | Write target is `$PWD/.skill-up.yaml` instead of the XDG path                                |
+| `--local`  | `false`                                            | Write `$PWD/.skill-up.yaml`; after review, select it on subsequent commands with `--config ./.skill-up.yaml` |
 | `--config` | —                                                  | **Source** file to read (validated, copied verbatim with comments). Without this, a commented template is written. |
 | `--print`  | `false`                                            | Print to stdout instead of writing to disk                                                   |
 | `--force`  | `false`                                            | Overwrite an existing target                                                                 |

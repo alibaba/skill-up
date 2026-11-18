@@ -24,7 +24,7 @@ type Config struct {
 	Telemetry     Telemetry         `yaml:"telemetry,omitempty"`
 	Env           map[string]string `yaml:"env,omitempty"`
 	RuntimeKwargs map[string]Kwargs `yaml:"runtime_kwargs,omitempty"`
-	// Only values loaded through trusted discovery layers may expand ${VAR}.
+	// LoadFile and directly constructed configs must not gain expansion permission.
 	envSources map[string]string
 }
 

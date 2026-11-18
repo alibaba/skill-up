@@ -34,6 +34,9 @@ After reviewing the file, select it with `--config ./.skill-up.yaml` to apply
 its defaults. This opt-in covers the whole file, including `runtime_kwargs`.
 Selecting a different explicit file does not trust the project file. A project
 file selected through `SKILL_UP_CONFIG` is also trusted as the user layer.
+Use an absolute path when setting `SKILL_UP_CONFIG` persistently: a relative
+path resolves from the working directory and can select a different file in
+each repository.
 
 Higher-precedence layers overlay non-zero fields onto lower layers; map fields
 (`telemetry.resource_attributes`, `env`, `runtime_kwargs`) are merged key-wise
@@ -96,8 +99,12 @@ or move trusted defaults to the user-level config. Inspect destinations as well
 as credential references before opting in: an explicit file can combine its
 endpoint with credentials from user config or the shell.
 
-This boundary covers user-config discovery. It does not sandbox `eval.yaml`,
-scripts or agent execution; review an evaluation before running it with credentials.
+This boundary covers user-config discovery. `skill-up run` treats evaluation
+configuration as executable input, whether supplied as a path or discovered
+automatically. Its runtime and model endpoints can use credentials from user
+config or the shell; its script judges can execute code. Review the evaluation
+and its scripts before running it with credentials. This change does not add
+endpoint restrictions or sandboxing to evaluation configuration.
 
 ---
 
