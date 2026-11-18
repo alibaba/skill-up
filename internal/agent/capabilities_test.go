@@ -44,7 +44,10 @@ func TestValidateJudgeAdapterConfig(t *testing.T) {
 }
 
 func TestIndependentJudgeUsesProtocolScopedConnection(t *testing.T) {
-	t.Parallel()
+	// Provider-scoped env (ANTHROPIC_*) overrides the credentials file, so keep host values out.
+	t.Setenv("ANTHROPIC_MODEL", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_BASE_URL", "")
 	path := filepath.Join(t.TempDir(), "credentials.yaml")
 	if err := os.WriteFile(path, []byte("providers:\n  anthropic:\n    openai:\n      api_key: judge-key\n      base_url: https://gateway.example.test/v1\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -233,7 +236,13 @@ func TestResolveAdapterConfig_QoderModelAndConnectionIsolation(t *testing.T) {
 }
 
 func TestResolveAdapterConfig_QoderRunnerAndJudgeModels(t *testing.T) {
-	t.Parallel()
+	// Provider-scoped env (OPENAI_*, QODER_*) overrides the resolved models, so keep host values out.
+	t.Setenv("OPENAI_MODEL", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_BASE_URL", "")
+	t.Setenv("QODER_MODEL", "")
+	t.Setenv("QODER_API_KEY", "")
+	t.Setenv("QODER_BASE_URL", "")
 
 	for _, tc := range []struct {
 		name string
@@ -245,7 +254,6 @@ func TestResolveAdapterConfig_QoderRunnerAndJudgeModels(t *testing.T) {
 		{"legacy-provider-model", credential.CLIOverrides{Model: "openai/Qwen3.7-Plus"}, "Qwen3.7-Plus"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runner := credential.ResolveRunnerConfig(config.EngineConfig{
 				Name:  "qodercli",
 				Model: config.ModelConfig{Name: "openai/custom-ID"},
