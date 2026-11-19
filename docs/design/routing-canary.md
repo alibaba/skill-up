@@ -50,7 +50,9 @@ pins it.
 ## Results
 
 Three iterations per engine (`ITERATIONS=3`), each iteration running all three
-cases in a fresh workspace:
+cases in a fresh workspace. The cells are grading outcomes — did the case pass,
+i.e. did the expected marker file appear and the reply match — not a claim that
+the engine reported a selection event:
 
 | Engine | Relevant | Unrelated | Competing | Iterations |
 | --- | --- | --- | --- | --- |
