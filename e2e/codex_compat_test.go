@@ -90,7 +90,7 @@ func runCodexCLICompatibility(t *testing.T, wireAPI, homeMode string) {
 		if homeMode == evalruntime.AgentHomeTemporary {
 			checkCodexTemporaryHome(t, rt, artifactDir, sessionID, prompt, want)
 		} else if _, err := os.Stat(filepath.Join(os.Getenv("CODEX_HOME"), "auth.json")); !os.IsNotExist(err) {
-			t.Fatalf("inherited mode must not create an API-key login: %v", err)
+			t.Fatalf("inherited mode must leave %s absent (stat error=%v)", filepath.Join(os.Getenv("CODEX_HOME"), "auth.json"), err)
 		}
 	}
 	mu.Lock()
