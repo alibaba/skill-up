@@ -53,21 +53,31 @@ def tool_calls(obj, out):
             tool_calls(value, out)
 
 
-def text_blobs(obj, out):
+def message_texts(obj, out, role=None):
+    """Collect (role, text) pairs so catalog detection can ignore assistant text.
+
+    The injected catalog rides in a `system` or `developer` message (Codex sends
+    it as a developer message); an assistant sentence like "There are no
+    available skills." must not count as a catalog.
+    """
     if isinstance(obj, dict):
+        next_role = role
+        role_value = obj.get("role")
+        if isinstance(role_value, str):
+            next_role = role_value.lower()
         for key, value in obj.items():
             if key in ("text", "content", "output_text", "input_text") and isinstance(value, str):
-                out.append(value)
+                out.append((next_role, value))
             else:
-                text_blobs(value, out)
+                message_texts(value, out, next_role)
     elif isinstance(obj, list):
         for value in obj:
-            text_blobs(value, out)
+            message_texts(value, out, role)
 
 
 def summarize_transcript(path: Path) -> dict:
     calls: list[tuple[str, str]] = []
-    texts: list[str] = []
+    texts: list[tuple[str | None, str]] = []
     for line in path.read_text(errors="replace").splitlines():
         if not line.strip():
             continue
@@ -76,12 +86,16 @@ def summarize_transcript(path: Path) -> dict:
         except json.JSONDecodeError:
             continue
         tool_calls(event, calls)
-        text_blobs(event, texts)
+        message_texts(event, texts)
 
     skill_calls = sorted({name for name, _ in calls if "skill" in name.lower()})
     skill_file_referenced = any("SKILL.md" in payload for _, payload in calls)
     markers = sorted({marker for marker in MARKERS if any(marker in payload for _, payload in calls)})
-    catalog = any("<skills_instructions>" in text or "available skills" in text.lower() for text in texts)
+    catalog = any(
+        role in ("system", "developer")
+        and ("<skills_instructions>" in text or "available skills" in text.lower())
+        for role, text in texts
+    )
     return {
         "events": len(texts),
         "skill_tool_calls": skill_calls,

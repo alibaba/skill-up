@@ -207,7 +207,7 @@ be mistaken for "no activation":
 | `skill tool call` | Tool names in the transcript that look like a Skill tool (e.g. Claude Code's `Skill`) |
 | `skill file reference` | A tool-call payload contains `SKILL.md`. A listing or failed read also matches, so this is a reference, not a confirmed read |
 | `markers` | Canary marker files referenced by a call |
-| `catalog` | The injected `<skills_instructions>` catalog is present |
+| `catalog` | The injected `<skills_instructions>` catalog is present, detected only in a `system`/`developer` message (Codex injects it as a developer message); assistant text that merely mentions "available skills" does not count |
 
 ## Confounders found while measuring
 

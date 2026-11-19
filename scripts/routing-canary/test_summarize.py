@@ -107,6 +107,41 @@ class SummarizeFixtureTest(unittest.TestCase):
         self.assertIn("| skill |", competing)
         self.assertIn("| .translation-done |", competing)
 
+    def test_catalog_only_counts_in_a_system_or_developer_message(self) -> None:
+        """Assistant prose like "There are no available skills." is not a catalog."""
+        write_json(self.iteration / "result.json", {"case_results": [{"case_id": "relevant", "status": "PASS"}]})
+        write_transcript(
+            self.iteration / "relevant",
+            [
+                # Assistant text with the same phrase must not trigger the column.
+                {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "There are no available skills."}]},
+                # The real thing: Codex injects the catalog as a developer message.
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "developer",
+                        "content": [{"type": "input_text", "text": "<skills_instructions>canary-routing ...</skills_instructions>"}],
+                    },
+                },
+            ],
+        )
+
+        text = render(self.root)
+        cells = [cell.strip() for cell in row(text, "relevant").strip().strip("|").split("|")]
+        self.assertEqual(cells[-1], "yes", "catalog column should see the developer-message catalog")
+
+    def test_assistant_text_alone_is_not_a_catalog(self) -> None:
+        write_json(self.iteration / "result.json", {"case_results": [{"case_id": "relevant", "status": "PASS"}]})
+        write_transcript(
+            self.iteration / "relevant",
+            [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "There are no available skills."}]}],
+        )
+
+        text = render(self.root)
+        cells = [cell.strip() for cell in row(text, "relevant").strip().strip("|").split("|")]
+        self.assertEqual(cells[-1], "no", "assistant text alone must not count as a catalog")
+
     def test_reference_without_a_read_is_not_reported_as_a_skill_call(self) -> None:
         write_json(self.iteration / "result.json", {"case_results": [{"case_id": "listing", "status": "PASS"}]})
         write_transcript(
