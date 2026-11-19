@@ -314,6 +314,7 @@ Engine 和凭据。它与旧式 `judge.model` 互斥，后者复用被测 Agent 
 | ------------------------------------ | ------------------------------------------ |
 | `skill-up run [path]`                | 运行评测用例并生成报告                     |
 | `skill-up validate [path]`           | 校验 `eval.yaml` 和用例文件                |
+| `skill-up validate --skill <dir>`    | 检查单个 skill 的内容完整性                |
 | `skill-up list-cases [path]`         | 列出配置引用的所有用例                     |
 | `skill-up compare <result> <result>...` | 离线对比多个评测结果，支持 HTML、Markdown、JSON 和文本 |
 | `skill-up report <result.json>`      | 从已有结果生成报告                         |
