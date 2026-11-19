@@ -52,6 +52,10 @@ func TestResolveRunnerConfig_ExplicitProviderPreservesOpaqueCLIModel(t *testing.
 }
 
 func TestResolveRunnerConfig_ExplicitProviderKeepsConfiguredModel(t *testing.T) {
+	// Provider-scoped env (DASHSCOPE_*) overrides the configured model, so keep host values out.
+	t.Setenv("DASHSCOPE_MODEL", "")
+	t.Setenv("DASHSCOPE_API_KEY", "")
+	t.Setenv("DASHSCOPE_BASE_URL", "")
 	resolved := ResolveRunnerConfig(config.EngineConfig{
 		Name:  "codex",
 		Model: config.ModelConfig{Provider: "openai", Name: "yaml-model"},

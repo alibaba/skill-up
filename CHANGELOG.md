@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `skill-up validate --skill <dir>` lints the content integrity of a single
+  skill as authored on disk: SKILL.md must open with a closed YAML frontmatter
+  block declaring non-empty `name` and `description` fields, and every
+  `references/`, `assets/`, `scripts/` path cited in the markdown body must
+  exist on disk. The body is parsed as CommonMark so prose citations, local
+  link/image destinations, and path-citing inline code spans are checked —
+  with or without a leading `./`, and with equivalent path spellings
+  normalized — while code blocks, remote URLs, and raw HTML are ignored. The
+  opt-in `--uncited` flag also reports files under those directories that are
+  not reachable from the body, the orphans a truncated SKILL.md leaves behind;
+  reachability is transitive through the links of cited documents and the
+  path mentions of cited scripts (dotfiles stay silent; a directory cited as a
+  link destination covers everything beneath it), and it stays a heuristic,
+  which is why the report is off by default. Findings print as warnings
+  without changing the exit code; `--strict` promotes them to failures. The
+  check is source-level and independent from eval config validation — it does
+  not see what a run installs after `skills.include`/`skills.exclude`
+  filtering.
+
 ### Changed
 
 - **Breaking:** project `.skill-up.yaml` files now require explicit selection
@@ -16,6 +37,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reject a `rule_based` matcher that is present but holds no values to match.
+  `output_contains: {all: []}`, `output_matches: {}`, `turn_response_contains`
+  without `contains_all`/`contains_any`, and `turn_response_not_contains`
+  without `not_contains` used to validate and then report a passing assertion
+  with zero checks, so a half-filled rule became a silent pass (the same class
+  of bug as the unknown-matcher check for #294). `validate` now names the
+  matcher and asks for at least one value, and rejects an entry that is the
+  empty string in any of them, since `""` is a substring of every response and
+  an empty pattern matches every response. Whitespace entries stay valid: they
+  are compared as written, so a matcher holding only a newline can assert a
+  single-line output.
 - Use prompt-file delivery for resumed Claude Code and Qoder turns when the
   prompt exceeds the inline limit or the target is Windows, preserving prompt
   delivery metadata and failing before execution if the file cannot be uploaded.
