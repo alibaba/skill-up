@@ -386,7 +386,9 @@ func (r *DockerRuntime) Exists(ctx context.Context, sourcePath string) (bool, er
 }
 
 func (r *DockerRuntime) existsWithTest(ctx context.Context, source string) (bool, error) {
-	result, err := r.Exec(ctx, "ls -d "+shellquote.QuotePOSIX(source), ExecOptions{Cwd: "/"})
+	// -L dereferences symlinks so this fallback matches the stat -L path:
+	// a dangling symlink is absent, while a link to an existing path exists.
+	result, err := r.Exec(ctx, "ls -dL "+shellquote.QuotePOSIX(source), ExecOptions{Cwd: "/"})
 	if err != nil {
 		return false, err
 	}
@@ -419,8 +421,13 @@ func (r *DockerRuntime) ReadFile(ctx context.Context, sourcePath string) ([]byte
 }
 
 func dockerFileNotFound(stderr string) bool {
-	lower := strings.ToLower(stderr)
-	return strings.Contains(lower, "no such file or directory")
+	lower := strings.ToLower(strings.TrimSpace(stderr))
+	// An access error can print a path that itself contains the phrase
+	// "no such file or directory"; only the trailing diagnostic matters.
+	if strings.Contains(lower, "permission denied") {
+		return false
+	}
+	return strings.HasSuffix(lower, ": no such file or directory")
 }
 
 // DownloadDir recursively copies a directory from the container to the host.

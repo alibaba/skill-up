@@ -13,6 +13,8 @@ import (
 	"github.com/alibaba/skill-up/internal/platform"
 )
 
+const dockerStatTestContainer = "docker-stat-test"
+
 // fakeDockerCall is one captured invocation of the docker CLI.
 type fakeDockerCall struct {
 	args []string
@@ -147,10 +149,10 @@ func TestDockerRuntimeExistsAndReadFileErrors(t *testing.T) {
 	}
 	responses := map[string]fakeDockerResponse{
 		"exists":              {},
-		"missing":             {exitCode: 1, stderr: "No such file or directory"},
-		"exists access error": {exitCode: 1, stderr: "Permission denied"},
-		"read missing":        {exitCode: 1, stderr: "No such file or directory"},
-		"read directory":      {exitCode: 1, stderr: "Is a directory"},
+		"missing":             {exitCode: 1, stderr: "stat: cannot statx 'x': No such file or directory"},
+		"exists access error": {exitCode: 1, stderr: "stat: cannot statx 'x': Permission denied"},
+		"read missing":        {exitCode: 1, stderr: "cat: x: No such file or directory"},
+		"read directory":      {exitCode: 1, stderr: "cat: x: Is a directory"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -159,7 +161,7 @@ func TestDockerRuntimeExistsAndReadFileErrors(t *testing.T) {
 				response: responses[tt.name],
 			}})
 			r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
-			r.containerID = "docker-stat-test"
+			r.containerID = dockerStatTestContainer
 			ok, data, err := tt.call(context.Background(), r)
 			if tt.wantErr {
 				if err == nil {
@@ -178,6 +180,58 @@ func TestDockerRuntimeExistsAndReadFileErrors(t *testing.T) {
 			}
 			_ = data
 		})
+	}
+}
+
+func TestDockerRuntimeExistsDanglingSymlinkAcrossPaths(t *testing.T) {
+	t.Run("stat follows dangling link", func(t *testing.T) {
+		fd := newFakeDocker(t, []scriptedCall{{
+			match:    "exec",
+			response: fakeDockerResponse{exitCode: 1, stderr: "stat: cannot statx 'link': No such file or directory"},
+		}})
+		r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+		r.containerID = dockerStatTestContainer
+
+		ok, err := r.Exists(context.Background(), "link")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok {
+			t.Fatal("dangling symlink should be absent when stat -L is available")
+		}
+	})
+
+	t.Run("fallback follows dangling link", func(t *testing.T) {
+		fd := newFakeDocker(t, []scriptedCall{
+			{match: "exec", response: fakeDockerResponse{exitCode: 127, stderr: "stat: not found"}},
+			{match: "exec", response: fakeDockerResponse{exitCode: 2, stderr: "ls: cannot access 'link': No such file or directory"}},
+		})
+		r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+		r.containerID = dockerStatTestContainer
+
+		ok, err := r.Exists(context.Background(), "link")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok {
+			t.Fatal("dangling symlink should be absent in the ls -dL fallback")
+		}
+		if got := strings.Join(fd.callArgs(1), " "); !strings.Contains(got, "ls -dL") {
+			t.Fatalf("fallback command = %q, want ls -dL", got)
+		}
+	})
+}
+
+func TestDockerRuntimeExistsPermissionErrorWithMisleadingPath(t *testing.T) {
+	fd := newFakeDocker(t, []scriptedCall{{
+		match:    "exec",
+		response: fakeDockerResponse{exitCode: 1, stderr: "stat: cannot statx '/work/no such file or directory/x': Permission denied"},
+	}})
+	r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+	r.containerID = dockerStatTestContainer
+
+	if _, err := r.Exists(context.Background(), "x"); err == nil {
+		t.Fatal("expected an access error for a permission-denied path whose text contains the missing-file phrase")
 	}
 }
 
