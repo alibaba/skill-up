@@ -407,6 +407,7 @@ skill-up import ./evals/evals.json --output ./evals
 | ------------------------------------ | ------------------------------------------- |
 | `skill-up run [path]`                | Run evaluation cases and produce reports    |
 | `skill-up validate [path]`           | Validate `eval.yaml` and case files         |
+| `skill-up validate --skill <dir>`    | Lint a skill's content integrity            |
 | `skill-up list-cases [path]`         | List all cases referenced by the config     |
 | `skill-up compare <result> <result>...` | Compare multiple finished runs; export HTML, Markdown, JSON or text |
 | `skill-up report <result.json>`      | Generate reports from a previous run        |
