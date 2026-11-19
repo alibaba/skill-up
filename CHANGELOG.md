@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Copy fixture contents when the upload source directory is a symlink in the
+- Copy fixture contents when `context.repo_fixture` names a directory symlink in the
   `none` and OpenSandbox runtimes. Local uploads no longer fail with a directory
   read error, and OpenSandbox no longer silently uploads an empty fixture.
 - Reject a `rule_based` matcher that is present but holds no values to match.
