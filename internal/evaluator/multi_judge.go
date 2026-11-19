@@ -234,6 +234,9 @@ func memberExecution(graded EvalResult, stop judge.Stop, decision MemberDecision
 	if decision == MemberAccepted {
 		return acceptedMemberExecution(graded, stop, planned)
 	}
+	if isRecoveredTimeout(gradingExecution(&graded)) {
+		return recoveredMemberExecution(graded, stop, planned)
+	}
 	stage := judge.StageStarted
 	if graded.Grading == nil && graded.Status == judge.StatusSkip {
 		stage = judge.StageNotInvoked
@@ -284,10 +287,7 @@ func acceptedMemberExecution(graded EvalResult, stop judge.Stop, planned []judge
 		return graded.Execution
 	}
 	completion := judge.CompletionFinished
-	env := graded.Metrics
-	if graded.Grading != nil && graded.Grading.Metrics != nil {
-		env = graded.Grading.Metrics
-	}
+	env := memberEnvelope(graded)
 	if env != nil {
 		completion = completionForContract(env, planned)
 	}
@@ -300,6 +300,40 @@ func acceptedMemberExecution(graded EvalResult, stop judge.Stop, planned []judge
 		meta.Timeout = &judge.TimeoutMetadata{Occurred: true, Source: stop.DeadlineSource, Recovered: graded.Grading.Recovery != nil}
 	}
 	return meta
+}
+
+// recoveredMemberExecution reports a member whose own deadline stopped it after it
+// had already written a trustworthy scoring result. The outcome is final, so
+// completion follows the validated slots, while the stop resolved at the member
+// boundary keeps its source: a case deadline firing through the member is never
+// relabelled as the judge knob, and the judge's own script deadline is still
+// attributed when the member context stayed live.
+func recoveredMemberExecution(graded EvalResult, stop judge.Stop, planned []judge.MetricSlot) *judge.ExecutionMetadata {
+	if stop.Cause == judge.CauseNone {
+		observed := gradingExecution(&graded)
+		stop = judge.Stop{Cause: observed.Cause, DeadlineSource: observed.DeadlineSource, CancelSource: observed.CancelSource, Detail: observed.Detail}
+	}
+	meta := &judge.ExecutionMetadata{
+		Stage:          judge.StageFinished,
+		Completion:     completionForContract(memberEnvelope(graded), planned),
+		Cause:          stop.Cause,
+		DeadlineSource: stop.DeadlineSource,
+		CancelSource:   stop.CancelSource,
+		Detail:         stop.Detail,
+	}
+	if stop.Cause == judge.CauseDeadlineExpiry {
+		meta.Timeout = &judge.TimeoutMetadata{Occurred: true, Source: stop.DeadlineSource, Recovered: true}
+	}
+	return meta
+}
+
+// memberEnvelope prefers the envelope the scoring pass produced over the one
+// materialized for a member that never reached a result.
+func memberEnvelope(graded EvalResult) *judge.MetricsEnvelope {
+	if graded.Grading != nil && graded.Grading.Metrics != nil {
+		return graded.Grading.Metrics
+	}
+	return graded.Metrics
 }
 
 // completionForContract maps the materialized slots onto the completion states:

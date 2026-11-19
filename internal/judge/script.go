@@ -175,18 +175,24 @@ func (j *ScriptJudge) timeoutResult(ctx context.Context, timeout time.Duration, 
 		Cause: CauseDeadlineExpiry, DeadlineSource: source,
 		Timeout: &TimeoutMetadata{Occurred: true, Source: source},
 	}
-	// Keep a trustworthy result written before the deadline.
+	// Keep a trustworthy result written before the deadline. The legacy verdict
+	// mapping is decided above and is not revisited here.
+	var res *Result
+	var timeoutErr error
 	if j.TimeoutIsError {
-		timeoutErr := fmt.Errorf("script timed out after %s: %w", timeout, ctx.Err())
-		res := NewErrorResult(timeoutErr, in.TurnsExecuted, in.TurnsTotal)
-		res.Execution = execution
-		j.attachMetrics(res, MetricPrevented)
-		return res, timeoutErr
+		timeoutErr = fmt.Errorf("script timed out after %s: %w", timeout, ctx.Err())
+		res = NewErrorResult(timeoutErr, in.TurnsExecuted, in.TurnsTotal)
+	} else {
+		res = j.buildResult(false, "script timed out after "+timeout.String(), debugInfo, in)
 	}
-	res := j.buildResult(false, "script timed out after "+timeout.String(), debugInfo, in)
 	res.Execution = execution
-	j.attachMetrics(res, MetricPrevented)
-	return res, nil
+	// Collecting a complete, invocation-bound, schema-valid payload means a final
+	// scoring outcome exists even though execution exceeded its budget. Record that
+	// recovery so the evaluator derives completion from the validated slots instead
+	// of reporting an interruption; nothing was collected, or the payload was
+	// rejected as a whole, leaves the stop standing.
+	execution.Timeout.Recovered = j.attachMetrics(res, MetricPrevented)
+	return res, timeoutErr
 }
 
 // buildResult creates a judge Result from script execution outcome.
@@ -261,9 +267,15 @@ func (j *ScriptJudge) declinedMetrics() *MetricsEnvelope {
 // appeared while evaluation was interrupted yields NOT_PRODUCED, and one that
 // never appeared after a completed run yields a rejected payload rather than a
 // fabricated zero.
-func (j *ScriptJudge) attachMetrics(res *Result, production MetricProduction) {
+//
+// It reports whether a trustworthy final scoring outcome was collected: a complete,
+// invocation-bound, schema-valid payload was materialized. A slot-level defect still
+// counts, because the payload itself was valid and the scoring pass reached an
+// outcome; a whole-envelope rejection, an unavailable channel and a file that never
+// appeared do not.
+func (j *ScriptJudge) attachMetrics(res *Result, production MetricProduction) bool {
 	if res == nil || len(j.MetricSlots) == 0 {
-		return
+		return false
 	}
 	judgeID := j.producerID()
 	if j.MetricsResultPath == "" {
@@ -271,14 +283,14 @@ func (j *ScriptJudge) attachMetrics(res *Result, production MetricProduction) {
 		// judge built without one). Report that honestly rather than implying a
 		// stale file was found.
 		res.Metrics = MaterializeSlots(judgeID, j.MetricSlots, nil, ProblemChannelUnsupported, production)
-		return
+		return false
 	}
 	info, err := os.Lstat(j.MetricsResultPath)
 	if errors.Is(err, os.ErrNotExist) && production == MetricPrevented {
 		// Nothing was ever produced because evaluation was interrupted: the slots
 		// are NOT_PRODUCED, not a rejected payload.
 		res.Metrics = MaterializeSlots(judgeID, j.MetricSlots, nil, ProblemNone, MetricPrevented)
-		return
+		return false
 	}
 	if err != nil {
 		problem := ProblemUnboundResult
@@ -286,24 +298,25 @@ func (j *ScriptJudge) attachMetrics(res *Result, production MetricProduction) {
 			problem = ProblemUnparseable
 		}
 		res.Metrics = MaterializeSlots(judgeID, j.MetricSlots, nil, problem, production)
-		return
+		return false
 	}
 	if !info.Mode().IsRegular() {
 		// A symlink, directory or device node is never a collected result.
 		res.Metrics = MaterializeSlots(judgeID, j.MetricSlots, nil, ProblemUnboundResult, production)
-		return
+		return false
 	}
 	if info.Size() > MaxMetricsPayloadBytes {
 		// Bound the read before it happens: an oversized file must not be loaded
 		// into memory just to be rejected afterwards.
 		res.Metrics = MaterializeSlots(judgeID, j.MetricSlots, nil, ProblemSizeLimit, production)
-		return
+		return false
 	}
 	raw, err := os.ReadFile(j.MetricsResultPath)
 	if err != nil {
 		res.Metrics = MaterializeSlots(judgeID, j.MetricSlots, nil, ProblemUnparseable, production)
-		return
+		return false
 	}
 	emitted, payloadProblem := ParseMetricsPayload(raw, j.MetricsInvocationID)
 	res.Metrics = MaterializeSlots(judgeID, j.MetricSlots, emitted, payloadProblem, MetricProduced)
+	return payloadProblem == ProblemNone
 }

@@ -176,6 +176,9 @@ func deriveSingleExecution(ctx context.Context, result *EvalResult, env *judge.M
 		stop := judge.ClassifyStop(ctx.Err(), judge.StopObservation{DeadlineSource: DeadlineSource(ctx), SignalObserved: SignalObserved(ctx)})
 		return interruptedExecution(stage, stop)
 	case result.Grading != nil && result.Grading.Execution != nil:
+		if isRecoveredTimeout(result.Grading.Execution) {
+			return recoveredSingleExecution(result.Grading.Execution, env, planned)
+		}
 		return result.Grading.Execution
 	case contractError != "":
 		return &judge.ExecutionMetadata{Stage: judge.StageFinished, Completion: completionForContract(env, planned), Cause: judge.CauseContractError}
@@ -184,4 +187,24 @@ func deriveSingleExecution(ctx context.Context, result *EvalResult, env *judge.M
 	default:
 		return &judge.ExecutionMetadata{Stage: judge.StageFinished, Completion: completionForContract(env, planned), Cause: judge.CauseNone}
 	}
+}
+
+// isRecoveredTimeout reports the collector's own fact: a deadline stopped the
+// scoring pass, and a complete, invocation-bound, schema-valid result was still
+// recovered from it. Only that combination makes the outcome final; a stop with
+// nothing collected, or with a payload rejected as a whole, stays INTERRUPTED.
+func isRecoveredTimeout(ex *judge.ExecutionMetadata) bool {
+	return ex != nil && ex.Timeout != nil && ex.Timeout.Occurred && ex.Timeout.Recovered
+}
+
+// recoveredSingleExecution derives completion from the validated slots of a
+// recovered timeout result. The judge's own record supplies the stop, its source
+// and the timeout metadata, which are copied unchanged: accepting the score never
+// claims execution stayed inside its budget. The record itself is not mutated, so
+// the scoring pass still reports the interruption it observed.
+func recoveredSingleExecution(observed *judge.ExecutionMetadata, env *judge.MetricsEnvelope, planned []judge.MetricSlot) *judge.ExecutionMetadata {
+	revised := *observed
+	revised.Stage = judge.StageFinished
+	revised.Completion = completionForContract(env, planned)
+	return &revised
 }

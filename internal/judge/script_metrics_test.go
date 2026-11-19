@@ -484,18 +484,33 @@ func TestScriptJudgeTimeoutCollectsValidInvocationBoundResult(t *testing.T) {
 			if res.Status != tc.wantStatus {
 				t.Fatalf("status = %s, want %s (verdict mapping must not change)", res.Status, tc.wantStatus)
 			}
-			if res.Metrics == nil {
-				t.Fatal("a timeout discarded a collectible valid result")
-			}
-			if res.Metrics.Coverage.Available != 2 || res.Metrics.Quality != QualityNotConfigured {
-				t.Fatalf("envelope = %+v, want both scores retained", res.Metrics)
-			}
-			for _, metric := range res.Metrics.Metrics {
-				if metric.Availability != Available || metric.Value == nil {
-					t.Fatalf("slot = %+v, an accepted score must stay AVAILABLE", metric)
-				}
-			}
+			assertCollectedTimeoutResult(t, res)
 		})
+	}
+}
+
+// assertCollectedTimeoutResult pins what a timeout may keep: every collected score
+// stays AVAILABLE, and the collector records the recovery that lets the evaluator
+// derive completion from those slots. The judge's own record still reports the stop
+// it observed, so nothing here claims execution stayed inside its budget.
+func assertCollectedTimeoutResult(t *testing.T, res *Result) {
+	t.Helper()
+	if res.Metrics == nil {
+		t.Fatal("a timeout discarded a collectible valid result")
+	}
+	if res.Metrics.Coverage.Available != 2 || res.Metrics.Quality != QualityNotConfigured {
+		t.Fatalf("envelope = %+v, want both scores retained", res.Metrics)
+	}
+	for _, metric := range res.Metrics.Metrics {
+		if metric.Availability != Available || metric.Value == nil {
+			t.Fatalf("slot = %+v, an accepted score must stay AVAILABLE", metric)
+		}
+	}
+	if res.Execution == nil || res.Execution.Timeout == nil || !res.Execution.Timeout.Recovered {
+		t.Fatalf("execution = %+v, want the collected result recorded as recovered", res.Execution)
+	}
+	if res.Execution.Completion != CompletionInterrupted || res.Execution.Cause != CauseDeadlineExpiry {
+		t.Fatalf("execution = %+v, want the observed stop preserved", res.Execution)
 	}
 }
 
@@ -527,6 +542,14 @@ func TestScriptJudgeTimeoutWithoutCollectedFileLeavesSlotsNotProduced(t *testing
 	}
 	if res.Metrics.Quality != QualityNotAssessed {
 		t.Fatalf("quality = %s, want NOT_ASSESSED", res.Metrics.Quality)
+	}
+	// Nothing was collected, so no final scoring outcome exists: the stop stands and
+	// completion must not be derived from these slots.
+	if res.Execution == nil || res.Execution.Timeout == nil || res.Execution.Timeout.Recovered {
+		t.Fatalf("execution = %+v, want no recovery claimed for an uncollected result", res.Execution)
+	}
+	if res.Execution.Completion != CompletionInterrupted {
+		t.Fatalf("completion = %s, want INTERRUPTED", res.Execution.Completion)
 	}
 }
 

@@ -225,6 +225,11 @@ type ExecutionMetadata struct {
 }
 
 // TimeoutMetadata keeps a timeout visible even after its result was accepted.
+// Recovered means a trustworthy final outcome was obtained despite the timeout:
+// agent_judge accepted a valid final message after its agent call errored, or a
+// script judge collected the complete, invocation-bound, schema-valid result file
+// the script wrote before its deadline. Completion is then derived from the
+// validated slots, while Occurred and Source keep the exceeded budget attributable.
 type TimeoutMetadata struct {
 	Occurred  bool   `json:"occurred"`
 	Source    string `json:"source,omitempty"`

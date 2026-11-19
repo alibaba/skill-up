@@ -625,7 +625,9 @@ func TestExecuteCaseSingleScriptTimeoutRecordsSourceAndKeepsScores(t *testing.T)
 // shape for real: the case knob is armed at 300s and never fires while the judge
 // knob is armed at 2s and does. The member runs as a child process, emits its
 // scores, and is then killed by its own deadline, so the stop must name the knob
-// that expired rather than the live case deadline above it.
+// that expired rather than the live case deadline above it. The collected scores
+// also make the outcome final, so completion is derived from them rather than from
+// the stop (discussion_r4520744571).
 func TestExecuteCaseGroupedJudgeTimeoutUnderLiveCaseDeadline(t *testing.T) {
 	scratch := metricsScratchDir(t)
 	slowDir := filepath.Join(scratch, "slow")
@@ -650,6 +652,17 @@ func TestExecuteCaseGroupedJudgeTimeoutUnderLiveCaseDeadline(t *testing.T) {
 		t.Fatalf("outcomes = %d", len(result.JudgeResults))
 	}
 	member := result.JudgeResults[0]
+	assertGroupedRecoveredTimeout(t, member, result)
+}
+
+// assertGroupedRecoveredTimeout keeps the two facts this shape must report at once:
+// the expired knob stays attributable, and the scores collected before the kill make
+// the outcome final, so completion is derived from them (#317 contract §2).
+// Upstream (before #317) arms grouped script judges with TimeoutIsError=true and the
+// single-judge path with false, so the same judge deadline is an ERROR verdict when
+// grouped and FAIL when alone; that mapping is not revisited here.
+func assertGroupedRecoveredTimeout(t *testing.T, member judge.Outcome, result EvalResult) {
+	t.Helper()
 	if member.Execution == nil || member.Execution.Cause != judge.CauseDeadlineExpiry ||
 		member.Execution.DeadlineSource != judgeTimeoutSource {
 		t.Fatalf("grouped timeout provenance = %+v", member.Execution)
@@ -658,18 +671,239 @@ func TestExecuteCaseGroupedJudgeTimeoutUnderLiveCaseDeadline(t *testing.T) {
 		member.Execution.Timeout.Source != judgeTimeoutSource {
 		t.Fatalf("timeout metadata = %+v", member.Execution.Timeout)
 	}
-	// Upstream (before #317) arms grouped script judges with TimeoutIsError=true
-	// and the single-judge path with false, so the same judge deadline is an ERROR
-	// verdict when grouped and FAIL when alone. What #317 must keep is that the
-	// expired knob stays attributable and the scores already collected survive.
 	if member.Status != judge.StatusError {
 		t.Fatalf("grouped member verdict = %s, want ERROR under the pre-existing strict script timeout", member.Status)
 	}
 	if member.Metrics == nil || member.Metrics.Coverage.Available != 2 {
 		t.Fatalf("collected scores lost on stop: metrics=%+v", member.Metrics)
 	}
-	if result.GroupCompletion != judge.CompletionInterrupted || result.GroupCause != judge.CauseDeadlineExpiry {
-		t.Fatalf("group = %s/%s, want INTERRUPTED/deadline_expiry", result.GroupCompletion, result.GroupCause)
+	// INTERRUPTED is reserved for a stop that recovered no final scoring outcome.
+	if member.Execution.Stage != judge.StageFinished || member.Execution.Completion != judge.CompletionFinished {
+		t.Fatalf("recovered member = %s/%s, want COMPLETED/COMPLETED", member.Execution.Stage, member.Execution.Completion)
+	}
+	if !member.Execution.Timeout.Recovered {
+		t.Fatalf("timeout metadata does not record the collected result: %+v", member.Execution.Timeout)
+	}
+	if result.GroupCompletion != judge.CompletionFinished || result.GroupCause != judge.CauseDeadlineExpiry {
+		t.Fatalf("group = %s/%s, want COMPLETED/deadline_expiry", result.GroupCompletion, result.GroupCause)
+	}
+}
+
+// recoveredTimeoutShape is one scoring result a script writes before its own
+// deadline kills it, with what the contract derives from those slots. wantCoverage
+// counts AVAILABLE, MISSING, ERROR and NOT_PRODUCED in that order; wantScores pins
+// the exact values that must survive the stop; wantReason is the correctness slot's
+// reason when it holds no usable score.
+type recoveredTimeoutShape struct {
+	name         string
+	payload      string
+	wantSingle   judge.Status
+	wantComplete judge.Completion
+	wantQuality  judge.Quality
+	wantReason   string
+	wantCoverage [4]int
+	wantScores   map[string]float64
+}
+
+func recoveredTimeoutShapes() []recoveredTimeoutShape {
+	return []recoveredTimeoutShape{
+		{
+			name:         "complete valid result",
+			payload:      `{"schema_version":1,"invocation_id":"__INVOCATION__","metrics":[{"metric_id":"correctness","availability":"AVAILABLE","value":0.9,"evidence":["ok"]},{"metric_id":"completeness","availability":"AVAILABLE","value":0.75,"evidence":["ok"]}]}`,
+			wantSingle:   judge.StatusFail,
+			wantComplete: judge.CompletionFinished,
+			wantQuality:  judge.QualityNotConfigured,
+			wantCoverage: [4]int{2, 0, 0, 0},
+			wantScores:   map[string]float64{"correctness": 0.9, "completeness": 0.75},
+		},
+		{
+			name:         "required metric unavailable",
+			payload:      `{"schema_version":1,"invocation_id":"__INVOCATION__","metrics":[{"metric_id":"completeness","availability":"AVAILABLE","value":0.75,"evidence":["ok"]}]}`,
+			wantSingle:   judge.StatusFail,
+			wantComplete: judge.CompletionIncomplete,
+			wantQuality:  judge.QualityNotConfigured,
+			wantReason:   "required_metric_not_emitted",
+			wantCoverage: [4]int{1, 1, 0, 0},
+			wantScores:   map[string]float64{"completeness": 0.75},
+		},
+		{
+			name:         "invalid metric beside a valid sibling",
+			payload:      `{"schema_version":1,"invocation_id":"__INVOCATION__","metrics":[{"metric_id":"correctness","availability":"AVAILABLE","value":"not-a-number","evidence":["ok"]},{"metric_id":"completeness","availability":"AVAILABLE","value":0.75,"evidence":["ok"]}]}`,
+			wantSingle:   judge.StatusError,
+			wantComplete: judge.CompletionFailed,
+			wantQuality:  judge.QualityNotConfigured,
+			wantReason:   "invalid_value",
+			wantCoverage: [4]int{1, 0, 1, 0},
+			wantScores:   map[string]float64{"completeness": 0.75},
+		},
+		{
+			name:         "no result file collected",
+			wantSingle:   judge.StatusFail,
+			wantComplete: judge.CompletionInterrupted,
+			wantQuality:  judge.QualityNotAssessed,
+			wantReason:   "evaluation_prevented",
+			wantCoverage: [4]int{0, 0, 0, 2},
+		},
+		{
+			name:         "payload rejected as a whole",
+			payload:      `this is not json`,
+			wantSingle:   judge.StatusError,
+			wantComplete: judge.CompletionInterrupted,
+			wantQuality:  judge.QualityNotAssessed,
+			wantReason:   "unparseable_payload",
+			wantCoverage: [4]int{0, 0, 2, 0},
+		},
+		{
+			name:         "result bound to another invocation",
+			payload:      `{"schema_version":1,"invocation_id":"another-invocation","metrics":[{"metric_id":"correctness","availability":"AVAILABLE","value":0.9,"evidence":["ok"]}]}`,
+			wantSingle:   judge.StatusError,
+			wantComplete: judge.CompletionInterrupted,
+			wantQuality:  judge.QualityNotAssessed,
+			wantReason:   "unbound_or_stale_result",
+			wantCoverage: [4]int{0, 0, 2, 0},
+		},
+	}
+}
+
+// TestExecuteCaseRecoveredTimeoutDerivesCompletion drives both judge paths through
+// the real evaluator: the script writes its result file and is then killed by its
+// own deadline. A collected, invocation-bound, schema-valid payload makes the
+// scoring outcome final, so completion follows the validated slots while the
+// deadline, its source and the timeout metadata stay recorded and the legacy
+// verdict mapping is untouched (discussion_r4520744571, contract §2). The last
+// three shapes are the negative controls: nothing collected, or a payload rejected
+// as a whole, is not a trustworthy final outcome and must stay INTERRUPTED.
+func TestExecuteCaseRecoveredTimeoutDerivesCompletion(t *testing.T) {
+	for _, tc := range recoveredTimeoutShapes() {
+		t.Run("single/"+tc.name, func(t *testing.T) {
+			result := runRecoveredTimeoutSingle(t, tc)
+			assertRecoveredTimeout(t, result.Execution, result.Metrics, tc)
+			if result.Status != tc.wantSingle {
+				t.Errorf("single verdict = %s (error=%v), want %s", result.Status, result.Error, tc.wantSingle)
+			}
+		})
+		t.Run("grouped/"+tc.name, func(t *testing.T) {
+			result := runRecoveredTimeoutGrouped(t, tc)
+			if len(result.JudgeResults) != 1 {
+				t.Fatalf("outcomes = %d, want 1", len(result.JudgeResults))
+			}
+			outcome := result.JudgeResults[0]
+			assertRecoveredTimeout(t, outcome.Execution, outcome.Metrics, tc)
+			if outcome.Status != judge.StatusError {
+				t.Errorf("grouped member verdict = %s, want ERROR under the pre-existing strict script timeout", outcome.Status)
+			}
+			if result.GroupCompletion != tc.wantComplete || result.GroupCause != judge.CauseDeadlineExpiry {
+				t.Errorf("group = %s/%s, want %s/deadline_expiry", result.GroupCompletion, result.GroupCause, tc.wantComplete)
+			}
+		})
+	}
+}
+
+// recoveredTimeoutMember arms a script judge that writes tc's payload and then
+// outlives its deadline. An empty payload means the script never writes a result
+// file at all. The workspace is one the harness does not own, because a killed
+// Windows child keeps its working directory after the test finished.
+func recoveredTimeoutMember(t *testing.T, tc recoveredTimeoutShape, seconds int) (config.JudgeConfig, string) {
+	t.Helper()
+	scratch := metricsScratchDir(t)
+	dir := filepath.Join(scratch, "script")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := metricsScript(t, dir, pick(longWaitPosix, longWaitWindows))
+	if tc.payload != "" {
+		script = metricsScriptWithTail(t, dir, tc.payload, outlivesDeadline())
+	}
+	limit := seconds
+	return config.JudgeConfig{ID: "scorer", Type: "script", ScriptPath: script, TimeoutSeconds: &limit, Metrics: scoreRegistry()}, scratch
+}
+
+func runRecoveredTimeoutSingle(t *testing.T, tc recoveredTimeoutShape) EvalResult {
+	t.Helper()
+	member, scratch := recoveredTimeoutMember(t, tc, 1)
+	e := newTestEvaluator(EvalOptions{
+		Agent: &mockAgent{name: "test", output: "done"}, OutputDir: t.TempDir(),
+		EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none"}, Judge: member},
+	})
+	return e.executeCase(context.Background(), &config.CaseConfig{ID: "recovered-single", Input: config.Input{Prompt: "hello"}}, "with_skill", newScratchRuntime(t, scratch), nil)
+}
+
+func runRecoveredTimeoutGrouped(t *testing.T, tc recoveredTimeoutShape) EvalResult {
+	t.Helper()
+	member, scratch := recoveredTimeoutMember(t, tc, 2)
+	members := []config.JudgeConfig{member}
+	e := newTestEvaluator(EvalOptions{
+		Agent: &mockAgent{name: "test", output: "done"}, OutputDir: t.TempDir(),
+		EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none"}, Judges: &members},
+	})
+	return e.executeCase(context.Background(), &config.CaseConfig{
+		ID: "recovered-grouped", Input: config.Input{Prompt: "hello"},
+		Constraints: config.Constraints{TimeoutSeconds: 300},
+	}, "with_skill", newScratchRuntime(t, scratch), nil)
+}
+
+func assertRecoveredTimeout(t *testing.T, ex *judge.ExecutionMetadata, env *judge.MetricsEnvelope, tc recoveredTimeoutShape) {
+	t.Helper()
+	assertRecoveredCompletion(t, ex, tc)
+	assertRecoveredSlots(t, env, tc)
+}
+
+func assertRecoveredCompletion(t *testing.T, ex *judge.ExecutionMetadata, tc recoveredTimeoutShape) {
+	t.Helper()
+	assertTimeoutProvenance(t, ex)
+	wantStage, wantRecovered := judge.StageFinished, true
+	if tc.wantComplete == judge.CompletionInterrupted {
+		// No trustworthy final outcome was obtained: the pass stays started but
+		// interrupted, and nothing may claim a result was recovered.
+		wantStage, wantRecovered = judge.StageStarted, false
+	}
+	if ex.Stage != wantStage {
+		t.Errorf("execution stage = %s, want %s", ex.Stage, wantStage)
+	}
+	if ex.Completion != tc.wantComplete {
+		t.Errorf("completion = %s, want %s", ex.Completion, tc.wantComplete)
+	}
+	if ex.Timeout.Recovered != wantRecovered {
+		t.Errorf("timeout.recovered = %v, want %v", ex.Timeout.Recovered, wantRecovered)
+	}
+	if ex.Timeout.Source != judgeTimeoutSource {
+		t.Errorf("timeout.source = %q, want %q", ex.Timeout.Source, judgeTimeoutSource)
+	}
+}
+
+func assertRecoveredSlots(t *testing.T, env *judge.MetricsEnvelope, tc recoveredTimeoutShape) {
+	t.Helper()
+	if env == nil {
+		t.Fatal("metrics = nil, want the planned registry materialized")
+	}
+	got := [4]int{env.Coverage.Available, env.Coverage.Missing, env.Coverage.Errored, env.Coverage.NotProduced}
+	if got != tc.wantCoverage {
+		t.Errorf("coverage = %v, want %v (available/missing/error/not_produced)", got, tc.wantCoverage)
+	}
+	if env.Coverage.Planned != 2 {
+		t.Errorf("planned denominator = %d, want the registry count 2", env.Coverage.Planned)
+	}
+	if env.Quality != tc.wantQuality {
+		t.Errorf("quality = %s, want %s", env.Quality, tc.wantQuality)
+	}
+	for _, slot := range env.Metrics {
+		assertRecoveredSlot(t, slot, tc)
+	}
+}
+
+func assertRecoveredSlot(t *testing.T, slot judge.MetricResult, tc recoveredTimeoutShape) {
+	t.Helper()
+	if want, scored := tc.wantScores[slot.MetricID]; scored {
+		if slot.Availability != judge.Available || slot.Value == nil || *slot.Value != want {
+			t.Errorf("collected slot %s = %s/%v, want AVAILABLE/%v", slot.MetricID, slot.Availability, slot.Value, want)
+		}
+		return
+	}
+	if slot.Availability == judge.Available || slot.Value != nil {
+		t.Errorf("slot %s = %s/%v, want no usable score", slot.MetricID, slot.Availability, slot.Value)
+	}
+	if slot.MetricID == "correctness" && slot.Reason != tc.wantReason {
+		t.Errorf("correctness reason = %q, want %q", slot.Reason, tc.wantReason)
 	}
 }
 

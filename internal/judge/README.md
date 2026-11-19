@@ -326,6 +326,13 @@ Rules that the implementation enforces:
   `AVAILABLE`, and the timeout, its source and any recovery stay recorded.
   A score is never fabricated as zero, and an accepted result is never rewritten
   by a cancellation that arrives later.
+- A recovered timeout result is a final scoring outcome. When the collector obtains
+  a complete, invocation-bound, schema-valid payload after the deadline, completion
+  is derived from the validated slots (`COMPLETED` / `INCOMPLETE` / `FAILED`) and
+  `timeout.recovered` records why, while `deadline_expiry`, its source and the
+  exceeded budget stay visible. A stop that collected nothing, or a payload rejected
+  as a whole, is not a trustworthy outcome and stays `INTERRUPTED`. The legacy
+  script-timeout verdicts are unchanged either way.
 - Whole-payload defects (unparseable, top-level shape, duplicate JSON keys, unknown
   top-level field, schema version, unbound or stale result, size limit) make every
   slot `ERROR`. Slot-level defects poison only their own slot and independently
