@@ -23,6 +23,68 @@ func (failingFileRuntime) ReadFile(context.Context, string) ([]byte, error) {
 }
 
 // ---------------------------------------------------------------------------
+// whitespace matchers
+// ---------------------------------------------------------------------------
+
+// A whitespace matcher is compared as written, untrimmed: it is how a case
+// asserts a single-line output, or rejects a run of spaces. Validation accepts
+// these values (only the empty string is rejected), so they must work here.
+func TestRuleBased_OutputContains_Not_Newline_Pass(t *testing.T) {
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			OutputContains: &config.OutputContainsRule{Not: []string{"\n"}},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "one line only"})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusPass)
+}
+
+func TestRuleBased_OutputContains_Not_Newline_Fail(t *testing.T) {
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			OutputContains: &config.OutputContainsRule{Not: []string{"\n"}},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "first line\nsecond line"})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusFail)
+}
+
+func TestRuleBased_OutputContains_Not_TwoSpaces_Pass(t *testing.T) {
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			OutputContains: &config.OutputContainsRule{Not: []string{"  "}},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "aligned by one space each"})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusPass)
+}
+
+func TestRuleBased_OutputContains_Not_TwoSpaces_Fail(t *testing.T) {
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			OutputContains: &config.OutputContainsRule{Not: []string{"  "}},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "extra  space"})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusFail)
+}
+
+func TestRuleBased_OutputMatches_Not_TwoSpaces_Pass(t *testing.T) {
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Success: []config.Rule{{
+			OutputMatches: &config.OutputMatchesRule{Not: []string{"  "}},
+		}},
+	})
+	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "a b"})
+	assertNoError(t, err)
+	assertStatus(t, r, StatusPass)
+}
+
+// ---------------------------------------------------------------------------
 // output_contains
 // ---------------------------------------------------------------------------
 
