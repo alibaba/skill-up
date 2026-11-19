@@ -630,10 +630,16 @@ Three behaviours are worth knowing before copying it:
   permission mode (`--mode yolo` above) and, where the CLI supports it, disallow the
   interactive question tool (`--disallowed-tools AskUserQuestion`). Otherwise cases
   that reach an approval point hang until the deadline while simple cases pass.
-- ZCode's headless mode resolves the model from the personal channel's
-  `providerOrder` and offers no per-run `--model` flag, so `${model}` /
-  `${model_name}` cannot be forwarded. Per-case model selection needs CLI support
-  first; tracked in issue #377.
+- On the Windows desktop CLI 0.17.1 build tested in issue #377, headless ZCode
+  resolved the model from the personal channel's `providerOrder` and offered no
+  per-run `--model` flag, so `${model}` / `${model_name}` could not be forwarded
+  there. This is a finding about that build, not a documented API limit: ZCode
+  v3.18.2's standalone configuration docs describe selecting a custom provider
+  and model through a separate configuration file
+  (`ZCODE_PERSONAL_PROVIDER_CONFIG_FILE`), which says nothing about a `--model`
+  flag or subscription-account models. Scope per-case model selection to the
+  version you run; if your build documents a model flag, pass it through
+  `args` and the `${model}` template applies as with any other CLI.
 
 ## HTTP transport
 
