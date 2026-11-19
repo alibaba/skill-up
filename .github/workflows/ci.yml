@@ -242,7 +242,7 @@ jobs:
           grep -F "turn 2:" "$log"
           grep -F "unexpected argument '--output-last-message'" "$log"
 
-      - name: Verify real CLI resume and request history after the fix
+      - name: Verify home modes, API-key login, resume and session collection
         run: go test -race -tags e2e -timeout 300s -count=1 -v -run '^TestCodexCLICompatibility$' ./e2e
         env:
           SKILL_UP_CODEX_COMPAT_E2E: "1"
