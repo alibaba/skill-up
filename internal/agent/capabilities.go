@@ -267,7 +267,6 @@ func resolveAppliedModel(params *credential.ResolvedAgentConfig, capabilities Ca
 	if requested == "" {
 		return ""
 	}
-
 	if capabilities.ModelPolicy == ModelPolicyCodexProvider {
 		if reason := codexCustomProviderUnavailableReason(params.Provider, params.AppliedBaseURL); reason != "" {
 			return ""

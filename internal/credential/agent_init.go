@@ -50,8 +50,16 @@ type ResolvedAgentConfig struct {
 	AppliedVersion string
 	Protocol       string
 
-	Provider          string
-	Model             string
+	Provider string
+	Model    string
+	// ModelSplit records that Model is the bare half of a legacy
+	// "provider/model" reference the resolver split to pick provider-scoped
+	// credentials. The split is reversible, so the reference is not carried:
+	// an adapter that resolves models by their full id rejoins
+	// provider + "/" + Model only while the flag holds. It is set where the
+	// split happens, cleared when another source replaces the model, and
+	// carried along when the model is inherited.
+	ModelSplit        bool
 	AppliedProvider   string
 	AppliedModel      string
 	AppliedAPIKey     string
@@ -84,6 +92,7 @@ type agentResolveInput struct {
 	engine      config.EngineConfig
 	provider    string
 	model       string
+	modelSplit  bool
 	baseURL     string
 	valueSource ValueSource
 	fallback    *ResolvedAgentConfig
@@ -119,6 +128,9 @@ func ResolveJudgeConfig(judgeCfg config.JudgeConfig, runner ResolvedAgentConfig,
 		})
 	}
 	provider, model := parseJudgeModel(judgeCfg.Model)
+	// parseJudgeModel splits a legacy "provider/model" judge model; a judge
+	// model written as one field is the split that needs rejoining later.
+	modelSplit := provider != ""
 	var fallback *ResolvedAgentConfig
 	if runner.Provider != "" || runner.Model != "" || runner.APIKey != "" || runner.BaseURL != "" {
 		fallback = &runner
@@ -134,6 +146,7 @@ func ResolveJudgeConfig(judgeCfg config.JudgeConfig, runner ResolvedAgentConfig,
 		},
 		provider:    provider,
 		model:       model,
+		modelSplit:  modelSplit,
 		valueSource: ValueSourceJudge,
 		fallback:    fallback,
 		resolver:    resolver,
@@ -162,14 +175,15 @@ func resolveResolvedAgentConfig(in agentResolveInput) ResolvedAgentConfig {
 		custom = nil
 	}
 	params := ResolvedAgentConfig{
-		Role:     in.role,
-		Engine:   in.engine.Name,
-		Version:  in.engine.Version,
-		Provider: in.provider,
-		Model:    in.model,
-		BaseURL:  in.baseURL,
-		Kwargs:   maps.Clone(in.engine.Kwargs),
-		Custom:   custom,
+		Role:       in.role,
+		Engine:     in.engine.Name,
+		Version:    in.engine.Version,
+		Provider:   in.provider,
+		Model:      in.model,
+		ModelSplit: in.modelSplit,
+		BaseURL:    in.baseURL,
+		Kwargs:     maps.Clone(in.engine.Kwargs),
+		Custom:     custom,
 	}
 	if strings.TrimSpace(in.engine.Entry) != "" {
 		params.Warnings = append(params.Warnings,
@@ -214,6 +228,7 @@ func applyFallback(params *ResolvedAgentConfig, fallback *ResolvedAgentConfig) {
 	}
 	if params.Model == "" && fallback.Model != "" {
 		params.Model = fallback.Model
+		params.ModelSplit = fallback.ModelSplit
 		params.ModelSource = ValueSourceRunner
 	}
 	// Connection values belong to a provider namespace, unlike engine lifecycle.
@@ -238,7 +253,10 @@ func applyCLIModelOverride(params *ResolvedAgentConfig, cliProvider, cliModel st
 		params.Provider = cliProvider
 		params.ProviderSource = ValueSourceCLI
 		if cliModel != "" {
+			// An explicit provider means the model was written bare beside it,
+			// not split out of a legacy reference.
 			params.Model = cliModel
+			params.ModelSplit = false
 			params.ModelSource = ValueSourceCLI
 		}
 		return
@@ -249,11 +267,15 @@ func applyCLIModelOverride(params *ResolvedAgentConfig, cliProvider, cliModel st
 	if params.Engine == agentkind.OpenCode {
 		// OpenCode must not infer a provider from a slashed model ID.
 		params.Model = cliModel
+		params.ModelSplit = false
 		params.ModelSource = ValueSourceCLI
 		return
 	}
-
 	params.Provider, params.Model = ResolveModelRef(cliModel, resolver)
+	// The CLI model replaced whatever was resolved before, so the previous
+	// split no longer holds; a new one holds only when a provider prefix was
+	// actually split off.
+	params.ModelSplit = params.Provider != ""
 	if params.Provider != "" {
 		params.ProviderSource = ValueSourceCLI
 	} else {
@@ -359,6 +381,9 @@ func setResolvedValue(params *ResolvedAgentConfig, kind scopedValueKind, value s
 	switch kind {
 	case valueModel:
 		params.Model = value
+		// A provider env or credential file replaces the model wholesale, so
+		// any earlier split no longer describes it.
+		params.ModelSplit = false
 		params.ModelSource = source
 	case valueAPIKey:
 		params.APIKey = value
