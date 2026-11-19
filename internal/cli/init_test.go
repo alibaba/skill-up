@@ -56,10 +56,14 @@ func TestInit_LocalWritesTemplate(t *testing.T) {
 	t.Chdir(tmp)
 
 	cmd := newInitCmdForTest()
-	cmd.SetOut(&bytes.Buffer{})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
 	cmd.SetArgs([]string{"--local"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("init --local: %v", err)
+	}
+	if !strings.Contains(out.String(), "--config ./.skill-up.yaml") {
+		t.Fatalf("missing local config opt-in hint: %q", out.String())
 	}
 	target := filepath.Join(tmp, ".skill-up.yaml")
 	got, err := os.ReadFile(target)

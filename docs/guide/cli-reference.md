@@ -463,12 +463,16 @@ skill-up init [flags]
 
 | Flag       | Default                                            | Description                                                                                  |
 | :--------: | :-------------------------------------------------: | :-------------------------------------------------------------------------------------------: |
-| `--local`  | `false`                                            | Write target is `$PWD/.skill-up.yaml` instead of the XDG path                                |
+| `--local`  | `false`                                            | Write `$PWD/.skill-up.yaml`; after review, select it on subsequent commands with `--config ./.skill-up.yaml` |
 | `--config` | —                                                  | **Source** file to read (validated, copied verbatim with comments). Without this, a commented template is written. |
 | `--print`  | `false`                                            | Print to stdout instead of writing to disk                                                   |
 | `--force`  | `false`                                            | Overwrite an existing target                                                                 |
 
-> Note: for `init`, `--config` names the *source* to read. For every other subcommand (`run`, `validate`, …) it is the *load-path override* sitting at the top of the discovery chain.
+> For `init`, `--config` names the source to copy without expanding placeholders.
+> For other subcommands it selects the highest-precedence config and permits
+> all its defaults and `${VAR}` expansion in its `env` values. Automatically
+> discovered `.skill-up.yaml` files are ignored. Use `--config` only with trusted files;
+> see [user configuration](./user-config.md#schema) for the trust boundary.
 
 ### Examples
 

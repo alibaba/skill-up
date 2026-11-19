@@ -4,9 +4,12 @@ import (
 	"context"
 	"maps"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 )
+
+var envPlaceholderPattern = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*\}`)
 
 const (
 	envOtelServiceName             = "OTEL_SERVICE_NAME"
@@ -22,6 +25,7 @@ const (
 // ApplyEnv writes telemetry and arbitrary env defaults from c into the process
 // environment, only setting keys that are currently unset. It returns the list
 // of keys that were actually applied (sorted) for logging and debugging.
+// Only env values from the user or explicit discovery layer expand ${VAR}.
 func ApplyEnv(c Config) ([]string, error) {
 	pending := telemetryEnv(c.Telemetry)
 	for k, v := range c.Env {
@@ -29,6 +33,16 @@ func ApplyEnv(c Config) ([]string, error) {
 			continue
 		}
 		if _, exists := pending[k]; !exists {
+			if source := c.envSources[k]; source == sourceUser || source == sourceExplicit {
+				// Resolve before setting any defaults, so config entries cannot
+				// become expansion sources based on map or key ordering.
+				v = envPlaceholderPattern.ReplaceAllStringFunc(v, func(ref string) string {
+					if value, exists := os.LookupEnv(ref[2 : len(ref)-1]); exists {
+						return value
+					}
+					return ref
+				})
+			}
 			pending[k] = v
 		}
 	}

@@ -24,6 +24,8 @@ type Config struct {
 	Telemetry     Telemetry         `yaml:"telemetry,omitempty"`
 	Env           map[string]string `yaml:"env,omitempty"`
 	RuntimeKwargs map[string]Kwargs `yaml:"runtime_kwargs,omitempty"`
+	// LoadFile and directly constructed configs must not gain expansion permission.
+	envSources map[string]string
 }
 
 // Telemetry holds OpenTelemetry-related defaults. Each non-empty field maps to
@@ -67,8 +69,9 @@ func (c *Config) Validate() error {
 }
 
 // overlay copies non-zero fields from other onto c. Maps are merged key-wise
-// with other winning on conflicts.
-func (c *Config) overlay(other Config) {
+// with other winning on conflicts. sourceKind identifies the layer supplying
+// the env values so ApplyEnv can limit expansion to trusted sources.
+func (c *Config) overlay(other Config, sourceKind string) {
 	if other.SchemaVersion != "" {
 		c.SchemaVersion = other.SchemaVersion
 	}
@@ -94,6 +97,14 @@ func (c *Config) overlay(other Config) {
 	}
 	c.Telemetry.ResourceAttributes = mergeStringMap(c.Telemetry.ResourceAttributes, other.Telemetry.ResourceAttributes)
 	c.Env = mergeStringMap(c.Env, other.Env)
+	if len(other.Env) > 0 {
+		if c.envSources == nil {
+			c.envSources = make(map[string]string)
+		}
+		for key := range other.Env {
+			c.envSources[key] = sourceKind
+		}
+	}
 
 	if len(other.RuntimeKwargs) > 0 {
 		if c.RuntimeKwargs == nil {

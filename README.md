@@ -331,17 +331,20 @@ skill-up auto-loads an optional user-level config that supplies default OpenTele
 ### Discovery chain (lowest to highest precedence)
 
 ```
-embed (empty) < user (~/.config/skill-up/config.yaml) < project ($PWD/.skill-up.yaml) < explicit (--config)
+embed (empty) < user (~/.config/skill-up/config.yaml) < explicit (--config)
 ```
 
 | Source     | Path                                                                                                    |
 | ---------- | ------------------------------------------------------------------------------------------------------- |
 | `embed`    | empty `Config{}` — no vendor defaults baked in                                                          |
 | `user`     | `$SKILL_UP_CONFIG`, else `$XDG_CONFIG_HOME/skill-up/config.yaml`, else `~/.config/skill-up/config.yaml` |
-| `project`  | `$PWD/.skill-up.yaml`                                                                                   |
 | `explicit` | `--config <path>` (must exist)                                                                          |
 
-Missing files at the `user` and `project` layers are silently skipped; a missing `--config` path is a hard error. A corrupt config at any layer also fails the run.
+Missing user files are silently skipped; read or parse errors warn. A missing
+or invalid `--config` path is a hard error. Automatically discovered
+`$PWD/.skill-up.yaml` files are ignored with a warning. Review a project file,
+then select it with `--config ./.skill-up.yaml` to trust all its defaults,
+including runtime endpoints.
 
 ### Quickstart
 
@@ -353,6 +356,9 @@ skill-up init --force                    # overwrite an existing file
 skill-up init --config foo.yaml          # reads foo.yaml, writes it to ~/.config/skill-up/config.yaml
 skill-up init --config foo.yaml --local  # reads foo.yaml, writes it to $PWD/.skill-up.yaml
 ```
+
+Files written with `--local` require explicit selection. Review the file, then
+use `--config ./.skill-up.yaml` on commands that should apply its defaults.
 
 With `--config <path>`, `init` reads that file (validating it as a skill-up
 config) and writes its raw bytes to the target — comments and formatting are
@@ -391,7 +397,14 @@ For `runtime_kwargs`: explicit `--runtime-kwarg` on `run` > `eval.yaml` `environ
 
 ### Secrets
 
-Prefer `${ENV_VAR}` references inside the config file rather than baking secret literals. The redaction mechanism (`userconfig.Redact`) masks fields tagged `secret:"true"` when printing; currently no Config field carries the tag, but the mechanism is in place for future fields.
+Use `${ENV_VAR}` references in `env` values from user-level or explicitly selected
+configuration. Automatically discovered project files are ignored; pass
+`--config ./.skill-up.yaml` only after reviewing and trusting that file. See
+[user-config semantics](docs/guide/user-config.md#schema) for precedence and
+the endpoint trust policy.
+
+The redaction mechanism (`userconfig.Redact`) masks fields tagged `secret:"true"`
+when printing; currently no Config field carries the tag.
 
 ## Importing `evals.json`
 

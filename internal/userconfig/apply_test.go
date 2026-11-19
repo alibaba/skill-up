@@ -68,6 +68,83 @@ func TestApplyEnv_ArbitraryEnv(t *testing.T) {
 	}
 }
 
+func TestApplyEnv_ExpandsPlaceholders(t *testing.T) {
+	t.Setenv("SKILL_UP_TEST_SOURCE", "example-value")
+	t.Setenv("SKILL_UP_TEST_EMPTY", "")
+	t.Setenv("SKILL_UP_TEST_NESTED", "${SKILL_UP_TEST_SOURCE}")
+	t.Setenv("SKILL_UP_TEST_ABSENT", "")
+	_ = os.Unsetenv("SKILL_UP_TEST_ABSENT")
+	for _, tc := range []struct{ name, value, want string }{
+		{"embedded", "authorization=${SKILL_UP_TEST_SOURCE}", "authorization=example-value"},
+		{"repeated", "${SKILL_UP_TEST_SOURCE}/${SKILL_UP_TEST_SOURCE}", "example-value/example-value"},
+		{"unset", "${SKILL_UP_TEST_ABSENT}", "${SKILL_UP_TEST_ABSENT}"},
+		{"empty", "${SKILL_UP_TEST_EMPTY}", ""},
+		{"mixed", "${SKILL_UP_TEST_SOURCE}/${SKILL_UP_TEST_ABSENT}", "example-value/${SKILL_UP_TEST_ABSENT}"},
+		{"single pass", "${SKILL_UP_TEST_NESTED}", "${SKILL_UP_TEST_SOURCE}"},
+		{"bare reference", "$SKILL_UP_TEST_SOURCE", "$SKILL_UP_TEST_SOURCE"},
+		{"shell syntax", "${SKILL_UP_TEST_ABSENT:-fallback}", "${SKILL_UP_TEST_ABSENT:-fallback}"},
+		{"unclosed", "${SKILL_UP_TEST_SOURCE", "${SKILL_UP_TEST_SOURCE"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const target = "SKILL_UP_TEST_TARGET"
+			t.Setenv(target, "")
+			_ = os.Unsetenv(target)
+			var cfg Config
+			cfg.overlay(Config{Env: map[string]string{target: tc.value}}, "user")
+			applied, err := ApplyEnv(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, exists := os.LookupEnv(target); !exists || got != tc.want {
+				t.Fatalf("value = %q (set=%t), want %q", got, exists, tc.want)
+			}
+			if !slices.Contains(applied, target) || cfg.Env[target] != tc.value {
+				t.Fatal("applied keys or original config changed unexpectedly")
+			}
+		})
+	}
+}
+
+func TestApplyEnv_ExpansionPreservesPrecedence(t *testing.T) {
+	const source, target = "SKILL_UP_TEST_A", "SKILL_UP_TEST_Z"
+	t.Setenv(source, "")
+	_ = os.Unsetenv(source)
+	t.Setenv(target, "")
+	_ = os.Unsetenv(target)
+	var cfg Config
+	cfg.overlay(Config{Env: map[string]string{source: "from-config", target: "${" + source + "}"}}, "user")
+	if _, err := ApplyEnv(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv(target); got != "${"+source+"}" {
+		t.Fatalf("config defaults must not become expansion sources: %q", got)
+	}
+	t.Setenv(source, "from-shell")
+	for _, existing := range []string{"shell-target", ""} {
+		t.Setenv(target, existing)
+		if _, err := ApplyEnv(cfg); err != nil {
+			t.Fatal(err)
+		}
+		if got := os.Getenv(target); got != existing {
+			t.Fatalf("existing value overwritten: %q", got)
+		}
+	}
+}
+
+func TestApplyEnv_WithoutSourceKeepsPlaceholders(t *testing.T) {
+	const target = "SKILL_UP_TEST_TARGET"
+	t.Setenv("SKILL_UP_TEST_SOURCE", "example-value")
+	t.Setenv(target, "")
+	_ = os.Unsetenv(target)
+	cfg := Config{Env: map[string]string{target: "${SKILL_UP_TEST_SOURCE}"}}
+	if _, err := ApplyEnv(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv(target); got != cfg.Env[target] {
+		t.Fatalf("config without a trusted source expanded: %q", got)
+	}
+}
+
 func TestMergeKwargs_EvalWins(t *testing.T) {
 	c := Config{RuntimeKwargs: map[string]Kwargs{
 		"opensandbox": {"base_url": "from-config", "extensions": "ext"},

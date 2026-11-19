@@ -3,11 +3,11 @@
 //  1. embed     — the empty Config{} (no vendor defaults baked in).
 //  2. user      — $SKILL_UP_CONFIG, else $XDG_CONFIG_HOME/skill-up/config.yaml,
 //                 else ~/.config/skill-up/config.yaml. Missing = silent skip.
-//  3. project   — $WorkingDir/.skill-up.yaml. Missing = silent skip.
-//  4. explicit  — opts.ExplicitPath. Missing = ERROR.
+//  3. explicit  — opts.ExplicitPath. Missing = ERROR.
 //
 // Higher-precedence layers overlay non-zero fields onto lower layers; map
 // fields are merged key-wise rather than replaced.
+// Project files require selection through --config or the user-layer path.
 
 package userconfig
 
@@ -33,14 +33,20 @@ const UserConfigDir = "skill-up"
 // UserConfigFile is the default user-layer file name.
 const UserConfigFile = "config.yaml"
 
+const (
+	sourceEmbed    = "embed"
+	sourceUser     = "user"
+	sourceExplicit = "explicit"
+)
+
 // LoadOptions controls config discovery.
 type LoadOptions struct {
 	ExplicitPath string
 	WorkingDir   string
 	HomeDir      string
 	Env          func(string) string
-	// Warnings receives one line per non-fatal issue (e.g. a corrupt user or
-	// project layer file). Defaults to os.Stderr when nil.
+	// Warnings receives non-fatal issues, including ignored project files.
+	// Defaults to os.Stderr when nil.
 	Warnings io.Writer
 }
 
@@ -65,14 +71,10 @@ func LoadEffective(opts LoadOptions) (Config, []Source, error) {
 	}
 
 	cfg := Config{}
-	sources := []Source{{Kind: "embed"}}
+	sources := []Source{{Kind: sourceEmbed}}
 
-	// Auto-discovered layers (user, project) downgrade parse/validate errors to
-	// warnings so a corrupt ~/.config/skill-up/config.yaml does not block
-	// unrelated commands (run/validate/init/...). Only --config, which the user
-	// explicitly opted into, treats errors as fatal.
-	sources = mergeOptionalLayer(&cfg, sources, "user", resolveUserConfigPath(opts, getenv), warn)
-	sources = mergeOptionalLayer(&cfg, sources, "project", resolveProjectConfigPath(opts), warn)
+	// Optional user-file read/parse errors must not block unrelated commands.
+	sources = mergeOptionalLayer(&cfg, sources, sourceUser, resolveUserConfigPath(opts, getenv), warn)
 
 	if opts.ExplicitPath != "" {
 		loaded, ok, err := loadConfigFile(opts.ExplicitPath)
@@ -82,10 +84,11 @@ func LoadEffective(opts LoadOptions) (Config, []Source, error) {
 		if !ok {
 			return Config{}, nil, fmt.Errorf("config file not found: %s", opts.ExplicitPath)
 		}
-		cfg.overlay(loaded)
-		sources = append(sources, Source{Kind: "explicit", Path: opts.ExplicitPath})
+		cfg.overlay(loaded, sourceExplicit)
+		sources = append(sources, Source{Kind: sourceExplicit, Path: opts.ExplicitPath})
 	}
 
+	warnUntrustedProjectConfig(resolveProjectConfigPath(opts), sources, warn)
 	if err := cfg.Validate(); err != nil {
 		paths := make([]string, 0, len(sources))
 		for _, s := range sources {
@@ -102,7 +105,7 @@ func LoadEffective(opts LoadOptions) (Config, []Source, error) {
 	return cfg, sources, nil
 }
 
-// mergeOptionalLayer loads a single auto-discovered layer (user or project),
+// mergeOptionalLayer loads an optional trusted layer,
 // downgrading parse errors to warnings on warn and appending to sources when
 // the file existed and parsed cleanly.
 func mergeOptionalLayer(cfg *Config, sources []Source, kind, path string, warn io.Writer) []Source {
@@ -117,8 +120,25 @@ func mergeOptionalLayer(cfg *Config, sources []Source, kind, path string, warn i
 	if !ok {
 		return sources
 	}
-	cfg.overlay(loaded)
+	cfg.overlay(loaded, kind)
 	return append(sources, Source{Kind: kind, Path: path})
+}
+
+func warnUntrustedProjectConfig(path string, sources []Source, warn io.Writer) {
+	project, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) || path == "" {
+		return
+	}
+	if err == nil {
+		for _, source := range sources {
+			trusted, statErr := os.Stat(source.Path)
+			if statErr == nil && os.SameFile(project, trusted) {
+				return
+			}
+		}
+	}
+	// Even literal endpoints or runtime kwargs can redirect trusted credentials.
+	_, _ = fmt.Fprintf(warn, "warning: ignoring project config %s; review it and select it with --config to trust its defaults\n", path)
 }
 
 func resolveUserConfigPath(opts LoadOptions, getenv func(string) string) string {

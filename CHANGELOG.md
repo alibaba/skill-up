@@ -28,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not see what a run installs after `skills.include`/`skills.exclude`
   filtering.
 
+### Changed
+
+- **Breaking:** project `.skill-up.yaml` files now require explicit selection
+  with `--config` or `SKILL_UP_CONFIG`. Automatic discovery warns and ignores
+  the entire file, including runtime defaults, so project endpoints cannot
+  redirect trusted credentials. Review existing project configs before opting in.
+
 ### Fixed
 
 - Reject a `rule_based` matcher that is present but holds no values to match.
@@ -44,6 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use prompt-file delivery for resumed Claude Code and Qoder turns when the
   prompt exceeds the inline limit or the target is Windows, preserving prompt
   delivery metadata and failing before execution if the file cannot be uploaded.
+- Expand `${VAR}` references in user-config `env` defaults from the process
+  environment only for user-level or explicitly selected (`--config`) values.
+  Preserve unset references and existing environment values.
 - Match environment variable names case-insensitively in the `none` runtime on
   native Windows. A host `Path` and a configured or probed `PATH` were both
   passed to the child, and which one it kept followed map order. Per-call
