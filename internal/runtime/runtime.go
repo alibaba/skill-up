@@ -15,6 +15,10 @@ import (
 )
 
 const (
+	// AgentHomeInherited preserves inherited agent home settings.
+	AgentHomeInherited = "inherited"
+	// AgentHomeTemporary redirects agent home settings to the run directory.
+	AgentHomeTemporary = "temporary"
 	// VariantEnvName identifies the framework-owned execution configuration variable.
 	VariantEnvName = "SKILL_UP_VARIANT"
 	// ClaudeDirMode is the default directory mode for Claude files.
@@ -223,6 +227,7 @@ type SetupStep struct {
 // Config holds all runtime configuration options.
 type Config struct {
 	Type           string
+	AgentHome      string
 	Image          string
 	WorkspaceMount string
 	// WorkspaceDir reuses an existing host directory as the workspace for the
@@ -290,6 +295,15 @@ func (c SkillConfig) DirName() string {
 
 // NewRuntime creates a Runtime based on the config type.
 func NewRuntime(cfg Config) (Runtime, error) {
+	switch cfg.AgentHome {
+	case "", AgentHomeInherited:
+	case AgentHomeTemporary:
+		if cfg.Type != "none" {
+			return nil, errors.New("agent_home: temporary requires the none runtime")
+		}
+	default:
+		return nil, fmt.Errorf("unknown agent_home %q: must be inherited or temporary", cfg.AgentHome)
+	}
 	var (
 		rt  Runtime
 		err error

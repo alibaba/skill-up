@@ -92,13 +92,18 @@ type ExecResult struct {
 
 ### NoneRuntime (Local Mode)
 
-Uses the host environment directly with either a temporary directory or an
-explicitly supplied existing host directory as the workspace:
+Uses the host with either a temporary workspace or an explicitly supplied
+existing directory. Agent home settings are inherited unless `agent_home` is
+`temporary`:
 
-- `Create`: reuses `Config.WorkspaceDir` when set; otherwise creates
-  `os.MkdirTemp("", "skill-up-*")`
-- `Close`: never deletes an externally owned `Config.WorkspaceDir`; temporary
-  workspaces follow `Config.Delete`
+- `Create`: reuses `Config.WorkspaceDir` when set; otherwise creates a temporary
+  run directory with a `workspace/` child. This layout is the same in both home
+  modes. In `temporary` mode, the run directory also holds the agent home; an
+  explicit workspace gets a separate temporary home.
+- `Close`: removes the temporary run directory when `Config.Delete` is true,
+  including its workspace and any agent home. An explicit `Config.WorkspaceDir`
+  remains untouched. Call `Close` after a failed `Create` too, to clean up a
+  partially created run directory.
 - Reused workspaces are stateful across serialized cases, retries, and
   iterations; setup steps, fixtures, skill installation, and agent changes all
   persist. Report output and event logs must be outside the reused directory.
