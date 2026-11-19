@@ -195,6 +195,44 @@ func TestIntegration_NoBashStillWorks(t *testing.T) {
 	}
 }
 
+// TestIntegration_ExistsFollowsSymlinks verifies Exists dereferences symlinks
+// through the real `stat -L` path: a link to an existing target exists, while
+// a dangling link is absent rather than reporting the link itself.
+func TestIntegration_ExistsFollowsSymlinks(t *testing.T) {
+	ensureImage(t)
+	r := newIntegrationRuntime(t, Config{})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := r.Create(ctx); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	setup, err := r.Exec(ctx, "printf ok > target && ln -s target good-link && ln -s missing-target dangling-link", ExecOptions{})
+	if err != nil {
+		t.Fatalf("setup Exec: %v", err)
+	}
+	if setup.ExitCode != 0 {
+		t.Fatalf("setup exit=%d stderr=%q", setup.ExitCode, setup.Stderr)
+	}
+
+	ok, err := r.Exists(ctx, "good-link")
+	if err != nil {
+		t.Fatalf("Exists(good-link): %v", err)
+	}
+	if !ok {
+		t.Fatal("good-link should exist; stat -L must follow the symlink to its target")
+	}
+
+	ok, err = r.Exists(ctx, "dangling-link")
+	if err != nil {
+		t.Fatalf("Exists(dangling-link): %v", err)
+	}
+	if ok {
+		t.Fatal("dangling-link should be absent; stat -L must report the missing target")
+	}
+}
+
 // TestIntegration_UploadDownloadFile round-trips a single file: write on
 // host → UploadFile → exec to read the in-container content → DownloadFile
 // to a fresh host path → compare bytes.
