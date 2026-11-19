@@ -292,6 +292,9 @@ jobs:
       - name: Run revive
         run: revive -config revive.toml ./...
 
+      - name: Test canary fixture scripts
+        run: python3 -m unittest discover -s scripts/routing-canary -p "test_*.py" -v
+
   gate:
     name: CI Gate
     if: ${{ !cancelled() }}
