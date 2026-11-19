@@ -43,7 +43,6 @@ func TestCodexCLICompatibility(t *testing.T) {
 }
 
 func runCodexCLICompatibility(t *testing.T, wireAPI, homeMode string) {
-	t.Helper()
 	rt, ctx := codexCompatibilityRuntime(t, homeMode)
 	var mu sync.Mutex
 	var requests [][]codexCompatMessage
@@ -90,6 +89,8 @@ func runCodexCLICompatibility(t *testing.T, wireAPI, homeMode string) {
 		sessionID = result.SessionID
 		if homeMode == evalruntime.AgentHomeTemporary {
 			checkCodexTemporaryHome(t, rt, artifactDir, sessionID, prompt, want)
+		} else if _, err := os.Stat(filepath.Join(os.Getenv("CODEX_HOME"), "auth.json")); !os.IsNotExist(err) {
+			t.Fatalf("inherited mode must not create an API-key login: %v", err)
 		}
 	}
 	mu.Lock()
@@ -126,7 +127,8 @@ func checkCodexTemporaryHome(t *testing.T, rt agent.Runtime, artifactDir, sessio
 	}
 	data, err := os.ReadFile(files[0])
 	if err != nil || !bytes.Contains(data, []byte(prompt)) || !bytes.Contains(data, []byte(reply)) {
-		t.Fatalf("collected session JSONL is missing the current exchange: %v", err)
+		t.Fatalf("collected session %s: read=%v, prompt present=%t, reply present=%t",
+			files[0], err, bytes.Contains(data, []byte(prompt)), bytes.Contains(data, []byte(reply)))
 	}
 	sourceFiles, err := filepath.Glob(filepath.Join(home, "sessions", "*", "*", "*", filepath.Base(files[0])))
 	if err != nil || len(sourceFiles) != 1 {
@@ -134,11 +136,15 @@ func checkCodexTemporaryHome(t *testing.T, rt agent.Runtime, artifactDir, sessio
 	}
 	source, err := os.ReadFile(sourceFiles[0])
 	if err != nil || !bytes.Equal(data, source) {
-		t.Fatalf("collected session differs from the temporary-home session: %v", err)
+		t.Fatalf("collected session %s differs from temporary-home session %s: %v", files[0], sourceFiles[0], err)
 	}
 	entries, err := os.ReadDir(os.Getenv("CODEX_HOME"))
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("temporary mode wrote to the inherited Codex home: %v, %v", entries, err)
+	}
+	entries, err = os.ReadDir(os.Getenv("HOME"))
+	if err != nil || len(entries) != 1 || entries[0].Name() != ".codex" {
+		t.Fatalf("temporary mode wrote to the inherited home: %v, %v", entries, err)
 	}
 }
 
