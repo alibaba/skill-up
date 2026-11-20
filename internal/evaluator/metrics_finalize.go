@@ -30,13 +30,14 @@ func finalizeJudgeMetrics(ctx context.Context, result *EvalResult, cfg config.Ju
 	if stage == "" {
 		stage = judge.StageNotInvoked
 	}
-	env := caseMetricsEnvelope(ctx, result, cfg, planned, stage)
+	production := metricProduction(ctx, result, stage)
+	env := caseMetricsEnvelope(result, cfg, planned, stage, production)
 	result.Metrics = env
 	if result.Grading != nil {
 		result.Grading.Metrics = env
 	}
 
-	contractError := metricContractError(env, planned, metricProduction(ctx, result, stage))
+	contractError := metricContractError(env, planned, production)
 	switch {
 	case contractError != "":
 		applyMetricError(result, contractError)
@@ -46,7 +47,7 @@ func finalizeJudgeMetrics(ctx context.Context, result *EvalResult, cfg config.Ju
 	result.Execution = deriveSingleExecution(ctx, result, env, planned, contractError, stage)
 }
 
-func caseMetricsEnvelope(ctx context.Context, result *EvalResult, cfg config.JudgeConfig, planned []judge.MetricSlot, stage judge.Stage) *judge.MetricsEnvelope {
+func caseMetricsEnvelope(result *EvalResult, cfg config.JudgeConfig, planned []judge.MetricSlot, stage judge.Stage, production judge.MetricProduction) *judge.MetricsEnvelope {
 	if result.Grading != nil && result.Grading.Metrics != nil {
 		return result.Grading.Metrics
 	}
@@ -54,7 +55,7 @@ func caseMetricsEnvelope(ctx context.Context, result *EvalResult, cfg config.Jud
 	if cfg.Type != "script" && stage == judge.StageStarted {
 		problem = judge.ProblemChannelUnsupported
 	}
-	return judge.MaterializeSlots(cfg.ID, planned, nil, problem, metricProduction(ctx, result, stage))
+	return judge.MaterializeSlots(cfg.ID, planned, nil, problem, production)
 }
 
 // metricProduction reports whether a scoring pass was allowed to reach a
@@ -62,6 +63,9 @@ func caseMetricsEnvelope(ctx context.Context, result *EvalResult, cfg config.Jud
 // ended as an unsuccessful process leaves its planned slots NOT_PRODUCED rather
 // than MISSING, so an execution failure is never reported as omitted output.
 func metricProduction(ctx context.Context, result *EvalResult, stage judge.Stage) judge.MetricProduction {
+	if metricsFinalized(result) {
+		return judge.MetricProduced
+	}
 	if stage != judge.StageStarted || ctx.Err() != nil {
 		return judge.MetricPrevented
 	}
@@ -74,6 +78,10 @@ func metricProduction(ctx context.Context, result *EvalResult, stage judge.Stage
 		return judge.MetricPrevented
 	}
 	return judge.MetricProduced
+}
+
+func metricsFinalized(result *EvalResult) bool {
+	return result.Grading != nil && result.Grading.MetricsFinalized
 }
 
 func gradingExecution(result *EvalResult) *judge.ExecutionMetadata {
@@ -176,13 +184,16 @@ func deriveSingleExecution(ctx context.Context, result *EvalResult, env *judge.M
 	case ctx.Err() != nil:
 		stop := judge.ClassifyStop(ctx.Err(), judge.StopObservation{DeadlineSource: DeadlineSource(ctx), SignalObserved: SignalObserved(ctx)})
 		execution := interruptedExecution(stage, stop)
-		if execution.Timeout != nil && isRecoveredTimeout(observed) {
+		recovered := execution.Timeout != nil && isRecoveredTimeout(observed)
+		if recovered {
 			execution.Timeout.Recovered = true
-			return recoveredSingleExecution(execution, env, planned)
+		}
+		if recovered || metricsFinalized(result) {
+			return completedMetricExecution(execution, env, planned)
 		}
 		return execution
 	case isRecoveredTimeout(observed):
-		return recoveredSingleExecution(observed, env, planned)
+		return completedMetricExecution(observed, env, planned)
 	case observed != nil:
 		return observed
 	case contractError != "":
@@ -202,12 +213,9 @@ func isRecoveredTimeout(ex *judge.ExecutionMetadata) bool {
 	return ex != nil && ex.Timeout != nil && ex.Timeout.Occurred && ex.Timeout.Recovered
 }
 
-// recoveredSingleExecution derives completion from the validated slots of a
-// recovered timeout result. The judge's own record supplies the stop, its source
-// and the timeout metadata, which are copied unchanged: accepting the score never
-// claims execution stayed inside its budget. The record itself is not mutated, so
-// the scoring pass still reports the interruption it observed.
-func recoveredSingleExecution(observed *judge.ExecutionMetadata, env *judge.MetricsEnvelope, planned []judge.MetricSlot) *judge.ExecutionMetadata {
+// completedMetricExecution derives completion from validated metric slots
+// while preserving the recorded stop and its provenance.
+func completedMetricExecution(observed *judge.ExecutionMetadata, env *judge.MetricsEnvelope, planned []judge.MetricSlot) *judge.ExecutionMetadata {
 	revised := *observed
 	revised.Stage = judge.StageFinished
 	revised.Completion = completionForContract(env, planned)

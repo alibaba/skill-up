@@ -154,6 +154,10 @@ type Result struct {
 	// field changes meaning.
 	Metrics *MetricsEnvelope `json:"metrics,omitempty"`
 
+	// MetricsFinalized records a completed script's metric collection attempt
+	// before the evaluator checks for a later stop.
+	MetricsFinalized bool `json:"-"`
+
 	// Execution is evaluator-facing metadata copied to the case record rather
 	// than nested in the legacy grading payload.
 	Execution *ExecutionMetadata `json:"-"`

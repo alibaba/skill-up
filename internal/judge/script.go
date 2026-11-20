@@ -165,6 +165,7 @@ func (j *ScriptJudge) evaluateInRuntime(ctx context.Context, rt evalruntime.Runt
 	}
 	res := j.buildResult(true, evidence, debugInfo, in)
 	j.attachMetrics(res, MetricProduced)
+	res.MetricsFinalized = res.Metrics != nil
 	return res, nil
 }
 

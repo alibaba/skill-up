@@ -154,6 +154,9 @@ func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 	// validate per-turn judge rules reference valid turn numbers
 	turnsTotal := len(cfg.Input.Turns)
 	errs = append(errs, validateConfiguredJudges(judgeFields{single: cfg.Judge, singleSet: cfg.JudgeSet, members: cfg.Judges, membersSet: cfg.JudgesSet})...)
+	if err := validateCaseMetricRegistryType(cfg.Judge); err != nil {
+		errs = append(errs, err.Error())
+	}
 	var allRules []Rule
 	allRules = append(allRules, cfg.Judge.Success...)
 	allRules = append(allRules, cfg.Judge.Failure...)

@@ -113,6 +113,9 @@ func memberDecisionFor(graded EvalResult, stop judge.Stop) MemberDecision {
 	if graded.Grading == nil || graded.Status == judge.StatusError {
 		return MemberNotAccepted
 	}
+	if metricsFinalized(&graded) {
+		return MemberAccepted
+	}
 	switch stop.Cause {
 	case judge.CauseNone:
 		return MemberAccepted
@@ -220,13 +223,11 @@ func gradedMetrics(member config.JudgeConfig, graded EvalResult, decision Member
 	return judge.MaterializeSlots(member.ID, slots, nil, judge.ProblemNone, production)
 }
 
-// memberExecution describes one member's execution facts. Accepted results report
-// their own completion. Otherwise the member keeps whatever its own scoring pass
-// already observed; a member that recorded nothing and was stopped by the outer
-// context is INTERRUPTED, with the stage recording whether it had started.
+// memberExecution keeps scoring completion and stop metadata for final results,
+// including a completed scoring pass with a contract error followed by a stop.
 func memberExecution(graded EvalResult, stop judge.Stop, decision MemberDecision, planned []judge.MetricSlot) *judge.ExecutionMetadata {
-	if decision == MemberAccepted {
-		return acceptedMemberExecution(graded, stop, planned)
+	if decision == MemberAccepted || (metricsFinalized(&graded) && stop.Cause != judge.CauseNone) {
+		return completedMemberExecution(graded, stop, planned)
 	}
 	if isRecoveredTimeout(gradingExecution(&graded)) {
 		return recoveredMemberExecution(graded, stop, planned)
@@ -277,7 +278,7 @@ func observedMemberExecution(graded EvalResult, stage judge.Stage) *judge.Execut
 	return &observed
 }
 
-func acceptedMemberExecution(graded EvalResult, stop judge.Stop, planned []judge.MetricSlot) *judge.ExecutionMetadata {
+func completedMemberExecution(graded EvalResult, stop judge.Stop, planned []judge.MetricSlot) *judge.ExecutionMetadata {
 	// A judge that reported how its own pass ended outranks a completion derived
 	// from slots: a script that exited unsuccessfully keeps FAILED/process_exit
 	// even though it reached a final outcome.

@@ -1729,3 +1729,78 @@ func TestExecuteCaseNullEvidencePoisonsOnlyItsSlot(t *testing.T) {
 		})
 	}
 }
+
+func TestFinalMetricsAreValidatedAfterLateDeadline(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		grouped bool
+	}{
+		{name: "single"},
+		{name: "grouped", grouped: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			graded, member := collectResultMissingRequiredMetric(t, tc.grouped)
+			// Simulate the stop at the collection/finalization boundary without
+			// depending on wall-clock timing of the script.
+			ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+			defer cancel()
+			ctx = ContextWithDeadlineSource(ctx, caseTimeoutDeadlineSource)
+			finalizeJudgeMetrics(ctx, &graded, member)
+			assertFinalMetricsContractError(t, graded)
+			if tc.grouped {
+				stop := memberStop(ctx, ctx, "")
+				decision := memberDecisionFor(graded, stop)
+				if decision != MemberNotAccepted {
+					t.Fatal("member with a missing required slot must not be accepted")
+				}
+				execution := memberExecution(graded, stop, decision, judge.SlotsFromConfig(member.Metrics))
+				assertLateDeadlineOnFinalMetrics(t, execution)
+			}
+		})
+	}
+}
+
+func collectResultMissingRequiredMetric(t *testing.T, grouped bool) (EvalResult, config.JudgeConfig) {
+	t.Helper()
+	payload := `{"schema_version":1,"invocation_id":"__INVOCATION__","metrics":[{"metric_id":"completeness","availability":"AVAILABLE","value":0.75}]}`
+	script := metricsScriptWithTail(t, t.TempDir(), payload, "")
+	member := config.JudgeConfig{ID: "scorer", Type: "script", ScriptPath: script, Metrics: scoreRegistry()}
+	ag := &mockAgent{name: "test", output: "done"}
+	e := newTestEvaluator(EvalOptions{
+		Agent: ag, OutputDir: t.TempDir(),
+		EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none"}, Judge: member},
+	})
+	result := e.runJudgePhase(context.Background(), newScriptRuntime(t), &config.CaseConfig{ID: "late-deadline"},
+		"with_skill", member, 1, ag, judge.Input{}, &EvalResult{}, "judge/run", grouped)
+	if result.Status != judge.StatusPass || result.Grading == nil || result.Grading.Metrics == nil {
+		t.Fatalf("expected successful script collection before finalization, got %s (%v)", result.Status, result.Error)
+	}
+	m := result.Grading.Metrics.Metrics
+	if len(m) != 2 || m[0].Availability != judge.Missing || m[1].Availability != judge.Available {
+		t.Fatalf("collected slots = %+v, want a missing required metric and an available sibling", m)
+	}
+	return result, member
+}
+
+func assertFinalMetricsContractError(t *testing.T, graded EvalResult) {
+	t.Helper()
+	if graded.Status != judge.StatusError || graded.Grading.Status != judge.StatusError ||
+		!strings.Contains(errorText(graded.Error), "required named metric unavailable: correctness") {
+		t.Fatalf("status = %s with error %v, want required-metric contract error", graded.Status, graded.Error)
+	}
+	if c := graded.Metrics.Coverage; c.Missing != 1 || c.Available != 1 {
+		t.Fatalf("coverage = %+v, want one missing slot and one available sibling", c)
+	}
+	assertLateDeadlineOnFinalMetrics(t, graded.Execution)
+}
+
+func assertLateDeadlineOnFinalMetrics(t *testing.T, execution *judge.ExecutionMetadata) {
+	t.Helper()
+	if execution == nil || execution.Stage != judge.StageFinished || execution.Completion != judge.CompletionIncomplete {
+		t.Fatalf("execution = %+v, want COMPLETED/INCOMPLETE", execution)
+	}
+	if execution.Cause != judge.CauseDeadlineExpiry || execution.DeadlineSource != caseTimeoutDeadlineSource ||
+		execution.Timeout == nil || !execution.Timeout.Occurred || execution.Timeout.Recovered {
+		t.Fatalf("deadline metadata = %+v, want a late case deadline without timeout recovery", execution)
+	}
+}
