@@ -174,6 +174,31 @@ func TestEvaluatePostCondition(t *testing.T) {
 			response: "operation success",
 			wantFail: false,
 		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			reason := evaluatePostCondition(tt.pc, tt.response)
+			if tt.wantFail && reason == "" {
+				t.Fatal("expected failure reason, got empty")
+			}
+			if !tt.wantFail && reason != "" {
+				t.Fatalf("unexpected failure: %s", reason)
+			}
+		})
+	}
+}
+
+func TestEvaluatePostCondition_WhitespaceMatchers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		pc       *config.PostCondition
+		response string
+		wantFail bool
+	}{
 		{
 			// Whitespace matchers are compared as written, so a post_condition
 			// can gate on a newline or on a run of spaces.
