@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -58,6 +59,10 @@ type openSandboxClient interface {
 	DownloadFile(ctx context.Context, remotePath, rangeHeader string, opts ...opensandbox.DownloadFileOptions) (io.ReadCloser, error)
 	SearchFiles(ctx context.Context, dir, pattern string) ([]opensandbox.FileInfo, error)
 	RunCommandWithOpts(ctx context.Context, req opensandbox.RunCommandRequest, handlers *opensandbox.ExecutionHandlers) (*opensandbox.Execution, error)
+}
+
+type openSandboxFileInfoClient interface {
+	GetFileInfo(ctx context.Context, remotePath string) (map[string]opensandbox.FileInfo, error)
 }
 
 var createOpenSandbox = createOpenSandboxCompat
@@ -372,16 +377,19 @@ func (r *OpenSandboxRuntime) Exists(ctx context.Context, sourcePath string) (boo
 		return false, err
 	}
 	source := r.remotePath(sourcePath)
-	files, err := r.sandbox.SearchFiles(ctx, path.Dir(source), path.Base(source))
+	client, ok := r.sandbox.(openSandboxFileInfoClient)
+	if !ok {
+		return false, errors.New("opensandbox client does not support file metadata")
+	}
+	infos, err := client.GetFileInfo(ctx, source)
 	if err != nil {
-		return false, fmt.Errorf("search sandbox file %s: %w", source, err)
-	}
-	for _, file := range files {
-		if file.Path == source {
-			return true, nil
+		if isOpenSandboxFileNotFound(err) {
+			return false, nil
 		}
+		return false, fmt.Errorf("get sandbox file info %s: %w", source, err)
 	}
-	return false, nil
+	_, ok = infos[source]
+	return ok, nil
 }
 
 // ReadFile returns the contents of a file in the sandbox workspace.
@@ -404,6 +412,14 @@ func (r *OpenSandboxRuntime) ReadFile(ctx context.Context, sourcePath string) ([
 		return nil, fmt.Errorf("read sandbox file %s: %w", source, err)
 	}
 	return data, nil
+}
+
+func isOpenSandboxFileNotFound(err error) bool {
+	var apiErr *opensandbox.APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.StatusCode == http.StatusNotFound && apiErr.Response.Code == "FILE_NOT_FOUND"
 }
 
 func (r *OpenSandboxRuntime) downloadRemoteFile(ctx context.Context, source, targetPath string, mode int) error {
