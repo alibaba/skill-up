@@ -377,6 +377,9 @@ func (r *OpenSandboxRuntime) Exists(ctx context.Context, sourcePath string) (boo
 		return false, err
 	}
 	source := r.remotePath(sourcePath)
+	if err := rejectOpenSandboxExpandedPath(source); err != nil {
+		return false, err
+	}
 	client, ok := r.sandbox.(openSandboxFileInfoClient)
 	if !ok {
 		return false, errors.New("opensandbox client does not support file metadata")
@@ -398,6 +401,9 @@ func (r *OpenSandboxRuntime) ReadFile(ctx context.Context, sourcePath string) ([
 		return nil, err
 	}
 	source := r.remotePath(sourcePath)
+	if err := rejectOpenSandboxExpandedPath(source); err != nil {
+		return nil, err
+	}
 	rc, err := r.sandbox.DownloadFile(ctx, source, "")
 	if err != nil {
 		if isOpenSandboxFileNotFound(err) {
@@ -419,6 +425,17 @@ func isOpenSandboxFileNotFound(err error) bool {
 		return false
 	}
 	return apiErr.StatusCode == http.StatusNotFound && apiErr.Response.Code == "FILE_NOT_FOUND"
+}
+
+// rejectOpenSandboxExpandedPath keeps the server's environment-variable
+// expansion from changing what a workspace-relative path names. A literal
+// filename containing "$" would otherwise resolve to a different file or fail
+// with an unset-variable error.
+func rejectOpenSandboxExpandedPath(source string) error {
+	if strings.Contains(source, "$") {
+		return fmt.Errorf("opensandbox path %q contains environment expansion syntax", source)
+	}
+	return nil
 }
 
 func (r *OpenSandboxRuntime) downloadRemoteFile(ctx context.Context, source, targetPath string, mode int) error {

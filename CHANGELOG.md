@@ -7,27 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- `skill-up validate --skill <dir>` lints the content integrity of a single
-  skill as authored on disk: SKILL.md must open with a closed YAML frontmatter
-  block declaring non-empty `name` and `description` fields, and every
-  `references/`, `assets/`, `scripts/` path cited in the markdown body must
-  exist on disk. The body is parsed as CommonMark so prose citations, local
-  link/image destinations, and path-citing inline code spans are checked —
-  with or without a leading `./`, and with equivalent path spellings
-  normalized — while code blocks, remote URLs, and raw HTML are ignored. The
-  opt-in `--uncited` flag also reports files under those directories that are
-  not reachable from the body, the orphans a truncated SKILL.md leaves behind;
-  reachability is transitive through the links of cited documents and the
-  path mentions of cited scripts (dotfiles stay silent; a directory cited as a
-  link destination covers everything beneath it), and it stays a heuristic,
-  which is why the report is off by default. Findings print as warnings
-  without changing the exit code; `--strict` promotes them to failures. The
-  check is source-level and independent from eval config validation — it does
-  not see what a run installs after `skills.include`/`skills.exclude`
-  filtering.
-
 ### Fixed
 
 - Reject a `rule_based` matcher that is present but holds no values to match.
@@ -45,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prompt exceeds the inline limit or the target is Windows, preserving prompt
   delivery metadata and failing before execution if the file cannot be uploaded.
 - Read workspace file expectations and rule-based checks through the runtime
-  when it exposes `Stat` and `ReadFile` accessors. Docker and OpenSandbox
+  when it exposes `Exists` and `ReadFile` accessors. Docker and OpenSandbox
   cases now grade the actual sandbox workspace instead of host paths, while
   path confinement prevents these checks from escaping the workspace.
 - Match environment variable names case-insensitively in the `none` runtime on

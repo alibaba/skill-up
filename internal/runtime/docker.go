@@ -369,7 +369,7 @@ func (r *DockerRuntime) Exists(ctx context.Context, sourcePath string) (bool, er
 	if err != nil {
 		return false, err
 	}
-	result, err := r.Exec(ctx, "stat -L "+shellquote.QuotePOSIX(source), ExecOptions{Cwd: "/"})
+	result, err := r.Exec(ctx, "stat -L "+shellquote.QuotePOSIX(source), ExecOptions{Cwd: "/", Env: map[string]string{"LC_ALL": "C"}})
 	if err != nil {
 		return false, err
 	}
@@ -388,7 +388,7 @@ func (r *DockerRuntime) Exists(ctx context.Context, sourcePath string) (bool, er
 func (r *DockerRuntime) existsWithTest(ctx context.Context, source string) (bool, error) {
 	// -L dereferences symlinks so this fallback matches the stat -L path:
 	// a dangling symlink is absent, while a link to an existing path exists.
-	result, err := r.Exec(ctx, "ls -dL "+shellquote.QuotePOSIX(source), ExecOptions{Cwd: "/"})
+	result, err := r.Exec(ctx, "ls -dL "+shellquote.QuotePOSIX(source), ExecOptions{Cwd: "/", Env: map[string]string{"LC_ALL": "C"}})
 	if err != nil {
 		return false, err
 	}
@@ -407,7 +407,7 @@ func (r *DockerRuntime) ReadFile(ctx context.Context, sourcePath string) ([]byte
 	if err != nil {
 		return nil, err
 	}
-	result, err := r.Exec(ctx, "cat "+shellquote.QuotePOSIX(source), ExecOptions{Cwd: "/"})
+	result, err := r.Exec(ctx, "cat "+shellquote.QuotePOSIX(source), ExecOptions{Cwd: "/", Env: map[string]string{"LC_ALL": "C"}})
 	if err != nil {
 		return nil, err
 	}

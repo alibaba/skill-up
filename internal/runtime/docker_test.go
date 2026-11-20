@@ -183,6 +183,61 @@ func TestDockerRuntimeExistsAndReadFileErrors(t *testing.T) {
 	}
 }
 
+func TestDockerRuntimeFileProbesUseEnglishLocale(t *testing.T) {
+	t.Run("stat", func(t *testing.T) {
+		fd := newFakeDocker(t, []scriptedCall{{
+			match:    "exec",
+			response: fakeDockerResponse{},
+		}})
+		r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+		r.containerID = dockerStatTestContainer
+
+		if _, err := r.Exists(context.Background(), "x"); err != nil {
+			t.Fatal(err)
+		}
+		assertDockerEnv(t, fd.callArgs(0))
+	})
+
+	t.Run("ls fallback", func(t *testing.T) {
+		fd := newFakeDocker(t, []scriptedCall{
+			{match: "exec", response: fakeDockerResponse{exitCode: 127}},
+			{match: "exec", response: fakeDockerResponse{exitCode: 2, stderr: "ls: cannot access 'x': No such file or directory"}},
+		})
+		r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+		r.containerID = dockerStatTestContainer
+
+		if _, err := r.Exists(context.Background(), "x"); err != nil {
+			t.Fatal(err)
+		}
+		assertDockerEnv(t, fd.callArgs(0))
+		assertDockerEnv(t, fd.callArgs(1))
+	})
+
+	t.Run("cat", func(t *testing.T) {
+		fd := newFakeDocker(t, []scriptedCall{{
+			match:    "exec",
+			response: fakeDockerResponse{stdout: "data"},
+		}})
+		r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+		r.containerID = dockerStatTestContainer
+
+		if _, err := r.ReadFile(context.Background(), "x"); err != nil {
+			t.Fatal(err)
+		}
+		assertDockerEnv(t, fd.callArgs(0))
+	})
+}
+
+func assertDockerEnv(t *testing.T, args []string) {
+	t.Helper()
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--env" && args[i+1] == "LC_ALL=C" {
+			return
+		}
+	}
+	t.Fatalf("args %v missing --env LC_ALL=C", args)
+}
+
 func TestDockerRuntimeExistsDanglingSymlinkAcrossPaths(t *testing.T) {
 	t.Run("stat follows dangling link", func(t *testing.T) {
 		fd := newFakeDocker(t, []scriptedCall{{

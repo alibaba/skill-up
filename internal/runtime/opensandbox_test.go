@@ -1139,6 +1139,12 @@ func TestOpenSandboxRuntimeExistsUsesLiteralMetadata(t *testing.T) {
 			}},
 			wantErr: true,
 		},
+		{
+			name:       "rejects environment expansion",
+			sourcePath: "report-$VERSION.txt",
+			fake:       &fakeOpenSandbox{},
+			wantErr:    true,
+		},
 	}
 
 	for _, tt := range tests {
