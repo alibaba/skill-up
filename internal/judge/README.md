@@ -280,19 +280,30 @@ go test ./internal/judge/ -run TestAgentJudge -v
 
 ## Named metrics (#317, first slice: validated scoring and persistence)
 
-Configured per judge as a planned registry; omitted means the judge keeps today's
-shape exactly:
+A local script judge can declare a named metric registry:
 
 ```yaml
 judge:
-  type: agent_judge
+  type: script
+  script_path: scripts/score.sh
   metrics:
-    - id: correctness          # stable config identifier, never a judge-generated label
+    - id: correctness
       required: true
       evidence_required: true
     - id: completeness
-      min_score: 0.7           # absent means no threshold decision, which is not a threshold of 0
+      min_score: 0.7
 ```
+
+For a runnable example, save this as `scripts/score.sh`:
+
+```sh
+#!/bin/sh
+cat > "$EVAL_METRICS_RESULT_PATH" <<EOF
+{"schema_version":1,"invocation_id":"$EVAL_METRICS_INVOCATION_ID","metrics":[{"metric_id":"correctness","availability":"AVAILABLE","value":0.8,"evidence":["example evidence"]},{"metric_id":"completeness","availability":"AVAILABLE","value":0.75}]}
+EOF
+```
+
+A case-level `judge.metrics` registry requires an explicit `judge.type`.
 
 Four independent questions, four fields, disjoint value sets:
 
@@ -373,24 +384,24 @@ Accepted grammar (`schema_version` must be `1`):
 }
 ```
 
-`availability` is one of `AVAILABLE`, `MISSING`, `SKIP`, `ERROR`. `AVAILABLE`
-requires a finite number in `[0,1]` — an explicit `0` is a real score. Unknown
-entry fields, unknown top-level fields, duplicate JSON keys at any level, a wrong
-schema version, a mismatched invocation id, a non-object top level, an `evidence`
-array holding an element that is neither a string nor `null`, trailing content and
-an oversized file are all rejected.
+`availability` is one of `AVAILABLE`, `MISSING`, `SKIP`, or `ERROR`.
+An explicit `0` is a valid `AVAILABLE` score.
 
-Rejection semantics:
-
-- Whole-envelope defect ⇒ every planned slot `ERROR` with that reason; nothing is usable.
-- One bad entry ⇒ only that slot `ERROR`; independently valid siblings stay `AVAILABLE`.
-- A `null` element inside `evidence` is one entry's defect, not the payload's: that
-  slot becomes `ERROR` with reason `invalid_evidence`, and a sibling carrying a
-  valid score keeps it. A blank string element is not a defect on its own —
-  `evidence_required` asks for at least one nonblank string, so
-  `["valid evidence", "   "]` supports the score.
-- The path is `Lstat`-ed and must be a regular, non-symlink file, and its size is
-  checked before it is read. A directory, symlink or device is never collected.
+- **Envelope errors** mark every planned slot `ERROR`. These include malformed
+  JSON, a non-object top level, trailing content, unknown field names,
+  duplicate JSON keys, an unsupported schema version, or a mismatched invocation
+  ID. A wrong type for `metric_id`, `availability`, `reason`, or `evidence`
+  also fails the envelope. An `evidence` array may contain strings or `null`.
+- **Slot errors** affect the named metric and preserve sibling scores. Examples
+  include an unknown availability value, a missing, nonnumeric or out-of-range
+  `AVAILABLE` score, a duplicate metric ID, and a `null` evidence element
+  (`invalid_evidence`). If evidence is required, at least one string must be
+  nonblank.
+- An explicit `SKIP` on a required or thresholded slot preserves its reason,
+  makes scoring `INCOMPLETE`, and records `judge_declined` when the decline is
+  the only contract issue.
+- Collection validates the opened file and enforces a 1 MiB read limit. Only
+  regular files are accepted, with symlinks rejected at open time.
 - A file that never appeared because evaluation was interrupted ⇒ `NOT_PRODUCED`.
 - A file that never appeared after the script exited `0` ⇒ rejected payload, not a
   fabricated zero.

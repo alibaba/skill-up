@@ -37,14 +37,14 @@ func finalizeJudgeMetrics(ctx context.Context, result *EvalResult, cfg config.Ju
 		result.Grading.Metrics = env
 	}
 
-	contractError := metricContractError(env, planned, production)
+	contractError, contractCause := metricContractError(env, planned, production)
 	switch {
 	case contractError != "":
 		applyMetricError(result, contractError)
 	case env.Quality == judge.QualityNotMet:
 		applyMetricFailure(result, unmetThresholds(env, planned))
 	}
-	result.Execution = deriveSingleExecution(ctx, result, env, planned, contractError, stage)
+	result.Execution = deriveSingleExecution(ctx, result, env, planned, contractCause, stage)
 }
 
 func caseMetricsEnvelope(result *EvalResult, cfg config.JudgeConfig, planned []judge.MetricSlot, stage judge.Stage, production judge.MetricProduction) *judge.MetricsEnvelope {
@@ -91,35 +91,37 @@ func gradingExecution(result *EvalResult) *judge.ExecutionMetadata {
 	return result.Grading.Execution
 }
 
-func metricContractError(env *judge.MetricsEnvelope, planned []judge.MetricSlot, production judge.MetricProduction) string {
+func metricContractError(env *judge.MetricsEnvelope, planned []judge.MetricSlot, production judge.MetricProduction) (string, judge.Cause) {
 	byID := make(map[string]judge.MetricResult, len(env.Metrics))
 	for _, metric := range env.Metrics {
 		byID[metric.MetricID] = metric
 		if metric.Availability == judge.Errored {
-			return "named metric " + metric.MetricID + " is invalid: " + metric.Reason
+			return "named metric " + metric.MetricID + " is invalid: " + metric.Reason, judge.CauseContractError
 		}
 	}
 	if production == judge.MetricPrevented {
-		return ""
+		return "", judge.CauseNone
 	}
+	var declined string
 	for _, slot := range planned {
-		metric, ok := byID[slot.ID]
-		if !ok {
-			if slot.Required || slot.MinScore != nil {
-				return "required named metric unavailable: " + slot.ID
+		if !slot.Required && slot.MinScore == nil {
+			continue
+		}
+		switch byID[slot.ID].Availability {
+		case judge.Available, judge.NotProduced:
+			continue
+		case judge.Declined:
+			if declined == "" {
+				declined = slot.ID
 			}
-			continue
-		}
-		// A slot the execution never reached is an execution fact, not omitted
-		// scoring output: it must not reclassify the verdict or its cause.
-		if metric.Availability == judge.NotProduced {
-			continue
-		}
-		if metric.Availability != judge.Available && (slot.Required || slot.MinScore != nil) {
-			return "required named metric unavailable: " + slot.ID
+		default:
+			return "required named metric unavailable: " + slot.ID, judge.CauseContractError
 		}
 	}
-	return ""
+	if declined != "" {
+		return "required named metric unavailable: " + declined, judge.CauseJudgeDeclined
+	}
+	return "", judge.CauseNone
 }
 
 // unmetThresholds names the metrics whose collected value fell below the
@@ -178,26 +180,24 @@ func applyMetricFailure(result *EvalResult, unmet []string) {
 	}
 }
 
-func deriveSingleExecution(ctx context.Context, result *EvalResult, env *judge.MetricsEnvelope, planned []judge.MetricSlot, contractError string, stage judge.Stage) *judge.ExecutionMetadata {
+func deriveSingleExecution(ctx context.Context, result *EvalResult, env *judge.MetricsEnvelope, planned []judge.MetricSlot, contractCause judge.Cause, stage judge.Stage) *judge.ExecutionMetadata {
 	observed := gradingExecution(result)
 	switch {
+	case isRecoveredTimeout(observed):
+		return completedMetricExecution(observed, env, planned)
+	case observed != nil && observed.Cause == judge.CauseDeadlineExpiry:
+		return observed
 	case ctx.Err() != nil:
-		stop := judge.ClassifyStop(ctx.Err(), judge.StopObservation{DeadlineSource: DeadlineSource(ctx), SignalObserved: SignalObserved(ctx)})
+		stop := judge.ClassifyStop(ctx.Err(), judge.StopObservation{DeadlineSource: judge.DeadlineSource(ctx), SignalObserved: SignalObserved(ctx)})
 		execution := interruptedExecution(stage, stop)
-		recovered := execution.Timeout != nil && isRecoveredTimeout(observed)
-		if recovered {
-			execution.Timeout.Recovered = true
-		}
-		if recovered || metricsFinalized(result) {
+		if metricsFinalized(result) {
 			return completedMetricExecution(execution, env, planned)
 		}
 		return execution
-	case isRecoveredTimeout(observed):
-		return completedMetricExecution(observed, env, planned)
 	case observed != nil:
 		return observed
-	case contractError != "":
-		return &judge.ExecutionMetadata{Stage: judge.StageFinished, Completion: completionForContract(env, planned), Cause: judge.CauseContractError}
+	case contractCause != judge.CauseNone:
+		return &judge.ExecutionMetadata{Stage: judge.StageFinished, Completion: completionForContract(env, planned), Cause: contractCause}
 	case result.Error != nil:
 		return &judge.ExecutionMetadata{Stage: stage, Completion: judge.CompletionFailed, Cause: judge.CauseExecutionError, Detail: result.Error.Error()}
 	default:

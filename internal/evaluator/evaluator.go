@@ -375,20 +375,8 @@ func (e *defaultEvaluator) executeCase(ctx context.Context, caseCfg *config.Case
 	var result EvalResult
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		attemptCtx, cancel, timeoutSource, timeoutSec := withCaseTimeout(ctx, e.evalCfg.Cases.Defaults.TimeoutSeconds, caseCfg.Constraints.TimeoutSeconds)
-		// Name the armed knob so a deadline that fires through the case context can
-		// report its own source instead of being attributed to a guess.
-		attemptCtx = ContextWithDeadlineSource(attemptCtx, timeoutSource)
 		result = e.executeCaseOnce(attemptCtx, caseCfg, configName, overrideRT, overrideAgent)
-		// Decide whether to annotate *before* cancel() so (a) cancel doesn't
-		// overwrite Err with Canceled and erase the signal, and (b) a
-		// parent-supplied deadline (e.g. a caller wrapping EvaluateAll in
-		// context.WithTimeout) firing through attemptCtx isn't relabelled as a
-		// case timeout — that would point users at the wrong YAML knob. A
-		// tighter child deadline (e.g. judge.timeout_seconds) gets the same
-		// protection because attemptCtx.Err() stays nil when the case-level
-		// deadline never fires. The decision lives at the caller so the
-		// annotate helper stays free of a control-flag parameter.
-		if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+		if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) && timeoutSource != "" {
 			annotateCaseTimeoutError(&result, timeoutSource, timeoutSec)
 		}
 		cancel()
@@ -1151,20 +1139,21 @@ func annotateCaseTimeoutError(result *EvalResult, source string, seconds int) {
 	result.Error = fmt.Errorf("%w (case timeout %ds via %s)", result.Error, seconds, source)
 }
 
-// withCaseTimeout returns a derived context bounded by the case-level
-// timeout, along with the resolved value and the config key that supplied it
-// (so timeout errors can name the knob users need to adjust). source/seconds
-// are empty/zero when no timeout is configured.
+// withCaseTimeout returns the effective case context. The source and seconds
+// are populated when the case's own budget supplies the effective deadline.
 func withCaseTimeout(ctx context.Context, defaultTimeoutSec, caseTimeoutSec int) (context.Context, context.CancelFunc, string, int) {
+	source, seconds := "cases.defaults.timeout_seconds", defaultTimeoutSec
 	if caseTimeoutSec > 0 {
-		c, cancel := context.WithTimeout(ctx, time.Duration(caseTimeoutSec)*time.Second)
-		return c, cancel, caseTimeoutDeadlineSource, caseTimeoutSec
+		source, seconds = caseTimeoutDeadlineSource, caseTimeoutSec
 	}
-	if defaultTimeoutSec > 0 {
-		c, cancel := context.WithTimeout(ctx, time.Duration(defaultTimeoutSec)*time.Second)
-		return c, cancel, "cases.defaults.timeout_seconds", defaultTimeoutSec
+	if seconds <= 0 {
+		return ctx, func() {}, "", 0
 	}
-	return ctx, func() {}, "", 0
+	child, cancel, ownsDeadline := judge.WithTimeoutSource(ctx, time.Duration(seconds)*time.Second, source)
+	if !ownsDeadline {
+		return child, cancel, "", 0
+	}
+	return child, cancel, source, seconds
 }
 
 func retryAllowed(policy config.RetryPolicy, reason string) bool {

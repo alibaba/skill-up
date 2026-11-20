@@ -673,3 +673,17 @@ exit 0
 		t.Fatalf("a .sh judge must have its result file collected: %+v", res.Metrics)
 	}
 }
+
+func TestBoundedMetricReadEnforcesLimit(t *testing.T) {
+	for _, size := range []int{MaxMetricsPayloadBytes, MaxMetricsPayloadBytes + 1} {
+		reader := strings.NewReader(strings.Repeat(" ", size))
+		raw, problem := readBoundedMetrics(reader)
+		if size == MaxMetricsPayloadBytes {
+			if problem != ProblemNone || len(raw) != size {
+				t.Fatalf("at the size limit, got %d bytes with problem %q", len(raw), problem)
+			}
+		} else if problem != ProblemSizeLimit || raw != nil {
+			t.Fatalf("above the size limit, got %d bytes with problem %q", len(raw), problem)
+		}
+	}
+}

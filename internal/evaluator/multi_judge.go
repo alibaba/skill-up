@@ -17,7 +17,7 @@ import (
 // JudgeOutcome preserves one independent judge result for evaluator callers.
 type JudgeOutcome = judge.Outcome
 
-const judgeTimeoutSource = "judge.timeout_seconds"
+const judgeTimeoutSource = judge.JudgeTimeoutSource
 
 // MemberDecision indicates whether a judge result was accepted as the member's
 // final outcome or interrupted before acceptance.
@@ -49,7 +49,7 @@ func (e *defaultEvaluator) runMultipleJudges(
 	var causes []error
 	for i, member := range plan.Judges {
 		if ctx.Err() != nil {
-			stop := judge.ClassifyStop(ctx.Err(), judge.StopObservation{DeadlineSource: DeadlineSource(ctx), SignalObserved: SignalObserved(ctx)})
+			stop := judge.ClassifyStop(ctx.Err(), judge.StopObservation{DeadlineSource: judge.DeadlineSource(ctx), SignalObserved: SignalObserved(ctx)})
 			for _, pending := range plan.Judges[i:] {
 				result.JudgeResults = append(result.JudgeResults, JudgeOutcome{
 					ID: pending.ID, Type: pending.Type, Status: judge.StatusSkip,
@@ -78,11 +78,9 @@ func (e *defaultEvaluator) runJudgeMember(ctx context.Context, rt runtime.Runtim
 	outcome := JudgeOutcome{ID: member.ID, Type: member.Type, Artifacts: "judge/" + member.ID + "/run"}
 	e.prepareOutputDir(ctx, configName, caseCfg.ID, outcome.Artifacts)
 	memberCtx := ctx
-	memberDeadlineSource := ""
 	cancel := func() {}
 	if member.TimeoutSeconds != nil && *member.TimeoutSeconds > 0 {
-		memberCtx, cancel = context.WithTimeout(ctx, time.Duration(*member.TimeoutSeconds)*time.Second)
-		memberDeadlineSource = judgeTimeoutSource
+		memberCtx, cancel, _ = judge.WithTimeoutSource(ctx, time.Duration(*member.TimeoutSeconds)*time.Second, judgeTimeoutSource)
 	}
 	defer cancel()
 	memberResult := &EvalResult{SessionResult: result.SessionResult, CaseID: result.CaseID, CaseName: result.CaseName}
@@ -98,7 +96,7 @@ func (e *defaultEvaluator) runJudgeMember(ctx context.Context, rt runtime.Runtim
 	if graded.Status == judge.StatusError && graded.Error != nil {
 		causes = append(causes, graded.Error)
 	}
-	stop := memberStop(ctx, memberCtx, memberDeadlineSource)
+	stop := memberStop(memberCtx)
 	decision := memberDecisionFor(graded, stop)
 	outcome.Metrics = gradedMetrics(member, graded, decision)
 	outcome.Execution = memberExecution(graded, stop, decision, judge.SlotsFromConfig(member.Metrics))
@@ -141,22 +139,9 @@ func recordMemberContextError(ctx context.Context, outcome *JudgeOutcome, decisi
 	return err
 }
 
-// memberStop resolves why a member stopped. A member-level deadline is only
-// attributed to judge.timeout_seconds when the parent context had not itself
-// expired, so a case deadline firing through the member is never mislabeled.
-func memberStop(parentCtx, memberCtx context.Context, memberDeadlineSource string) judge.Stop {
-	if memberCtx.Err() == nil {
-		return judge.Stop{Cause: judge.CauseNone}
-	}
-	var source string
-	if errors.Is(memberCtx.Err(), context.DeadlineExceeded) {
-		if parentCtx.Err() != nil {
-			source = DeadlineSource(parentCtx)
-		} else {
-			source = memberDeadlineSource
-		}
-	}
-	return judge.ClassifyStop(memberCtx.Err(), judge.StopObservation{DeadlineSource: source, SignalObserved: SignalObserved(parentCtx)})
+// memberStop reads the deadline source chosen when the member was started.
+func memberStop(ctx context.Context) judge.Stop {
+	return judge.ClassifyStop(ctx.Err(), judge.StopObservation{DeadlineSource: judge.DeadlineSource(ctx), SignalObserved: SignalObserved(ctx)})
 }
 
 // stopDetail renders a human-readable stop note. The machine-readable cause and
@@ -226,56 +211,33 @@ func gradedMetrics(member config.JudgeConfig, graded EvalResult, decision Member
 // memberExecution keeps scoring completion and stop metadata for final results,
 // including a completed scoring pass with a contract error followed by a stop.
 func memberExecution(graded EvalResult, stop judge.Stop, decision MemberDecision, planned []judge.MetricSlot) *judge.ExecutionMetadata {
+	if observed := gradingExecution(&graded); observed != nil && observed.Cause == judge.CauseDeadlineExpiry {
+		if isRecoveredTimeout(observed) {
+			return completedMetricExecution(observed, memberEnvelope(graded), planned)
+		}
+		return observed
+	}
 	if decision == MemberAccepted || (metricsFinalized(&graded) && stop.Cause != judge.CauseNone) {
 		return completedMemberExecution(graded, stop, planned)
 	}
-	if isRecoveredTimeout(gradingExecution(&graded)) {
-		return recoveredMemberExecution(graded, stop, planned)
-	}
-	if graded.Execution != nil && graded.Execution.Stage == judge.StageFinished {
-		// Preserve completion for a scoring pass that violated the metric contract.
+	if graded.Execution != nil {
 		return graded.Execution
 	}
-	stage := judge.StageStarted
-	if graded.Grading == nil && graded.Status == judge.StatusSkip {
+	stage := graded.judgeStage
+	if stage == "" {
 		stage = judge.StageNotInvoked
 	}
 	execution := interruptedExecution(stage, stop)
 	if execution.Cause == judge.CauseNone {
-		// The member may already know what ended its own pass while the outer
-		// context stayed live: ScriptJudge arms DefaultScriptTimeout itself when
-		// the config omits timeout_seconds, and a judge that failed before grading
-		// recorded a failure rather than an interruption. Keep those facts instead
-		// of relabelling them as a generic execution interruption.
-		if observed := observedMemberExecution(graded, stage); observed != nil {
-			return observed
-		}
 		execution.Cause = judge.CauseExecutionError
 		if graded.Error != nil {
 			execution.Detail = graded.Error.Error()
 		}
-		if graded.Grading != nil {
+		if graded.Status == judge.StatusError || graded.Grading != nil {
 			execution.Completion = judge.CompletionFailed
 		}
 	}
 	return execution
-}
-
-// observedMemberExecution returns the execution facts the member's own scoring
-// pass recorded, when they say more than an empty interruption would. The stage
-// is the member's own, so a member that was never invoked cannot inherit a started
-// record. A record with neither a cause nor a failed completion carries no
-// information and is dropped so the caller keeps its generic fallback.
-func observedMemberExecution(graded EvalResult, stage judge.Stage) *judge.ExecutionMetadata {
-	if graded.Execution == nil {
-		return nil
-	}
-	observed := *graded.Execution
-	if observed.Cause == judge.CauseNone && observed.Completion != judge.CompletionFailed {
-		return nil
-	}
-	observed.Stage = stage
-	return &observed
 }
 
 func completedMemberExecution(graded EvalResult, stop judge.Stop, planned []judge.MetricSlot) *judge.ExecutionMetadata {
@@ -297,31 +259,6 @@ func completedMemberExecution(graded EvalResult, stop judge.Stop, planned []judg
 	meta.Cause, meta.DeadlineSource, meta.CancelSource, meta.Detail = stop.Cause, stop.DeadlineSource, stop.CancelSource, stop.Detail
 	if stop.Cause == judge.CauseDeadlineExpiry {
 		meta.Timeout = &judge.TimeoutMetadata{Occurred: true, Source: stop.DeadlineSource, Recovered: graded.Grading.Recovery != nil}
-	}
-	return meta
-}
-
-// recoveredMemberExecution reports a member whose own deadline stopped it after it
-// had already written a trustworthy scoring result. The outcome is final, so
-// completion follows the validated slots, while the stop resolved at the member
-// boundary keeps its source: a case deadline firing through the member is never
-// relabelled as the judge knob, and the judge's own script deadline is still
-// attributed when the member context stayed live.
-func recoveredMemberExecution(graded EvalResult, stop judge.Stop, planned []judge.MetricSlot) *judge.ExecutionMetadata {
-	if stop.Cause == judge.CauseNone {
-		observed := gradingExecution(&graded)
-		stop = judge.Stop{Cause: observed.Cause, DeadlineSource: observed.DeadlineSource, CancelSource: observed.CancelSource, Detail: observed.Detail}
-	}
-	meta := &judge.ExecutionMetadata{
-		Stage:          judge.StageFinished,
-		Completion:     completionForContract(memberEnvelope(graded), planned),
-		Cause:          stop.Cause,
-		DeadlineSource: stop.DeadlineSource,
-		CancelSource:   stop.CancelSource,
-		Detail:         stop.Detail,
-	}
-	if stop.Cause == judge.CauseDeadlineExpiry {
-		meta.Timeout = &judge.TimeoutMetadata{Occurred: true, Source: stop.DeadlineSource, Recovered: true}
 	}
 	return meta
 }
@@ -439,7 +376,7 @@ func skippedJudgeStop(ctx context.Context, cause error, reason string) judge.Sto
 		return stop
 	}
 	return judge.ClassifyStop(cause, judge.StopObservation{
-		DeadlineSource: DeadlineSource(ctx),
+		DeadlineSource: judge.DeadlineSource(ctx),
 		SignalObserved: SignalObserved(ctx),
 	})
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strconv"
@@ -67,7 +68,7 @@ func (j *ScriptJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 		timeout = time.Duration(j.TimeoutSeconds) * time.Second
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel, _ := WithTimeoutSource(ctx, timeout, JudgeTimeoutSource)
 	defer cancel()
 
 	rt, cleanup, err := j.runtime(ctx)
@@ -170,21 +171,25 @@ func (j *ScriptJudge) evaluateInRuntime(ctx context.Context, rt evalruntime.Runt
 }
 
 func (j *ScriptJudge) timeoutResult(ctx context.Context, timeout time.Duration, debugInfo string, in Input) (*Result, error) {
-	source := "judge.timeout_seconds"
+	stop := ClassifyStop(ctx.Err(), StopObservation{DeadlineSource: DeadlineSource(ctx)})
 	execution := &ExecutionMetadata{
 		Stage: StageStarted, Completion: CompletionInterrupted,
-		Cause: CauseDeadlineExpiry, DeadlineSource: source,
-		Timeout: &TimeoutMetadata{Occurred: true, Source: source},
+		Cause: stop.Cause, DeadlineSource: stop.DeadlineSource,
+		Timeout: &TimeoutMetadata{Occurred: true, Source: stop.DeadlineSource},
 	}
 	// Keep a trustworthy result written before the deadline. The legacy verdict
 	// mapping is decided above and is not revisited here.
+	message := "script interrupted by deadline"
+	if stop.DeadlineSource == JudgeTimeoutSource {
+		message = "script timed out after " + timeout.String()
+	}
 	var res *Result
 	var timeoutErr error
 	if j.TimeoutIsError {
-		timeoutErr = fmt.Errorf("script timed out after %s: %w", timeout, ctx.Err())
+		timeoutErr = fmt.Errorf("%s: %w", message, ctx.Err())
 		res = NewErrorResult(timeoutErr, in.TurnsExecuted, in.TurnsTotal)
 	} else {
-		res = j.buildResult(false, "script timed out after "+timeout.String(), debugInfo, in)
+		res = j.buildResult(false, message, debugInfo, in)
 	}
 	res.Execution = execution
 	// Collecting a complete, invocation-bound, schema-valid payload means a final
@@ -312,12 +317,47 @@ func (j *ScriptJudge) attachMetrics(res *Result, production MetricProduction) bo
 		res.Metrics = MaterializeSlots(judgeID, j.MetricSlots, nil, ProblemSizeLimit, production)
 		return false
 	}
-	raw, err := os.ReadFile(j.MetricsResultPath)
-	if err != nil {
-		res.Metrics = MaterializeSlots(judgeID, j.MetricSlots, nil, ProblemUnparseable, production)
+	raw, readProblem := readMetricsResult(j.MetricsResultPath, info)
+	if readProblem != ProblemNone {
+		res.Metrics = MaterializeSlots(judgeID, j.MetricSlots, nil, readProblem, production)
 		return false
 	}
 	emitted, payloadProblem := ParseMetricsPayload(raw, j.MetricsInvocationID)
 	res.Metrics = MaterializeSlots(judgeID, j.MetricSlots, emitted, payloadProblem, MetricProduced)
 	return payloadProblem == ProblemNone
+}
+
+// readMetricsResult checks the object that will be read and bounds the read
+// even if its size changes after Stat.
+func readMetricsResult(path string, expected os.FileInfo) ([]byte, PayloadProblem) {
+	f, err := openMetricsResult(path)
+	if errors.Is(err, errors.ErrUnsupported) {
+		return nil, ProblemChannelUnsupported
+	}
+	if err != nil {
+		return nil, ProblemUnparseable
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, ProblemUnparseable
+	}
+	if !info.Mode().IsRegular() || !os.SameFile(expected, info) {
+		return nil, ProblemUnboundResult
+	}
+	if info.Size() > MaxMetricsPayloadBytes {
+		return nil, ProblemSizeLimit
+	}
+	return readBoundedMetrics(f)
+}
+
+func readBoundedMetrics(r io.Reader) ([]byte, PayloadProblem) {
+	raw, err := io.ReadAll(io.LimitReader(r, MaxMetricsPayloadBytes+1))
+	if err != nil {
+		return nil, ProblemUnparseable
+	}
+	if len(raw) > MaxMetricsPayloadBytes {
+		return nil, ProblemSizeLimit
+	}
+	return raw, ProblemNone
 }

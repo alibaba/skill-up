@@ -10,10 +10,7 @@ import (
 // unattributable cancellation stays "unknown" instead of being guessed as
 // user-initiated.
 
-type (
-	signalObserverKey struct{}
-	deadlineSourceKey struct{}
-)
+type signalObserverKey struct{}
 
 // SignalObserver records whether this process actually observed an interrupt.
 // The flag is set by the signal handler path, never inferred afterwards.
@@ -59,22 +56,4 @@ func SignalObserved(ctx context.Context) bool {
 	}
 	observer, ok := ctx.Value(signalObserverKey{}).(*SignalObserver)
 	return ok && observer.Observed()
-}
-
-// ContextWithDeadlineSource names the configuration knob that armed the deadline
-// carried by this context. An empty source stays unattributed downstream.
-func ContextWithDeadlineSource(ctx context.Context, source string) context.Context {
-	if source == "" {
-		return ctx
-	}
-	return context.WithValue(ctx, deadlineSourceKey{}, source)
-}
-
-// DeadlineSource returns the recorded knob name, or "" when unknown.
-func DeadlineSource(ctx context.Context) string {
-	if ctx == nil {
-		return ""
-	}
-	source, _ := ctx.Value(deadlineSourceKey{}).(string)
-	return source
 }

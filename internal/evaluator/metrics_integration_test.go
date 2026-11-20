@@ -1744,11 +1744,11 @@ func TestFinalMetricsAreValidatedAfterLateDeadline(t *testing.T) {
 			// depending on wall-clock timing of the script.
 			ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 			defer cancel()
-			ctx = ContextWithDeadlineSource(ctx, caseTimeoutDeadlineSource)
+			ctx = judge.ContextWithDeadlineSource(ctx, caseTimeoutDeadlineSource)
 			finalizeJudgeMetrics(ctx, &graded, member)
 			assertFinalMetricsContractError(t, graded)
 			if tc.grouped {
-				stop := memberStop(ctx, ctx, "")
+				stop := memberStop(ctx)
 				decision := memberDecisionFor(graded, stop)
 				if decision != MemberNotAccepted {
 					t.Fatal("member with a missing required slot must not be accepted")
@@ -1802,5 +1802,48 @@ func assertLateDeadlineOnFinalMetrics(t *testing.T, execution *judge.ExecutionMe
 	if execution.Cause != judge.CauseDeadlineExpiry || execution.DeadlineSource != caseTimeoutDeadlineSource ||
 		execution.Timeout == nil || !execution.Timeout.Occurred || execution.Timeout.Recovered {
 		t.Fatalf("deadline metadata = %+v, want a late case deadline without timeout recovery", execution)
+	}
+}
+
+func TestExecuteCaseDeclinedRequiredMetricKeepsCause(t *testing.T) {
+	const payload = `{"schema_version":1,"invocation_id":"__INVOCATION__","metrics":[{"metric_id":"correctness","availability":"SKIP","reason":"insufficient evidence"},{"metric_id":"completeness","availability":"AVAILABLE","value":0.75}]}`
+	for _, name := range []string{"single", "grouped"} {
+		t.Run(name, func(t *testing.T) {
+			script := metricsScriptWithTail(t, t.TempDir(), payload, "")
+			member := config.JudgeConfig{ID: "scorer", Type: "script", ScriptPath: script, Metrics: scoreRegistry()}
+			cfg := &config.EvalConfig{Environment: config.Environment{Type: "none"}}
+			if name == "grouped" {
+				cfg.Judges = &[]config.JudgeConfig{member}
+			} else {
+				cfg.Judge = member
+			}
+			e := newTestEvaluator(EvalOptions{
+				Agent: &mockAgent{name: "test", output: "done"}, OutputDir: t.TempDir(), EvalCfg: cfg,
+			})
+			r := e.executeCase(context.Background(), &config.CaseConfig{ID: "decline", Input: config.Input{Prompt: "hello"}},
+				"with_skill", newScriptRuntime(t), nil)
+			if r.Status != judge.StatusError {
+				t.Fatalf("case status = %s, want ERROR", r.Status)
+			}
+			execution, env := r.Execution, r.Metrics
+			if name == "grouped" {
+				if len(r.JudgeResults) != 1 || r.JudgeResults[0].Status != judge.StatusError {
+					t.Fatalf("unexpected judge outcomes: %+v", r.JudgeResults)
+				}
+				execution, env = r.JudgeResults[0].Execution, r.JudgeResults[0].Metrics
+			}
+			assertRequiredMetricDecline(t, execution, env)
+		})
+	}
+}
+
+func assertRequiredMetricDecline(t *testing.T, execution *judge.ExecutionMetadata, env *judge.MetricsEnvelope) {
+	t.Helper()
+	if execution == nil || execution.Cause != judge.CauseJudgeDeclined || execution.Completion != judge.CompletionIncomplete {
+		t.Fatalf("execution = %+v, want INCOMPLETE/judge_declined", execution)
+	}
+	if env == nil || len(env.Metrics) != 2 || env.Metrics[0].Availability != judge.Declined ||
+		env.Metrics[0].Reason != "insufficient evidence" || env.Metrics[1].Availability != judge.Available {
+		t.Fatalf("expected declined slot's reason and available sibling: %+v", env)
 	}
 }

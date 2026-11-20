@@ -14,10 +14,9 @@ import (
 )
 
 type stopCase struct {
-	name          string
-	build         func(t *testing.T) (parent, member context.Context)
-	memberTimeout bool
-	want          judge.Stop
+	name  string
+	build func(t *testing.T) (parent, member context.Context)
+	want  judge.Stop
 }
 
 func expiredCaseDeadlineIntoMember(source string) func(*testing.T) (context.Context, context.Context) {
@@ -33,41 +32,50 @@ func expiredCaseDeadlineIntoMember(source string) func(*testing.T) (context.Cont
 func stopCases() []stopCase {
 	return []stopCase{
 		{
-			name:          "no cancellation",
-			build:         func(*testing.T) (context.Context, context.Context) { return context.Background(), context.Background() },
-			memberTimeout: false,
-			want:          judge.Stop{Cause: judge.CauseNone},
+			name:  "no cancellation",
+			build: func(*testing.T) (context.Context, context.Context) { return context.Background(), context.Background() },
+			want:  judge.Stop{Cause: judge.CauseNone},
 		},
 		{
 			name: "member-level deadline names its own knob",
 			build: func(t *testing.T) (context.Context, context.Context) {
 				t.Helper()
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+				ctx, cancel, _ := judge.WithTimeoutSource(context.Background(), 10*time.Millisecond, judgeTimeoutSource)
 				t.Cleanup(cancel)
 				<-ctx.Done()
 				return context.Background(), ctx
 			},
-			memberTimeout: true,
-			want:          judge.Stop{Cause: judge.CauseDeadlineExpiry, DeadlineSource: judgeTimeoutSource, Detail: "context deadline exceeded"},
+			want: judge.Stop{Cause: judge.CauseDeadlineExpiry, DeadlineSource: judgeTimeoutSource, Detail: "context deadline exceeded"},
 		},
 		{
-			name:          "a case deadline firing through the member is not called a judge timeout",
-			build:         expiredCaseDeadlineIntoMember("case.constraints.timeout_seconds"),
-			memberTimeout: true,
-			want:          judge.Stop{Cause: judge.CauseDeadlineExpiry, DeadlineSource: "case.constraints.timeout_seconds", Detail: "context deadline exceeded"},
+			name:  "a case deadline firing through the member is not called a judge timeout",
+			build: expiredCaseDeadlineIntoMember("case.constraints.timeout_seconds"),
+			want:  judge.Stop{Cause: judge.CauseDeadlineExpiry, DeadlineSource: "case.constraints.timeout_seconds", Detail: "context deadline exceeded"},
 		},
 		{
 			name: "inactive parent deadline metadata does not mask a judge timeout",
 			build: func(t *testing.T) (context.Context, context.Context) {
 				t.Helper()
-				parent := ContextWithDeadlineSource(context.Background(), "case.constraints.timeout_seconds")
-				member, cancel := context.WithTimeout(parent, 10*time.Millisecond)
+				parent := judge.ContextWithDeadlineSource(context.Background(), "case.constraints.timeout_seconds")
+				member, cancel, _ := judge.WithTimeoutSource(parent, 10*time.Millisecond, judgeTimeoutSource)
 				t.Cleanup(cancel)
 				<-member.Done()
 				return parent, member
 			},
-			memberTimeout: true,
-			want:          judge.Stop{Cause: judge.CauseDeadlineExpiry, DeadlineSource: judgeTimeoutSource, Detail: "context deadline exceeded"},
+			want: judge.Stop{Cause: judge.CauseDeadlineExpiry, DeadlineSource: judgeTimeoutSource, Detail: "context deadline exceeded"},
+		},
+		{
+			name: "a later parent expiry does not change the member deadline source",
+			build: func(t *testing.T) (context.Context, context.Context) {
+				t.Helper()
+				parent, cancelParent, _ := judge.WithTimeoutSource(context.Background(), 10*time.Millisecond, caseTimeoutDeadlineSource)
+				t.Cleanup(cancelParent)
+				member, cancelMember, _ := judge.WithTimeoutSource(parent, -time.Second, judgeTimeoutSource)
+				t.Cleanup(cancelMember)
+				<-parent.Done()
+				return parent, member
+			},
+			want: judge.Stop{Cause: judge.CauseDeadlineExpiry, DeadlineSource: judgeTimeoutSource, Detail: "context deadline exceeded"},
 		},
 		{
 			name: "a parent deadline with an unattributed origin stays unknown",
@@ -78,8 +86,7 @@ func stopCases() []stopCase {
 				<-ctx.Done()
 				return ctx, ctx
 			},
-			memberTimeout: true,
-			want:          judge.Stop{Cause: judge.CauseDeadlineExpiry, DeadlineSource: judge.CancelUnspecified, Detail: "context deadline exceeded"},
+			want: judge.Stop{Cause: judge.CauseDeadlineExpiry, DeadlineSource: judge.CancelUnspecified, Detail: "context deadline exceeded"},
 		},
 		{
 			name: "cancellation without an observed signal stays unknown",
@@ -102,12 +109,8 @@ func TestMemberStopAttributesSources(t *testing.T) {
 	cases := stopCases()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			parent, member := tc.build(t)
-			memberDeadlineSource := ""
-			if tc.memberTimeout {
-				memberDeadlineSource = judgeTimeoutSource
-			}
-			got := memberStop(parent, member, memberDeadlineSource)
+			_, member := tc.build(t)
+			got := memberStop(member)
 			if got != tc.want {
 				t.Fatalf("memberStop = %+v, want %+v", got, tc.want)
 			}
@@ -119,7 +122,7 @@ func expiredDeadlineContext(source string) context.Context {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 	<-ctx.Done()
-	return ContextWithDeadlineSource(ctx, source)
+	return judge.ContextWithDeadlineSource(ctx, source)
 }
 
 // canceledContext returns a context whose Err is already context.Canceled. cancel()
@@ -364,12 +367,12 @@ func TestSkippedJudgesAreNoopForSingleJudgePlans(t *testing.T) {
 	}
 }
 
-// TestMetadataSurvivesNilResult pins the rule that execution facts and planned
-// slots are not stored only inside judge.Result.
+// TestMetadataSurvivesNilResult checks execution metadata and planned slots
+// when an invoked judge is canceled before returning a result.
 func TestMetadataSurvivesNilResult(t *testing.T) {
 	member := config.JudgeConfig{ID: "slow", Type: "script", Metrics: []config.MetricConfig{{ID: "correctness", Required: true}}}
 	stop := judge.Stop{Cause: judge.CauseCancellation, CancelSource: judge.CancelUnspecified, Detail: "context canceled"}
-	graded := EvalResult{Status: judge.StatusError, Grading: nil, Error: context.Canceled}
+	graded := EvalResult{Status: judge.StatusError, Error: context.Canceled, judgeStage: judge.StageStarted}
 	outcome := JudgeOutcome{
 		ID: member.ID, Type: member.Type, Status: graded.Status, Result: graded.Grading,
 		Metrics:   gradedMetrics(member, graded, MemberNotAccepted),
@@ -501,4 +504,43 @@ func TestGroupFoldOverMemberOutcomes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCaseTimeoutKeepsShorterCallerDeadlineUnattributed(t *testing.T) {
+	caller, cancelCaller := context.WithTimeout(context.Background(), 0)
+	defer cancelCaller()
+	ctx, cancel, source, seconds := withCaseTimeout(caller, 5, 10)
+	defer cancel()
+
+	wantDeadline, _ := caller.Deadline()
+	gotDeadline, ok := ctx.Deadline()
+	if !ok || !gotDeadline.Equal(wantDeadline) {
+		t.Fatalf("effective deadline = %v, want caller deadline %v", gotDeadline, wantDeadline)
+	}
+	if source != "" || seconds != 0 || judge.DeadlineSource(ctx) != "" {
+		t.Fatalf("caller deadline was attributed to case configuration: %q %ds", source, seconds)
+	}
+}
+
+func TestMemberExecutionKeepsSetupFailureStage(t *testing.T) {
+	failure := errors.New("judge setup failed")
+	graded := EvalResult{Status: judge.StatusError, Error: failure}
+	got := memberExecution(graded, judge.Stop{Cause: judge.CauseNone}, MemberNotAccepted, nil)
+	if got.Stage != judge.StageNotInvoked || got.Completion != judge.CompletionFailed ||
+		got.Cause != judge.CauseExecutionError || got.Detail != failure.Error() {
+		t.Fatalf("unexpected setup failure execution: %+v", got)
+	}
+}
+
+func TestMemberExecutionKeepsRecordedTimeoutWithoutMetrics(t *testing.T) {
+	observed := interruptedExecution(judge.StageStarted, judge.Stop{
+		Cause: judge.CauseDeadlineExpiry, DeadlineSource: judgeTimeoutSource,
+	})
+	graded := EvalResult{
+		Status: judge.StatusError, Grading: &judge.Result{Status: judge.StatusError, Execution: observed},
+		judgeStage: judge.StageStarted,
+	}
+	laterStop := judge.Stop{Cause: judge.CauseDeadlineExpiry, DeadlineSource: caseTimeoutDeadlineSource}
+	got := memberExecution(graded, laterStop, MemberNotAccepted, nil)
+	assertDeadlineStopRecorded(t, got)
 }
