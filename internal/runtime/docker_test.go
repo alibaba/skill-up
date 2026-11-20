@@ -235,6 +235,38 @@ func TestDockerRuntimeExistsPermissionErrorWithMisleadingPath(t *testing.T) {
 	}
 }
 
+func TestDockerRuntimeMissingFileNamedPermissionDenied(t *testing.T) {
+	t.Run("exists", func(t *testing.T) {
+		fd := newFakeDocker(t, []scriptedCall{{
+			match:    "exec",
+			response: fakeDockerResponse{exitCode: 1, stderr: "stat: cannot statx '/workspace/permission denied.txt': No such file or directory"},
+		}})
+		r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+		r.containerID = dockerStatTestContainer
+
+		ok, err := r.Exists(context.Background(), "permission denied.txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok {
+			t.Fatal("a missing file named 'permission denied.txt' should be absent")
+		}
+	})
+
+	t.Run("read", func(t *testing.T) {
+		fd := newFakeDocker(t, []scriptedCall{{
+			match:    "exec",
+			response: fakeDockerResponse{exitCode: 1, stderr: "cat: /workspace/permission denied.txt: No such file or directory"},
+		}})
+		r := newDockerRuntimeForTest(t, Config{Image: "alpine:3.20"}, fd)
+		r.containerID = dockerStatTestContainer
+
+		if _, err := r.ReadFile(context.Background(), "permission denied.txt"); !errors.Is(err, ErrFileNotFound) {
+			t.Fatalf("ReadFile = %v, want ErrFileNotFound", err)
+		}
+	})
+}
+
 // createScript returns the canonical scripted-call sequence that Create
 // performs (docker create → docker start → docker exec mkdir -p workspace).
 // Test scripts prepend this before the steps they actually want to exercise.

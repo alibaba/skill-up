@@ -422,11 +422,8 @@ func (r *DockerRuntime) ReadFile(ctx context.Context, sourcePath string) ([]byte
 
 func dockerFileNotFound(stderr string) bool {
 	lower := strings.ToLower(strings.TrimSpace(stderr))
-	// An access error can print a path that itself contains the phrase
-	// "no such file or directory"; only the trailing diagnostic matters.
-	if strings.Contains(lower, "permission denied") {
-		return false
-	}
+	// Only the trailing diagnostic matters: the printed path can contain
+	// "no such file or directory" or "permission denied" as a filename.
 	return strings.HasSuffix(lower, ": no such file or directory")
 }
 
