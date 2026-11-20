@@ -138,11 +138,11 @@ func unmetThresholds(env *judge.MetricsEnvelope, planned []judge.MetricSlot) []s
 	return unmet
 }
 
-// applyMetricError records a metric contract violation. An execution error the
-// judge already reported outranks it: the verdict, its error text and therefore
-// its retry classification must survive.
+// applyMetricError records a metric contract violation. Existing execution
+// errors and script timeouts keep their verdict and retry classification.
 func applyMetricError(result *EvalResult, message string) {
-	if result.Status == judge.StatusError {
+	observed := gradingExecution(result)
+	if result.Status == judge.StatusError || (observed != nil && observed.Cause == judge.CauseDeadlineExpiry) {
 		result.Metrics.AddDiagnostic("metric_contract_error: " + message)
 		return
 	}
@@ -171,15 +171,20 @@ func applyMetricFailure(result *EvalResult, unmet []string) {
 }
 
 func deriveSingleExecution(ctx context.Context, result *EvalResult, env *judge.MetricsEnvelope, planned []judge.MetricSlot, contractError string, stage judge.Stage) *judge.ExecutionMetadata {
+	observed := gradingExecution(result)
 	switch {
 	case ctx.Err() != nil:
 		stop := judge.ClassifyStop(ctx.Err(), judge.StopObservation{DeadlineSource: DeadlineSource(ctx), SignalObserved: SignalObserved(ctx)})
-		return interruptedExecution(stage, stop)
-	case result.Grading != nil && result.Grading.Execution != nil:
-		if isRecoveredTimeout(result.Grading.Execution) {
-			return recoveredSingleExecution(result.Grading.Execution, env, planned)
+		execution := interruptedExecution(stage, stop)
+		if execution.Timeout != nil && isRecoveredTimeout(observed) {
+			execution.Timeout.Recovered = true
+			return recoveredSingleExecution(execution, env, planned)
 		}
-		return result.Grading.Execution
+		return execution
+	case isRecoveredTimeout(observed):
+		return recoveredSingleExecution(observed, env, planned)
+	case observed != nil:
+		return observed
 	case contractError != "":
 		return &judge.ExecutionMetadata{Stage: judge.StageFinished, Completion: completionForContract(env, planned), Cause: judge.CauseContractError}
 	case result.Error != nil:

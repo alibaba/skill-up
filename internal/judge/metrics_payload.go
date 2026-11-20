@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 )
 
 // Structured named-metrics result payload for the script judge (#317, slice 1).
@@ -18,6 +17,12 @@ const MetricsSchemaVersion = 1
 
 // MaxMetricsPayloadBytes bounds a single collected result file.
 const MaxMetricsPayloadBytes = 1 << 20
+
+var metricsEnvelopeFields = map[string]bool{
+	"schema_version": true,
+	"invocation_id":  true,
+	"metrics":        true,
+}
 
 var metricsEntryFields = map[string]bool{
 	"metric_id":    true,
@@ -44,14 +49,10 @@ func ParseMetricsPayload(raw []byte, invocationID string) ([]EmittedMetric, Payl
 	}
 	reader := bytes.NewReader(raw)
 	decoder := json.NewDecoder(reader)
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&envelope); err != nil {
 		var typeErr *json.UnmarshalTypeError
 		if errors.As(err, &typeErr) {
 			return nil, ProblemTopLevelShape
-		}
-		if strings.Contains(err.Error(), "unknown field") {
-			return nil, ProblemUnknownTopField
 		}
 		return nil, ProblemUnparseable
 	}
@@ -142,9 +143,8 @@ func hasNullArrayElement(raw []byte) bool {
 	return false
 }
 
-// checkTopLevelKeys reports duplicate JSON keys at any nesting level and a
-// non-object top level. A duplicate makes binding ambiguous, so nothing in the
-// payload can be trusted.
+// checkTopLevelKeys requires an object with exact envelope field names and
+// rejects duplicate JSON keys at any nesting level.
 func checkTopLevelKeys(raw []byte) PayloadProblem {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	// Numbers stay as json.Number here: this scan only checks structure and key
@@ -160,11 +160,12 @@ func checkTopLevelKeys(raw []byte) PayloadProblem {
 	if !ok || delim != '{' {
 		return ProblemTopLevelShape
 	}
-	return scanObject(decoder)
+	return scanObject(decoder, metricsEnvelopeFields)
 }
 
-func scanObject(decoder *json.Decoder) PayloadProblem {
+func scanObject(decoder *json.Decoder, allowedFields map[string]bool) PayloadProblem {
 	seen := map[string]bool{}
+	unknownField := false
 	for decoder.More() {
 		keyToken, err := decoder.Token()
 		if err != nil {
@@ -178,6 +179,9 @@ func scanObject(decoder *json.Decoder) PayloadProblem {
 			return ProblemDuplicateJSONKey
 		}
 		seen[key] = true
+		if allowedFields != nil && !allowedFields[key] {
+			unknownField = true
+		}
 		valueToken, err := decoder.Token()
 		if err != nil {
 			return ProblemUnparseable
@@ -189,6 +193,9 @@ func scanObject(decoder *json.Decoder) PayloadProblem {
 	if _, err := decoder.Token(); err != nil { // consume the closing brace
 		return ProblemUnparseable
 	}
+	if unknownField {
+		return ProblemUnknownTopField
+	}
 	return ProblemNone
 }
 
@@ -198,7 +205,7 @@ func scanValue(decoder *json.Decoder, token json.Token) PayloadProblem {
 	case !isDelim:
 		return ProblemNone
 	case delim == '{':
-		return scanObject(decoder)
+		return scanObject(decoder, nil)
 	case delim == '[':
 		for decoder.More() {
 			item, err := decoder.Token()

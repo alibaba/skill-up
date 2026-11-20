@@ -506,15 +506,8 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	// path (all messages in one Run call), with an explicit warning.
 	if len(caseCfg.Input.Turns) > 0 || caseCfg.UserSimulator != nil {
 		if _, ok := runAgent.(agent.SessionResumer); ok {
-			agentExecOpts := agent.ExecOptions{
-				ArtifactDir: e.prepareOutputDir(ctx, configName, caseCfg.ID, "agent/run"),
-				TimeoutSec:  caseTimeoutSeconds(e.evalCfg, caseCfg),
-				AgentMetadata: &runtime.AgentMetadata{
-					CaseID:   caseCfg.ID,
-					Variant:  configName,
-					MaxTurns: caseMaxTurns(e.evalCfg, caseCfg),
-				},
-			}
+			artifactDir := e.prepareOutputDir(ctx, configName, caseCfg.ID, "agent/run")
+			agentExecOpts := e.caseAgentExecOptions(caseCfg, configName, artifactDir)
 			multiTurnResult := e.executeMultiTurnCase(ctx, rt, caseCfg, configName, runAgent, agentExecOpts, startTime, judgeCfg, &result)
 			multiTurnResult.Version = observation.Version
 			// Same rule as the single-shot path: the deferred telemetry reads this
@@ -555,15 +548,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	if observability.LinkedTraceTopologyEnabled() {
 		logging.DebugContextf(agentCtx, "Evaluator: linked agent trace started for case %s (%s)", caseCfg.ID, configName)
 	}
-	agentExecOpts := agent.ExecOptions{
-		ArtifactDir: agentArtifactDir,
-		TimeoutSec:  caseTimeoutSeconds(e.evalCfg, caseCfg),
-		AgentMetadata: &runtime.AgentMetadata{
-			CaseID:   caseCfg.ID,
-			Variant:  configName,
-			MaxTurns: caseMaxTurns(e.evalCfg, caseCfg),
-		},
-	}
+	agentExecOpts := e.caseAgentExecOptions(caseCfg, configName, agentArtifactDir)
 	sessionResult, execErr := runAgent.Run(agentCtx, rt, agentExecOpts, messages)
 	agentSpan.End()
 	finalizeArtifacts(sessionResult)
@@ -608,6 +593,18 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	// case span and skill_up.case.run.count keep reporting the pre-judge status.
 	result = finalResult
 	return result
+}
+
+func (e *defaultEvaluator) caseAgentExecOptions(caseCfg *config.CaseConfig, configName, artifactDir string) agent.ExecOptions {
+	return agent.ExecOptions{
+		ArtifactDir: artifactDir,
+		TimeoutSec:  caseTimeoutSeconds(e.evalCfg, caseCfg),
+		AgentMetadata: &runtime.AgentMetadata{
+			CaseID:   caseCfg.ID,
+			Variant:  configName,
+			MaxTurns: caseMaxTurns(e.evalCfg, caseCfg),
+		},
+	}
 }
 
 //nolint:spancheck // caller owns the returned span and must end it.

@@ -697,7 +697,6 @@ func assertGroupedRecoveredTimeout(t *testing.T, member judge.Outcome, result Ev
 type recoveredTimeoutShape struct {
 	name         string
 	payload      string
-	wantSingle   judge.Status
 	wantComplete judge.Completion
 	wantQuality  judge.Quality
 	wantReason   string
@@ -710,7 +709,6 @@ func recoveredTimeoutShapes() []recoveredTimeoutShape {
 		{
 			name:         "complete valid result",
 			payload:      `{"schema_version":1,"invocation_id":"__INVOCATION__","metrics":[{"metric_id":"correctness","availability":"AVAILABLE","value":0.9,"evidence":["ok"]},{"metric_id":"completeness","availability":"AVAILABLE","value":0.75,"evidence":["ok"]}]}`,
-			wantSingle:   judge.StatusFail,
 			wantComplete: judge.CompletionFinished,
 			wantQuality:  judge.QualityNotConfigured,
 			wantCoverage: [4]int{2, 0, 0, 0},
@@ -719,7 +717,6 @@ func recoveredTimeoutShapes() []recoveredTimeoutShape {
 		{
 			name:         "required metric unavailable",
 			payload:      `{"schema_version":1,"invocation_id":"__INVOCATION__","metrics":[{"metric_id":"completeness","availability":"AVAILABLE","value":0.75,"evidence":["ok"]}]}`,
-			wantSingle:   judge.StatusFail,
 			wantComplete: judge.CompletionIncomplete,
 			wantQuality:  judge.QualityNotConfigured,
 			wantReason:   "required_metric_not_emitted",
@@ -729,7 +726,6 @@ func recoveredTimeoutShapes() []recoveredTimeoutShape {
 		{
 			name:         "invalid metric beside a valid sibling",
 			payload:      `{"schema_version":1,"invocation_id":"__INVOCATION__","metrics":[{"metric_id":"correctness","availability":"AVAILABLE","value":"not-a-number","evidence":["ok"]},{"metric_id":"completeness","availability":"AVAILABLE","value":0.75,"evidence":["ok"]}]}`,
-			wantSingle:   judge.StatusError,
 			wantComplete: judge.CompletionFailed,
 			wantQuality:  judge.QualityNotConfigured,
 			wantReason:   "invalid_value",
@@ -738,7 +734,6 @@ func recoveredTimeoutShapes() []recoveredTimeoutShape {
 		},
 		{
 			name:         "no result file collected",
-			wantSingle:   judge.StatusFail,
 			wantComplete: judge.CompletionInterrupted,
 			wantQuality:  judge.QualityNotAssessed,
 			wantReason:   "evaluation_prevented",
@@ -747,7 +742,6 @@ func recoveredTimeoutShapes() []recoveredTimeoutShape {
 		{
 			name:         "payload rejected as a whole",
 			payload:      `this is not json`,
-			wantSingle:   judge.StatusError,
 			wantComplete: judge.CompletionInterrupted,
 			wantQuality:  judge.QualityNotAssessed,
 			wantReason:   "unparseable_payload",
@@ -756,7 +750,6 @@ func recoveredTimeoutShapes() []recoveredTimeoutShape {
 		{
 			name:         "result bound to another invocation",
 			payload:      `{"schema_version":1,"invocation_id":"another-invocation","metrics":[{"metric_id":"correctness","availability":"AVAILABLE","value":0.9,"evidence":["ok"]}]}`,
-			wantSingle:   judge.StatusError,
 			wantComplete: judge.CompletionInterrupted,
 			wantQuality:  judge.QualityNotAssessed,
 			wantReason:   "unbound_or_stale_result",
@@ -767,7 +760,7 @@ func recoveredTimeoutShapes() []recoveredTimeoutShape {
 
 // TestExecuteCaseRecoveredTimeoutDerivesCompletion drives both judge paths through
 // the real evaluator: the script writes its result file and is then killed by its
-// own deadline. A collected, invocation-bound, schema-valid payload makes the
+// own deadline or the case deadline. An invocation-bound, valid payload makes the
 // scoring outcome final, so completion follows the validated slots while the
 // deadline, its source and the timeout metadata stay recorded and the legacy
 // verdict mapping is untouched (discussion_r4520744571, contract §2). The last
@@ -776,26 +769,32 @@ func recoveredTimeoutShapes() []recoveredTimeoutShape {
 func TestExecuteCaseRecoveredTimeoutDerivesCompletion(t *testing.T) {
 	for _, tc := range recoveredTimeoutShapes() {
 		t.Run("single/"+tc.name, func(t *testing.T) {
-			result := runRecoveredTimeoutSingle(t, tc)
-			assertRecoveredTimeout(t, result.Execution, result.Metrics, tc)
-			if result.Status != tc.wantSingle {
-				t.Errorf("single verdict = %s (error=%v), want %s", result.Status, result.Error, tc.wantSingle)
-			}
+			assertRecoveredSingleTimeout(t, runRecoveredTimeoutSingle(t, tc, 1, 0), tc, judgeTimeoutSource)
+		})
+		t.Run("single case deadline/"+tc.name, func(t *testing.T) {
+			assertRecoveredSingleTimeout(t, runRecoveredTimeoutSingle(t, tc, 3, 1), tc, caseTimeoutDeadlineSource)
 		})
 		t.Run("grouped/"+tc.name, func(t *testing.T) {
-			result := runRecoveredTimeoutGrouped(t, tc)
-			if len(result.JudgeResults) != 1 {
-				t.Fatalf("outcomes = %d, want 1", len(result.JudgeResults))
-			}
-			outcome := result.JudgeResults[0]
-			assertRecoveredTimeout(t, outcome.Execution, outcome.Metrics, tc)
-			if outcome.Status != judge.StatusError {
-				t.Errorf("grouped member verdict = %s, want ERROR under the pre-existing strict script timeout", outcome.Status)
-			}
-			if result.GroupCompletion != tc.wantComplete || result.GroupCause != judge.CauseDeadlineExpiry {
-				t.Errorf("group = %s/%s, want %s/deadline_expiry", result.GroupCompletion, result.GroupCause, tc.wantComplete)
-			}
+			assertRecoveredGroupedTimeout(t, runRecoveredTimeoutGrouped(t, tc, 2, 300), tc, judgeTimeoutSource)
 		})
+		t.Run("grouped case deadline/"+tc.name, func(t *testing.T) {
+			assertRecoveredGroupedTimeout(t, runRecoveredTimeoutGrouped(t, tc, 3, 1), tc, caseTimeoutDeadlineSource)
+		})
+	}
+}
+
+func assertRecoveredGroupedTimeout(t *testing.T, result EvalResult, tc recoveredTimeoutShape, source string) {
+	t.Helper()
+	if len(result.JudgeResults) != 1 {
+		t.Fatalf("outcomes = %d, want 1", len(result.JudgeResults))
+	}
+	outcome := result.JudgeResults[0]
+	assertRecoveredTimeout(t, outcome.Execution, outcome.Metrics, tc, source)
+	if outcome.Status != judge.StatusError {
+		t.Errorf("grouped member verdict = %s, want ERROR under the pre-existing strict script timeout", outcome.Status)
+	}
+	if result.GroupCompletion != tc.wantComplete || result.GroupCause != judge.CauseDeadlineExpiry {
+		t.Errorf("group = %s/%s, want %s/deadline_expiry", result.GroupCompletion, result.GroupCause, tc.wantComplete)
 	}
 }
 
@@ -818,19 +817,22 @@ func recoveredTimeoutMember(t *testing.T, tc recoveredTimeoutShape, seconds int)
 	return config.JudgeConfig{ID: "scorer", Type: "script", ScriptPath: script, TimeoutSeconds: &limit, Metrics: scoreRegistry()}, scratch
 }
 
-func runRecoveredTimeoutSingle(t *testing.T, tc recoveredTimeoutShape) EvalResult {
+func runRecoveredTimeoutSingle(t *testing.T, tc recoveredTimeoutShape, judgeSeconds, caseSeconds int) EvalResult {
 	t.Helper()
-	member, scratch := recoveredTimeoutMember(t, tc, 1)
+	member, scratch := recoveredTimeoutMember(t, tc, judgeSeconds)
 	e := newTestEvaluator(EvalOptions{
 		Agent: &mockAgent{name: "test", output: "done"}, OutputDir: t.TempDir(),
 		EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none"}, Judge: member},
 	})
-	return e.executeCase(context.Background(), &config.CaseConfig{ID: "recovered-single", Input: config.Input{Prompt: "hello"}}, "with_skill", newScratchRuntime(t, scratch), nil)
+	return e.executeCase(context.Background(), &config.CaseConfig{
+		ID: "recovered-single", Input: config.Input{Prompt: "hello"},
+		Constraints: config.Constraints{TimeoutSeconds: caseSeconds},
+	}, "with_skill", newScratchRuntime(t, scratch), nil)
 }
 
-func runRecoveredTimeoutGrouped(t *testing.T, tc recoveredTimeoutShape) EvalResult {
+func runRecoveredTimeoutGrouped(t *testing.T, tc recoveredTimeoutShape, judgeSeconds, caseSeconds int) EvalResult {
 	t.Helper()
-	member, scratch := recoveredTimeoutMember(t, tc, 2)
+	member, scratch := recoveredTimeoutMember(t, tc, judgeSeconds)
 	members := []config.JudgeConfig{member}
 	e := newTestEvaluator(EvalOptions{
 		Agent: &mockAgent{name: "test", output: "done"}, OutputDir: t.TempDir(),
@@ -838,19 +840,33 @@ func runRecoveredTimeoutGrouped(t *testing.T, tc recoveredTimeoutShape) EvalResu
 	})
 	return e.executeCase(context.Background(), &config.CaseConfig{
 		ID: "recovered-grouped", Input: config.Input{Prompt: "hello"},
-		Constraints: config.Constraints{TimeoutSeconds: 300},
+		Constraints: config.Constraints{TimeoutSeconds: caseSeconds},
 	}, "with_skill", newScratchRuntime(t, scratch), nil)
 }
 
-func assertRecoveredTimeout(t *testing.T, ex *judge.ExecutionMetadata, env *judge.MetricsEnvelope, tc recoveredTimeoutShape) {
+func assertRecoveredSingleTimeout(t *testing.T, result EvalResult, tc recoveredTimeoutShape, source string) {
 	t.Helper()
-	assertRecoveredCompletion(t, ex, tc)
+	if result.Status != judge.StatusFail || result.Error != nil {
+		t.Errorf("single status = %s (error=%v), want FAIL with no execution error", result.Status, result.Error)
+	}
+	if result.Grading == nil || result.Grading.Status != judge.StatusFail || result.Grading.ErrorReason != nil {
+		t.Errorf("single grading = %+v, want the legacy timeout verdict", result.Grading)
+	}
+	assertRecoveredTimeout(t, result.Execution, result.Metrics, tc, source)
+}
+
+func assertRecoveredTimeout(t *testing.T, ex *judge.ExecutionMetadata, env *judge.MetricsEnvelope, tc recoveredTimeoutShape, source string) {
+	t.Helper()
+	assertRecoveredCompletion(t, ex, tc, source)
 	assertRecoveredSlots(t, env, tc)
 }
 
-func assertRecoveredCompletion(t *testing.T, ex *judge.ExecutionMetadata, tc recoveredTimeoutShape) {
+func assertRecoveredCompletion(t *testing.T, ex *judge.ExecutionMetadata, tc recoveredTimeoutShape, source string) {
 	t.Helper()
-	assertTimeoutProvenance(t, ex)
+	if ex == nil || ex.Cause != judge.CauseDeadlineExpiry || ex.DeadlineSource != source ||
+		ex.Timeout == nil || !ex.Timeout.Occurred || ex.Timeout.Source != source {
+		t.Fatalf("timeout provenance = %+v, want deadline expiry from %s", ex, source)
+	}
 	wantStage, wantRecovered := judge.StageFinished, true
 	if tc.wantComplete == judge.CompletionInterrupted {
 		// No trustworthy final outcome was obtained: the pass stays started but
@@ -865,9 +881,6 @@ func assertRecoveredCompletion(t *testing.T, ex *judge.ExecutionMetadata, tc rec
 	}
 	if ex.Timeout.Recovered != wantRecovered {
 		t.Errorf("timeout.recovered = %v, want %v", ex.Timeout.Recovered, wantRecovered)
-	}
-	if ex.Timeout.Source != judgeTimeoutSource {
-		t.Errorf("timeout.source = %q, want %q", ex.Timeout.Source, judgeTimeoutSource)
 	}
 }
 

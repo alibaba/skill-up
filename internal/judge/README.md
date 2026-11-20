@@ -320,8 +320,9 @@ Rules that the implementation enforces:
 - For a judge that opts into a metric registry, a threshold miss changes its
   verdict to `FAIL`; an errored slot or an unavailable required/thresholded slot
   changes it to `ERROR`. Optional unavailable slots without thresholds do not
-  change the verdict and do not make completion `INCOMPLETE`. With no registry,
-  legacy verdict behavior is unchanged.
+  change the verdict and do not make completion `INCOMPLETE`. Script timeouts
+  keep their legacy verdict even when slots report contract errors. With no
+  registry, legacy verdict behavior is unchanged.
 - A timeout does not invalidate a trustworthy score. An accepted score stays
   `AVAILABLE`, and the timeout, its source and any recovery stay recorded.
   A score is never fabricated as zero, and an accepted result is never rewritten
@@ -329,9 +330,10 @@ Rules that the implementation enforces:
 - A recovered timeout result is a final scoring outcome. When the collector obtains
   a complete, invocation-bound, schema-valid payload after the deadline, completion
   is derived from the validated slots (`COMPLETED` / `INCOMPLETE` / `FAILED`) and
-  `timeout.recovered` records why, while `deadline_expiry`, its source and the
-  exceeded budget stay visible. A stop that collected nothing, or a payload rejected
-  as a whole, is not a trustworthy outcome and stays `INTERRUPTED`. The legacy
+  `timeout.recovered` records why. This applies at both judge and case deadlines,
+  and the execution metadata keeps `deadline_expiry` and the source that fired.
+  A stop that collected nothing, or a payload rejected as a whole, stays
+  `INTERRUPTED`. The legacy
   script-timeout verdicts are unchanged either way.
 - Whole-payload defects (unparseable, top-level shape, duplicate JSON keys, unknown
   top-level field, schema version, unbound or stale result, size limit) make every

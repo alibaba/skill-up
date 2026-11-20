@@ -225,17 +225,15 @@ func gradedMetrics(member config.JudgeConfig, graded EvalResult, decision Member
 // already observed; a member that recorded nothing and was stopped by the outer
 // context is INTERRUPTED, with the stage recording whether it had started.
 func memberExecution(graded EvalResult, stop judge.Stop, decision MemberDecision, planned []judge.MetricSlot) *judge.ExecutionMetadata {
-	if decision != MemberAccepted && graded.Execution != nil && graded.Execution.Stage == judge.StageFinished {
-		// A completed scoring pass can still violate the metric contract. Preserve
-		// its FAILED/INCOMPLETE completion rather than rewriting it as an execution
-		// interruption merely because the compatibility verdict is ERROR.
-		return graded.Execution
-	}
 	if decision == MemberAccepted {
 		return acceptedMemberExecution(graded, stop, planned)
 	}
 	if isRecoveredTimeout(gradingExecution(&graded)) {
 		return recoveredMemberExecution(graded, stop, planned)
+	}
+	if graded.Execution != nil && graded.Execution.Stage == judge.StageFinished {
+		// Preserve completion for a scoring pass that violated the metric contract.
+		return graded.Execution
 	}
 	stage := judge.StageStarted
 	if graded.Grading == nil && graded.Status == judge.StatusSkip {
