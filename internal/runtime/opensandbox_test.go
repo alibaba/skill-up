@@ -976,6 +976,7 @@ type fakeOpenSandbox struct {
 	execs                  []opensandbox.RunCommandRequest
 	execResult             *opensandbox.Execution
 	downloadHook           func(string) []byte
+	downloadErr            error
 	uploadDelay            time.Duration
 	uploadMu               sync.Mutex
 	activeUploads          int
@@ -1052,6 +1053,9 @@ func (f *fakeOpenSandbox) UploadFiles(ctx context.Context, entries []opensandbox
 }
 
 func (f *fakeOpenSandbox) DownloadFile(_ context.Context, remotePath, _ string, _ ...opensandbox.DownloadFileOptions) (io.ReadCloser, error) {
+	if f.downloadErr != nil {
+		return nil, f.downloadErr
+	}
 	if f.downloadDelay > 0 {
 		f.downloadMu.Lock()
 		f.activeDownloads++
@@ -1155,6 +1159,32 @@ func TestOpenSandboxRuntimeExistsUsesLiteralMetadata(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestOpenSandboxRuntimeReadFileClassifiesDownloadErrors(t *testing.T) {
+	t.Run("file not found", func(t *testing.T) {
+		fake := &fakeOpenSandbox{downloadErr: &opensandbox.APIError{
+			StatusCode: http.StatusNotFound,
+			Response:   opensandbox.ErrorResponse{Code: "FILE_NOT_FOUND", Message: "file not found"},
+		}}
+		rt := &OpenSandboxRuntime{workspace: "/workspace", sandbox: fake}
+
+		if _, err := rt.ReadFile(context.Background(), "missing"); !errors.Is(err, ErrFileNotFound) {
+			t.Fatalf("ReadFile = %v, want ErrFileNotFound", err)
+		}
+	})
+
+	t.Run("other error propagates", func(t *testing.T) {
+		fake := &fakeOpenSandbox{downloadErr: &opensandbox.APIError{
+			StatusCode: http.StatusForbidden,
+			Response:   opensandbox.ErrorResponse{Code: "RUNTIME_ERROR", Message: "permission denied"},
+		}}
+		rt := &OpenSandboxRuntime{workspace: "/workspace", sandbox: fake}
+
+		if _, err := rt.ReadFile(context.Background(), "restricted"); err == nil || !strings.Contains(err.Error(), "permission denied") {
+			t.Fatalf("ReadFile = %v, want permission error", err)
+		}
+	})
 }
 
 func TestOpenSandboxRuntime_MergeEnv_AppliesToSubsequentExec(t *testing.T) {

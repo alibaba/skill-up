@@ -394,16 +394,15 @@ func (r *OpenSandboxRuntime) Exists(ctx context.Context, sourcePath string) (boo
 
 // ReadFile returns the contents of a file in the sandbox workspace.
 func (r *OpenSandboxRuntime) ReadFile(ctx context.Context, sourcePath string) ([]byte, error) {
-	exists, err := r.Exists(ctx, sourcePath)
-	if err != nil {
+	if err := r.ensureCreated(); err != nil {
 		return nil, err
-	}
-	if !exists {
-		return nil, ErrFileNotFound
 	}
 	source := r.remotePath(sourcePath)
 	rc, err := r.sandbox.DownloadFile(ctx, source, "")
 	if err != nil {
+		if isOpenSandboxFileNotFound(err) {
+			return nil, ErrFileNotFound
+		}
 		return nil, fmt.Errorf("download sandbox file %s: %w", source, err)
 	}
 	defer func() { _ = rc.Close() }()
