@@ -1136,6 +1136,17 @@ func annotateCaseTimeoutError(result *EvalResult, source string, seconds int) {
 	if !errors.Is(result.Error, context.DeadlineExceeded) {
 		return
 	}
+	if len(result.JudgeResults) != 0 {
+		first := slices.IndexFunc(result.JudgeResults, func(outcome JudgeOutcome) bool {
+			return (outcome.Status == judge.StatusError || outcome.Status == judge.StatusSkip) &&
+				outcome.Execution != nil && outcome.Execution.Cause == judge.CauseDeadlineExpiry
+		})
+		// Judge outcomes are ordered by invocation. A later case deadline can
+		// stop pending judges, but cannot rename the first recorded timeout.
+		if first < 0 || result.JudgeResults[first].Execution.DeadlineSource != source {
+			return
+		}
+	}
 	result.Error = fmt.Errorf("%w (case timeout %ds via %s)", result.Error, seconds, source)
 }
 

@@ -655,6 +655,90 @@ func TestExecuteCaseGroupedJudgeTimeoutUnderLiveCaseDeadline(t *testing.T) {
 	assertGroupedRecoveredTimeout(t, member, result)
 }
 
+func TestExecuteCaseGroupedJudgeTimeoutBeforeCaseDeadlineDuringCleanup(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		pending []config.JudgeConfig
+	}{
+		{name: "no pending judge"},
+		{name: "case deadline prevents pending judge", pending: []config.JudgeConfig{
+			{ID: "pending", Type: "script", ScriptPath: "pending.sh"},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := runGroupedJudgeTimeoutWithLateCaseDeadline(t, tc.pending)
+			if !errors.Is(result.Error, context.DeadlineExceeded) {
+				t.Fatalf("error = %v, want a deadline error", result.Error)
+			}
+			summary := result.Error.Error()
+			if !strings.Contains(summary, "scorer:") || !strings.Contains(summary, "deadline via judge.timeout_seconds") ||
+				strings.Contains(summary, "case timeout 3s via") {
+				t.Errorf("summary = %q, want the scorer's own budget without a case-level timeout label", summary)
+			}
+			assertGroupedLateCaseTimeout(t, result.JudgeResults, 1+len(tc.pending))
+			const pendingDetail = "pending: case deadline expired (deadline via case.constraints.timeout_seconds)"
+			if wantPending := len(tc.pending) != 0; strings.Contains(summary, pendingDetail) != wantPending {
+				t.Errorf("summary = %q, want pending judge deadline detail: %t", summary, wantPending)
+			}
+		})
+	}
+}
+
+func runGroupedJudgeTimeoutWithLateCaseDeadline(t *testing.T, pending []config.JudgeConfig) EvalResult {
+	t.Helper()
+	members := []config.JudgeConfig{
+		{ID: "scorer", Type: "script", ScriptPath: "score.sh", TimeoutSeconds: new(1), Metrics: scoreRegistry()},
+	}
+	members = append(members, pending...)
+	var caseDone <-chan struct{}
+	ag := &mockAgent{name: "test", runFunc: func(ctx context.Context, _ runtime.Runtime, _ agent.ExecOptions, _ []transcript.Message) (*agent.SessionResult, error) {
+		caseDone = ctx.Done()
+		return &agent.SessionResult{FinalMessage: "done"}, nil
+	}}
+	scoring := false
+	rt := &mockRuntime{workspace: t.TempDir(), execFunc: func(ctx context.Context, _ string, opts runtime.ExecOptions) (runtime.ExecResult, error) {
+		if _, isScript := opts.Env["EVAL_EXIT_CODE"]; isScript {
+			if scoring {
+				t.Fatal("pending judge unexpectedly ran")
+			}
+			scoring = true
+			<-ctx.Done()
+			return runtime.ExecResult{}, ctx.Err()
+		}
+		if scoring {
+			// The script's cleanup outlives the remaining case budget. Wait for
+			// that deadline rather than guessing how long the cleanup should take.
+			<-caseDone
+		}
+		return runtime.ExecResult{}, nil
+	}}
+	e := newTestEvaluator(EvalOptions{
+		Agent: ag, OutputDir: t.TempDir(),
+		EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none"}, Judges: &members},
+	})
+	return e.executeCase(context.Background(), &config.CaseConfig{
+		ID: "late-case-deadline", Input: config.Input{Prompt: "hello"},
+		Constraints: config.Constraints{TimeoutSeconds: 3},
+	}, "with_skill", rt, nil)
+}
+
+func assertGroupedLateCaseTimeout(t *testing.T, outcomes []JudgeOutcome, wantLen int) {
+	t.Helper()
+	if len(outcomes) != wantLen {
+		t.Fatalf("outcomes = %d, want %d", len(outcomes), wantLen)
+	}
+	first := outcomes[0]
+	if ex := first.Execution; first.Status != judge.StatusError || ex == nil || ex.Cause != judge.CauseDeadlineExpiry || ex.DeadlineSource != judgeTimeoutSource {
+		t.Fatalf("scorer status = %s, execution = %+v, want its judge deadline", first.Status, ex)
+	}
+	if wantLen == 2 {
+		second := outcomes[1]
+		if ex := second.Execution; second.Status != judge.StatusSkip || ex == nil || ex.Stage != judge.StageNotInvoked || ex.Cause != judge.CauseDeadlineExpiry || ex.DeadlineSource != caseTimeoutDeadlineSource {
+			t.Fatalf("pending status = %s, execution = %+v, want it skipped by the case deadline", second.Status, ex)
+		}
+	}
+}
+
 // assertGroupedRecoveredTimeout keeps the two facts this shape must report at once:
 // the expired knob stays attributable, and the scores collected before the kill make
 // the outcome final, so completion is derived from them (#317 contract §2).

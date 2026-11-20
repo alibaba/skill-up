@@ -8,11 +8,11 @@ import (
 )
 
 func openMetricsResult(path string) (*os.File, error) {
-	absolute, err := filepath.Abs(path)
+	extended, err := windowsMetricsResultPath(path)
 	if err != nil {
 		return nil, err
 	}
-	name, err := syscall.UTF16PtrFromString(extendedMetricsPath(absolute))
+	name, err := syscall.UTF16PtrFromString(extended)
 	if err != nil {
 		return nil, err
 	}
@@ -22,7 +22,25 @@ func openMetricsResult(path string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return os.NewFile(uintptr(handle), path), nil
+	return os.NewFile(uintptr(handle), extended), nil
+}
+
+func lstatMetricsResult(path string) (os.FileInfo, error) {
+	// os.SameFile may reopen the path retained by Lstat to read the file ID.
+	// Give that reopen the same extended path that opened the data handle.
+	extended, err := windowsMetricsResultPath(path)
+	if err != nil {
+		return nil, err
+	}
+	return os.Lstat(extended)
+}
+
+func windowsMetricsResultPath(path string) (string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return extendedMetricsPath(absolute), nil
 }
 
 // CreateFile needs the extended prefix for long absolute paths.

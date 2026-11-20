@@ -11,3 +11,7 @@ import (
 func openMetricsResult(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 }
+
+func lstatMetricsResult(path string) (os.FileInfo, error) {
+	return os.Lstat(path)
+}

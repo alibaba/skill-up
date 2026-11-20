@@ -22,7 +22,10 @@ func ResolveJudgePlan(eval *EvalConfig, caseCfg *CaseConfig) (JudgePlan, error) 
 	if (caseCfg.JudgesSet || caseCfg.Judges != nil) && (caseCfg.JudgeSet || caseCfg.Judge.Type != "") {
 		return JudgePlan{}, errors.New("case cannot configure both judge and judges")
 	}
-	if err := validateCaseMetricRegistryType(caseCfg.Judge); err != nil {
+	if err := validateMetricRegistryType(eval.Judge); err != nil {
+		return JudgePlan{}, fmt.Errorf("eval: %w", err)
+	}
+	if err := validateMetricRegistryType(caseCfg.Judge); err != nil {
 		return JudgePlan{}, err
 	}
 	selected, single, err := chooseJudgeConfig(eval, caseCfg)
@@ -35,8 +38,8 @@ func ResolveJudgePlan(eval *EvalConfig, caseCfg *CaseConfig) (JudgePlan, error) 
 	return makeJudgeListPlan(selected)
 }
 
-func validateCaseMetricRegistryType(local JudgeConfig) error {
-	if local.Type == "" && local.Metrics != nil {
+func validateMetricRegistryType(cfg JudgeConfig) error {
+	if cfg.Type == "" && cfg.Metrics != nil {
 		return errors.New("judge.type is required when judge.metrics is configured")
 	}
 	return nil

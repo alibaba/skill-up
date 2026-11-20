@@ -256,7 +256,7 @@ func (j *ScriptJudge) declinedMetrics() *MetricsEnvelope {
 	judgeID := j.producerID()
 	env := MaterializeSlots(judgeID, j.MetricSlots, nil, ProblemNone, MetricPrevented)
 	if j.MetricsResultPath != "" {
-		if info, err := os.Lstat(j.MetricsResultPath); err == nil && info.Mode().IsRegular() {
+		if info, err := lstatMetricsResult(j.MetricsResultPath); err == nil && info.Mode().IsRegular() {
 			env.AddDiagnostic("result_file_not_accepted")
 		}
 	}
@@ -291,7 +291,7 @@ func (j *ScriptJudge) attachMetrics(res *Result, production MetricProduction) bo
 		res.Metrics = MaterializeSlots(judgeID, j.MetricSlots, nil, ProblemChannelUnsupported, production)
 		return false
 	}
-	info, err := os.Lstat(j.MetricsResultPath)
+	info, err := lstatMetricsResult(j.MetricsResultPath)
 	if errors.Is(err, os.ErrNotExist) && production == MetricPrevented {
 		// Nothing was ever produced because evaluation was interrupted: the slots
 		// are NOT_PRODUCED, not a rejected payload.

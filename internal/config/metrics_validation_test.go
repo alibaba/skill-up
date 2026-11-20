@@ -170,3 +170,51 @@ func TestCaseMetricRegistryRequiresExplicitJudgeType(t *testing.T) {
 		})
 	}
 }
+
+func TestEvalMetricRegistryRequiresExplicitJudgeType(t *testing.T) {
+	const base = `schema_version: v1alpha1
+environment:
+  type: none
+engine:
+  name: claude_code
+cases:
+  files: [cases/example.yaml]
+`
+	const metrics = `  metrics:
+    - id: correctness
+      min_score: 0.7
+`
+	for _, tc := range []struct {
+		name    string
+		judge   string
+		wantErr bool
+	}{
+		{name: "no judge"},
+		{name: "typed registry", judge: "judge:\n  type: script\n  script_path: judge.sh\n" + metrics},
+		{name: "untyped registry with a threshold", judge: "judge:\n" + metrics, wantErr: true},
+		{name: "untyped explicit empty registry", judge: "judge:\n  metrics: []\n", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "eval.yaml")
+			if err := os.WriteFile(path, []byte(base+tc.judge), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := NewLoader(path).LoadEvalConfig()
+			if err != nil {
+				t.Fatalf("load eval config: %v", err)
+			}
+			_, planErr := ResolveJudgePlan(cfg, &CaseConfig{})
+			for name, err := range map[string]error{
+				"eval validation": NewValidator().ValidateEvalConfig(cfg),
+				"runtime plan":    planErr,
+			} {
+				if tc.wantErr && (err == nil || !strings.Contains(err.Error(), "judge.type is required when judge.metrics is configured")) {
+					t.Errorf("%s error = %v, want explicit judge type requirement", name, err)
+				}
+				if !tc.wantErr && err != nil {
+					t.Errorf("%s rejected valid configuration: %v", name, err)
+				}
+			}
+		})
+	}
+}

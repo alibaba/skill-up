@@ -48,8 +48,9 @@ func (e *defaultEvaluator) runMultipleJudges(
 	result.JudgeResults = make([]JudgeOutcome, 0, len(plan.Judges))
 	var causes []error
 	for i, member := range plan.Judges {
-		if ctx.Err() != nil {
-			stop := judge.ClassifyStop(ctx.Err(), judge.StopObservation{DeadlineSource: judge.DeadlineSource(ctx), SignalObserved: SignalObserved(ctx)})
+		if err := ctx.Err(); err != nil {
+			causes = append(causes, err)
+			stop := judge.ClassifyStop(err, judge.StopObservation{DeadlineSource: judge.DeadlineSource(ctx), SignalObserved: SignalObserved(ctx)})
 			for _, pending := range plan.Judges[i:] {
 				result.JudgeResults = append(result.JudgeResults, JudgeOutcome{
 					ID: pending.ID, Type: pending.Type, Status: judge.StatusSkip,
@@ -67,7 +68,7 @@ func (e *defaultEvaluator) runMultipleJudges(
 	result.Grading, result.Status = judge.DefaultOutcomeAggregator().Aggregate(result.JudgeResults, result.Turns, turnsTotal)
 	result.GroupCompletion, result.GroupCause = foldGroupState(result.JudgeResults)
 	if result.Status == judge.StatusError {
-		result.Error = multiJudgeError(ctx, result.JudgeResults, causes)
+		result.Error = multiJudgeError(result.JudgeResults, causes)
 	}
 	result.Configuration = configName
 	return *result
@@ -297,10 +298,7 @@ func completionForContract(env *judge.MetricsEnvelope, planned []judge.MetricSlo
 	return judge.CompletionFinished
 }
 
-func multiJudgeError(ctx context.Context, outcomes []JudgeOutcome, causes []error) error {
-	if ctx.Err() != nil {
-		causes = append(causes, ctx.Err())
-	}
+func multiJudgeError(outcomes []JudgeOutcome, causes []error) error {
 	summary := errors.New(summarizeJudgeErrors(outcomes))
 	if len(causes) == 0 {
 		return summary
@@ -325,6 +323,9 @@ func summarizeJudgeErrors(outcomes []JudgeOutcome) string {
 			detail := outcome.Error
 			if detail == "" {
 				detail = outcome.SkipReason
+			}
+			if execution := outcome.Execution; execution != nil && execution.Cause == judge.CauseDeadlineExpiry && execution.DeadlineSource != "" {
+				detail += " (deadline via " + execution.DeadlineSource + ")"
 			}
 			details = append(details, outcome.ID+": "+detail)
 		}
