@@ -2,30 +2,6 @@ package platform
 
 import "testing"
 
-func TestCleanWorkspaceRelPath(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		in   string
-		want string
-	}{
-		{"", "."},
-		{".", "."},
-		{"./", "."},
-		{"/", "/"},
-		{`\`, "/"},
-		{`.\`, "."},
-		{"dir/file.txt", "dir/file.txt"},
-		{`dir\file.txt`, "dir/file.txt"},
-		{"foo/../bar", "bar"},
-	}
-	for _, tt := range tests {
-		if got := CleanWorkspaceRelPath(tt.in); got != tt.want {
-			t.Errorf("CleanWorkspaceRelPath(%q) = %q, want %q", tt.in, got, tt.want)
-		}
-	}
-}
-
 func TestIsWorkspaceRootPath(t *testing.T) {
 	t.Parallel()
 

@@ -5,20 +5,13 @@ import (
 	"strings"
 )
 
-// CleanWorkspaceRelPath returns the host-independent clean form of a
-// workspace-relative path.
-//
-// Eval configs are authored once and may run on any host, so the path grammar
-// must not depend on the host separator. Both '/' and '\' are treated as
-// separators; this also makes Windows root spellings such as ".\" and "\" mean
-// the same thing on Linux and macOS.
-func CleanWorkspaceRelPath(rel string) string {
-	return path.Clean(strings.ReplaceAll(rel, `\`, "/"))
-}
-
 // IsWorkspaceRootPath reports whether rel addresses the workspace root itself:
 // "", ".", "./", "/", "\", ".\" and any other path that cleans to "." or "/".
+//
+// Only root detection uses the separator-insensitive form. Callers pass every
+// other path through unchanged, so a filename containing a backslash keeps its
+// literal meaning on POSIX hosts.
 func IsWorkspaceRootPath(rel string) bool {
-	clean := CleanWorkspaceRelPath(rel)
+	clean := path.Clean(strings.ReplaceAll(rel, `\`, "/"))
 	return clean == "." || clean == "/"
 }

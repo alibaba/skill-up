@@ -50,32 +50,6 @@ func TestRuleBased_FileRules_EmptySliceFails(t *testing.T) {
 	assertStatus(t, r, StatusFail)
 }
 
-// Validation accepts both separators, so execution must resolve the same
-// portable relative path on every host.
-func TestRuleBased_FileRules_AcceptPortableSeparators(t *testing.T) {
-	ws := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(ws, "dir"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(ws, "dir", "out.txt"), []byte("ok"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	for _, path := range []string{"dir/out.txt", `dir\out.txt`} {
-		r, err := NewRuleBasedJudge(config.JudgeConfig{
-			Success: []config.Rule{{FilesExist: []string{path}}},
-		}).Evaluate(context.Background(), Input{WorkspacePath: ws})
-		assertNoError(t, err)
-		assertStatus(t, r, StatusPass)
-	}
-
-	r, err := NewRuleBasedJudge(config.JudgeConfig{
-		Success: []config.Rule{{FilesNotExist: []string{`dir\missing.txt`}}},
-	}).Evaluate(context.Background(), Input{WorkspacePath: ws})
-	assertNoError(t, err)
-	assertStatus(t, r, StatusPass)
-}
-
 func TestRuleBased_ToolCalled_EmptyNameFails(t *testing.T) {
 	for _, name := range []string{"", "   "} {
 		r, err := NewRuleBasedJudge(config.JudgeConfig{
@@ -104,8 +78,8 @@ func TestCheckExpect_FilePathsUseTheSameGrammar(t *testing.T) {
 		}
 	}
 
-	// Separator portability matches config validation.
-	r := CheckExpect(&config.Expect{FilesExist: []string{`out.txt`}}, Input{WorkspacePath: ws})
+	// A normal relative path still resolves as before.
+	r := CheckExpect(&config.Expect{FilesExist: []string{"out.txt"}}, Input{WorkspacePath: ws})
 	if !r.Passed {
 		t.Fatalf("expect.files_exist out.txt failures = %+v, want pass", r.Failures)
 	}

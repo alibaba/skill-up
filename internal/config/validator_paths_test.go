@@ -65,7 +65,7 @@ func TestValidator_RejectsInvalidFileRulePaths(t *testing.T) {
 	}
 }
 
-func TestValidator_AcceptsPortableFileRulePaths(t *testing.T) {
+func TestValidator_AcceptsValidFileRulePaths(t *testing.T) {
 	t.Parallel()
 
 	cfg := evalWithJudge(JudgeConfig{
@@ -76,7 +76,7 @@ func TestValidator_AcceptsPortableFileRulePaths(t *testing.T) {
 		}},
 	})
 	if err := NewValidator().ValidateEvalConfig(cfg); err != nil {
-		t.Fatalf("portable file paths rejected: %v", err)
+		t.Fatalf("valid file paths rejected: %v", err)
 	}
 }
 
