@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -969,10 +970,13 @@ type fakeOpenSandbox struct {
 	searchPattern          string
 	searchResults          []opensandbox.FileInfo
 	searchErr              error
+	fileInfo               map[string]opensandbox.FileInfo
+	fileInfoErr            error
 	lastExec               opensandbox.RunCommandRequest
 	execs                  []opensandbox.RunCommandRequest
 	execResult             *opensandbox.Execution
 	downloadHook           func(string) []byte
+	downloadErr            error
 	uploadDelay            time.Duration
 	uploadMu               sync.Mutex
 	activeUploads          int
@@ -1049,6 +1053,9 @@ func (f *fakeOpenSandbox) UploadFiles(ctx context.Context, entries []opensandbox
 }
 
 func (f *fakeOpenSandbox) DownloadFile(_ context.Context, remotePath, _ string, _ ...opensandbox.DownloadFileOptions) (io.ReadCloser, error) {
+	if f.downloadErr != nil {
+		return nil, f.downloadErr
+	}
 	if f.downloadDelay > 0 {
 		f.downloadMu.Lock()
 		f.activeDownloads++
@@ -1074,6 +1081,13 @@ func (f *fakeOpenSandbox) SearchFiles(_ context.Context, dir, pattern string) ([
 	return f.searchResults, nil
 }
 
+func (f *fakeOpenSandbox) GetFileInfo(_ context.Context, path string) (map[string]opensandbox.FileInfo, error) {
+	if f.fileInfoErr != nil {
+		return nil, f.fileInfoErr
+	}
+	return f.fileInfo, nil
+}
+
 func (f *fakeOpenSandbox) RunCommandWithOpts(_ context.Context, req opensandbox.RunCommandRequest, _ *opensandbox.ExecutionHandlers) (*opensandbox.Execution, error) {
 	f.lastExec = req
 	f.execs = append(f.execs, req)
@@ -1081,6 +1095,102 @@ func (f *fakeOpenSandbox) RunCommandWithOpts(_ context.Context, req opensandbox.
 		return f.execResult, nil
 	}
 	return &opensandbox.Execution{ExitCode: new(0)}, nil
+}
+
+func TestOpenSandboxRuntimeExistsUsesLiteralMetadata(t *testing.T) {
+	tests := []struct {
+		name       string
+		sourcePath string
+		fake       *fakeOpenSandbox
+		wantOK     bool
+		wantErr    bool
+	}{
+		{
+			name:       "existing directory",
+			sourcePath: "dir",
+			fake: &fakeOpenSandbox{fileInfo: map[string]opensandbox.FileInfo{
+				"/workspace/dir": {Path: "/workspace/dir", Mode: 0o755},
+			}},
+			wantOK: true,
+		},
+		{
+			name:       "literal filename with glob characters",
+			sourcePath: "[abc]*.txt",
+			fake: &fakeOpenSandbox{fileInfo: map[string]opensandbox.FileInfo{
+				"/workspace/[abc]*.txt": {Path: "/workspace/[abc]*.txt", Mode: 0o644},
+			}},
+			wantOK: true,
+		},
+		{
+			name:       "missing path is confirmed absence",
+			sourcePath: "missing",
+			fake: &fakeOpenSandbox{fileInfoErr: &opensandbox.APIError{
+				StatusCode: http.StatusNotFound,
+				Response:   opensandbox.ErrorResponse{Code: "FILE_NOT_FOUND", Message: "file not found"},
+			}},
+			wantOK: false,
+		},
+		{
+			name:       "access error is preserved",
+			sourcePath: "restricted",
+			fake: &fakeOpenSandbox{fileInfoErr: &opensandbox.APIError{
+				StatusCode: http.StatusForbidden,
+				Response:   opensandbox.ErrorResponse{Code: "RUNTIME_ERROR", Message: "permission denied"},
+			}},
+			wantErr: true,
+		},
+		{
+			name:       "rejects environment expansion",
+			sourcePath: "report-$VERSION.txt",
+			fake:       &fakeOpenSandbox{},
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt := &OpenSandboxRuntime{workspace: "/workspace", sandbox: tt.fake}
+			ok, err := rt.Exists(context.Background(), tt.sourcePath)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected an access error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ok != tt.wantOK {
+				t.Fatalf("Exists = %v, want %v", ok, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestOpenSandboxRuntimeReadFileClassifiesDownloadErrors(t *testing.T) {
+	t.Run("file not found", func(t *testing.T) {
+		fake := &fakeOpenSandbox{downloadErr: &opensandbox.APIError{
+			StatusCode: http.StatusNotFound,
+			Response:   opensandbox.ErrorResponse{Code: "FILE_NOT_FOUND", Message: "file not found"},
+		}}
+		rt := &OpenSandboxRuntime{workspace: "/workspace", sandbox: fake}
+
+		if _, err := rt.ReadFile(context.Background(), "missing"); !errors.Is(err, ErrFileNotFound) {
+			t.Fatalf("ReadFile = %v, want ErrFileNotFound", err)
+		}
+	})
+
+	t.Run("other error propagates", func(t *testing.T) {
+		fake := &fakeOpenSandbox{downloadErr: &opensandbox.APIError{
+			StatusCode: http.StatusForbidden,
+			Response:   opensandbox.ErrorResponse{Code: "RUNTIME_ERROR", Message: "permission denied"},
+		}}
+		rt := &OpenSandboxRuntime{workspace: "/workspace", sandbox: fake}
+
+		if _, err := rt.ReadFile(context.Background(), "restricted"); err == nil || !strings.Contains(err.Error(), "permission denied") {
+			t.Fatalf("ReadFile = %v, want permission error", err)
+		}
+	})
 }
 
 func TestOpenSandboxRuntime_MergeEnv_AppliesToSubsequentExec(t *testing.T) {

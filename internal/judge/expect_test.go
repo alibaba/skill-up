@@ -1,12 +1,14 @@
 package judge
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/alibaba/skill-up/internal/config"
+	"github.com/alibaba/skill-up/internal/runtime"
 )
 
 func TestCheckExpect_NilExpect(t *testing.T) {
@@ -16,6 +18,49 @@ func TestCheckExpect_NilExpect(t *testing.T) {
 	}
 	if len(result.Failures) != 0 {
 		t.Fatalf("expected 0 failures, got %d", len(result.Failures))
+	}
+}
+
+func TestCheckExpectRuntimeConstrainsWorkspacePaths(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(root, "outside.txt")
+	if err := os.WriteFile(outside, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rt, err := runtime.NewRuntime(runtime.Config{Type: "none", WorkspaceDir: workspace})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	for _, tc := range []struct {
+		name string
+		path string
+	}{
+		{name: "relative traversal", path: "../outside.txt"},
+		{name: "absolute path", path: outside},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files, ok := rt.(WorkspaceFiles)
+			if !ok {
+				t.Fatal("runtime should expose WorkspaceFiles")
+			}
+			result := CheckExpectContext(context.Background(), &config.Expect{FilesExist: []string{tc.path}}, Input{
+				WorkspacePath: rt.Workspace(),
+				Files:         files,
+			})
+			if result.Passed {
+				t.Fatal("runtime-backed files_exist accepted a path outside the workspace")
+			}
+		})
 	}
 }
 

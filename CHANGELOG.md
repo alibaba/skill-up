@@ -44,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use prompt-file delivery for resumed Claude Code and Qoder turns when the
   prompt exceeds the inline limit or the target is Windows, preserving prompt
   delivery metadata and failing before execution if the file cannot be uploaded.
+- Read workspace file expectations and rule-based checks through the runtime
+  when it exposes `Exists` and `ReadFile` accessors. Docker and OpenSandbox
+  cases now grade the actual sandbox workspace instead of host paths, while
+  path confinement prevents these checks from escaping the workspace.
 - Match environment variable names case-insensitively in the `none` runtime on
   native Windows. A host `Path` and a configured or probed `PATH` were both
   passed to the child, and which one it kept followed map order. Per-call
