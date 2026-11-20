@@ -30,6 +30,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reject incomplete tool and file matchers before a run. `tool_called` without
+  a name never matches an invocation, so a success rule failed silently and a
+  failure rule became a no-op; `files_exist`/`files_not_exist` entries that
+  name the workspace root (`.`, `/`, `\`, `.\`) always exist, so the former
+  passed without checking anything and the latter failed for the wrong reason.
+  The same empty-string entry rule now applies to turn `post_condition`
+  `must_contain_any`, `must_contain_all`, and `must_not_contain`, where `""`
+  is a substring of every response. File checks in both `judge` and `expect`
+  use one host-independent path grammar (both `/` and `\` are separators), so
+  a config validated on one host behaves the same on another.
 - Reject a `rule_based` matcher that is present but holds no values to match.
   `output_contains: {all: []}`, `output_matches: {}`, `turn_response_contains`
   without `contains_all`/`contains_any`, and `turn_response_not_contains`

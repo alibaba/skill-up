@@ -190,6 +190,75 @@ func TestEvaluatePostCondition(t *testing.T) {
 	}
 }
 
+func TestEvaluatePostCondition_WhitespaceMatchers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		pc       *config.PostCondition
+		response string
+		wantFail bool
+	}{
+		{
+			// Whitespace matchers are compared as written, so a post_condition
+			// can gate on a newline or on a run of spaces.
+			name:     "must_contain_all_whitespace_pass",
+			pc:       &config.PostCondition{MustContainAll: []string{"\n"}},
+			response: "line 1\nline 2",
+			wantFail: false,
+		},
+		{
+			name:     "must_contain_all_whitespace_fail",
+			pc:       &config.PostCondition{MustContainAll: []string{"\n"}},
+			response: "single line response",
+			wantFail: true,
+		},
+		{
+			name:     "must_contain_any_whitespace_pass",
+			pc:       &config.PostCondition{MustContainAny: []string{"\t", "  "}},
+			response: "has  double space",
+			wantFail: false,
+		},
+		{
+			name:     "must_contain_any_whitespace_fail",
+			pc:       &config.PostCondition{MustContainAny: []string{"\t", "  "}},
+			response: "has single space",
+			wantFail: true,
+		},
+		{
+			name:     "must_not_contain_whitespace_pass",
+			pc:       &config.PostCondition{MustNotContain: []string{"\n", "  "}},
+			response: "single space line",
+			wantFail: false,
+		},
+		{
+			name:     "must_not_contain_whitespace_fail_newline",
+			pc:       &config.PostCondition{MustNotContain: []string{"\n"}},
+			response: "line 1\nline 2",
+			wantFail: true,
+		},
+		{
+			name:     "must_not_contain_whitespace_fail_double_space",
+			pc:       &config.PostCondition{MustNotContain: []string{"  "}},
+			response: "double  space",
+			wantFail: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			reason := evaluatePostCondition(tt.pc, tt.response)
+			if tt.wantFail && reason == "" {
+				t.Fatal("expected failure reason, got empty")
+			}
+			if !tt.wantFail && reason != "" {
+				t.Fatalf("unexpected failure: %s", reason)
+			}
+		})
+	}
+}
+
 func TestEvaluatePostCondition_CaseSensitive(t *testing.T) {
 	t.Parallel()
 
