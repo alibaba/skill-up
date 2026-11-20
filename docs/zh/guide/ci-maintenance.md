@@ -148,7 +148,8 @@ Zizmor 在 Model E2E 中报告的四个 `adhoc-packages` 属于已接受的低�
 ```bash
 gh attestation verify skill-up_0.15.0_darwin_arm64.tar.gz \
   --repo alibaba/skill-up \
-  --signer-workflow alibaba/skill-up/.github/workflows/release.yml
+  --signer-workflow alibaba/skill-up/.github/workflows/release.yml \
+  --source-digest ffba9031129271260026dbb2a823af23d0505100
 ```
 
 这证明产物来源，不会使原 tag 变成已签名。保留已发布 tag 和产物；维护者可另行授权为现有版本签署审计/校验和声明，下一版本使用新的 signed tag。未来自动门禁应在构建前按明确的签名者信任配置拒绝未签名或不可信 tag；不要默默加入信任密钥或重写既有 tag。

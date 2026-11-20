@@ -156,7 +156,8 @@ against this repository's release workflow and the same source commit:
 ```bash
 gh attestation verify skill-up_0.15.0_darwin_arm64.tar.gz \
   --repo alibaba/skill-up \
-  --signer-workflow alibaba/skill-up/.github/workflows/release.yml
+  --signer-workflow alibaba/skill-up/.github/workflows/release.yml \
+  --source-digest ffba9031129271260026dbb2a823af23d0505100
 ```
 
 This verifies artifact origin; it does not retroactively sign the tag. Preserve
