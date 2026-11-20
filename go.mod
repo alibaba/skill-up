@@ -3,7 +3,7 @@ module github.com/alibaba/skill-up
 go 1.26.0
 
 require (
-	github.com/alibaba/OpenSandbox/sdks/sandbox/go v1.1.1
+	github.com/alibaba/OpenSandbox/sdks/sandbox/go v1.2.0
 	github.com/anthropics/anthropic-sdk-go v1.84.0
 	github.com/bmatcuk/doublestar/v4 v4.10.4
 	github.com/google/uuid v1.6.0
@@ -11,6 +11,7 @@ require (
 	github.com/openai/openai-go/v3 v3.97.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.1.0
+	github.com/yuin/goldmark v1.8.6
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.47.0
