@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/alibaba/skill-up/internal/agent"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
 
@@ -316,7 +317,13 @@ func NewErrorResult(err error, turnsExecuted, turnsTotal int) *Result {
 //   - (false, nil) if the file does not exist
 //   - (false, err) if the path is invalid or a stat error occurs
 func fileExistsInWorkspace(workspace, rel string) (bool, error) {
-	abs, err := safePath(workspace, rel)
+	if strings.TrimSpace(rel) == "" {
+		return false, fmt.Errorf("empty file path")
+	}
+	if platform.IsWorkspaceRootPath(rel) {
+		return false, fmt.Errorf("invalid file path %q", rel)
+	}
+	abs, err := safePath(workspace, platform.CleanWorkspaceRelPath(rel))
 	if err != nil {
 		return false, err
 	}

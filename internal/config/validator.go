@@ -14,6 +14,7 @@ import (
 	"github.com/alibaba/skill-up/internal/agentkind"
 	"github.com/alibaba/skill-up/internal/customengine"
 	"github.com/alibaba/skill-up/internal/logging"
+	"github.com/alibaba/skill-up/internal/platform"
 )
 
 // Judge type constants.
@@ -216,6 +217,21 @@ func validateExpect(prefix string, expect Expect) []string {
 	validateStrings("files_exist", expect.FilesExist)
 	validateStrings("files_not_exist", expect.FilesNotExist)
 
+	// The runtime rejects root aliases for the same shared helper the
+	// rule_based matcher uses; keep validation in step with it.
+	validateRootPaths := func(field string, values []string) {
+		for i, value := range values {
+			if strings.TrimSpace(value) == "" {
+				continue
+			}
+			if platform.IsWorkspaceRootPath(value) {
+				errs = append(errs, fmt.Sprintf("%s.%s[%d] invalid file path %q", prefix, field, i, value))
+			}
+		}
+	}
+	validateRootPaths("files_exist", expect.FilesExist)
+	validateRootPaths("files_not_exist", expect.FilesNotExist)
+
 	if expect.GoldenFile != "" && strings.TrimSpace(expect.GoldenFile) == "" {
 		errs = append(errs, prefix+".golden_file must not be empty")
 	}
@@ -302,6 +318,10 @@ func validateJudgeTypeAndLocalFields(judge JudgeConfig) []string {
 	errs = append(errs, validateRecognizableRules("judge.failure", judge.Failure)...)
 	errs = append(errs, validateNonVacuousRules("judge.success", judge.Success)...)
 	errs = append(errs, validateNonVacuousRules("judge.failure", judge.Failure)...)
+	errs = append(errs, validateToolCalledRules("judge.success", judge.Success)...)
+	errs = append(errs, validateToolCalledRules("judge.failure", judge.Failure)...)
+	errs = append(errs, validateFileRules("judge.success", judge.Success)...)
+	errs = append(errs, validateFileRules("judge.failure", judge.Failure)...)
 
 	return errs
 }
@@ -459,6 +479,52 @@ func validateRegexList(field string, patterns []string) []string {
 	for i, pattern := range patterns {
 		if _, err := regexp.Compile(pattern); err != nil {
 			errs = append(errs, fmt.Sprintf("%s[%d] is invalid regex %q: %v", field, i, pattern, err))
+		}
+	}
+	return errs
+}
+
+// validateToolCalledRules rejects a tool matcher that names no tool. An empty
+// name never matches an invocation, so a success rule silently fails and a
+// failure rule becomes a no-op.
+func validateToolCalledRules(field string, rules []Rule) []string {
+	var errs []string
+	for i, rule := range rules {
+		if rule.ToolCalled == nil {
+			continue
+		}
+		if strings.TrimSpace(rule.ToolCalled.Name) == "" {
+			errs = append(errs, fmt.Sprintf("%s[%d].tool_called.name is required", field, i))
+		}
+	}
+	return errs
+}
+
+// validateFileRules rejects file checks that name the workspace root itself or
+// an empty path. The root always exists, so files_exist would pass without
+// checking anything while files_not_exist would fail for the wrong reason.
+func validateFileRules(field string, rules []Rule) []string {
+	var errs []string
+	for i, rule := range rules {
+		prefix := fmt.Sprintf("%s[%d]", field, i)
+		errs = append(errs, validateWorkspacePathList(prefix+".files_exist", rule.FilesExist)...)
+		errs = append(errs, validateWorkspacePathList(prefix+".files_not_exist", rule.FilesNotExist)...)
+	}
+	return errs
+}
+
+// validateWorkspacePathList applies the shared workspace path grammar: empty
+// entries are rejected, and so are root aliases such as ".", "/" and ".\"
+// (the runtime rejects the same spellings).
+func validateWorkspacePathList(field string, values []string) []string {
+	var errs []string
+	for i, value := range values {
+		if strings.TrimSpace(value) == "" {
+			errs = append(errs, fmt.Sprintf("%s[%d] must not be empty", field, i))
+			continue
+		}
+		if platform.IsWorkspaceRootPath(value) {
+			errs = append(errs, fmt.Sprintf("%s[%d] invalid file path %q", field, i, value))
 		}
 	}
 	return errs
@@ -1007,6 +1073,12 @@ func validatePostCondition(turnIdx int, pc *PostCondition) []string {
 	if len(pc.MustContainAny) == 0 && len(pc.MustContainAll) == 0 && len(pc.MustNotContain) == 0 {
 		errs = append(errs, prefix+" must include at least one of must_contain_any, must_contain_all, or must_not_contain")
 	}
+	// An empty entry is a substring of every response: must_contain_* would
+	// always pass and must_not_contain would always fail. Whitespace is a real
+	// matcher and stays valid.
+	errs = append(errs, validateNonBlankMatcherValues(prefix+".must_contain_any", pc.MustContainAny)...)
+	errs = append(errs, validateNonBlankMatcherValues(prefix+".must_contain_all", pc.MustContainAll)...)
+	errs = append(errs, validateNonBlankMatcherValues(prefix+".must_not_contain", pc.MustNotContain)...)
 
 	return errs
 }
@@ -1095,7 +1167,7 @@ func validateToolCalledInTurnRule(r *ToolCalledInTurnRule, turnsTotal int) []str
 	} else if turnsTotal > 0 && r.Turn > turnsTotal {
 		errs = append(errs, fmt.Sprintf("tool_called_in_turn.turn %d exceeds total turns %d", r.Turn, turnsTotal))
 	}
-	if r.Name == "" {
+	if strings.TrimSpace(r.Name) == "" {
 		errs = append(errs, "tool_called_in_turn.name is required")
 	}
 	return errs
@@ -1108,7 +1180,7 @@ func validateToolNotCalledInTurnRule(r *ToolNotCalledInTurnRule, turnsTotal int)
 	} else if turnsTotal > 0 && r.Turn > turnsTotal {
 		errs = append(errs, fmt.Sprintf("tool_not_called_in_turn.turn %d exceeds total turns %d", r.Turn, turnsTotal))
 	}
-	if r.Name == "" {
+	if strings.TrimSpace(r.Name) == "" {
 		errs = append(errs, "tool_not_called_in_turn.name is required")
 	}
 	return errs
