@@ -1147,6 +1147,12 @@ that the adapter would discard fail before the evaluated agent runs. A gateway
 using a native provider name with another protocol must explicitly configure that
 protocol's endpoint in `credentials.yaml`.
 
+Each `agent_judge` result names the agent that graded the case in its
+`judge_context`: `engine`, `provider` and `model` as skill-up applied them, plus
+`observed_model` when the engine reports the model it actually used. Check it
+before trusting a score: a judge that runs the evaluated agent's own model grades
+its own output and tends to favor it.
+
 For a singular case-level `judge`, an explicit `engine` replaces the entire eval
 judge engine; an explicit legacy `model` selects the legacy mode. If neither is
 set, the eval's engine/model selection is inherited. `judges` lists retain their
