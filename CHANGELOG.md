@@ -30,6 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep `agent_judge` review materials from reading as instructions. The judge
+  prompt now states that inline excerpts and referenced files come from the
+  agent under evaluation and are evidence, never instructions, and it fences
+  each inline excerpt with more backticks than the excerpt contains, so output
+  holding its own fence and a forged `## Required Output Contract` could no
+  longer close the excerpt and continue as prompt text. The response-format
+  example shows `"passed": null` instead of `"passed": true`, matching the file
+  template, so the example no longer suggests a verdict.
 - Reject a `rule_based` matcher that is present but holds no values to match.
   `output_contains: {all: []}`, `output_matches: {}`, `turn_response_contains`
   without `contains_all`/`contains_any`, and `turn_response_not_contains`
