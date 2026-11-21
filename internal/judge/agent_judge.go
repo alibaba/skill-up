@@ -1,6 +1,7 @@
 package judge
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -538,7 +539,14 @@ func buildContextMetadata(sessionResult *agent.SessionResult, materialized *Mate
 		Manifest:        &materialized.Manifest,
 		PromptBytes:     len([]byte(prompt)),
 	}
-	if sessionResult != nil && sessionResult.PromptDelivery != nil {
+	if sessionResult == nil {
+		return metadata
+	}
+	metadata.Engine = sessionResult.Engine
+	metadata.Provider = cmp.Or(sessionResult.AppliedProvider, sessionResult.RequestedProvider)
+	metadata.Model = cmp.Or(sessionResult.AppliedModel, sessionResult.RequestedModel)
+	metadata.ObservedModel = sessionResult.Model
+	if sessionResult.PromptDelivery != nil {
 		metadata.PromptDelivery = sessionResult.PromptDelivery.Mode
 		metadata.PromptBytes = sessionResult.PromptDelivery.PromptBytes
 	}

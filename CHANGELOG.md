@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Record the agent that graded each `agent_judge` case in its `judge_context`:
+  `engine`, `provider` and `model` as skill-up applied them, plus
+  `observed_model` when the engine reports the model it actually used. A judge
+  configured with the evaluated agent's own model grades its own output and
+  tends to favor it; until now the grading output did not say which model the
+  judge ran, so that case could not be told apart from an independent judge.
+
 - `skill-up validate --skill <dir>` lints the content integrity of a single
   skill as authored on disk: SKILL.md must open with a closed YAML frontmatter
   block declaring non-empty `name` and `description` fields, and every

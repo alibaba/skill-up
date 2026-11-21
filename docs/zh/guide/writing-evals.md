@@ -997,6 +997,11 @@ OpenAI/Anthropic 协议冲突，以及 adapter 会忽略的评分模型，会在
 网关若使用原生 provider 名称提供另一种协议，需要在 `credentials.yaml` 中显式配置
 对应协议的 endpoint。
 
+每个 `agent_judge` 结果都会在 `judge_context` 里写明给这个 case 打分的 agent：
+skill-up 实际使用的 `engine`、`provider` 和 `model`；engine 报告了它真正使用的模型时，
+还会写 `observed_model`。采信分数之前先看一眼：judge 用的如果就是被测 agent 自己的
+模型，相当于给自己的输出打分，往往会偏向自己。
+
 单个 case 的 `judge.engine` 会整体替换 eval 的 judge engine；显式 `judge.model`
 切换为旧模式；两者都未指定时继承 eval 的 engine/model 选择。`judges` 列表仍整体替换，
 成员不会继承单个 judge 的默认配置。

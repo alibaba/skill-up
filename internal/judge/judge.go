@@ -180,6 +180,13 @@ type ContextMetadata struct {
 	Manifest        *ContextManifest `json:"manifest,omitempty"`
 	PromptDelivery  string           `json:"prompt_delivery,omitempty"`
 	PromptBytes     int              `json:"prompt_bytes,omitempty"`
+	// Engine, Provider and Model identify the agent that graded the case, so a
+	// report shows whether the judge was independent of the evaluated agent.
+	// ObservedModel is the model the engine itself reported, when it reports one.
+	Engine        string `json:"engine,omitempty"`
+	Provider      string `json:"provider,omitempty"`
+	Model         string `json:"model,omitempty"`
+	ObservedModel string `json:"observed_model,omitempty"`
 }
 
 // SessionResultError preserves a judge-side session result when evaluation fails.
