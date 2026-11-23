@@ -133,6 +133,14 @@ func (r *nodeBootstrapTestRuntime) DownloadFile(context.Context, string, string)
 	return nil
 }
 func (r *nodeBootstrapTestRuntime) DownloadDir(context.Context, string, string) error { return nil }
+func (r *nodeBootstrapTestRuntime) Exists(context.Context, string) (bool, error) {
+	return false, runtime.ErrFileNotFound
+}
+
+func (r *nodeBootstrapTestRuntime) ReadFile(context.Context, string) ([]byte, error) {
+	return nil, runtime.ErrFileNotFound
+}
+
 func (r *nodeBootstrapTestRuntime) Exec(_ context.Context, command string, _ runtime.ExecOptions) (runtime.ExecResult, error) {
 	r.commands = append(r.commands, command)
 	return r.result, r.err

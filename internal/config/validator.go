@@ -72,6 +72,7 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	}
 
 	errs = append(errs, validateReservedEnvironment(cfg.Environment)...)
+	errs = append(errs, validateHomeIsolation(cfg.Environment)...)
 
 	// Docker-runtime fields that would otherwise silently pass `skill-up
 	// validate` and only fail later when NewDockerRuntime constructs the
@@ -951,6 +952,19 @@ func validateCustomHTTP(h *customengine.HTTPConfig) []string {
 
 func isValidRuntimeType(t string) bool {
 	return t == runtimeTypeNone || t == runtimeTypeOpenSandbox || t == runtimeTypeDocker
+}
+
+func validateHomeIsolation(env Environment) []string {
+	switch env.AgentHome {
+	case "", "inherited":
+	case "temporary":
+		if env.Type != runtimeTypeNone {
+			return []string{"environment.agent_home: temporary requires environment.type: none"}
+		}
+	default:
+		return []string{fmt.Sprintf("environment.agent_home %q must be inherited or temporary", env.AgentHome)}
+	}
+	return nil
 }
 
 func validateReservedEnvironment(env Environment) []string {

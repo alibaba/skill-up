@@ -60,6 +60,32 @@ func TestStripExt(t *testing.T) {
 	}
 }
 
+func TestLoaderAgentHome(t *testing.T) {
+	for _, tc := range []struct{ mode, want string }{
+		{want: "inherited"},
+		{mode: "inherited", want: "inherited"},
+		{mode: "temporary", want: "temporary"},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			content := "schema_version: v1alpha1\n"
+			if tc.mode != "" {
+				content += "environment:\n  agent_home: " + tc.mode + "\n"
+			}
+			path := filepath.Join(t.TempDir(), "eval.yaml")
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := NewLoader(path).LoadEvalConfig()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cfg.Environment.ToRuntimeConfig().AgentHome; got != tc.want {
+				t.Fatalf("agent_home = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestLoader_LoadEvalConfig(t *testing.T) {
 	t.Parallel()
 	content := `schema_version: v1alpha1
