@@ -125,8 +125,8 @@ func TestBuildQwenCodeRunCmdKeepsSlashedModelID(t *testing.T) {
 	// Qwen Code resolves models by the full id its modelProviders registered
 	// (for example zcode/GLM-5.3-Flash), so a slashed id must reach -m intact
 	// (#383).
-	cmd := buildQwenCodeRunCmd("do it", "zcode/GLM-5.3-Flash")
-	if !strings.Contains(cmd, "-m 'zcode/GLM-5.3-Flash'") {
+	cmd := buildQwenCodeRunCmd("do it", qwenSlashedModelID)
+	if !strings.Contains(cmd, "-m '"+qwenSlashedModelID+"'") {
 		t.Fatalf("run cmd did not keep the full model id:\n%s", cmd)
 	}
 }
@@ -139,10 +139,10 @@ func TestQwenCodeRun_ForwardsResolvedSlashedModel(t *testing.T) {
 	// OPENAI_MODEL, and the value annotateSessionResult reports are one value (#383).
 	resolved := credential.ResolveRunnerConfig(
 		config.EngineConfig{Name: "qwen_code"}, nil,
-		credential.CLIOverrides{Model: "zcode/GLM-5.3-Flash"},
+		credential.CLIOverrides{Model: qwenSlashedModelID},
 	)
 	applied := ResolveAdapterConfig(resolved, nil)
-	if applied.AppliedProvider != "zcode" || !applied.ModelSplit || applied.AppliedModel != "zcode/GLM-5.3-Flash" {
+	if applied.AppliedProvider != "zcode" || !applied.ModelSplit || applied.AppliedModel != qwenSlashedModelID {
 		t.Fatalf("adapter config provider/split/applied = %q/%v/%q, want zcode/split/zcode/GLM-5.3-Flash",
 			applied.AppliedProvider, applied.ModelSplit, applied.AppliedModel)
 	}
@@ -163,13 +163,13 @@ func TestQwenCodeRun_ForwardsResolvedSlashedModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run qwen_code: %v", err)
 	}
-	if !strings.Contains(rt.runCommand, "-m 'zcode/GLM-5.3-Flash'") {
+	if !strings.Contains(rt.runCommand, "-m '"+qwenSlashedModelID+"'") {
 		t.Fatalf("run cmd did not forward the full model id: %s", rt.runCommand)
 	}
-	if got := rt.lastExecEnv[credential.EnvOpenAIModel]; got != "zcode/GLM-5.3-Flash" {
+	if got := rt.lastExecEnv[credential.EnvOpenAIModel]; got != qwenSlashedModelID {
 		t.Fatalf("OPENAI_MODEL = %q, want the full id", got)
 	}
-	if result.AppliedModel != "zcode/GLM-5.3-Flash" {
+	if result.AppliedModel != qwenSlashedModelID {
 		t.Fatalf("reported applied model = %q, want the full id", result.AppliedModel)
 	}
 	// Telemetry reads the same materialized id and must not prefix the provider
@@ -179,10 +179,10 @@ func TestQwenCodeRun_ForwardsResolvedSlashedModel(t *testing.T) {
 		t.Fatalf("agent type = %T, want *QwenCodeAgent", ag)
 	}
 	attrs := qwen.buildAgentObservabilityAttrs(map[string]string{"skill_up.case.id": "case-1"})
-	if got := attrs["skill_up.model"]; got != "zcode/GLM-5.3-Flash" {
+	if got := attrs["skill_up.model"]; got != qwenSlashedModelID {
 		t.Fatalf("telemetry skill_up.model = %q, want the single qualified id", got)
 	}
-	if got := attrs["skill_up.model.applied"]; got != "zcode/GLM-5.3-Flash" {
+	if got := attrs["skill_up.model.applied"]; got != qwenSlashedModelID {
 		t.Fatalf("telemetry skill_up.model.applied = %q, want the single qualified id", got)
 	}
 }
