@@ -684,6 +684,45 @@ func TestExecuteCaseGroupedJudgeTimeoutBeforeCaseDeadlineDuringCleanup(t *testin
 	}
 }
 
+func TestExecuteCaseGroupedCompletedMetricErrorDoesNotRetryAsTimeout(t *testing.T) {
+	members := []config.JudgeConfig{
+		{ID: "scorer", Type: "script", ScriptPath: "score.sh", TimeoutSeconds: new(1), Metrics: scoreRegistry()},
+	}
+	var judgeDone <-chan struct{}
+	rt := &mockRuntime{workspace: t.TempDir(), execFunc: func(ctx context.Context, _ string, opts runtime.ExecOptions) (runtime.ExecResult, error) {
+		if path := opts.Env["EVAL_METRICS_RESULT_PATH"]; path != "" {
+			judgeDone = ctx.Done()
+			const template = `{"schema_version":1,"invocation_id":"__INVOCATION__","metrics":[{"metric_id":"completeness","availability":"AVAILABLE","value":0.75}]}`
+			payload := strings.ReplaceAll(template, "__INVOCATION__", opts.Env["EVAL_METRICS_INVOCATION_ID"])
+			return runtime.ExecResult{}, os.WriteFile(path, []byte(payload), 0o600)
+		}
+		if judgeDone != nil {
+			// The exit-zero script has already collected metrics when cleanup runs.
+			<-judgeDone
+		}
+		return runtime.ExecResult{}, nil
+	}}
+	e := newTestEvaluator(EvalOptions{
+		Agent: &mockAgent{name: "test", output: "done"}, OutputDir: t.TempDir(),
+		EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none"}, Judges: &members},
+	})
+	result := e.executeCase(context.Background(), &config.CaseConfig{
+		ID: "late-judge-deadline", Input: config.Input{Prompt: "hello"},
+		Constraints: config.Constraints{TimeoutSeconds: 30},
+	}, "with_skill", rt, nil)
+	if len(result.JudgeResults) != 1 || !strings.Contains(errorText(result.Error), "required named metric unavailable: correctness") {
+		t.Fatalf("outcomes = %d, error = %v, want one member with a required-metric error", len(result.JudgeResults), result.Error)
+	}
+	execution := result.JudgeResults[0].Execution
+	if execution == nil || execution.Stage != judge.StageFinished || execution.Completion != judge.CompletionIncomplete ||
+		execution.Cause != judge.CauseDeadlineExpiry || execution.DeadlineSource != judgeTimeoutSource {
+		t.Fatalf("execution = %+v, want completed scoring with late judge deadline", execution)
+	}
+	if reason, ok := retryReasonForResult(result); !ok || reason != "error" || errors.Is(result.Error, context.DeadlineExceeded) {
+		t.Fatalf("retry reason = %q (%t), error = %v, want only the metric contract error", reason, ok, result.Error)
+	}
+}
+
 func runGroupedJudgeTimeoutWithLateCaseDeadline(t *testing.T, pending []config.JudgeConfig) EvalResult {
 	t.Helper()
 	members := []config.JudgeConfig{

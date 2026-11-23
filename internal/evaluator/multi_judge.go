@@ -101,8 +101,12 @@ func (e *defaultEvaluator) runJudgeMember(ctx context.Context, rt runtime.Runtim
 	decision := memberDecisionFor(graded, stop)
 	outcome.Metrics = gradedMetrics(member, graded, decision)
 	outcome.Execution = memberExecution(graded, stop, decision, judge.SlotsFromConfig(member.Metrics))
-	if memberErr := recordMemberContextError(memberCtx, &outcome, decision); memberErr != nil {
-		causes = append(causes, memberErr)
+	// A deadline observed after metric collection belongs in the execution
+	// metadata. It did not interrupt this member's scoring pass.
+	if stop.Cause != judge.CauseDeadlineExpiry || !metricsFinalized(&graded) {
+		if memberErr := recordMemberContextError(memberCtx, &outcome, decision); memberErr != nil {
+			causes = append(causes, memberErr)
+		}
 	}
 	outcome.DurationMs = time.Since(started).Milliseconds()
 	return outcome, causes
