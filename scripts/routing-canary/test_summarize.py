@@ -156,6 +156,33 @@ class SummarizeFixtureTest(unittest.TestCase):
             listing,
         )
 
+    def test_empty_transcript_reports_unknown_evidence(self) -> None:
+        """An empty artifact says nothing about the Skill, so the evidence is unknown."""
+        write_json(self.iteration / "result.json", {"case_results": [{"case_id": "relevant", "status": "ERROR"}]})
+        run_dir = self.iteration / "relevant/with_skill/outputs/agent/run"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "run.jsonl").write_text("")
+
+        text = render(self.root)
+        cells = [cell.strip() for cell in row(text, "relevant").strip().strip("|").split("|")]
+        self.assertEqual(cells[4], "empty", "an empty transcript must not be reported as present")
+        self.assertEqual(cells[6], "-", "skill file reference must be unknown without a record")
+        self.assertEqual(cells[7], "-", "markers must be unknown without a record")
+        self.assertEqual(cells[8], "-", "catalog must be unknown without a record")
+
+    def test_unparseable_transcript_reports_unknown_evidence(self) -> None:
+        """Lines that are not JSON are not records, so the evidence stays unknown."""
+        write_json(self.iteration / "result.json", {"case_results": [{"case_id": "relevant", "status": "ERROR"}]})
+        run_dir = self.iteration / "relevant/with_skill/outputs/agent/run"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "run.jsonl").write_text("not json\nalso not json\n")
+
+        text = render(self.root)
+        cells = [cell.strip() for cell in row(text, "relevant").strip().strip("|").split("|")]
+        self.assertEqual(cells[4], "unparseable", "an unparseable transcript must not be reported as present")
+        self.assertEqual(cells[6], "-", "skill file reference must be unknown without a record")
+        self.assertEqual(cells[8], "-", "catalog must be unknown without a record")
+
     def test_transcript_without_result_json_still_renders(self) -> None:
         write_transcript(
             self.iteration / "unrelated",

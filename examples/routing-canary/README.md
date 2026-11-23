@@ -76,8 +76,12 @@ The script replaces `out/<engine>/` on every run (so an older `iteration-2/`
 cannot be read as part of the latest result) and exits nonzero if an engine
 failed or produced no artifacts. The summary keeps cases whose transcript is
 missing, reporting them as `transcript missing` next to the execution status
-from `result.json`. The `skill file reference` column is deliberately weaker
-than "read": a directory listing or a failed `cat` also contains `SKILL.md`.
+from `result.json`. A transcript that exists but holds no usable record — an
+empty artifact, or lines that are not JSON — is reported as `transcript empty`
+or `transcript unparseable`, and its Skill evidence columns stay unknown (`-`)
+instead of claiming the Skill was absent. The `skill file reference` column is
+deliberately weaker than "read": a directory listing or a failed `cat` also
+contains `SKILL.md`.
 
 The versions used for the investigation were:
 

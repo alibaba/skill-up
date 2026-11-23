@@ -78,13 +78,17 @@ def message_texts(obj, out, role=None):
 def summarize_transcript(path: Path) -> dict:
     calls: list[tuple[str, str]] = []
     texts: list[tuple[str | None, str]] = []
+    records = 0
+    unparseable = 0
     for line in path.read_text(errors="replace").splitlines():
         if not line.strip():
             continue
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
+            unparseable += 1
             continue
+        records += 1
         tool_calls(event, calls)
         message_texts(event, texts)
 
@@ -96,8 +100,21 @@ def summarize_transcript(path: Path) -> dict:
         and ("<skills_instructions>" in text or "available skills" in text.lower())
         for role, text in texts
     )
+    # An artifact with no usable record says nothing about the Skill: the
+    # OpenCode adapter can leave an empty stdout file even when the run failed.
+    # Report the evidence as unknown rather than as an observed absence.
+    if records == 0:
+        return {
+            "events": 0,
+            "state": "empty" if unparseable == 0 else "unparseable",
+            "skill_tool_calls": [],
+            "skill_file_referenced": None,
+            "markers": [],
+            "catalog_injected": None,
+        }
     return {
         "events": len(texts),
+        "state": "present",
         "skill_tool_calls": skill_calls,
         "skill_file_referenced": skill_file_referenced,
         "markers": markers,
@@ -157,7 +174,7 @@ def summarize_case(case_dir: Path, status: str) -> dict:
     info = summarize_transcript(transcripts[0])
     info["execution"] = status
     info["graded"] = graded_result(case_dir)
-    info["transcript"] = "present"
+    info["transcript"] = info.pop("state")
     return info
 
 
