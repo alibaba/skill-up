@@ -277,8 +277,10 @@ func TestApplyEnv_ExpandedOTLPHeaderRouting(t *testing.T) {
 		{name: "structured config wins over env", project: Config{Env: map[string]string{envOtelExporterOTLPTracesEndpt: "https://project.invalid"}}, explicit: Config{Telemetry: Telemetry{Traces: TracesConfig{Endpoint: "https://trusted.invalid"}}}, header: generic, wantHeader: "authorization=fixture", wantSet: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			for _, key := range []string{generic, traces, metrics, logs, endpoint, metricDest, proxy,
-				envOtelExporterOTLPTracesEndpt, "SKILL_UP_TEST_OTHER"} {
+			for _, key := range []string{
+				generic, traces, metrics, logs, endpoint, metricDest, proxy,
+				envOtelExporterOTLPTracesEndpt, "SKILL_UP_TEST_OTHER",
+			} {
 				t.Setenv(key, "")
 				if err := os.Unsetenv(key); err != nil {
 					t.Fatal(err)
