@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/alibaba/skill-up/internal/platform"
+	evalruntime "github.com/alibaba/skill-up/internal/runtime"
 )
 
 // TestFindQoderSessionFileAcrossProjectDirNamingRules is the core guarantee of
@@ -482,8 +483,15 @@ func (r *shellSessionRuntime) Stop(context.Context) error                       
 func (r *shellSessionRuntime) UploadFile(context.Context, string, string) error  { return nil }
 func (r *shellSessionRuntime) UploadDir(context.Context, string, string) error   { return nil }
 func (r *shellSessionRuntime) DownloadDir(context.Context, string, string) error { return nil }
-func (r *shellSessionRuntime) Workspace() string                                 { return r.workspace }
-func (r *shellSessionRuntime) RequiresProcessSandbox() bool                      { return false }
+func (r *shellSessionRuntime) Exists(context.Context, string) (bool, error) {
+	return false, evalruntime.ErrFileNotFound
+}
+
+func (r *shellSessionRuntime) ReadFile(context.Context, string) ([]byte, error) {
+	return nil, evalruntime.ErrFileNotFound
+}
+func (r *shellSessionRuntime) Workspace() string            { return r.workspace }
+func (r *shellSessionRuntime) RequiresProcessSandbox() bool { return false }
 
 func (r *shellSessionRuntime) DownloadFile(_ context.Context, remote, local string) error {
 	data, err := os.ReadFile(remote) //nolint:gosec // both paths are fixtures the test itself created

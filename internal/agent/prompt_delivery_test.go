@@ -140,6 +140,14 @@ func (r *promptDeliveryTestRuntime) DownloadFile(context.Context, string, string
 	return nil
 }
 func (r *promptDeliveryTestRuntime) DownloadDir(context.Context, string, string) error { return nil }
+func (r *promptDeliveryTestRuntime) Exists(context.Context, string) (bool, error) {
+	return false, runtime.ErrFileNotFound
+}
+
+func (r *promptDeliveryTestRuntime) ReadFile(context.Context, string) ([]byte, error) {
+	return nil, runtime.ErrFileNotFound
+}
+
 func (r *promptDeliveryTestRuntime) Exec(context.Context, string, runtime.ExecOptions) (runtime.ExecResult, error) {
 	return runtime.ExecResult{}, nil
 }

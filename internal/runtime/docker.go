@@ -20,6 +20,7 @@ import (
 	"github.com/alibaba/skill-up/internal/logging"
 	"github.com/alibaba/skill-up/internal/observability"
 	"github.com/alibaba/skill-up/internal/platform"
+	"github.com/alibaba/skill-up/internal/shellquote"
 )
 
 const (
@@ -360,6 +361,70 @@ func (r *DockerRuntime) DownloadFile(ctx context.Context, sourcePath, targetPath
 		return dockerCLIErr(stderr, exitCode, err, "docker cp %s -> %s failed", source, targetPath)
 	}
 	return nil
+}
+
+// Exists reports whether a file or directory exists in the container workspace.
+func (r *DockerRuntime) Exists(ctx context.Context, sourcePath string) (bool, error) {
+	source, err := r.remotePath(sourcePath)
+	if err != nil {
+		return false, err
+	}
+	result, err := r.Exec(ctx, "stat -L "+shellquote.QuotePOSIX(source), ExecOptions{Cwd: "/", Env: map[string]string{"LC_ALL": "C"}})
+	if err != nil {
+		return false, err
+	}
+	if result.ExitCode == 0 {
+		return true, nil
+	}
+	if result.ExitCode == 127 {
+		return r.existsWithTest(ctx, source)
+	}
+	if dockerFileNotFound(result.Stderr) {
+		return false, nil
+	}
+	return false, fmt.Errorf("docker runtime: exists %s failed (exit %d): %s", source, result.ExitCode, result.Stderr)
+}
+
+func (r *DockerRuntime) existsWithTest(ctx context.Context, source string) (bool, error) {
+	// -L dereferences symlinks so this fallback matches the stat -L path:
+	// a dangling symlink is absent, while a link to an existing path exists.
+	result, err := r.Exec(ctx, "ls -dL "+shellquote.QuotePOSIX(source), ExecOptions{Cwd: "/", Env: map[string]string{"LC_ALL": "C"}})
+	if err != nil {
+		return false, err
+	}
+	if result.ExitCode == 0 {
+		return true, nil
+	}
+	if dockerFileNotFound(result.Stderr) {
+		return false, nil
+	}
+	return false, fmt.Errorf("docker runtime: exists %s failed (exit %d): %s", source, result.ExitCode, result.Stderr)
+}
+
+// ReadFile returns the contents of a file in the container workspace.
+func (r *DockerRuntime) ReadFile(ctx context.Context, sourcePath string) ([]byte, error) {
+	source, err := r.remotePath(sourcePath)
+	if err != nil {
+		return nil, err
+	}
+	result, err := r.Exec(ctx, "cat "+shellquote.QuotePOSIX(source), ExecOptions{Cwd: "/", Env: map[string]string{"LC_ALL": "C"}})
+	if err != nil {
+		return nil, err
+	}
+	if result.ExitCode != 0 {
+		if dockerFileNotFound(result.Stderr) {
+			return nil, ErrFileNotFound
+		}
+		return nil, fmt.Errorf("docker runtime: read %s failed (exit %d): %s", source, result.ExitCode, result.Stderr)
+	}
+	return []byte(result.Stdout), nil
+}
+
+func dockerFileNotFound(stderr string) bool {
+	lower := strings.ToLower(strings.TrimSpace(stderr))
+	// Only the trailing diagnostic matters: the printed path can contain
+	// "no such file or directory" or "permission denied" as a filename.
+	return strings.HasSuffix(lower, ": no such file or directory")
 }
 
 // DownloadDir recursively copies a directory from the container to the host.

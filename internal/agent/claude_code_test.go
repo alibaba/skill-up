@@ -1049,6 +1049,14 @@ func (r *claudeCodeTestRuntime) DownloadDir(context.Context, string, string) err
 	return nil
 }
 
+func (r *claudeCodeTestRuntime) Exists(context.Context, string) (bool, error) {
+	return false, runtime.ErrFileNotFound
+}
+
+func (r *claudeCodeTestRuntime) ReadFile(context.Context, string) ([]byte, error) {
+	return nil, runtime.ErrFileNotFound
+}
+
 func (r *claudeCodeTestRuntime) Exec(_ context.Context, command string, opts runtime.ExecOptions) (runtime.ExecResult, error) {
 	// Probe calls (issued by agent.Install via probeAndMergePATH) get a
 	// canned literal PATH and are NOT recorded as the agent's own

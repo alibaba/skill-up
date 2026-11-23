@@ -8,11 +8,14 @@
 package judge
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/alibaba/skill-up/internal/config"
+	"github.com/alibaba/skill-up/internal/runtime"
 )
 
 // ExpectResult is the structured outcome of an expect pre-check.
@@ -28,6 +31,10 @@ type ExpectResult struct {
 	// (e.g. "must_contain", "exit_code"). Used by ToAssertionResults to
 	// emit passing assertions for report completeness.
 	ConfiguredRules []string `json:"configured_rules"`
+
+	// Error records an inconclusive access failure that prevents a reliable
+	// pass/fail determination.
+	Error *string `json:"error,omitempty"`
 }
 
 // ExpectFailure records a single failed expect check.
@@ -45,7 +52,17 @@ type ExpectFailure struct {
 //
 // Returns an ExpectResult indicating pass/fail and detailed failure evidence.
 // If expect is nil (no expect block configured), returns a passing result.
+// CheckExpect evaluates expect rules with a background context.
+// Callers with a request-scoped context should use CheckExpectContext.
+//
+//nolint:contextcheck
 func CheckExpect(expect *config.Expect, in Input) *ExpectResult {
+	return CheckExpectContext(context.Background(), expect, in)
+}
+
+// CheckExpectContext evaluates all expect rules defined in the case
+// configuration against the judge Input.
+func CheckExpectContext(ctx context.Context, expect *config.Expect, in Input) *ExpectResult {
 	if expect == nil {
 		return &ExpectResult{Passed: true}
 	}
@@ -67,11 +84,19 @@ func CheckExpect(expect *config.Expect, in Input) *ExpectResult {
 	}
 	if len(expect.FilesExist) > 0 {
 		configuredRules = append(configuredRules, "files_exist")
-		failures = append(failures, checkFilesExist(expect.FilesExist, in.WorkspacePath)...)
+		if in.Files != nil {
+			failures = append(failures, checkFilesExistRuntime(ctx, expect.FilesExist, in)...)
+		} else {
+			failures = append(failures, checkFilesExist(expect.FilesExist, in.WorkspacePath)...)
+		}
 	}
 	if len(expect.FilesNotExist) > 0 {
 		configuredRules = append(configuredRules, "files_not_exist")
-		failures = append(failures, checkFilesNotExist(expect.FilesNotExist, in.WorkspacePath)...)
+		if in.Files != nil {
+			failures = append(failures, checkFilesNotExistRuntime(ctx, expect.FilesNotExist, in)...)
+		} else {
+			failures = append(failures, checkFilesNotExist(expect.FilesNotExist, in.WorkspacePath)...)
+		}
 	}
 	if expect.GoldenFile != "" {
 		configuredRules = append(configuredRules, "golden_file")
@@ -79,13 +104,27 @@ func CheckExpect(expect *config.Expect, in Input) *ExpectResult {
 	}
 	if len(expect.FileContains) > 0 {
 		configuredRules = append(configuredRules, "file_contains")
-		failures = append(failures, checkFileContains(expect.FileContains, in.WorkspacePath)...)
+		if in.Files != nil {
+			failures = append(failures, checkFileContainsRuntime(ctx, expect.FileContains, in)...)
+		} else {
+			failures = append(failures, checkFileContains(expect.FileContains, in.WorkspacePath)...)
+		}
+	}
+
+	var accessErr *string
+	for _, failure := range failures {
+		if strings.HasPrefix(failure.Detail, "cannot check file ") || strings.HasPrefix(failure.Detail, "cannot access file ") {
+			detail := failure.Detail
+			accessErr = &detail
+			break
+		}
 	}
 
 	return &ExpectResult{
 		Passed:          len(failures) == 0,
 		Failures:        failures,
 		ConfiguredRules: configuredRules,
+		Error:           accessErr,
 	}
 }
 
@@ -303,6 +342,91 @@ func checkFileContains(checks []config.FileContainsCheck, workspace string) []Ex
 		}
 	}
 	return failures
+}
+
+func checkFilesExistRuntime(ctx context.Context, files []string, in Input) []ExpectFailure {
+	var failures []ExpectFailure
+	for _, f := range files {
+		path, err := normalizeWorkspacePath(in, f)
+		if err != nil {
+			failures = append(failures, ExpectFailure{Rule: "files_exist", Detail: fmt.Sprintf("invalid path %q: %v", f, err)})
+			continue
+		}
+		exists, err := in.Files.Exists(ctx, path)
+		if err != nil {
+			failures = append(failures, ExpectFailure{
+				Rule:   "files_exist",
+				Detail: fmt.Sprintf("cannot check file %q: %v", f, err),
+			})
+			continue
+		}
+		if !exists {
+			failures = append(failures, ExpectFailure{
+				Rule:   "files_exist",
+				Detail: fmt.Sprintf("expected file %q does not exist", f),
+			})
+		}
+	}
+	return failures
+}
+
+func checkFilesNotExistRuntime(ctx context.Context, files []string, in Input) []ExpectFailure {
+	var failures []ExpectFailure
+	for _, f := range files {
+		path, err := normalizeWorkspacePath(in, f)
+		if err != nil {
+			failures = append(failures, ExpectFailure{Rule: "files_not_exist", Detail: fmt.Sprintf("invalid path %q: %v", f, err)})
+			continue
+		}
+		exists, err := in.Files.Exists(ctx, path)
+		if err != nil {
+			failures = append(failures, ExpectFailure{
+				Rule:   "files_not_exist",
+				Detail: fmt.Sprintf("cannot check file %q: %v", f, err),
+			})
+			continue
+		}
+		if exists {
+			failures = append(failures, ExpectFailure{
+				Rule:   "files_not_exist",
+				Detail: fmt.Sprintf("file %q exists", f),
+			})
+		}
+	}
+	return failures
+}
+
+func checkFileContainsRuntime(ctx context.Context, checks []config.FileContainsCheck, in Input) []ExpectFailure {
+	var failures []ExpectFailure
+	for _, fc := range checks {
+		path, err := normalizeWorkspacePath(in, fc.Path)
+		if err != nil {
+			failures = append(failures, ExpectFailure{Rule: "file_contains", Detail: fmt.Sprintf("invalid path %q: %v", fc.Path, err)})
+			continue
+		}
+		data, err := in.Files.ReadFile(ctx, path)
+		if err != nil {
+			failures = append(failures, ExpectFailure{
+				Rule:   "file_contains",
+				Detail: expectFileFailureDetail(fc.Path, err),
+			})
+			continue
+		}
+		if !strings.Contains(string(data), fc.Content) {
+			failures = append(failures, ExpectFailure{
+				Rule:   "file_contains",
+				Detail: fmt.Sprintf("file %q does not contain %q", fc.Path, fc.Content),
+			})
+		}
+	}
+	return failures
+}
+
+func expectFileFailureDetail(path string, err error) string {
+	if errors.Is(err, runtime.ErrFileNotFound) {
+		return fmt.Sprintf("expected file %q does not exist", path)
+	}
+	return fmt.Sprintf("cannot access file %q: %v", path, err)
 }
 
 // ---------------------------------------------------------------------------

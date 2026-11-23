@@ -27,6 +27,10 @@ const (
 	ClaudeFileMode = 0o600
 )
 
+// ErrFileNotFound is returned by runtime file operations when a requested path
+// does not exist. Callers can distinguish a missing file from an access failure.
+var ErrFileNotFound = errors.New("runtime file not found")
+
 // mergeEnv returns hostEnv (os.Environ form) with persistentEnv and callEnv
 // overlaid, in that order (callEnv wins). Values are forwarded LITERALLY: no
 // $VAR / ${VAR} expansion. This matches the docker and opensandbox runtimes,
@@ -185,6 +189,12 @@ type Runtime interface {
 	UploadFile(ctx context.Context, sourcePath, targetPath string) error
 	UploadDir(ctx context.Context, sourceDir, targetDir string) error
 	DownloadFile(ctx context.Context, sourcePath, targetPath string) error
+	// Exists reports whether a workspace path exists. A confirmed absence
+	// returns (false, nil); an inconclusive check returns an error.
+	Exists(ctx context.Context, sourcePath string) (bool, error)
+	// ReadFile returns the contents of a workspace file. ErrFileNotFound is
+	// returned when the path is confirmed absent.
+	ReadFile(ctx context.Context, sourcePath string) ([]byte, error)
 	// DownloadDir copies sourceDir from the runtime workspace to targetDir on the host.
 	// For NoneRuntime, sourceDir may be relative to Workspace or an absolute host path.
 	DownloadDir(ctx context.Context, sourceDir, targetDir string) error
