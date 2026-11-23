@@ -59,8 +59,6 @@ func NewQwenCodeAgent(cfg Config) *QwenCodeAgent {
 	agent := &QwenCodeAgent{
 		CLIAgent: CLIAgent{BaseAgent: NewBaseAgent(cfg)},
 	}
-	// Reporting reads the id the adapter materializes, which only this adapter knows.
-	agent.inspector = agent
 
 	return agent
 }
@@ -212,19 +210,19 @@ func (a *QwenCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 }
 
 func (a *QwenCodeAgent) appliedModelName(_ context.Context) string {
-	return a.MaterializedModel()
+	return strings.TrimSpace(a.Cfg.ModelName)
 }
 
-// MaterializedModel assembles the model id Qwen Code is asked for. Qwen resolves
-// its modelProviders entries by the full id, while the credential layer splits a
-// legacy "provider/model" reference to pick provider-scoped credentials and keeps
-// the bare half in ModelName plus the ModelSplit flag (#383). Rejoining here keeps
-// that rule in the adapter: the same value reaches -m, OPENAI_MODEL and the
-// reported applied model.
-func (a *QwenCodeAgent) MaterializedModel() string {
-	model := strings.TrimSpace(a.Cfg.ModelName)
-	provider := strings.TrimSpace(a.Cfg.ModelProvider)
-	if a.Cfg.ModelSplit && model != "" && provider != "" {
+// materializeQwenModel assembles the complete model id Qwen Code is asked for.
+// Qwen resolves its modelProviders entries by the full id, while the credential
+// layer splits a legacy "provider/model" reference to pick provider-scoped
+// credentials and keeps the bare half plus the ModelSplit flag (#383). Resolve-
+// AdapterConfig dispatches here so the command, the session result, telemetry
+// and the run report all consume this one materialized value.
+func materializeQwenModel(params credential.ResolvedAgentConfig) string {
+	model := strings.TrimSpace(params.AppliedModel)
+	provider := strings.TrimSpace(params.AppliedProvider)
+	if params.ModelSplit && model != "" && provider != "" {
 		return provider + "/" + model
 	}
 	return model

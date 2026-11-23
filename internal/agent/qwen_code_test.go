@@ -142,8 +142,9 @@ func TestQwenCodeRun_ForwardsResolvedSlashedModel(t *testing.T) {
 		credential.CLIOverrides{Model: "zcode/GLM-5.3-Flash"},
 	)
 	applied := ResolveAdapterConfig(resolved, nil)
-	if applied.AppliedProvider != "zcode" || !applied.ModelSplit {
-		t.Fatalf("adapter config provider/split = %q/%v, want zcode/split", applied.AppliedProvider, applied.ModelSplit)
+	if applied.AppliedProvider != "zcode" || !applied.ModelSplit || applied.AppliedModel != "zcode/GLM-5.3-Flash" {
+		t.Fatalf("adapter config provider/split/applied = %q/%v/%q, want zcode/split/zcode/GLM-5.3-Flash",
+			applied.AppliedProvider, applied.ModelSplit, applied.AppliedModel)
 	}
 	ag, err := DetectAgentWithResolvedConfig(applied)
 	if err != nil {
@@ -170,6 +171,19 @@ func TestQwenCodeRun_ForwardsResolvedSlashedModel(t *testing.T) {
 	}
 	if result.AppliedModel != "zcode/GLM-5.3-Flash" {
 		t.Fatalf("reported applied model = %q, want the full id", result.AppliedModel)
+	}
+	// Telemetry reads the same materialized id and must not prefix the provider
+	// onto the already qualified value.
+	qwen, ok := ag.(*QwenCodeAgent)
+	if !ok {
+		t.Fatalf("agent type = %T, want *QwenCodeAgent", ag)
+	}
+	attrs := qwen.buildAgentObservabilityAttrs(map[string]string{"skill_up.case.id": "case-1"})
+	if got := attrs["skill_up.model"]; got != "zcode/GLM-5.3-Flash" {
+		t.Fatalf("telemetry skill_up.model = %q, want the single qualified id", got)
+	}
+	if got := attrs["skill_up.model.applied"]; got != "zcode/GLM-5.3-Flash" {
+		t.Fatalf("telemetry skill_up.model.applied = %q, want the single qualified id", got)
 	}
 }
 

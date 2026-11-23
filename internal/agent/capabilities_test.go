@@ -16,7 +16,6 @@ import (
 const (
 	testDashscopeProvider = "dashscope"
 	qwenSlashedModelID    = "zcode/GLM-5.3-Flash"
-	qwenBareModelID       = "GLM-5.3-Flash"
 )
 
 func TestValidateJudgeAdapterConfig(t *testing.T) {
@@ -102,11 +101,18 @@ func TestResolveAdapterConfig_QwenRecordsLegacySplitForTheAdapter(t *testing.T) 
 		t.Run(tt.name, func(t *testing.T) {
 			resolved := credential.ResolveRunnerConfig(tt.engine, nil, tt.cli)
 			applied := ResolveAdapterConfig(resolved, nil)
-			// The shared layer leaves the model as resolved; only the flag says a
-			// split happened, and the adapter is the one that knows how to undo it.
-			if applied.AppliedProvider != tt.wantProv || applied.Model != tt.wantModel || applied.AppliedModel != tt.wantModel {
-				t.Fatalf("provider/model/applied = %q/%q/%q, want %q/%q/%q",
-					applied.AppliedProvider, applied.Model, applied.AppliedModel, tt.wantProv, tt.wantModel, tt.wantModel)
+			// The credential layer records the split flag; the shared entry point
+			// dispatches to Qwen, which materializes the id it actually runs.
+			if applied.AppliedProvider != tt.wantProv || applied.Model != tt.wantModel {
+				t.Fatalf("provider/model = %q/%q, want %q/%q",
+					applied.AppliedProvider, applied.Model, tt.wantProv, tt.wantModel)
+			}
+			wantApplied := tt.wantModel
+			if tt.wantSplit {
+				wantApplied = qwenSlashedModelID
+			}
+			if applied.AppliedModel != wantApplied {
+				t.Fatalf("applied model = %q, want %q", applied.AppliedModel, wantApplied)
 			}
 			if applied.ModelSplit != tt.wantSplit {
 				t.Fatalf("adapter config split = %v, want %v", applied.ModelSplit, tt.wantSplit)
@@ -119,16 +125,10 @@ func TestResolveAdapterConfig_QwenRecordsLegacySplitForTheAdapter(t *testing.T) 
 			if !ok {
 				t.Fatalf("agent type = %T, want *QwenCodeAgent", agent)
 			}
-			if qwen.Cfg.ModelSplit != tt.wantSplit {
-				t.Fatalf("adapter model split = %v, want %v", qwen.Cfg.ModelSplit, tt.wantSplit)
-			}
-			// The adapter materializes the id it runs, reports, and records.
-			wantRun := tt.wantModel
-			if tt.wantSplit {
-				wantRun = qwenSlashedModelID
-			}
-			if got := qwen.MaterializedModel(); got != wantRun {
-				t.Fatalf("adapter materialized model = %q, want %q", got, wantRun)
+			// The agent runs the materialized id: -m, the session result, telemetry
+			// and the run report all read this one value.
+			if got := qwen.Cfg.ModelName; got != wantApplied {
+				t.Fatalf("adapter model = %q, want %q", got, wantApplied)
 			}
 		})
 	}
@@ -140,7 +140,7 @@ func TestResolveAdapterConfig_QwenJudgeInheritsLegacySplit(t *testing.T) {
 	runner := credential.ResolveRunnerConfig(config.EngineConfig{Name: "qwen_code"}, nil, credential.CLIOverrides{Model: qwenSlashedModelID})
 	judge := credential.ResolveJudgeConfig(config.JudgeConfig{}, runner, nil)
 	applied := ResolveAdapterConfig(judge, nil)
-	if applied.AppliedProvider != "zcode" || applied.AppliedModel != qwenBareModelID || !applied.ModelSplit {
+	if applied.AppliedProvider != "zcode" || applied.AppliedModel != qwenSlashedModelID || !applied.ModelSplit {
 		t.Fatalf("judge adapter config = provider %q model %q split %v, want zcode/GLM-5.3-Flash split",
 			applied.AppliedProvider, applied.AppliedModel, applied.ModelSplit)
 	}
@@ -152,7 +152,7 @@ func TestResolveAdapterConfig_QwenJudgeInheritsLegacySplit(t *testing.T) {
 	if !ok {
 		t.Fatalf("judge agent type = %T, want *QwenCodeAgent", agent)
 	}
-	if got := qwen.MaterializedModel(); got != qwenSlashedModelID {
+	if got := qwen.Cfg.ModelName; got != qwenSlashedModelID {
 		t.Fatalf("judge materialized model = %q, want zcode/GLM-5.3-Flash", got)
 	}
 }
