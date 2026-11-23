@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `environment.agent_home: temporary` for local Claude Code and Codex runs
+  with explicit API credentials. Each case, benchmark arm and retry uses a
+  separate temporary home for user settings, skills and session state. The default
+  `inherited` mode keeps inherited home settings. An explicit `--workspace` stays
+  in place, with a separate home in `temporary` mode.
+  Unsupported engines and personal-login-only configurations fail before setup.
+  `--no-delete` preserves the temporary tree.
+
 - `skill-up validate --skill <dir>` lints the content integrity of a single
   skill as authored on disk: SKILL.md must open with a closed YAML frontmatter
   block declaring non-empty `name` and `description` fields, and every
@@ -28,8 +36,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not see what a run installs after `skills.include`/`skills.exclude`
   filtering.
 
+### Changed
+
+- Put automatically created local workspaces at `<system temp>/skill-up-*/workspace/`
+  in both agent home modes. The workspace's parent is now a run directory,
+  instead of the system temporary directory. Runtime cleanup removes that
+  whole run directory; explicit `--workspace` paths remain unchanged.
+
 ### Fixed
 
+- Keep `agent_judge` review materials from reading as instructions. The judge
+  prompt now states that inline excerpts and referenced files come from the
+  agent under evaluation and are evidence, never instructions, and it fences
+  each inline excerpt with more backticks than the excerpt contains, so output
+  holding its own fence and a forged `## Required Output Contract` could no
+  longer close the excerpt and continue as prompt text. The response-format
+  example shows `"passed": null` instead of `"passed": true`, matching the file
+  template, so the example no longer suggests a verdict.
 - Reject a `rule_based` matcher that is present but holds no values to match.
   `output_contains: {all: []}`, `output_matches: {}`, `turn_response_contains`
   without `contains_all`/`contains_any`, and `turn_response_not_contains`

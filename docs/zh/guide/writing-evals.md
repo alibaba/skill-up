@@ -452,6 +452,48 @@ mcp:
 
 > **建议**：如果你的 Skill 不涉及文件操作，使用 `none` 可以省去沙箱准备时间。
 
+#### 本地 agent 主目录
+
+自动创建的本地 workspace 统一位于系统临时目录下，路径为
+`<system temp>/skill-up-*/workspace/`，其父目录为临时运行目录。
+`environment.agent_home` 决定如何处理 agent 主目录设置：
+
+- `inherited`（默认）：保留继承的主目录设置。
+- `temporary`：使用临时运行目录作为独立主目录，每个 case、基线分组和重试各自创建。
+  此模式支持使用 API 凭据的 Claude Code 和 Codex 评测。
+
+两种模式采用相同的 workspace 布局，切换模式不会改变 `..` 的含义。
+显式指定的 `--workspace` 在两种模式下均保持原位；`temporary` 会为其创建单独的临时主目录。
+
+```yaml
+environment:
+  type: none
+  agent_home: temporary
+```
+
+在 `temporary` 模式下，`HOME`、`USERPROFILE` 和 `CODEX_HOME` 指向临时根目录，
+因此 Codex 的 `auth.json` 和 `sessions/` 不会进入 workspace 产物和 diff。
+会话记录从 `$CODEX_HOME/sessions` 收集。
+
+`CLAUDE_CONFIG_DIR`、XDG 目录和 Windows 应用数据目录也位于临时主目录下，
+这些设置覆盖 setup、续轮和 judge 的执行。
+单次命令的环境变量不能覆盖这些目录；`BASH_ENV` 和 `ENV` 启动文件被禁用。
+可执行文件搜索路径及其他环境变量仍然保留。setup 步骤不能依赖该主目录中的个人 Git
+或包管理器配置；请通过 setup 命令或 `environment.env` 显式提供所需设置。
+
+首版要求显式 API 凭据：Claude Code 使用 `ANTHROPIC_API_KEY` 或
+`ANTHROPIC_AUTH_TOKEN`，Codex 使用 `OPENAI_API_KEY`，也可通过 skill-up 的常规
+凭据配置提供。Codex 每次调用前通过 stdin 在临时主目录内初始化 API-key 登录。
+不复制个人登录文件或系统钥匙串登录；凭据缺失或 run/judge 引擎不受支持时，
+会在 setup 或 agent 执行前报错。
+
+两种模式下，case runtime 关闭时均删除整个临时运行目录。显式指定 `--workspace`
+时保留 workspace，只删除按需创建的临时主目录。`--no-delete` 会保留临时目录树，
+setup 日志会显示临时主目录路径；其中可能保存 Codex API key，
+应按敏感文件处理。此选项隔离常规用户配置和状态，并非文件系统安全边界：
+workspace 指令、系统配置及其他继承的环境变量仍然可用。
+进程隔离请使用容器；Docker 和 OpenSandbox 不支持 `agent_home: temporary`。
+
 #### 会话清理
 
 评测会删除它创建的 workspace，但 agent CLI 可能在 workspace 之外保留按 workspace 保存的状态。Claude Code 会写入 `~/.claude/projects/<workspace-key>/`，其中包含会话记录与 `memory/` 目录；qodercli 会写入 `~/.qoder/projects/<workspace-key>/`（CN 版为 `~/.qoder-cn/`），其中包含会话记录、`<sessionID>/subagents/` 下的子代理记录以及 `*-session.json` 元数据。重复评测会不断堆积在用户自己的会话历史里。

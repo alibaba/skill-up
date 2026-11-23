@@ -5,6 +5,33 @@ import (
 	"testing"
 )
 
+func TestEnvironmentAgentHome(t *testing.T) {
+	for _, kind := range []string{runtimeTypeNone, runtimeTypeDocker, runtimeTypeOpenSandbox} {
+		for _, mode := range []string{"", "inherited", "temporary", "unknown"} {
+			t.Run(kind+"/"+mode, func(t *testing.T) {
+				cfg := &EvalConfig{
+					SchemaVersion: "v1alpha1",
+					Environment:   Environment{Type: kind, AgentHome: mode, Image: "test-image"},
+					Engine:        EngineConfig{Name: "claude_code"},
+					Cases:         CasesConfig{Files: []string{"case.yaml"}},
+					Judge:         JudgeConfig{Type: "rule_based"},
+				}
+				err := NewValidator().ValidateEvalConfig(cfg)
+				wantErr := mode == "unknown" || (mode == "temporary" && kind != runtimeTypeNone)
+				if wantErr && (err == nil || !strings.Contains(err.Error(), "environment.agent_home")) {
+					t.Fatalf("error = %v, want agent_home error", err)
+				}
+				if !wantErr && err != nil {
+					t.Fatal(err)
+				}
+				if got := cfg.Environment.ToRuntimeConfig().AgentHome; got != mode {
+					t.Fatalf("runtime agent_home = %q, want %q", got, mode)
+				}
+			})
+		}
+	}
+}
+
 //nolint:maintidx,funlen // table-driven test cases drive the line count; splitting hurts readability.
 func TestValidator_ValidateEvalConfig(t *testing.T) {
 	t.Parallel()

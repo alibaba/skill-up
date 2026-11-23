@@ -41,12 +41,13 @@ func (r *NoneRuntime) pathInWorkspaceOrAbs(p string) string {
 	return filepath.Join(r.workspace, c)
 }
 
-// NoneRuntime executes commands directly on the host with either an isolated
-// temporary workspace or an explicitly supplied, externally owned workspace.
+// NoneRuntime executes commands on the host with a temporary or caller-owned
+// workspace and an optional isolated agent home.
 type NoneRuntime struct {
 	cfg              Config
 	workspace        string
 	ownsWorkspaceDir bool
+	runDir           string
 }
 
 // MergeEnv layers entries into the runtime's persistent env baseline. See
@@ -58,8 +59,36 @@ func (r *NoneRuntime) MergeEnv(env map[string]string) {
 	mergeIntoEnvBaseline(&r.cfg.Env, env)
 }
 
-// Create selects an existing external workspace or allocates a temporary one.
+// Create prepares the workspace and, when requested, an isolated agent home.
 func (r *NoneRuntime) Create(ctx context.Context) error {
+	if r.cfg.WorkspaceDir != "" {
+		if err := r.createWorkspace(); err != nil {
+			return err
+		}
+		if !r.IsolatedHome() {
+			return nil
+		}
+	}
+	dir, err := os.MkdirTemp("", "skill-up-*")
+	if err != nil {
+		return fmt.Errorf("create temporary run directory: %w", err)
+	}
+	r.runDir = dir
+	if r.IsolatedHome() {
+		logging.InfoContextf(ctx, "temporary agent home: %s", dir)
+		for _, name := range []string{".claude", ".config", ".cache", ".local/share", ".local/state", "AppData/Roaming", "AppData/Local"} {
+			if err := os.MkdirAll(filepath.Join(dir, name), 0o700); err != nil {
+				return fmt.Errorf("create isolated config directory: %w", err)
+			}
+		}
+	}
+	if r.cfg.WorkspaceDir == "" {
+		return r.createWorkspace()
+	}
+	return nil
+}
+
+func (r *NoneRuntime) createWorkspace() error {
 	if r.cfg.WorkspaceDir != "" {
 		dir, err := filepath.Abs(filepath.Clean(r.cfg.WorkspaceDir))
 		if err != nil {
@@ -77,9 +106,9 @@ func (r *NoneRuntime) Create(ctx context.Context) error {
 		return nil
 	}
 
-	dir, err := os.MkdirTemp("", "skill-up-*")
-	if err != nil {
-		return fmt.Errorf("failed to create temp dir: %w", err)
+	dir := filepath.Join(r.runDir, "workspace")
+	if err := os.Mkdir(dir, noneDirMode); err != nil {
+		return fmt.Errorf("create workspace: %w", err)
 	}
 	r.workspace = dir
 	r.ownsWorkspaceDir = true
@@ -91,20 +120,17 @@ func (r *NoneRuntime) Create(ctx context.Context) error {
 // through Config.WorkspaceDir belongs to the caller and is preserved.
 func (r *NoneRuntime) OwnsWorkspace() bool { return r.ownsWorkspaceDir }
 
-// Close removes the temporary workspace.
+// Close removes the temporary run directory when cleanup is enabled.
+// An explicit workspace is outside that directory and remains untouched.
 func (r *NoneRuntime) Close() error {
-	if r.workspace == "" {
-		return nil
-	}
-	if !r.ownsWorkspaceDir {
-		logging.Debugf("NoneRuntime.Close: externally owned workspace preserved at %s", r.workspace)
+	if r.runDir == "" {
 		return nil
 	}
 	if !r.cfg.Delete {
-		logging.Debugf("NoneRuntime.Close: skipping cleanup, workspace preserved at %s", r.workspace)
+		logging.Debugf("NoneRuntime.Close: skipping cleanup, run directory preserved at %s", r.runDir)
 		return nil
 	}
-	return os.RemoveAll(r.workspace)
+	return os.RemoveAll(r.runDir)
 }
 
 // Start is a no-op for the none runtime.
@@ -296,6 +322,12 @@ func (r *NoneRuntime) Exec(ctx context.Context, command string, opts ExecOptions
 	// Windows-bash, ...) — append them once here so the same "use bash →
 	// disable MSYS argv rewrite" decision lives in a single place.
 	env = append(env, shell.Env...)
+	if r.IsolatedHome() {
+		if r.runDir == "" {
+			return ExecResult{}, errors.New("isolated home has not been created")
+		}
+		env = r.isolatedEnvironment(env)
+	}
 	cmd.Env = env
 
 	var stdout, stderr bytes.Buffer
