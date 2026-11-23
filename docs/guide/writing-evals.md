@@ -544,6 +544,8 @@ The scripts must already exist in the selected runtime; case fixtures are upload
 
 When `environment.type: opensandbox` is used, sandbox auth is read from the `OPENSANDBOX_API_KEY` environment variable. Non-secret options such as service URL or extension flags belong in `environment.kwargs`. The Agent runtime handles its own binary path; you usually do **not** need to set `PATH` inside the eval config.
 
+> **Known limitation:** OpenSandbox workspace file checks (`Exists` and `ReadFile`) reject paths containing `$` because the service expands environment variables in file paths. A literal filename such as `report-$VERSION.txt` therefore returns an error on OpenSandbox. This is tracked upstream at <https://github.com/opensandbox-group/OpenSandbox/issues/2960>.
+
 ```yaml
 environment:
   type: opensandbox
