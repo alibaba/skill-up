@@ -574,6 +574,32 @@ func TestBuildReportInput_UsesResolvedRunnerIdentity(t *testing.T) {
 	}
 }
 
+func TestBuildReportInput_MaterializesQwenModelID(t *testing.T) {
+	t.Setenv("ZCODE_API_KEY", "sk-test")
+
+	// The credential layer splits a legacy "provider/model" reference to pick
+	// credentials; the shared entry point dispatches materialization to Qwen, so
+	// the machine-readable applied_configuration.model records the complete id
+	// the command and the session actually use (#383, #399).
+	evalCfg := &config.EvalConfig{Engine: config.EngineConfig{Name: "qwen_code"}}
+	resolved := credential.ResolveRunnerConfig(
+		config.EngineConfig{Name: "qwen_code"}, nil,
+		credential.CLIOverrides{Model: "zcode/GLM-5.3-Flash"},
+	)
+
+	input := buildReportInput("s", map[string]*caseResults{}, nil, time.Time{}, time.Time{}, evalCfg, resolved)
+	if input.AppliedConfiguration == nil || input.AppliedConfiguration.Model != "zcode/GLM-5.3-Flash" {
+		t.Fatalf("applied configuration model = %+v, want zcode/GLM-5.3-Flash", input.AppliedConfiguration)
+	}
+	data, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"model":"zcode/GLM-5.3-Flash"`) {
+		t.Fatalf("final JSON report missing the materialized model id:\n%s", data)
+	}
+}
+
 func TestBuildReportInput_DistinguishesRequestedModelFromLocalFallback(t *testing.T) {
 	t.Parallel()
 
