@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `environment.agent_home: temporary` for local Claude Code and Codex runs
+  with explicit API credentials. Each case, benchmark arm and retry uses a
+  separate temporary home for user settings, skills and session state. The default
+  `inherited` mode keeps inherited home settings. An explicit `--workspace` stays
+  in place, with a separate home in `temporary` mode.
+  Unsupported engines and personal-login-only configurations fail before setup.
+  `--no-delete` preserves the temporary tree.
+
 - `skill-up validate --skill <dir>` lints the content integrity of a single
   skill as authored on disk: SKILL.md must open with a closed YAML frontmatter
   block declaring non-empty `name` and `description` fields, and every
@@ -27,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check is source-level and independent from eval config validation — it does
   not see what a run installs after `skills.include`/`skills.exclude`
   filtering.
+
+### Changed
+
+- Put automatically created local workspaces at `<system temp>/skill-up-*/workspace/`
+  in both agent home modes. The workspace's parent is now a run directory,
+  instead of the system temporary directory. Runtime cleanup removes that
+  whole run directory; explicit `--workspace` paths remain unchanged.
 
 ### Fixed
 

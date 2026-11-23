@@ -2,6 +2,7 @@ schema_version: v1alpha1
 
 environment:
   type: none
+  agent_home: inherited
   workspace_mount: /workspace
   env: {}
 

@@ -1341,6 +1341,10 @@ func (e *defaultEvaluator) prepareRuntimeForCase(ctx context.Context, caseCfg *c
 		_ = rt.Close()
 		return nil, agent.RuntimeObservation{}, fmt.Errorf("failed to create runtime workspace: %w", err)
 	}
+	if err := e.checkIsolatedHomeAgents(ctx, rt, caseCfg, ag); err != nil {
+		_ = rt.Close()
+		return nil, agent.RuntimeObservation{}, err
+	}
 	observation, err := e.setupCaseEnvironment(ctx, rt, caseCfg, configName, ag, mcpCfg)
 	if err != nil {
 		agent.ReleaseRuntime(ag, rt)
@@ -1389,6 +1393,32 @@ func (e *defaultEvaluator) setupCaseEnvironment(ctx context.Context, rt runtime.
 	}
 
 	return observation, nil
+}
+
+func (e *defaultEvaluator) checkIsolatedHomeAgents(ctx context.Context, rt runtime.Runtime, c *config.CaseConfig, ag agent.Agent) error {
+	if e.evalCfg.Environment.AgentHome != runtime.AgentHomeTemporary {
+		return nil
+	}
+	if err := agent.CheckIsolatedHome(ctx, rt, ag); err != nil {
+		return err
+	}
+	plan, err := config.ResolveJudgePlan(e.evalCfg, c)
+	if err != nil {
+		return err
+	}
+	for _, member := range plan.Judges {
+		if member.Type != judgeTypeAgentJudge {
+			continue
+		}
+		judgeAgent, err := e.resolveJudgeAgent(ctx, member, ag)
+		if err != nil {
+			return err
+		}
+		if err := agent.CheckIsolatedHome(ctx, rt, judgeAgent); err != nil {
+			return fmt.Errorf("judge %q: %w", member.ID, err)
+		}
+	}
+	return nil
 }
 
 // withJudgeSkillInstallNames returns judgeCfg with each judge Skill's default

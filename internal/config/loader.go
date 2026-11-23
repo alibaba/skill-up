@@ -83,14 +83,15 @@ func (l *Loader) LoadEvalConfig() (*EvalConfig, error) {
 	return &cfg, nil
 }
 
-// applyDocumentedDefaults fills the four implicit defaults documented in
-// README.md and docs/guide/getting-started.md, sourcing values from
-// defaults.yaml so the code and the documented values cannot drift apart.
+// applyDocumentedDefaults fills implicit defaults from defaults.yaml.
 // Use -1 (or any negative value) to opt out of the case-level timeout —
 // withCaseTimeout treats <=0 as "no deadline", but 0 is reserved here for
 // "not configured, use default".
 func applyDocumentedDefaults(cfg *EvalConfig) {
 	d := DefaultEvalConfig()
+	if cfg.Environment.AgentHome == "" {
+		cfg.Environment.AgentHome = d.Environment.AgentHome
+	}
 	if cfg.Cases.Defaults.TimeoutSeconds == 0 {
 		cfg.Cases.Defaults.TimeoutSeconds = d.Cases.Defaults.TimeoutSeconds
 	}
