@@ -35,7 +35,7 @@ skill-up run [path] [flags]
 | `--parallelism`        | From config                   | Override `cases.parallelism`. Allowed range: 1–256                                                                                                          |
 | `--baseline`           | From config                   | Override `benchmark.enabled` to `true` for this run                                                                                                         |
 | `--api-key`            | —                             | Pass an API key (higher precedence than env vars)                                                                                                          |
-| `--no-delete`          | `false`                       | Preserve workspaces or containers created by skill-up after evaluation for debugging.                                                                      |
+| `--no-delete`          | `false`                       | Keep workspaces, containers and temporary run directories for debugging. With `agent_home: temporary`, retained homes can contain credentials. |
 | `--cleanup-sessions`   | `false`                       | Also delete the agent's session directory for the workspace after evaluation. `claude_code` and `qodercli` implement it today: they remove `~/.claude/projects/<workspace-key>/` and `~/.qoder/projects/<workspace-key>/` (or `~/.qoder-cn/projects/<workspace-key>/` for the CN edition), sessions and memory included. Off by default because it deletes history that today survives an evaluation; an explicit `--cleanup-sessions=false` overrides `environment.cleanup_sessions: true`, and `--no-delete` takes precedence over both. |
 | `--event-log`          | —                             | Write an ordered v1 JSONL evaluation event stream to a local file. The parent directory must already exist                                                  |
 | `--event-attribute`    | —                             | Attach a namespaced `key=value` string attribute to every event (repeatable; requires `--event-log`)                                                        |
@@ -463,16 +463,12 @@ skill-up init [flags]
 
 | Flag       | Default                                            | Description                                                                                  |
 | :--------: | :-------------------------------------------------: | :-------------------------------------------------------------------------------------------: |
-| `--local`  | `false`                                            | Write `$PWD/.skill-up.yaml`; after review, select it on subsequent commands with `--config ./.skill-up.yaml` |
+| `--local`  | `false`                                            | Write target is `$PWD/.skill-up.yaml` instead of the XDG path                                |
 | `--config` | —                                                  | **Source** file to read (validated, copied verbatim with comments). Without this, a commented template is written. |
 | `--print`  | `false`                                            | Print to stdout instead of writing to disk                                                   |
 | `--force`  | `false`                                            | Overwrite an existing target                                                                 |
 
-> For `init`, `--config` names the source to copy without expanding placeholders.
-> For other subcommands it selects the highest-precedence config and permits
-> all its defaults and `${VAR}` expansion in its `env` values. Automatically
-> discovered `.skill-up.yaml` files are ignored. Use `--config` only with trusted files;
-> see [user configuration](./user-config.md#schema) for the trust boundary.
+> Specify `--config` at most once. For `init`, it names the copy source only. For other subcommands it selects an explicit layer trusted for variable expansion. See the [credential boundary](./user-config#credential-boundary). A relative `XDG_CONFIG_HOME` does not change the default write target.
 
 ### Examples
 

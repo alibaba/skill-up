@@ -110,16 +110,12 @@ skill-up init [flags]
 
 | Flag | Description |
 | --- | --- |
-| `--local` | Write `$PWD/.skill-up.yaml`; after review, select it on subsequent commands with `--config ./.skill-up.yaml`. |
+| `--local` | Write `$PWD/.skill-up.yaml` instead of the user config path. |
 | `--print` | Print the template to stdout without writing a file. |
 | `--force` | Overwrite an existing file. |
-| `--config <path>` | Source file to validate and copy verbatim. May be combined with `--local`; placeholders are not expanded while copying. |
+| `--config <path>` | Read and copy the source file verbatim; specify at most once. |
 
-The default path is `$XDG_CONFIG_HOME/skill-up/config.yaml` or `~/.config/skill-up/config.yaml`. `SKILL_UP_CONFIG` can also point to the user configuration file.
-
-Project files are not loaded automatically. For commands other than `init`,
-`--config` trusts the selected file's defaults, including endpoints and `${VAR}`
-expansion in `env`. Review the file before selecting it.
+The default write target is `$XDG_CONFIG_HOME/skill-up/config.yaml` when `XDG_CONFIG_HOME` is absolute, or `~/.config/skill-up/config.yaml` otherwise. For config discovery, `SKILL_UP_CONFIG` can select the user configuration file.
 
 ## skill-up debug
 

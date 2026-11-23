@@ -15,6 +15,10 @@ import (
 )
 
 const (
+	// AgentHomeInherited preserves inherited agent home settings.
+	AgentHomeInherited = "inherited"
+	// AgentHomeTemporary redirects agent home settings to the run directory.
+	AgentHomeTemporary = "temporary"
 	// VariantEnvName identifies the framework-owned execution configuration variable.
 	VariantEnvName = "SKILL_UP_VARIANT"
 	// ClaudeDirMode is the default directory mode for Claude files.
@@ -22,6 +26,10 @@ const (
 	// ClaudeFileMode is the default file mode for Claude files.
 	ClaudeFileMode = 0o600
 )
+
+// ErrFileNotFound is returned by runtime file operations when a requested path
+// does not exist. Callers can distinguish a missing file from an access failure.
+var ErrFileNotFound = errors.New("runtime file not found")
 
 // mergeEnv returns hostEnv (os.Environ form) with persistentEnv and callEnv
 // overlaid, in that order (callEnv wins). Values are forwarded LITERALLY: no
@@ -181,6 +189,12 @@ type Runtime interface {
 	UploadFile(ctx context.Context, sourcePath, targetPath string) error
 	UploadDir(ctx context.Context, sourceDir, targetDir string) error
 	DownloadFile(ctx context.Context, sourcePath, targetPath string) error
+	// Exists reports whether a workspace path exists. A confirmed absence
+	// returns (false, nil); an inconclusive check returns an error.
+	Exists(ctx context.Context, sourcePath string) (bool, error)
+	// ReadFile returns the contents of a workspace file. ErrFileNotFound is
+	// returned when the path is confirmed absent.
+	ReadFile(ctx context.Context, sourcePath string) ([]byte, error)
 	// DownloadDir copies sourceDir from the runtime workspace to targetDir on the host.
 	// For NoneRuntime, sourceDir may be relative to Workspace or an absolute host path.
 	DownloadDir(ctx context.Context, sourceDir, targetDir string) error
@@ -223,6 +237,7 @@ type SetupStep struct {
 // Config holds all runtime configuration options.
 type Config struct {
 	Type           string
+	AgentHome      string
 	Image          string
 	WorkspaceMount string
 	// WorkspaceDir reuses an existing host directory as the workspace for the
@@ -290,6 +305,15 @@ func (c SkillConfig) DirName() string {
 
 // NewRuntime creates a Runtime based on the config type.
 func NewRuntime(cfg Config) (Runtime, error) {
+	switch cfg.AgentHome {
+	case "", AgentHomeInherited:
+	case AgentHomeTemporary:
+		if cfg.Type != "none" {
+			return nil, errors.New("agent_home: temporary requires the none runtime")
+		}
+	default:
+		return nil, fmt.Errorf("unknown agent_home %q: must be inherited or temporary", cfg.AgentHome)
+	}
 	var (
 		rt  Runtime
 		err error

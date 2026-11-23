@@ -59,7 +59,7 @@ func runEvalPipeline(
 	input Input,
 ) (*Result, error) {
 	// Step 1: Expect pre-check (zero-cost, deterministic).
-	er := CheckExpect(expect, input)
+	er := CheckExpectContext(ctx, expect, input)
 	if !er.Passed {
 		// Short-circuit: expect failed; build a FAIL Result directly from
 		// the expect failure information.

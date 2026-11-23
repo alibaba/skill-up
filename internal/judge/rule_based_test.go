@@ -2,11 +2,25 @@ package judge
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/alibaba/skill-up/internal/config"
+	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
+
+type failingFileRuntime struct {
+	runtime.Runtime
+}
+
+func (failingFileRuntime) Exists(context.Context, string) (bool, error) {
+	return false, errors.New("stat failed")
+}
+
+func (failingFileRuntime) ReadFile(context.Context, string) ([]byte, error) {
+	return nil, errors.New("read failed")
+}
 
 // ---------------------------------------------------------------------------
 // whitespace matchers
@@ -83,6 +97,43 @@ func TestRuleBased_OutputContains_All_Pass(t *testing.T) {
 	r, err := j.Evaluate(context.Background(), Input{FinalMessage: "found null pointer bug"})
 	assertNoError(t, err)
 	assertStatus(t, r, StatusPass)
+}
+
+func TestRuleBased_FailureFileAccessErrorIsInconclusive(t *testing.T) {
+	if (Input{Files: failingFileRuntime{}}).Files == nil {
+		t.Fatal("failingFileRuntime should expose WorkspaceFiles")
+	}
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Failure: []config.Rule{{FilesExist: []string{"missing-or-inaccessible"}}},
+	})
+	_, err := j.Evaluate(context.Background(), Input{WorkspacePath: "/workspace", Files: failingFileRuntime{}})
+	if err == nil {
+		t.Fatal("expected an access error")
+	}
+}
+
+func TestNormalizeWorkspacePathWindowsBackslash(t *testing.T) {
+	in := Input{WorkspacePath: "/workspace", Files: failingFileRuntime{}}
+	if _, err := normalizeWorkspacePath(in, `..\outside.txt`); err == nil {
+		t.Fatal("expected a backslash traversal to be rejected")
+	}
+	got, err := normalizeWorkspacePath(in, `sub\file.txt`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "sub/file.txt" {
+		t.Fatalf("normalized path = %q, want %q", got, "sub/file.txt")
+	}
+}
+
+func TestRuleBased_FailureInvalidPathIsError(t *testing.T) {
+	j := NewRuleBasedJudge(config.JudgeConfig{
+		Failure: []config.Rule{{FilesExist: []string{"../outside.txt"}}},
+	})
+	_, err := j.Evaluate(context.Background(), Input{WorkspacePath: "/workspace", Files: failingFileRuntime{}})
+	if err == nil {
+		t.Fatal("expected an invalid-path error")
+	}
 }
 
 func TestRuleBased_OutputContains_All_Fail(t *testing.T) {

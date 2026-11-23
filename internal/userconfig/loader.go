@@ -3,11 +3,12 @@
 //  1. embed     — the empty Config{} (no vendor defaults baked in).
 //  2. user      — $SKILL_UP_CONFIG, else $XDG_CONFIG_HOME/skill-up/config.yaml,
 //                 else ~/.config/skill-up/config.yaml. Missing = silent skip.
-//  3. explicit  — opts.ExplicitPath. Missing = ERROR.
+//  3. project   — .skill-up.yaml in WorkingDir. Missing = silent skip.
+//  4. explicit  — opts.ExplicitPath. Missing = ERROR.
 //
 // Higher-precedence layers overlay non-zero fields onto lower layers; map
 // fields are merged key-wise rather than replaced.
-// Project files require selection through --config or the user-layer path.
+// Only the user and explicit layers are trusted for environment expansion.
 
 package userconfig
 
@@ -36,6 +37,7 @@ const UserConfigFile = "config.yaml"
 const (
 	sourceEmbed    = "embed"
 	sourceUser     = "user"
+	sourceProject  = "project"
 	sourceExplicit = "explicit"
 )
 
@@ -45,7 +47,7 @@ type LoadOptions struct {
 	WorkingDir   string
 	HomeDir      string
 	Env          func(string) string
-	// Warnings receives non-fatal issues, including ignored project files.
+	// Warnings receives non-fatal configuration issues.
 	// Defaults to os.Stderr when nil.
 	Warnings io.Writer
 }
@@ -75,6 +77,13 @@ func LoadEffective(opts LoadOptions) (Config, []Source, error) {
 
 	// Optional user-file read/parse errors must not block unrelated commands.
 	sources = mergeOptionalLayer(&cfg, sources, sourceUser, resolveUserConfigPath(opts, getenv), warn)
+	projectPath := resolveProjectConfigPath(opts)
+	// A project file deliberately selected via SKILL_UP_CONFIG already
+	// contributed as a user layer; do not downgrade its provenance by
+	// loading it a second time through automatic discovery.
+	if len(sources) == 1 || !sameConfigFile(sources[1].Path, projectPath) {
+		sources = mergeOptionalLayer(&cfg, sources, sourceProject, projectPath, warn)
+	}
 
 	if opts.ExplicitPath != "" {
 		loaded, ok, err := loadConfigFile(opts.ExplicitPath)
@@ -88,7 +97,6 @@ func LoadEffective(opts LoadOptions) (Config, []Source, error) {
 		sources = append(sources, Source{Kind: sourceExplicit, Path: opts.ExplicitPath})
 	}
 
-	warnUntrustedProjectConfig(resolveProjectConfigPath(opts), sources, warn)
 	if err := cfg.Validate(); err != nil {
 		paths := make([]string, 0, len(sources))
 		for _, s := range sources {
@@ -105,7 +113,7 @@ func LoadEffective(opts LoadOptions) (Config, []Source, error) {
 	return cfg, sources, nil
 }
 
-// mergeOptionalLayer loads an optional trusted layer,
+// mergeOptionalLayer loads an optional discovered layer,
 // downgrading parse errors to warnings on warn and appending to sources when
 // the file existed and parsed cleanly.
 func mergeOptionalLayer(cfg *Config, sources []Source, kind, path string, warn io.Writer) []Source {
@@ -124,42 +132,20 @@ func mergeOptionalLayer(cfg *Config, sources []Source, kind, path string, warn i
 	return append(sources, Source{Kind: kind, Path: path})
 }
 
-func warnUntrustedProjectConfig(path string, sources []Source, warn io.Writer) {
-	project, err := os.Stat(path)
-	if errors.Is(err, os.ErrNotExist) || path == "" {
-		return
+func sameConfigFile(a, b string) bool {
+	left, err := os.Stat(a)
+	if err != nil {
+		return false
 	}
-	if err == nil {
-		for _, source := range sources {
-			trusted, statErr := os.Stat(source.Path)
-			if statErr == nil && os.SameFile(project, trusted) {
-				return
-			}
-		}
-	}
-	// Even literal endpoints or runtime kwargs can redirect trusted credentials.
-	_, _ = fmt.Fprintf(warn, "warning: ignoring project config %s; review it and select it with --config to trust its defaults\n", path)
+	right, err := os.Stat(b)
+	return err == nil && os.SameFile(left, right)
 }
 
 func resolveUserConfigPath(opts LoadOptions, getenv func(string) string) string {
 	if v := getenv(ConfigEnvVar); v != "" {
 		return v
 	}
-	if xdg := getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, UserConfigDir, UserConfigFile)
-	}
-	home := opts.HomeDir
-	if home == "" {
-		h, err := os.UserHomeDir()
-		if err != nil {
-			return ""
-		}
-		home = h
-	}
-	if home == "" {
-		return ""
-	}
-	return filepath.Join(home, ".config", UserConfigDir, UserConfigFile)
+	return DefaultConfigPath(opts.HomeDir, getenv)
 }
 
 func resolveProjectConfigPath(opts LoadOptions) string {

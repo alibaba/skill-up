@@ -2,17 +2,14 @@ package cli
 
 import (
 	"bytes"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/spf13/cobra"
-	"go.opentelemetry.io/otel"
+
+	"github.com/alibaba/skill-up/internal/userconfig"
 )
 
 func TestUsageOnError_PrintsUsageForParseErrors(t *testing.T) {
@@ -54,82 +51,47 @@ func TestExecuteArgsVersionInitializesRoot(t *testing.T) {
 	}
 }
 
-func TestExecuteArgsProjectCannotRedirectTrustedTelemetry(t *testing.T) {
-	provider, propagator := otel.GetTracerProvider(), otel.GetTextMapPropagator()
-	t.Cleanup(func() {
-		otel.SetTracerProvider(provider)
-		otel.SetTextMapPropagator(propagator)
-	})
-	var trustedRequests, projectRequests, projectCredentials atomic.Int32
-	trusted := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "synthetic-token" {
-			t.Errorf("trusted collector received incorrect authorization header")
+func TestLoadUserConfigPreservesProjectDefaultsWithoutApplyingExpandedOTLPHeaders(t *testing.T) {
+	t.Setenv("SKILL_UP_TEST_HEADER_VALUE", "synthetic-value")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+	userPath := filepath.Join(t.TempDir(), "user.yaml")
+	t.Setenv("SKILL_UP_CONFIG", userPath)
+	if err := os.WriteFile(userPath, []byte(`env:
+  OTEL_EXPORTER_OTLP_HEADERS: authorization=${SKILL_UP_TEST_HEADER_VALUE}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(".skill-up.yaml", []byte(`telemetry:
+  traces:
+    endpoint: https://project.example.invalid
+env:
+  SKILL_UP_TEST_PROJECT_DEFAULT: project
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"OTEL_EXPORTER_OTLP_HEADERS", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "SKILL_UP_TEST_PROJECT_DEFAULT"} {
+		t.Setenv(key, "")
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
 		}
-		trustedRequests.Add(1)
-		w.Header().Set("Content-Type", "application/x-protobuf")
-	}))
-	t.Cleanup(trusted.Close)
-	project := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		projectRequests.Add(1)
-		if r.Header.Get("Authorization") == "synthetic-token" {
-			projectCredentials.Add(1)
-		}
-		w.Header().Set("Content-Type", "application/x-protobuf")
-	}))
-	t.Cleanup(project.Close)
-	for _, tc := range []struct {
-		name, projectConfig string
-	}{
-		{"generic endpoint", "env:\n  OTEL_EXPORTER_OTLP_ENDPOINT: %s\n"},
-		{"signal endpoint", "env:\n  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: %s\n"},
-		{"telemetry endpoint", "telemetry:\n  traces:\n    endpoint: %s\n"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			keys := []string{"OTEL_TRACES_EXPORTER", "OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_PROTOCOL", "OTEL_EXPORTER_OTLP_HEADERS"}
-			for _, entry := range os.Environ() {
-				key, _, _ := strings.Cut(entry, "=")
-				if strings.HasPrefix(strings.ToUpper(key), "OTEL_") {
-					keys = append(keys, key)
-				}
-			}
-			for _, key := range keys {
-				t.Setenv(key, "")
-				_ = os.Unsetenv(key)
-			}
-			t.Setenv("OTEL_METRICS_EXPORTER", "none")
-			t.Setenv("SKILL_UP_TEST_SECRET", "synthetic-token")
-			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-			wd := t.TempDir()
-			t.Chdir(wd)
-			userPath := filepath.Join(t.TempDir(), "user.yaml")
-			t.Setenv("SKILL_UP_CONFIG", userPath)
-			user := fmt.Sprintf(`env:
-  OTEL_TRACES_EXPORTER: otlp
-  OTEL_EXPORTER_OTLP_ENDPOINT: %s
-  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
-  OTEL_EXPORTER_OTLP_HEADERS: authorization=${SKILL_UP_TEST_SECRET}
-`, trusted.URL)
-			if err := os.WriteFile(userPath, []byte(user), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(wd, ".skill-up.yaml"), fmt.Appendf(nil, tc.projectConfig, project.URL), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			trustedRequests.Store(0)
-			projectRequests.Store(0)
-			projectCredentials.Store(0)
-			if _, err := captureStdout(t, func() error {
-				return ExecuteArgs("test-version", []string{"--version"})
-			}); err != nil {
-				t.Fatal(err)
-			}
-			if got := projectRequests.Load(); got != 0 {
-				t.Errorf("untrusted project collector received %d requests, %d with trusted credentials", got, projectCredentials.Load())
-			}
-			if got := trustedRequests.Load(); got == 0 {
-				t.Error("trusted collector received no requests")
-			}
-		})
+	}
+	cfg, _, err := loadUserConfig([]string{"--version"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Inspect defaults before SDK initialization. No collector or transport needed.
+	if _, err := userconfig.ApplyEnv(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := os.LookupEnv("OTEL_EXPORTER_OTLP_HEADERS"); ok {
+		t.Error("a newly expanded header default was applied with project routing")
+	}
+	if got := os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"); got != "https://project.example.invalid" {
+		t.Errorf("project route default = %q", got)
+	}
+	if got := os.Getenv("SKILL_UP_TEST_PROJECT_DEFAULT"); got != "project" {
+		t.Errorf("ordinary project default = %q", got)
 	}
 }
 
@@ -156,11 +118,16 @@ func TestExecuteArgsProjectEnvTrust(t *testing.T) {
 	wd := t.TempDir()
 	t.Chdir(wd)
 	project := filepath.Join(wd, ".skill-up.yaml")
-	if err := os.WriteFile(project, []byte(`env:
+	const projectContents = `env:
   OTEL_EXPORTER_OTLP_ENDPOINT: https://collector.example.invalid
   OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
-  OTEL_RESOURCE_ATTRIBUTES: leaked=${SKILL_UP_TEST_SECRET}
-`), 0o600); err != nil {
+  OTEL_RESOURCE_ATTRIBUTES: source=${SKILL_UP_TEST_SECRET}
+`
+	if err := os.WriteFile(project, []byte(projectContents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	copySource := filepath.Join(t.TempDir(), "copy.yaml")
+	if err := os.WriteFile(copySource, []byte(strings.Replace(projectContents, "source=", "copy-only=", 1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
@@ -169,10 +136,10 @@ func TestExecuteArgsProjectEnvTrust(t *testing.T) {
 		want       string
 		wantOutput string
 	}{
-		{"automatic", []string{"--version"}, "", "test-version"},
-		{"explicit", []string{"--version", "--config", project}, "leaked=test-token", "test-version"},
-		{"explicit equals", []string{"--version", "--config=" + project}, "leaked=test-token", "test-version"},
-		{"init source", []string{"init", "--config", project, "--print"}, "", "leaked=${SKILL_UP_TEST_SECRET}"},
+		{"automatic", []string{"--version"}, "source=${SKILL_UP_TEST_SECRET}", "test-version"},
+		{"explicit", []string{"--version", "--config", project}, "source=test-token", "test-version"},
+		{"explicit equals", []string{"--version", "--config=" + project}, "source=test-token", "test-version"},
+		{"init source", []string{"init", "--config", copySource, "--print"}, "source=${SKILL_UP_TEST_SECRET}", "copy-only=${SKILL_UP_TEST_SECRET}"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, key := range []string{"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_PROTOCOL", "OTEL_RESOURCE_ATTRIBUTES"} {
@@ -190,54 +157,6 @@ func TestExecuteArgsProjectEnvTrust(t *testing.T) {
 			}
 			if got := os.Getenv("OTEL_RESOURCE_ATTRIBUTES"); got != tc.want {
 				t.Fatalf("resource attributes = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestIsInitInvocation(t *testing.T) {
-	cases := []struct {
-		name string
-		args []string
-		want bool
-	}{
-		{"empty", nil, false},
-		{"bare init", []string{"init"}, true},
-		{"with --config space", []string{"--config", "/tmp/c.yaml", "init"}, true},
-		{"with --config=", []string{"--config=/tmp/c.yaml", "init"}, true},
-		{"end-of-flags before init still finds", []string{"--config", "/tmp/c.yaml", "--", "init"}, false},
-		{"run command", []string{"run", "/tmp/eval.yaml"}, false},
-		{"flag-only", []string{"--help"}, false},
-		{"init after non-value flag", []string{"--quiet", "init"}, true},
-		{"unknown -X flag followed by init", []string{"-X", "init"}, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := isInitInvocation(tc.args); got != tc.want {
-				t.Errorf("isInitInvocation(%v) = %v, want %v", tc.args, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestExtractConfigFlag(t *testing.T) {
-	cases := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{"absent", []string{"run", "x"}, ""},
-		{"space form", []string{"--config", "/a.yaml", "run"}, "/a.yaml"},
-		{"equals form", []string{"--config=/a.yaml", "run"}, "/a.yaml"},
-		{"empty equals", []string{"--config=", "run"}, ""},
-		{"trailing --config has no value", []string{"run", "--config"}, ""},
-		{"after -- terminator is positional", []string{"--", "--config", "/a.yaml"}, ""},
-		{"first wins", []string{"--config", "/first.yaml", "--config", "/second.yaml"}, "/first.yaml"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := extractConfigFlag(tc.args); got != tc.want {
-				t.Errorf("extractConfigFlag(%v) = %q, want %q", tc.args, got, tc.want)
 			}
 		})
 	}

@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -34,7 +35,15 @@ func TestCodexCLICompatibility(t *testing.T) {
 		t.Skip("set SKILL_UP_CODEX_COMPAT_E2E=1 with a preinstalled Codex CLI")
 	}
 	wireAPI := codexCompatibilityWireAPI(t)
-	rt, ctx := codexCompatibilityRuntime(t)
+	for _, homeMode := range []string{evalruntime.AgentHomeInherited, evalruntime.AgentHomeTemporary} {
+		t.Run(homeMode, func(t *testing.T) {
+			runCodexCLICompatibility(t, wireAPI, homeMode)
+		})
+	}
+}
+
+func runCodexCLICompatibility(t *testing.T, wireAPI, homeMode string) {
+	rt, ctx := codexCompatibilityRuntime(t, homeMode)
 	var mu sync.Mutex
 	var requests [][]codexCompatMessage
 	var requestErrors []error
@@ -64,7 +73,8 @@ func TestCodexCLICompatibility(t *testing.T) {
 	})
 	sessionID := ""
 	for i, prompt := range []string{codexFirstPrompt, codexSecondPrompt} {
-		result, err := ag.RunTurn(ctx, rt, agent.ExecOptions{ArtifactDir: t.TempDir()},
+		artifactDir := t.TempDir()
+		result, err := ag.RunTurn(ctx, rt, agent.ExecOptions{ArtifactDir: artifactDir},
 			transcript.Message{Role: transcript.RoleUser, Content: prompt, Turn: i + 1}, sessionID)
 		if err != nil {
 			t.Fatalf("turn %d: %v", i+1, err)
@@ -77,6 +87,11 @@ func TestCodexCLICompatibility(t *testing.T) {
 			t.Fatalf("resumed session changed: %q -> %q", sessionID, result.SessionID)
 		}
 		sessionID = result.SessionID
+		if homeMode == evalruntime.AgentHomeTemporary {
+			checkCodexTemporaryHome(t, rt, artifactDir, sessionID, prompt, want)
+		} else if _, err := os.Stat(filepath.Join(os.Getenv("CODEX_HOME"), "auth.json")); !os.IsNotExist(err) {
+			t.Fatalf("inherited mode must leave %s absent (stat error=%v)", filepath.Join(os.Getenv("CODEX_HOME"), "auth.json"), err)
+		}
 	}
 	mu.Lock()
 	recordedRequests := append([][]codexCompatMessage(nil), requests...)
@@ -90,6 +105,46 @@ func TestCodexCLICompatibility(t *testing.T) {
 	mu.Unlock()
 	if count != len(recordedRequests) {
 		t.Fatal("pre-fix invocation unexpectedly reached the provider")
+	}
+}
+
+func checkCodexTemporaryHome(t *testing.T, rt agent.Runtime, artifactDir, sessionID, prompt, reply string) {
+	t.Helper()
+	home := filepath.Dir(rt.Workspace())
+	authData, err := os.ReadFile(filepath.Join(home, "auth.json"))
+	if err != nil {
+		t.Fatalf("read temporary Codex login: %v", err)
+	}
+	var auth struct {
+		APIKey string `json:"OPENAI_API_KEY"`
+	}
+	if err := json.Unmarshal(authData, &auth); err != nil || auth.APIKey != "local-fixture-key" {
+		t.Fatal("temporary Codex home does not contain the configured API-key login")
+	}
+	files, err := filepath.Glob(filepath.Join(artifactDir, "rollout-*"+sessionID+".jsonl"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("expected one collected session JSONL for %s, got %v: %v", sessionID, files, err)
+	}
+	data, err := os.ReadFile(files[0])
+	if err != nil || !bytes.Contains(data, []byte(prompt)) || !bytes.Contains(data, []byte(reply)) {
+		t.Fatalf("collected session %s: read=%v, prompt present=%t, reply present=%t",
+			files[0], err, bytes.Contains(data, []byte(prompt)), bytes.Contains(data, []byte(reply)))
+	}
+	sourceFiles, err := filepath.Glob(filepath.Join(home, "sessions", "*", "*", "*", filepath.Base(files[0])))
+	if err != nil || len(sourceFiles) != 1 {
+		t.Fatalf("collected session must originate in the temporary home: %v, %v", sourceFiles, err)
+	}
+	source, err := os.ReadFile(sourceFiles[0])
+	if err != nil || !bytes.Equal(data, source) {
+		t.Fatalf("collected session %s differs from temporary-home session %s: %v", files[0], sourceFiles[0], err)
+	}
+	entries, err := os.ReadDir(os.Getenv("CODEX_HOME"))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("temporary mode wrote to the inherited Codex home: %v, %v", entries, err)
+	}
+	entries, err = os.ReadDir(os.Getenv("HOME"))
+	if err != nil || len(entries) != 1 || entries[0].Name() != ".codex" {
+		t.Fatalf("temporary mode wrote to the inherited home: %v, %v", entries, err)
 	}
 }
 
@@ -136,7 +191,7 @@ func TestCodexDashScopeMultiTurn(t *testing.T) {
 		t.Fatal("DASHSCOPE_API_KEY is required")
 	}
 	wireAPI := codexCompatibilityWireAPI(t)
-	rt, ctx := codexCompatibilityRuntime(t)
+	rt, ctx := codexCompatibilityRuntime(t, evalruntime.AgentHomeInherited)
 	baseURL := os.Getenv("OPENAI_BASE_URL")
 	if baseURL == "" {
 		baseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
@@ -185,7 +240,7 @@ func codexCompatibilityWireAPI(t *testing.T) string {
 	return wireAPI
 }
 
-func codexCompatibilityRuntime(t *testing.T) (agent.Runtime, context.Context) {
+func codexCompatibilityRuntime(t *testing.T, homeMode string) (agent.Runtime, context.Context) {
 	t.Helper()
 	home := t.TempDir()
 	codexHome := filepath.Join(home, ".codex")
@@ -194,7 +249,7 @@ func codexCompatibilityRuntime(t *testing.T) (agent.Runtime, context.Context) {
 	}
 	t.Setenv("HOME", home)
 	t.Setenv("CODEX_HOME", codexHome)
-	rt, err := evalruntime.NewRuntime(evalruntime.Config{Type: "none", Delete: true})
+	rt, err := evalruntime.NewRuntime(evalruntime.Config{Type: "none", Delete: true, AgentHome: homeMode})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,6 +259,13 @@ func codexCompatibilityRuntime(t *testing.T) (agent.Runtime, context.Context) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = rt.Close() })
+	if homeMode == evalruntime.AgentHomeTemporary {
+		result, err := rt.Exec(ctx, `printf '%s\n%s' "$HOME" "$CODEX_HOME"`, agent.ExecOptions{})
+		want := filepath.Dir(rt.Workspace())
+		if err != nil || result.ExitCode != 0 || result.Stdout != want+"\n"+want {
+			t.Fatalf("runtime did not redirect HOME and CODEX_HOME: err=%v output=%q", err, result.Stdout)
+		}
+	}
 	version, err := rt.Exec(ctx, "codex --version", agent.ExecOptions{})
 	if err != nil || version.ExitCode != 0 {
 		t.Fatalf("Codex unavailable: err=%v exit=%d stderr=%s", err, version.ExitCode, version.Stderr)

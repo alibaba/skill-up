@@ -25,7 +25,9 @@ type Config struct {
 	Env           map[string]string `yaml:"env,omitempty"`
 	RuntimeKwargs map[string]Kwargs `yaml:"runtime_kwargs,omitempty"`
 	// LoadFile and directly constructed configs must not gain expansion permission.
-	envSources map[string]string
+	envSources           map[string]string
+	tracesEndpointSource string
+	tracesProtocolSource string
 }
 
 // Telemetry holds OpenTelemetry-related defaults. Each non-empty field maps to
@@ -87,9 +89,11 @@ func (c *Config) overlay(other Config, sourceKind string) {
 	}
 	if other.Telemetry.Traces.Endpoint != "" {
 		c.Telemetry.Traces.Endpoint = other.Telemetry.Traces.Endpoint
+		c.tracesEndpointSource = sourceKind
 	}
 	if other.Telemetry.Traces.Protocol != "" {
 		c.Telemetry.Traces.Protocol = other.Telemetry.Traces.Protocol
+		c.tracesProtocolSource = sourceKind
 	}
 	if other.Telemetry.Verbose != nil {
 		v := *other.Telemetry.Verbose

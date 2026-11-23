@@ -17,6 +17,7 @@ Layers are merged in order of increasing precedence:
 ```text
 embed (empty)
   < user      (~/.config/skill-up/config.yaml, XDG-aware)
+  < project   ($PWD/.skill-up.yaml)
   < explicit  (--config <path>)
 ```
 
@@ -24,19 +25,10 @@ embed (empty)
 | :--------- | :------------------------------------------------------------------------------------------------------ | :------ |
 | `embed`    | empty `Config{}` — no vendor defaults baked in                                                          | always  |
 | `user`     | `$SKILL_UP_CONFIG`, else `$XDG_CONFIG_HOME/skill-up/config.yaml`, else `~/.config/skill-up/config.yaml` | skipped |
+| `project`  | `$PWD/.skill-up.yaml`                                                                                   | skipped |
 | `explicit` | `--config <path>` passed to any command                                                                 | error   |
 
-A missing `user` file is silently skipped; read or parse errors produce a
-`warning:` on stderr. A missing or invalid `--config` path is a hard error.
-
-An automatically discovered `$PWD/.skill-up.yaml` is ignored with a warning.
-After reviewing the file, select it with `--config ./.skill-up.yaml` to apply
-its defaults. This opt-in covers the whole file, including `runtime_kwargs`.
-Selecting a different explicit file does not trust the project file. A project
-file selected through `SKILL_UP_CONFIG` is also trusted as the user layer.
-Use an absolute path when setting `SKILL_UP_CONFIG` persistently: a relative
-path resolves from the working directory and can select a different file in
-each repository.
+Missing `user` and `project` files are skipped. Optional files that cannot be read or parsed produce a warning. A missing or invalid `--config` path is a hard error. Specify `--config` at most once. The XDG path is used only when `XDG_CONFIG_HOME` is absolute; otherwise discovery and the default `init` write target fall back to the home directory.
 
 Higher-precedence layers overlay non-zero fields onto lower layers; map fields
 (`telemetry.resource_attributes`, `env`, `runtime_kwargs`) are merged key-wise
@@ -74,41 +66,14 @@ Semantics:
   environment variable. Values are only applied **if the corresponding env var
   is not already set**, so a value on the command line or in your shell
   always wins.
-- **`${VAR}` placeholders** in `env` values from the `user` and `explicit`
-  layers are expanded from the process environment before defaults are applied.
-  Selecting a file grants it access to host environment variables, including
-  secrets, so review it before opting in. Unset variables remain literal;
-  variables set to an empty string expand to an empty string. Expansion is
-  single-pass and does not read other defaults from the same config. Bare
-  `$VAR` and shell expressions such as `${VAR:-fallback}` remain literal.
+- **`${VAR}` placeholders** expand only in `env` values supplied by the user or explicit layer, in one pass against the process environment before any defaults are applied. Unset references remain literal, and automatically discovered project values are never expanded.
 - **`runtime_kwargs`** — defaults for `run` keyed by `environment.type` (e.g.
   `opensandbox`). `eval.yaml` values take precedence; missing keys fall back
   here. Keys mirror the environment provider's kwargs schema.
 
-### Endpoint trust policy
+### Credential boundary
 
-Only trusted user or explicitly selected config files may provide defaults.
-An unselected project file cannot override a telemetry endpoint, inject a proxy
-or agent base URL through `env`, or redirect an OpenSandbox runtime through
-`runtime_kwargs`. This prevents it from redirecting credentials supplied by
-trusted config or the process environment, even when its values are literal.
-
-This is a breaking change for projects that relied on automatic `.skill-up.yaml`
-loading. Review the file and add `--config ./.skill-up.yaml` to each invocation,
-or move trusted defaults to the user-level config. Inspect destinations as well
-as credential references before opting in: an explicit file can combine its
-endpoint with credentials from user config or the shell.
-Trust applies to the selected path, not a saved copy of its contents. Review
-changes before reusing that path after a repository update. For stable local
-defaults, copy a reviewed file to user config with
-`skill-up init --config ./.skill-up.yaml` or keep it outside the repository.
-
-This boundary covers user-config discovery. `skill-up run` treats evaluation
-configuration as executable input, whether supplied as a path or discovered
-automatically. Its runtime and model endpoints can use credentials from user
-config or the shell; its script judges can execute code. Review the evaluation
-and its scripts before running it with credentials. This change does not add
-endpoint restrictions or sandboxing to evaluation configuration.
+Automatically discovered project files still supply defaults. Newly expanded OTLP headers are withheld when effective project settings can control the destination or transport. This protection applies only to headers produced by expansion; it does not change the treatment of literal headers, headers already in the process environment, or evaluation execution. Review any config before selecting it with `--config`, which trusts the file for expansion. For `init`, `--config` is only a copy source and is not used to supply defaults.
 
 ---
 
@@ -233,14 +198,8 @@ runtime_kwargs:
     base_url: http://sandbox.internal:9090
 ```
 
-After reviewing it, select the file for this run:
-
-```bash
-skill-up run ./evals/eval.yaml --config ./.skill-up.yaml
-```
-
-This adds an `opensandbox.base_url` default for this invocation. Without
-`--config`, the project file is ignored and user-level defaults still apply.
+This adds an `opensandbox.base_url` default for this project only — your
+`~/.config/skill-up/config.yaml` still applies elsewhere.
 
 ### One-off override on the command line
 
@@ -248,4 +207,4 @@ This adds an `opensandbox.base_url` default for this invocation. Without
 skill-up run ./evals/eval.yaml --config /tmp/debug-config.yaml
 ```
 
-`--config` overrides user-level defaults for this invocation.
+`--config` overrides both user and project layers for this invocation.

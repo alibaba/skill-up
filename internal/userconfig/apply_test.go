@@ -245,3 +245,59 @@ func TestApplyEnv_VerboseFalseExplicitDoesNotSetLogEnvs(t *testing.T) {
 		t.Errorf("verbose=false should not set %s, got %q", envOtelLogUserPrompts, v)
 	}
 }
+
+func TestApplyEnv_ExpandedOTLPHeaderRouting(t *testing.T) {
+	const (
+		generic    = "OTEL_EXPORTER_OTLP_HEADERS"
+		traces     = "OTEL_EXPORTER_OTLP_TRACES_HEADERS"
+		metrics    = "OTEL_EXPORTER_OTLP_METRICS_HEADERS"
+		logs       = "OTEL_EXPORTER_OTLP_LOGS_HEADERS"
+		endpoint   = "OTEL_EXPORTER_OTLP_ENDPOINT"
+		metricDest = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"
+		proxy      = "https_proxy"
+		fixture    = "SKILL_UP_TEST_HEADER_VALUE"
+	)
+	for _, tt := range []struct {
+		name       string
+		project    Config
+		explicit   Config
+		inherited  map[string]string
+		header     string
+		wantHeader string
+		wantSet    bool
+	}{
+		{name: "ordinary project config", project: Config{Env: map[string]string{"SKILL_UP_TEST_OTHER": "literal"}}, header: generic, wantHeader: "authorization=fixture", wantSet: true},
+		{name: "generic endpoint", project: Config{Env: map[string]string{endpoint: "https://project.invalid"}}, header: traces},
+		{name: "metrics endpoint", project: Config{Env: map[string]string{metricDest: "https://project.invalid"}}, header: metrics},
+		{name: "structured endpoint", project: Config{Telemetry: Telemetry{Traces: TracesConfig{Endpoint: "https://project.invalid"}}}, header: generic},
+		{name: "project proxy", project: Config{Env: map[string]string{proxy: "https://project.invalid"}}, header: logs},
+		{name: "trusted explicit wins", project: Config{Env: map[string]string{endpoint: "https://project.invalid"}}, explicit: Config{Env: map[string]string{endpoint: "https://trusted.invalid"}}, header: generic, wantHeader: "authorization=fixture", wantSet: true},
+		{name: "process overrides project endpoint", project: Config{Env: map[string]string{endpoint: "https://project.invalid"}}, inherited: map[string]string{endpoint: "https://trusted.invalid"}, header: generic, wantHeader: "authorization=fixture", wantSet: true},
+		{name: "process header untouched", project: Config{Env: map[string]string{endpoint: "https://project.invalid"}}, inherited: map[string]string{generic: "existing=literal"}, header: generic, wantHeader: "existing=literal", wantSet: true},
+		{name: "structured config wins over env", project: Config{Env: map[string]string{envOtelExporterOTLPTracesEndpt: "https://project.invalid"}}, explicit: Config{Telemetry: Telemetry{Traces: TracesConfig{Endpoint: "https://trusted.invalid"}}}, header: generic, wantHeader: "authorization=fixture", wantSet: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, key := range []string{generic, traces, metrics, logs, endpoint, metricDest, proxy,
+				envOtelExporterOTLPTracesEndpt, "SKILL_UP_TEST_OTHER"} {
+				t.Setenv(key, "")
+				if err := os.Unsetenv(key); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv(fixture, "fixture")
+			for key, value := range tt.inherited {
+				t.Setenv(key, value)
+			}
+			var cfg Config
+			cfg.overlay(Config{Env: map[string]string{tt.header: "authorization=${" + fixture + "}", "OTEL_EXPORTER_OTLP_COMPRESSION": "gzip"}}, sourceUser)
+			cfg.overlay(tt.project, sourceProject)
+			cfg.overlay(tt.explicit, sourceExplicit)
+			if _, err := ApplyEnv(cfg); err != nil {
+				t.Fatal(err)
+			}
+			if got, set := os.LookupEnv(tt.header); got != tt.wantHeader || set != tt.wantSet {
+				t.Errorf("header = %q, set=%t; want %q, set=%t", got, set, tt.wantHeader, tt.wantSet)
+			}
+		})
+	}
+}

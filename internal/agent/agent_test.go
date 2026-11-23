@@ -669,8 +669,15 @@ func (r *probeMergeTestRuntime) DownloadFile(context.Context, string, string) er
 	return nil
 }
 func (r *probeMergeTestRuntime) DownloadDir(context.Context, string, string) error { return nil }
-func (r *probeMergeTestRuntime) Workspace() string                                 { return r.workspace }
-func (r *probeMergeTestRuntime) RequiresProcessSandbox() bool                      { return false }
+func (r *probeMergeTestRuntime) Exists(context.Context, string) (bool, error) {
+	return false, runtime.ErrFileNotFound
+}
+
+func (r *probeMergeTestRuntime) ReadFile(context.Context, string) ([]byte, error) {
+	return nil, runtime.ErrFileNotFound
+}
+func (r *probeMergeTestRuntime) Workspace() string            { return r.workspace }
+func (r *probeMergeTestRuntime) RequiresProcessSandbox() bool { return false }
 func (r *probeMergeTestRuntime) Exec(_ context.Context, cmd string, _ ExecOptions) (ExecResult, error) {
 	r.probeCmd = cmd
 	return ExecResult{Stdout: r.probeStdout, ExitCode: r.probeExit}, r.probeErr

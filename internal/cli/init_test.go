@@ -173,3 +173,25 @@ func TestInit_ConfigSourceInvalid(t *testing.T) {
 		t.Fatal("expected error for invalid source")
 	}
 }
+
+func TestInit_DefaultTargetIgnoresRelativeXDG(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", "relative-xdg")
+	t.Chdir(t.TempDir())
+
+	cmd := newInitCmdForTest()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	want := filepath.Join(home, ".config", "skill-up", "config.yaml")
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("init did not write %s: %v", want, err)
+	}
+	if _, err := os.Stat("relative-xdg"); !os.IsNotExist(err) {
+		t.Fatalf("init unexpectedly used relative XDG (stat error: %v)", err)
+	}
+}

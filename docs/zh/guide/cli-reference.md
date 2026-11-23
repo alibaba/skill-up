@@ -35,7 +35,7 @@ skill-up run [path] [flags]
 | `--parallelism`       | 配置文件中的值                | 覆盖 `cases.parallelism`，用于临时调整用例并行数，取值范围为 1 到 256                                                                                       |
 | `--baseline`          | 配置文件中的值                | 为本次运行覆盖 `benchmark.enabled` 为 `true`                                                                                                                |
 | `--api-key`           | —                            | 传入 API Key（优先级高于环境变量）                                                                                                                          |
-| `--no-delete`         | `false`                      | 评测后保留由 skill-up 创建的 workspace 或容器，便于调试。                                                                                                   |
+| `--no-delete`         | `false`                      | 保留 workspace、容器和临时运行目录以便调试。启用 `agent_home: temporary` 时，保留的主目录可能包含凭据。 |
 | `--cleanup-sessions`  | `false`                      | 评测后同时删除 agent 为该 workspace 保存的会话目录。目前 `claude_code` 与 `qodercli` 支持：分别删除 `~/.claude/projects/<workspace-key>/` 与 `~/.qoder/projects/<workspace-key>/`（CN 版为 `~/.qoder-cn/projects/<workspace-key>/`）目录，包含会话记录与 memory。默认关闭，因为它会删除今天在评测后仍会保留的历史；显式的 `--cleanup-sessions=false` 会覆盖 `environment.cleanup_sessions: true`，`--no-delete` 优先级最高。 |
 | `-v, --verbose`       | `0`                          | 增加日志详细程度。默认输出 `info`；`-v`/`--verbose`/`--verbose=true` 输出 `debug`；`-vv`/`--verbose=2` 输出 `trace`；`--verbose=false` 关闭附加详细日志        |
 
@@ -285,15 +285,12 @@ skill-up init [flags]
 
 | Flag       | 默认值       | 说明                                                                                            |
 | :--------: | :----------: | :---------------------------------------------------------------------------------------------: |
-| `--local`  | `false`      | 写到 `$PWD/.skill-up.yaml`；审阅后，在后续命令中用 `--config ./.skill-up.yaml` 显式加载 |
+| `--local`  | `false`      | 写到 `$PWD/.skill-up.yaml` 而不是 XDG 路径                                                       |
 | `--config` | —            | **读取源**文件（先校验，再原样拷贝，注释保留）。未提供时写出带注释的模板                          |
 | `--print`  | `false`      | 输出到 stdout，而不是写盘                                                                        |
 | `--force`  | `false`      | 覆盖已存在的目标文件                                                                             |
 
-> 对 `init`，`--config` 指定要复制的源文件，不展开占位符。对其他子命令，它选择
-> 优先级最高的配置，启用全部默认值，并允许展开该文件 `env` 值中的 `${VAR}`。
-> 自动发现的 `.skill-up.yaml` 会被忽略。仅应使用 `--config` 选择可信文件；
-> 信任边界见[用户配置](./user-config.md#schema)。
+> `--config` 只能指定一次。对 `init`，它仅指定拷贝来源；对其他子命令，它选择可信任变量展开的显式配置层。见[凭据信任边界](./user-config.md#凭据信任边界)。相对路径的 `XDG_CONFIG_HOME` 不影响默认写入位置。
 
 ### 示例
 

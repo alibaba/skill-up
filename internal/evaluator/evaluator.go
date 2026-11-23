@@ -649,11 +649,17 @@ func (e *defaultEvaluator) evaluateCaseSession(
 	sessionResult *agent.SessionResult,
 	result *EvalResult,
 ) EvalResult {
+	plan, planErr := config.ResolveJudgePlan(e.evalCfg, caseCfg)
+	if planErr != nil {
+		result.Status, result.Error = judge.StatusError, planErr
+		return *result
+	}
 	judgeInput := judge.Input{
 		CaseID:         caseCfg.ID,
 		FinalMessage:   result.FinalMessage,
 		ExitCode:       result.ExitCode,
 		WorkspacePath:  rt.Workspace(),
+		Files:          rt,
 		SkillDir:       e.skillDir,
 		TurnsExecuted:  result.Turns,
 		TurnsTotal:     turnsTotal,
@@ -663,21 +669,35 @@ func (e *defaultEvaluator) evaluateCaseSession(
 		SessionResult:  sessionResult,
 		TurnResults:    toJudgeTurnResults(result.TurnResults),
 	}
-	plan, planErr := config.ResolveJudgePlan(e.evalCfg, caseCfg)
-	if planErr != nil {
-		result.Status, result.Error = judge.StatusError, planErr
-		return *result
-	}
 
 	if failed := e.runExpectPreCheck(ctx, caseCfg, configName, judgeCfg, judgeInput, result); failed {
 		recordSkippedJudges(result, plan, "gate_failed")
 		if plan.Multi {
 			result.Grading, _ = judge.DefaultOutcomeAggregator().Aggregate(result.JudgeResults, result.Turns, turnsTotal)
-			result.Grading.Status = judge.StatusFail
+			if result.Status == judge.StatusError {
+				result.Grading.Status = judge.StatusError
+			} else {
+				result.Grading.Status = judge.StatusFail
+			}
 		}
 		return *result
 	}
 
+	return e.runConfiguredJudges(ctx, rt, caseCfg, configName, plan, judgeCfg, turnsTotal, runAgent, judgeInput, result)
+}
+
+func (e *defaultEvaluator) runConfiguredJudges(
+	ctx context.Context,
+	rt runtime.Runtime,
+	caseCfg *config.CaseConfig,
+	configName string,
+	plan config.JudgePlan,
+	judgeCfg config.JudgeConfig,
+	turnsTotal int,
+	runAgent agent.Agent,
+	judgeInput judge.Input,
+	result *EvalResult,
+) EvalResult {
 	var expectAssertions []judge.AssertionResult
 	if result.ExpectResult != nil {
 		expectAssertions = result.ExpectResult.ToAssertionResults()
@@ -718,8 +738,14 @@ func (e *defaultEvaluator) runExpectPreCheck(
 		return false
 	}
 
-	expectResult := judge.CheckExpect(expectCfg, judgeInput)
+	expectResult := judge.CheckExpectContext(ctx, expectCfg, judgeInput)
 	result.ExpectResult = expectResult
+	if expectResult.Error != nil {
+		result.Status = judge.StatusError
+		result.Error = errors.New(*expectResult.Error)
+		result.Configuration = configName
+		return true
+	}
 	if expectResult.Passed {
 		return false
 	}
@@ -1341,6 +1367,10 @@ func (e *defaultEvaluator) prepareRuntimeForCase(ctx context.Context, caseCfg *c
 		_ = rt.Close()
 		return nil, agent.RuntimeObservation{}, fmt.Errorf("failed to create runtime workspace: %w", err)
 	}
+	if err := e.checkIsolatedHomeAgents(ctx, rt, caseCfg, ag); err != nil {
+		_ = rt.Close()
+		return nil, agent.RuntimeObservation{}, err
+	}
 	observation, err := e.setupCaseEnvironment(ctx, rt, caseCfg, configName, ag, mcpCfg)
 	if err != nil {
 		agent.ReleaseRuntime(ag, rt)
@@ -1389,6 +1419,32 @@ func (e *defaultEvaluator) setupCaseEnvironment(ctx context.Context, rt runtime.
 	}
 
 	return observation, nil
+}
+
+func (e *defaultEvaluator) checkIsolatedHomeAgents(ctx context.Context, rt runtime.Runtime, c *config.CaseConfig, ag agent.Agent) error {
+	if e.evalCfg.Environment.AgentHome != runtime.AgentHomeTemporary {
+		return nil
+	}
+	if err := agent.CheckIsolatedHome(ctx, rt, ag); err != nil {
+		return err
+	}
+	plan, err := config.ResolveJudgePlan(e.evalCfg, c)
+	if err != nil {
+		return err
+	}
+	for _, member := range plan.Judges {
+		if member.Type != judgeTypeAgentJudge {
+			continue
+		}
+		judgeAgent, err := e.resolveJudgeAgent(ctx, member, ag)
+		if err != nil {
+			return err
+		}
+		if err := agent.CheckIsolatedHome(ctx, rt, judgeAgent); err != nil {
+			return fmt.Errorf("judge %q: %w", member.ID, err)
+		}
+	}
+	return nil
 }
 
 // withJudgeSkillInstallNames returns judgeCfg with each judge Skill's default

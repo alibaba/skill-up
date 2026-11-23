@@ -502,6 +502,55 @@ Rules and constraints:
 
 > **Tip:** if your Skill does not touch the filesystem, `none` avoids sandbox provisioning and is significantly faster.
 
+#### Local agent home
+
+Automatic local workspaces use `<system temp>/skill-up-*/workspace/`, with a
+temporary run directory as their parent. `environment.agent_home` selects how
+agent home settings are handled:
+
+- `inherited` (default): keep the inherited home settings.
+- `temporary`: use the run directory as a separate home for each case, benchmark
+  arm and retry. This mode supports API-key-authenticated Claude Code and Codex runs.
+
+Both modes use the same workspace layout, so switching modes does not change the
+meaning of `..`. An explicit `--workspace` stays at the supplied path in both modes;
+`temporary` gives it a separate temporary home.
+
+```yaml
+environment:
+  type: none
+  agent_home: temporary
+```
+
+In `temporary` mode, `HOME`, `USERPROFILE` and `CODEX_HOME` point to the temporary
+root, so Codex's `auth.json` and `sessions/` stay outside workspace artifacts and
+diffs. Session transcripts are collected from `$CODEX_HOME/sessions`.
+
+`CLAUDE_CONFIG_DIR`, XDG directories and Windows application-data directories
+also live under the temporary home. These settings apply to setup steps, resumed
+turns and judges. Environment overrides cannot redirect those paths back to a personal
+home. Non-interactive shell startup files (`BASH_ENV` and `ENV`) are disabled.
+The existing executable search path and other environment variables are retained.
+Setup steps cannot rely on personal Git or package-manager configuration in this
+home; supply required settings through setup commands or `environment.env`.
+
+This initial mode requires explicit API credentials: `ANTHROPIC_API_KEY` or
+`ANTHROPIC_AUTH_TOKEN` for Claude Code, and `OPENAI_API_KEY` for Codex. The normal
+skill-up credential configuration can supply them too. Codex initializes its
+API-key login through stdin inside the temporary home before each invocation.
+Personal login files and OS-keychain logins are not copied. Missing credentials
+and unsupported run or judge engines fail before setup or agent execution.
+
+In both modes, the whole temporary run directory is deleted when the case runtime
+closes. With an explicit `--workspace`, the workspace is preserved and only a
+temporary home, if requested, is deleted. `--no-delete` preserves the temporary
+tree; temporary home locations are logged during setup.
+Treat a preserved home as sensitive because Codex may store the supplied key there.
+This isolates conventional user configuration and state, not filesystem access:
+workspace instructions, system-wide configuration and other inherited environment
+variables remain available. Use a container for process isolation. Docker and
+OpenSandbox reject `agent_home: temporary`.
+
 #### Session cleanup
 
 An evaluation deletes its workspace, but an agent CLI may keep per-workspace state outside it. Claude Code writes a project directory under `~/.claude/projects/<workspace-key>/` with the session transcript and a `memory/` folder, and qodercli writes `~/.qoder/projects/<workspace-key>/` (or `~/.qoder-cn/` for the CN edition) with the transcript, sub-agent transcripts under `<sessionID>/subagents/`, and `*-session.json` metadata, so repeated runs add up in the user's own session history.
@@ -543,6 +592,8 @@ The scripts must already exist in the selected runtime; case fixtures are upload
 #### OpenSandbox configuration
 
 When `environment.type: opensandbox` is used, sandbox auth is read from the `OPENSANDBOX_API_KEY` environment variable. Non-secret options such as service URL or extension flags belong in `environment.kwargs`. The Agent runtime handles its own binary path; you usually do **not** need to set `PATH` inside the eval config.
+
+> **Known limitation:** OpenSandbox workspace file checks (`Exists` and `ReadFile`) reject paths containing `$` because the service expands environment variables in file paths. A literal filename such as `report-$VERSION.txt` therefore returns an error on OpenSandbox. This is tracked upstream at <https://github.com/opensandbox-group/OpenSandbox/issues/2960>.
 
 ```yaml
 environment:

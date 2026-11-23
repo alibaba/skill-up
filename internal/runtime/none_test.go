@@ -63,6 +63,28 @@ func TestNoneRuntime_CreateAndClose(t *testing.T) {
 	}
 }
 
+func TestNoneRuntimeDefaultWorkspaceParent(t *testing.T) {
+	rt := &NoneRuntime{cfg: Config{Delete: true}}
+	if err := rt.Create(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+	workspace := rt.Workspace()
+	if filepath.Base(workspace) != "workspace" {
+		t.Fatalf("workspace = %q, want a workspace/ child of the temporary run directory", workspace)
+	}
+	parent := filepath.Dir(workspace)
+	if err := os.WriteFile(filepath.Join(parent, "run-state"), []byte("state"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(parent); !os.IsNotExist(err) {
+		t.Fatalf("run directory after Close = %v, want removed", err)
+	}
+}
+
 func TestNoneRuntime_ExistingWorkspaceIsReusedAndPreserved(t *testing.T) {
 	t.Parallel()
 

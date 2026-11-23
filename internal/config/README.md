@@ -42,6 +42,7 @@ The defaults as of the embedded `defaults.yaml`:
 |-------|--------------|
 | `schema_version` | `v1alpha1` |
 | `environment.type` | `none` |
+| `environment.agent_home` | `inherited` |
 | `environment.workspace_mount` | `/workspace` |
 | `engine.name` | `claude_code` |
 | `engine.model` | *(empty — no default provider or model name)* |

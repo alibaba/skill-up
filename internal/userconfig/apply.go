@@ -26,25 +26,51 @@ const (
 // environment, only setting keys that are currently unset. It returns the list
 // of keys that were actually applied (sorted) for logging and debugging.
 // Only env values from the user or explicit discovery layer expand ${VAR}.
+// Newly expanded OTLP headers are withheld if project defaults supply routing.
 func ApplyEnv(c Config) ([]string, error) {
 	pending := telemetryEnv(c.Telemetry)
-	for k, v := range c.Env {
-		if v == "" {
+	projectRoute := false
+	for key, source := range map[string]string{
+		envOtelExporterOTLPTracesEndpt: c.tracesEndpointSource,
+		envOtelExporterOTLPTracesProto: c.tracesProtocolSource,
+	} {
+		if _, exists := os.LookupEnv(key); !exists && source == sourceProject && pending[key] != "" {
+			projectRoute = true
+		}
+	}
+	for key, value := range c.Env {
+		if _, exists := os.LookupEnv(key); exists || value == "" {
 			continue
 		}
-		if _, exists := pending[k]; !exists {
-			if source := c.envSources[k]; source == sourceUser || source == sourceExplicit {
-				// Resolve before setting any defaults, so config entries cannot
-				// become expansion sources based on map or key ordering.
-				v = envPlaceholderPattern.ReplaceAllStringFunc(v, func(ref string) string {
-					if value, exists := os.LookupEnv(ref[2 : len(ref)-1]); exists {
-						return value
-					}
-					return ref
-				})
-			}
-			pending[k] = v
+		if _, exists := pending[key]; !exists && c.envSources[key] == sourceProject && isOTLPRouteDefault(key) {
+			projectRoute = true
 		}
+	}
+	for key, value := range c.Env {
+		if _, exists := os.LookupEnv(key); exists || value == "" {
+			continue
+		}
+		if _, exists := pending[key]; exists {
+			continue
+		}
+		if source := c.envSources[key]; source == sourceUser || source == sourceExplicit {
+			// Resolve before setting any defaults, so config entries cannot
+			// become expansion sources based on map or key ordering.
+			expanded := false
+			value = envPlaceholderPattern.ReplaceAllStringFunc(value, func(ref string) string {
+				if replacement, exists := os.LookupEnv(ref[2 : len(ref)-1]); exists {
+					expanded = true
+					return replacement
+				}
+				return ref
+			})
+			// Keep project routing and pre-existing headers intact, but do
+			// not add credentials derived by this new expansion to it.
+			if expanded && projectRoute && isOTLPHeaderDefault(key) {
+				continue
+			}
+		}
+		pending[key] = value
 	}
 
 	keys := make([]string, 0, len(pending))
@@ -64,6 +90,30 @@ func ApplyEnv(c Config) ([]string, error) {
 		applied = append(applied, k)
 	}
 	return applied, nil
+}
+
+// A generic OTLP header can reach more than one signal's exporter. Treat
+// unshadowed project routing keys conservatively rather than depending on
+// every exporter or child agent to resolve endpoint precedence identically.
+func isOTLPRouteDefault(key string) bool {
+	key = strings.ToUpper(key)
+	switch key {
+	case "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "GRPC_PROXY", "NO_GRPC_PROXY", "REQUEST_METHOD":
+		return true
+	}
+	return strings.HasPrefix(key, "OTEL_EXPORTER_OTLP_") &&
+		(strings.HasSuffix(key, "_ENDPOINT") || strings.HasSuffix(key, "_PROTOCOL") ||
+			strings.HasSuffix(key, "_INSECURE") || strings.HasSuffix(key, "_CERTIFICATE"))
+}
+
+func isOTLPHeaderDefault(key string) bool {
+	switch strings.ToUpper(key) {
+	case "OTEL_EXPORTER_OTLP_HEADERS", "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+		"OTEL_EXPORTER_OTLP_METRICS_HEADERS", "OTEL_EXPORTER_OTLP_LOGS_HEADERS":
+		return true
+	default:
+		return false
+	}
 }
 
 func telemetryEnv(t Telemetry) map[string]string {

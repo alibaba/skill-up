@@ -337,6 +337,14 @@ func (r *qwenTestRuntime) UploadFile(context.Context, string, string) error   { 
 func (r *qwenTestRuntime) UploadDir(context.Context, string, string) error    { return nil }
 func (r *qwenTestRuntime) DownloadFile(context.Context, string, string) error { return nil }
 func (r *qwenTestRuntime) DownloadDir(context.Context, string, string) error  { return nil }
+func (r *qwenTestRuntime) Exists(context.Context, string) (bool, error) {
+	return false, runtime.ErrFileNotFound
+}
+
+func (r *qwenTestRuntime) ReadFile(context.Context, string) ([]byte, error) {
+	return nil, runtime.ErrFileNotFound
+}
+
 func (r *qwenTestRuntime) Exec(_ context.Context, command string, opts runtime.ExecOptions) (runtime.ExecResult, error) {
 	if command == qwenCodeExecPathProbeCmd {
 		stdout := r.probeResponseStdout

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,17 +26,17 @@ reads that file (validating it as a skill-up config) and writes its raw
 contents to the target, preserving comments and formatting.
 
 Target selection:
-  default        $XDG_CONFIG_HOME/skill-up/config.yaml (or ~/.config/...)
+  default        absolute $XDG_CONFIG_HOME/skill-up/config.yaml (or ~/.config/...)
   --local        $PWD/.skill-up.yaml
   --print        stdout (no file written)
 
-Project files are not loaded automatically. After reviewing a local file,
-select it on subsequent commands with --config ./.skill-up.yaml.`,
+Project defaults are loaded automatically. To enable environment expansion in
+a project file after reviewing it, select it explicitly with --config ./.skill-up.yaml.`,
 	RunE: runInit,
 }
 
 func init() {
-	initCmd.Flags().Bool("local", false, "Write $PWD/.skill-up.yaml (requires --config to apply on subsequent commands)")
+	initCmd.Flags().Bool("local", false, "Write $PWD/.skill-up.yaml (loaded automatically as project defaults)")
 	initCmd.Flags().Bool("print", false, "Print to stdout instead of writing to disk")
 	initCmd.Flags().Bool("force", false, "Overwrite an existing file")
 	rootCmd.AddCommand(initCmd)
@@ -78,7 +79,7 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "wrote %s\n", target)
 	if local {
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "After reviewing this file, select it on subsequent commands with --config ./.skill-up.yaml")
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Project defaults load automatically. After reviewing this file, use --config ./.skill-up.yaml to enable env expansion.")
 	}
 	return nil
 }
@@ -110,18 +111,13 @@ func resolveProjectConfigTarget() (string, error) {
 	return filepath.Join(wd, userconfig.ProjectConfigFile), nil
 }
 
-// resolveUserConfigTarget returns the XDG-aware user config path
-// ($XDG_CONFIG_HOME/skill-up/config.yaml, falling back to
-// ~/.config/skill-up/config.yaml).
+// resolveUserConfigTarget uses the same absolute-XDG rule as config discovery.
 func resolveUserConfigTarget() (string, error) {
-	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, userconfig.UserConfigDir, userconfig.UserConfigFile), nil
+	target := userconfig.DefaultConfigPath("", os.Getenv)
+	if target == "" {
+		return "", errors.New("cannot determine the default user config path: home directory unavailable")
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".config", userconfig.UserConfigDir, userconfig.UserConfigFile), nil
+	return target, nil
 }
 
 // initTemplateContent is the commented YAML template used by `init` when no
@@ -129,8 +125,8 @@ func resolveUserConfigTarget() (string, error) {
 // default behavior is a no-op.
 const initTemplateContent = `# skill-up user config -- auto-loaded by every command.
 # Discovery order (lowest to highest precedence):
-#   embedded defaults < ~/.config/skill-up/config.yaml < --config
-# Project files apply only when explicitly selected with --config or SKILL_UP_CONFIG.
+#   embedded defaults < user config < .skill-up.yaml < --config
+# User config uses SKILL_UP_CONFIG, absolute XDG_CONFIG_HOME, or ~/.config.
 # Use ` + "`skill-up init --print`" + ` to regenerate this template.
 
 schema_version: v1alpha1
@@ -164,7 +160,7 @@ telemetry:
 
 # Arbitrary additional env vars. Same only-if-unset semantics as telemetry.
 # ${VAR} expands only in user-level or explicitly selected (--config) files.
-# Project files require --config ./.skill-up.yaml to apply any defaults.
+# Automatically loaded project env values remain literal.
 # env:
 #   OTEL_EXPORTER_OTLP_HEADERS: authorization=${OTLP_TOKEN}
 
