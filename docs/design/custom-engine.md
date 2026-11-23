@@ -590,6 +590,11 @@ The adapter (a ~100-line Node script, attached to GitHub issue #377) reads the
 inside the runtime workspace, so ship it with the skill or copy it in first):
 
 ```yaml
+environment:
+  # `yolo` removes ZCode's approval prompts, so it needs an isolating runtime.
+  # `none` runs ZCode on your host with your privileges.
+  type: docker
+  image: node:22
 engine:
   name: zcode
   custom:
@@ -601,7 +606,7 @@ engine:
       ZCODE_CLI: ${ZCODE_CLI}
       ZCODE_MODE: ${kwargs.mode}
     kwargs:
-      mode: yolo  # needs an isolating runtime; see the notes below
+      mode: yolo  # needs the isolating runtime above; see the notes below
     local:
       command: node
       args:
@@ -638,8 +643,10 @@ Three behaviours are worth knowing before copying it:
   and model through a separate configuration file
   (`ZCODE_PERSONAL_PROVIDER_CONFIG_FILE`), which says nothing about a `--model`
   flag or subscription-account models. Scope per-case model selection to the
-  version you run; if your build documents a model flag, pass it through
-  `args` and the `${model}` template applies as with any other CLI.
+  version you run. If your build documents a model flag, the wrapper has to
+  parse the option and forward it itself: `local.args` only hands the value to
+  the wrapper, and the reference adapter does not pass arbitrary options
+  through to ZCode.
 
 ## HTTP transport
 
