@@ -75,11 +75,28 @@ def message_texts(obj, out, role=None):
             message_texts(value, out, role)
 
 
+def is_error_event(obj) -> bool:
+    """Whether a transcript record reports that the run itself failed.
+
+    The engines report that in their own shape, and the adapters already read
+    these two: OpenCode writes a `type: "error"` event, and the Claude Code
+    stream ends with a `result` event flagged `is_error`. A failed run never
+    reached the Skill evidence it did not show, so a signal it did not produce
+    is unknown rather than absent.
+    """
+    if not isinstance(obj, dict):
+        return False
+    if obj.get("type") == "error":
+        return True
+    return obj.get("type") == "result" and obj.get("is_error") is True
+
+
 def summarize_transcript(path: Path) -> dict:
     calls: list[tuple[str, str]] = []
     texts: list[tuple[str | None, str]] = []
     records = 0
     unparseable = 0
+    failed = False
     for line in path.read_text(errors="replace").splitlines():
         if not line.strip():
             continue
@@ -93,6 +110,8 @@ def summarize_transcript(path: Path) -> dict:
         # make the transcript look complete.
         if isinstance(event, (dict, list)):
             records += 1
+        if is_error_event(event):
+            failed = True
         tool_calls(event, calls)
         message_texts(event, texts)
 
@@ -116,12 +135,19 @@ def summarize_transcript(path: Path) -> dict:
             "markers": [],
             "catalog_injected": None,
         }
-    # A line that did not decode can hold the evidence that was in it, so an
-    # unobserved signal in a truncated transcript is unknown, not absent.
-    unknown = None if unparseable else False
+    # A line that did not decode can hold the evidence that was in it, and a
+    # run that failed never reached the evidence it did not show: in both
+    # cases an unobserved signal is unknown, not absent.
+    unknown = None if (unparseable or failed) else False
+    if failed:
+        state = "failed"
+    elif unparseable:
+        state = "incomplete"
+    else:
+        state = "present"
     return {
         "events": len(texts),
-        "state": "incomplete" if unparseable else "present",
+        "state": state,
         "skill_tool_calls": skill_calls,
         "skill_file_referenced": skill_file_referenced if skill_file_referenced else unknown,
         "markers": markers,

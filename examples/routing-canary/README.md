@@ -86,6 +86,11 @@ not show stay unknown (`-`), because the truncated part can hold them. The
 `skill file reference` column is
 deliberately weaker than "read": a directory listing or a failed `cat` also
 contains `SKILL.md`.
+A transcript that reports the run itself failed — OpenCode's `error` event, or
+the Claude Code stream's `result` event flagged `is_error` — is reported as
+`transcript failed`: the run never reached the evidence it did not show, so
+those signals stay unknown (`-`), and the evidence it produced before it
+failed is kept.
 
 The versions used for the investigation were:
 

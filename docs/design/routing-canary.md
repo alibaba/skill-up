@@ -205,7 +205,7 @@ be mistaken for "no activation":
 | --- | --- |
 | `execution` | Case status from the iteration `result.json` (`PASS`/`FAIL`/`ERROR`), independent of transcript availability |
 | `graded` | Grading outcome from the case `grading.json` |
-| `transcript` | `present`, `incomplete`, `empty`, `unparseable` or `missing` |
+| `transcript` | `present`, `failed`, `incomplete`, `empty`, `unparseable` or `missing` |
 | `skill tool call` | Tool names in the transcript that look like a Skill tool (e.g. Claude Code's `Skill`) |
 | `skill file reference` | A tool-call payload contains `SKILL.md`. A listing or failed read also matches, so this is a reference, not a confirmed read |
 | `markers` | Canary marker files referenced by a call |
@@ -217,6 +217,12 @@ Skill evidence. A line that did not decode makes the transcript `incomplete`:
 the evidence the readable events show is kept, and the signals those events do
 not show are reported as unknown (`-`), because the truncated part can hold
 them.
+
+A transcript that reports the run itself failed — OpenCode's `error` event, or
+the Claude Code stream's `result` event flagged `is_error` — is reported as
+`failed`: the run never reached the Skill evidence it did not show, so those
+signals are unknown (`-`) like the ones a truncated transcript cannot settle,
+and the evidence the run did produce before it failed is kept.
 
 ## Confounders found while measuring
 

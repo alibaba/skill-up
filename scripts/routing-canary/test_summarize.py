@@ -219,6 +219,61 @@ class SummarizeFixtureTest(unittest.TestCase):
         self.assertEqual(cells[6], "yes", "the observed SKILL.md reference must be preserved")
         self.assertEqual(cells[8], "-", "an unobserved catalog in a truncated transcript is unknown")
 
+    def test_opencode_error_event_reports_a_failed_run(self) -> None:
+        """The adapter fails the run on this event, so the run says nothing about the Skill."""
+        write_json(self.iteration / "result.json", {"case_results": [{"case_id": "relevant", "status": "ERROR"}]})
+        run_dir = self.iteration / "relevant/with_skill/outputs/agent/run"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        # The fixture of `TestOpenCodeErrorEventFailsEvenWithAssistantText` in
+        # internal/agent/opencode_test.go: a text event, then the error event
+        # the adapter fails the run on. Both lines are valid JSON, so the
+        # transcript is readable — it is the run that failed.
+        (run_dir / "run.jsonl").write_text(
+            "\n".join(
+                [
+                    json.dumps({"type": "text", "sessionID": "ses_123", "part": {"text": "working"}}),
+                    json.dumps(
+                        {
+                            "type": "error",
+                            "sessionID": "ses_123",
+                            "error": {"name": "APIError", "data": {"message": "provider unavailable"}},
+                        }
+                    ),
+                ]
+            )
+            + "\n"
+        )
+
+        text = render(self.root)
+        cells = [cell.strip() for cell in row(text, "relevant").strip().strip("|").split("|")]
+        self.assertEqual(cells[2], "ERROR", "the execution status comes from result.json")
+        self.assertEqual(cells[4], "failed", "a transcript that reports the failure is not a present run")
+        self.assertEqual(cells[5], "-", "no Skill tool call was observed")
+        self.assertEqual(cells[6], "-", "an unobserved SKILL.md reference is unknown")
+        self.assertEqual(cells[8], "-", "an unobserved catalog is unknown")
+
+    def test_evidence_observed_before_the_error_is_preserved(self) -> None:
+        """A failed run still shows what it did before it failed."""
+        write_json(self.iteration / "result.json", {"case_results": [{"case_id": "relevant", "status": "ERROR"}]})
+        write_transcript(
+            self.iteration / "relevant",
+            [
+                {"type": "tool_use", "name": "Skill", "input": {"command": "cat .claude/skills/skill/SKILL.md"}},
+                {
+                    "type": "error",
+                    "sessionID": "ses_123",
+                    "error": {"name": "APIError", "data": {"message": "provider unavailable"}},
+                },
+            ],
+        )
+
+        text = render(self.root)
+        cells = [cell.strip() for cell in row(text, "relevant").strip().strip("|").split("|")]
+        self.assertEqual(cells[4], "failed", "the run failed")
+        self.assertEqual(cells[5], "Skill", "the Skill call observed before the error must be preserved")
+        self.assertEqual(cells[6], "yes", "the SKILL.md reference observed before the error must be preserved")
+        self.assertEqual(cells[8], "-", "an unobserved catalog in a failed run is unknown")
+
     def test_transcript_without_result_json_still_renders(self) -> None:
         write_transcript(
             self.iteration / "unrelated",
