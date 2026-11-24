@@ -183,6 +183,42 @@ class SummarizeFixtureTest(unittest.TestCase):
         self.assertEqual(cells[6], "-", "skill file reference must be unknown without a record")
         self.assertEqual(cells[8], "-", "catalog must be unknown without a record")
 
+    def test_transcript_of_null_lines_reports_unknown_evidence(self) -> None:
+        """`null` decodes, but it is not a record, so the evidence stays unknown."""
+        write_json(self.iteration / "result.json", {"case_results": [{"case_id": "relevant", "status": "ERROR"}]})
+        run_dir = self.iteration / "relevant/with_skill/outputs/agent/run"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "run.jsonl").write_text("null\nnull\n")
+
+        text = render(self.root)
+        cells = [cell.strip() for cell in row(text, "relevant").strip().strip("|").split("|")]
+        self.assertEqual(cells[4], "empty", "a transcript of null lines holds no usable record")
+        self.assertEqual(cells[6], "-", "skill file reference must be unknown without a record")
+        self.assertEqual(cells[8], "-", "catalog must be unknown without a record")
+
+    def test_truncated_transcript_keeps_positive_evidence_and_marks_the_rest_unknown(self) -> None:
+        """A line that did not decode can hold the evidence, so it is unknown, not absent."""
+        write_json(self.iteration / "result.json", {"case_results": [{"case_id": "relevant", "status": "PASS"}]})
+        run_dir = self.iteration / "relevant/with_skill/outputs/agent/run"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "run.jsonl").write_text(
+            json.dumps(
+                {
+                    "type": "tool_use",
+                    "name": "Skill",
+                    "input": {"command": "cat .claude/skills/skill/SKILL.md"},
+                }
+            )
+            + '\n{"type": "tool_use", "name": "Bash", "input": {"cmd'
+        )
+
+        text = render(self.root)
+        cells = [cell.strip() for cell in row(text, "relevant").strip().strip("|").split("|")]
+        self.assertEqual(cells[4], "incomplete", "a truncated transcript must not be reported as present")
+        self.assertEqual(cells[5], "Skill", "the observed Skill tool call must be preserved")
+        self.assertEqual(cells[6], "yes", "the observed SKILL.md reference must be preserved")
+        self.assertEqual(cells[8], "-", "an unobserved catalog in a truncated transcript is unknown")
+
     def test_transcript_without_result_json_still_renders(self) -> None:
         write_transcript(
             self.iteration / "unrelated",

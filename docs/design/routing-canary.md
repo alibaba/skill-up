@@ -205,11 +205,18 @@ be mistaken for "no activation":
 | --- | --- |
 | `execution` | Case status from the iteration `result.json` (`PASS`/`FAIL`/`ERROR`), independent of transcript availability |
 | `graded` | Grading outcome from the case `grading.json` |
-| `transcript` | `present` or `missing` |
+| `transcript` | `present`, `incomplete`, `empty`, `unparseable` or `missing` |
 | `skill tool call` | Tool names in the transcript that look like a Skill tool (e.g. Claude Code's `Skill`) |
 | `skill file reference` | A tool-call payload contains `SKILL.md`. A listing or failed read also matches, so this is a reference, not a confirmed read |
 | `markers` | Canary marker files referenced by a call |
 | `catalog` | The injected `<skills_instructions>` catalog is present, detected only in a `system`/`developer` message (Codex injects it as a developer message); assistant text that merely mentions "available skills" does not count |
+
+Only a JSON object or an array counts as a record, so a transcript of `null`
+lines holds no record and is reported as `empty` instead of as a run without
+Skill evidence. A line that did not decode makes the transcript `incomplete`:
+the evidence the readable events show is kept, and the signals those events do
+not show are reported as unknown (`-`), because the truncated part can hold
+them.
 
 ## Confounders found while measuring
 

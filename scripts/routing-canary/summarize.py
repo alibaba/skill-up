@@ -88,7 +88,11 @@ def summarize_transcript(path: Path) -> dict:
         except json.JSONDecodeError:
             unparseable += 1
             continue
-        records += 1
+        # Only a JSON object or an array is a record. A line that decodes to
+        # `null` or to a scalar carries nothing about the run, so it must not
+        # make the transcript look complete.
+        if isinstance(event, (dict, list)):
+            records += 1
         tool_calls(event, calls)
         message_texts(event, texts)
 
@@ -112,13 +116,16 @@ def summarize_transcript(path: Path) -> dict:
             "markers": [],
             "catalog_injected": None,
         }
+    # A line that did not decode can hold the evidence that was in it, so an
+    # unobserved signal in a truncated transcript is unknown, not absent.
+    unknown = None if unparseable else False
     return {
         "events": len(texts),
-        "state": "present",
+        "state": "incomplete" if unparseable else "present",
         "skill_tool_calls": skill_calls,
-        "skill_file_referenced": skill_file_referenced,
+        "skill_file_referenced": skill_file_referenced if skill_file_referenced else unknown,
         "markers": markers,
-        "catalog_injected": catalog,
+        "catalog_injected": catalog if catalog else unknown,
     }
 
 
