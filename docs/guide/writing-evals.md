@@ -1199,10 +1199,16 @@ using a native provider name with another protocol must explicitly configure tha
 protocol's endpoint in `credentials.yaml`.
 
 Each `agent_judge` result names the agent that graded the case in its
-`judge_context`: `engine`, `provider` and `model` as skill-up applied them, plus
-`observed_model` when the engine reports the model it actually used. Check it
-before trusting a score: a judge that runs the evaluated agent's own model grades
-its own output and tends to favor it.
+`judge_context`: the `engine`, plus the `provider` and `model` that skill-up
+forwarded to it. A value skill-up did not forward is omitted rather than filled
+in from the request: a Codex judge given a model override without a provider
+override is written with `model` and no `provider`, because Codex's local
+configuration picks the route. `observed_model` appears only when the adapter
+captures a model reported by the engine itself, and not every adapter does. When
+it is absent, the model that actually ran is unknown; that does not mean it
+differs from the evaluated agent's. Check `judge_context` before trusting a
+score: a judge that runs the evaluated agent's own model grades its own output
+and tends to favor it.
 
 For a singular case-level `judge`, an explicit `engine` replaces the entire eval
 judge engine; an explicit legacy `model` selects the legacy mode. If neither is

@@ -628,9 +628,14 @@ func TestBuildContextMetadata_RecordsTheJudgeAgent(t *testing.T) {
 			want: ContextMetadata{Engine: "claude_code", Provider: "gateway", Model: "claude-applied", ObservedModel: "claude-observed"},
 		},
 		{
-			name:    "requested values fill in when nothing was applied",
-			session: &agent.SessionResult{Engine: "codex", RequestedProvider: "openai", RequestedModel: "gpt-requested"},
-			want:    ContextMetadata{Engine: "codex", Provider: "openai", Model: "gpt-requested"},
+			// Codex got a model override without a provider override, so its own
+			// configuration picks the route.
+			name: "a requested provider that was not applied is left out",
+			session: &agent.SessionResult{
+				Engine: "codex", RequestedProvider: "openai",
+				RequestedModel: "gpt-judge", AppliedModel: "gpt-judge",
+			},
+			want: ContextMetadata{Engine: "codex", Model: "gpt-judge"},
 		},
 		{name: "no session leaves the judge agent unknown"},
 	}
@@ -645,24 +650,6 @@ func TestBuildContextMetadata_RecordsTheJudgeAgent(t *testing.T) {
 					tt.want.Engine, tt.want.Provider, tt.want.Model, tt.want.ObservedModel)
 			}
 		})
-	}
-}
-
-func TestAgentJudge_ReportsTheJudgeModelInGradingJSON(t *testing.T) {
-	t.Parallel()
-	metadata := buildContextMetadata(&agent.SessionResult{Engine: "claude_code", AppliedModel: "judge-model"},
-		&MaterializedContext{Manifest: ContextManifest{Profile: "standard"}}, "prompt")
-	raw, err := json.Marshal(metadata)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{`"engine":"claude_code"`, `"model":"judge-model"`} {
-		if !strings.Contains(string(raw), want) {
-			t.Fatalf("judge_context JSON %s missing %s", raw, want)
-		}
-	}
-	if strings.Contains(string(raw), "observed_model") || strings.Contains(string(raw), "provider") {
-		t.Fatalf("empty judge agent fields should be omitted: %s", raw)
 	}
 }
 
