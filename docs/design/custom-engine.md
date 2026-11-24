@@ -587,14 +587,41 @@ for stateful turns, `--cwd <dir>`, `--mode <build|edit|plan|yolo|guarded>`, and
 The adapter (a ~100-line Node script, attached to GitHub issue #377) reads the
 `SessionInput`, spawns ZCode with those flags, parses the JSON reply, and writes the
 `SessionResult`. The engine config stays declarative (the adapter path resolves
-inside the runtime workspace, so ship it with the skill or copy it in first):
+inside the runtime workspace, so ship it with the skill or copy it in first).
+
+The Docker runtime below needs two things the stock `node:22` image does not
+provide:
+
+- **A ZCode build inside the image.** The adapter starts ZCode with `node`, so
+  the image needs the ZCode bundle and whatever it loads next to it. Derive an
+  image and point `image` at that:
+
+  ```dockerfile
+  FROM node:22
+  COPY zcode/ /opt/zcode/
+  ENV ZCODE_CLI=/opt/zcode/zcode.cjs
+  ```
+
+- **`ZCODE_CLI` set to the path inside the container.** `${ZCODE_CLI}` is
+  expanded on the host when the config loads, and the value reaches the
+  container through `docker --env` unchanged, so a host install path is not
+  visible in the container. The default below is the in-container path; if you
+  export the variable yourself, export that same path and not the path of a
+  host install. Without `ZCODE_CLI` the reference adapter falls back to
+  `D:\Program Files\ZCode\resources\glm\zcode.cjs`, a Windows desktop path a
+  Linux container does not have.
+
+Shipping the build with the case files works as well: a `context.repo_fixture`
+directory is uploaded into the runtime workspace, so
+`ZCODE_CLI: ${workspace}/zcode.cjs` points at the copy.
 
 ```yaml
 environment:
   # `yolo` removes ZCode's approval prompts, so it needs an isolating runtime.
   # `none` runs ZCode on your host with your privileges.
   type: docker
-  image: node:22
+  # The image has to carry a ZCode build; see the Dockerfile above.
+  image: your-registry/zcode:22
 engine:
   name: zcode
   custom:
@@ -603,7 +630,7 @@ engine:
     response_format: session_result
     timeout_seconds: 300
     env:
-      ZCODE_CLI: ${ZCODE_CLI}
+      ZCODE_CLI: ${ZCODE_CLI:-/opt/zcode/zcode.cjs}
       ZCODE_MODE: ${kwargs.mode}
     kwargs:
       mode: yolo  # needs the isolating runtime above; see the notes below
