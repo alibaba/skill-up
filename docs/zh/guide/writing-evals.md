@@ -809,6 +809,8 @@ judge:
 
 skill-up 的评估分为两层：**expect**（门槛检查）和 **judge**（质量评估）。
 
+两者都是可选的。如果一个用例既没有 judge 规则，也没有 `expect` 检查和轮次 `post_condition`，就没有任何内容对它评分：它可能在 Agent 输出未经任何检查的情况下通过。`validate` 和 `run` 会打印一条包含该用例 ID 的警告。空列表，或者没有规则的 `rule_based` judge，都视为没有检查。
+
 ### expect — 快速门槛检查
 
 `expect` 是零成本的本地检查。如果 `expect` 不通过，`judge` 会被跳过。

@@ -291,3 +291,64 @@ func TestCaseJudgeWithoutTypeKeepsEvalJudgeListValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestCaseWithoutAnyCheckWarns(t *testing.T) {
+	const warning = "case case: no grading checks are configured (judge rules, expect checks or turn post_conditions); the case can pass without checking the agent's output"
+	ruleJudge := JudgeConfig{Type: "rule_based", Success: []Rule{{OutputContains: &OutputContainsRule{All: []string{"done"}}}}}
+	listJudge := ruleJudge
+	listJudge.ID = "rules"
+	exitCode := 0
+	for _, test := range []struct {
+		name     string
+		eval     EvalConfig
+		caseDoc  string
+		wantWarn bool
+	}{
+		{name: "nothing configured", wantWarn: true},
+		{name: "empty judge block", caseDoc: "judge: {}\n", wantWarn: true},
+		{name: "empty case expect list", caseDoc: "expect:\n  must_contain: []\n", wantWarn: true},
+		{name: "empty default expect list", eval: EvalConfig{Cases: CasesConfig{Defaults: CaseDefaults{Expect: Expect{FilesExist: []string{}}}}}, wantWarn: true},
+		{name: "rule_based judge without rules", eval: EvalConfig{Judge: JudgeConfig{Type: "rule_based"}, JudgeSet: true}, wantWarn: true},
+		{name: "case rule_based judge without rules", eval: EvalConfig{Judge: ruleJudge, JudgeSet: true}, caseDoc: "judge:\n  type: rule_based\n", wantWarn: true},
+		{name: "judges list without rules", eval: EvalConfig{Judges: &[]JudgeConfig{{ID: "rules", Type: "rule_based"}}, JudgesSet: true}, wantWarn: true},
+		{name: "failure rule only", eval: EvalConfig{Judge: JudgeConfig{Type: "rule_based", Failure: ruleJudge.Success}, JudgeSet: true}},
+		{name: "script judge", eval: EvalConfig{Judge: JudgeConfig{Type: "script", ScriptPath: "evals/judge.sh"}, JudgeSet: true}},
+		{name: "eval judge", eval: EvalConfig{Judge: ruleJudge, JudgeSet: true}},
+		{name: "eval judges list", eval: EvalConfig{Judges: &[]JudgeConfig{listJudge}, JudgesSet: true}},
+		{name: "case judge", caseDoc: "judge:\n  type: rule_based\n  success:\n    - output_contains:\n        all: [done]\n"},
+		{name: "case expect", caseDoc: "expect:\n  must_contain: [done]\n"},
+		{name: "default expect", eval: EvalConfig{Cases: CasesConfig{Defaults: CaseDefaults{Expect: Expect{ExitCode: &exitCode}}}}},
+		{name: "turn post_condition", caseDoc: "input:\n  turns:\n    - role: user\n      content: task\n      post_condition:\n        must_contain_all: [done]\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			evalsDir := filepath.Join(t.TempDir(), "evals")
+			if err := os.MkdirAll(evalsDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			caseDoc := test.caseDoc
+			if !strings.Contains(caseDoc, "input:") {
+				caseDoc = "input:\n  prompt: task\n" + caseDoc
+			}
+			if err := os.WriteFile(filepath.Join(evalsDir, "case.yaml"), []byte(caseDoc), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			caseCfg, err := NewLoader(filepath.Join(evalsDir, "eval.yaml")).LoadCaseConfig("evals/case.yaml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var logs bytes.Buffer
+			restore := logging.SetOutputForTest(&logs)
+			t.Cleanup(restore)
+			if err := NewValidator().ValidateCasesWithEvalDefaults(&test.eval, []*CaseConfig{caseCfg}); err != nil {
+				t.Fatalf("validate error = %v", err)
+			}
+			wantCount := 0
+			if test.wantWarn {
+				wantCount = 1
+			}
+			if got := strings.Count(logs.String(), warning); got != wantCount {
+				t.Fatalf("warning count = %d, want %d; logs: %s", got, wantCount, logs.String())
+			}
+		})
+	}
+}
