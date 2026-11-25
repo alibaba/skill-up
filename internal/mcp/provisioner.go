@@ -238,7 +238,9 @@ type mcpServerFile struct {
 
 // mcpMockTool is one tool in a fixture's tools map: the metadata it advertises
 // in tools/list and the response tools/call returns. Description and
-// InputSchema are optional; Response is required. InputSchema is untyped so a
+// InputSchema are optional; Response is required. IsError marks the response
+// as a tool execution error; like InputSchema it is untyped so a non-boolean
+// is a named validation error. InputSchema is untyped so a
 // scalar in the fixture is reported as a named validation error instead of a
 // YAML decode failure. Response is kept as a node so a missing response can be
 // told apart from an explicit null. Unknown collects any other key so a
@@ -248,6 +250,7 @@ type mcpMockTool struct {
 	Description string         `yaml:"description"`
 	InputSchema any            `yaml:"input_schema"`
 	Response    yaml.Node      `yaml:"response"`
+	IsError     any            `yaml:"is_error"`
 	Unknown     map[string]any `yaml:",inline"`
 }
 

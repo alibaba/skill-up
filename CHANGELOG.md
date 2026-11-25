@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A mocked MCP tool in a fixture's `tools` map can return a failed tool call.
+  `is_error: true` sends the tool's `response` with MCP's `isError: true`, so
+  a case can check how a Skill handles a tool that ran and failed. The field
+  is optional; `tool_responses` entries keep succeeding (#357).
+
 - Record the agent that graded each `agent_judge` case in its `judge_context`:
   the `engine`, plus the `provider` and `model` that skill-up forwarded to it. A
   value skill-up did not forward is omitted, so a Codex judge given a model
