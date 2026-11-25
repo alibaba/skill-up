@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Record the agent that graded each `agent_judge` case in its `judge_context`:
+  the `engine`, plus the `provider` and `model` that skill-up forwarded to it. A
+  value skill-up did not forward is omitted, so a Codex judge given a model
+  override without a provider override is written with `model` and no
+  `provider`. `observed_model` is added only when the adapter captures a model
+  reported by the engine; when it is absent, the model that ran is unknown. A
+  judge configured with the evaluated agent's own model grades its own output
+  and tends to favor it; until now the grading output did not say which model
+  the judge was given, so that case could not be told apart from an independent
+  judge.
+
 - Add `environment.agent_home: temporary` for local Claude Code and Codex runs
   with explicit API credentials. Each case, benchmark arm and retry uses a
   separate temporary home for user settings, skills and session state. The default

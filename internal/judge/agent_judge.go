@@ -538,7 +538,14 @@ func buildContextMetadata(sessionResult *agent.SessionResult, materialized *Mate
 		Manifest:        &materialized.Manifest,
 		PromptBytes:     len([]byte(prompt)),
 	}
-	if sessionResult != nil && sessionResult.PromptDelivery != nil {
+	if sessionResult == nil {
+		return metadata
+	}
+	metadata.Engine = sessionResult.Engine
+	metadata.Provider = sessionResult.AppliedProvider
+	metadata.Model = sessionResult.AppliedModel
+	metadata.ObservedModel = sessionResult.Model
+	if sessionResult.PromptDelivery != nil {
 		metadata.PromptDelivery = sessionResult.PromptDelivery.Mode
 		metadata.PromptBytes = sessionResult.PromptDelivery.PromptBytes
 	}

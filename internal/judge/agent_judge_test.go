@@ -609,6 +609,50 @@ func TestBuildContextMetadata_UsesManifestMaterializedDir(t *testing.T) {
 	}
 }
 
+// TestBuildContextMetadata_RecordsTheJudgeAgent checks that the report names the
+// engine and model that graded the case, so self-judging is visible.
+func TestBuildContextMetadata_RecordsTheJudgeAgent(t *testing.T) {
+	t.Parallel()
+	materialized := &MaterializedContext{Manifest: ContextManifest{Profile: "standard"}}
+	tests := []struct {
+		name    string
+		session *agent.SessionResult
+		want    ContextMetadata
+	}{
+		{
+			name: "applied values win over requested ones",
+			session: &agent.SessionResult{
+				Engine: "claude_code", RequestedProvider: "anthropic", AppliedProvider: "gateway",
+				RequestedModel: "claude-requested", AppliedModel: "claude-applied", Model: "claude-observed",
+			},
+			want: ContextMetadata{Engine: "claude_code", Provider: "gateway", Model: "claude-applied", ObservedModel: "claude-observed"},
+		},
+		{
+			// Codex got a model override without a provider override, so its own
+			// configuration picks the route.
+			name: "a requested provider that was not applied is left out",
+			session: &agent.SessionResult{
+				Engine: "codex", RequestedProvider: "openai",
+				RequestedModel: "gpt-judge", AppliedModel: "gpt-judge",
+			},
+			want: ContextMetadata{Engine: "codex", Model: "gpt-judge"},
+		},
+		{name: "no session leaves the judge agent unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := buildContextMetadata(tt.session, materialized, "prompt")
+			if got.Engine != tt.want.Engine || got.Provider != tt.want.Provider ||
+				got.Model != tt.want.Model || got.ObservedModel != tt.want.ObservedModel {
+				t.Fatalf("judge agent = {%q %q %q %q}, want {%q %q %q %q}",
+					got.Engine, got.Provider, got.Model, got.ObservedModel,
+					tt.want.Engine, tt.want.Provider, tt.want.Model, tt.want.ObservedModel)
+			}
+		})
+	}
+}
+
 func TestMaterializeJudgeContext_TranscriptMarshalFailure_ReturnsError(t *testing.T) {
 	_, err := MaterializeJudgeContext(context.Background(), &mockJudgeTestRuntime{}, nil, Input{
 		Transcript: transcript.Transcript{

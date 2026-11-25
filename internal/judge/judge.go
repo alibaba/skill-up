@@ -227,6 +227,16 @@ type ContextMetadata struct {
 	Manifest        *ContextManifest `json:"manifest,omitempty"`
 	PromptDelivery  string           `json:"prompt_delivery,omitempty"`
 	PromptBytes     int              `json:"prompt_bytes,omitempty"`
+	// Engine names the agent that graded the case, so a report shows whether the
+	// judge was independent of the evaluated agent. Provider and Model are the
+	// values skill-up forwarded to that engine; one it did not forward stays
+	// empty, because the engine's own configuration then decides it.
+	// ObservedModel is set only when the adapter captured a model the engine
+	// reported; empty means the model that ran is unknown.
+	Engine        string `json:"engine,omitempty"`
+	Provider      string `json:"provider,omitempty"`
+	Model         string `json:"model,omitempty"`
+	ObservedModel string `json:"observed_model,omitempty"`
 }
 
 // SessionResultError preserves a judge-side session result when evaluation fails.

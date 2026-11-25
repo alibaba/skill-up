@@ -1051,6 +1051,14 @@ OpenAI/Anthropic 协议冲突，以及 adapter 会忽略的评分模型，会在
 网关若使用原生 provider 名称提供另一种协议，需要在 `credentials.yaml` 中显式配置
 对应协议的 endpoint。
 
+每个 `agent_judge` 结果都会在 `judge_context` 里写明给这个 case 打分的 agent：`engine`，
+以及 skill-up 实际传给它的 `provider` 和 `model`。skill-up 没有传的值会省略，不会拿请求里的
+值顶替：Codex judge 只被覆盖了模型、没有被覆盖 provider 时，只写 `model`、不写 `provider`，
+因为这时的路由由 Codex 本地配置决定。`observed_model` 只有在 adapter 拿到 engine 自己报告的
+模型时才会出现，并不是每个 adapter 都能拿到；没有这个字段表示实际运行的模型未知，不表示它和
+被测 agent 的模型不同。采信分数之前先看一眼 `judge_context`：judge 用的如果就是被测 agent
+自己的模型，相当于给自己的输出打分，往往会偏向自己。
+
 单个 case 的 `judge.engine` 会整体替换 eval 的 judge engine；显式 `judge.model`
 切换为旧模式；两者都未指定时继承 eval 的 engine/model 选择。`judges` 列表仍整体替换，
 成员不会继承单个 judge 的默认配置。
