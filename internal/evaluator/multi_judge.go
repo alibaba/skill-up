@@ -34,6 +34,34 @@ func judgePlanNeedsWorkspaceDiff(plan config.JudgePlan) bool {
 	return slices.ContainsFunc(plan.Judges, judgeNeedsWorkspaceDiff)
 }
 
+func judgePlanNeedsWorkspaceFiles(plan config.JudgePlan) bool {
+	for _, member := range plan.Judges {
+		if member.Type != "rule_based" {
+			continue
+		}
+		for _, rule := range member.Success {
+			if len(rule.FilesExist) > 0 || len(rule.FilesNotExist) > 0 {
+				return true
+			}
+		}
+		for _, rule := range member.Failure {
+			if len(rule.FilesExist) > 0 || len(rule.FilesNotExist) > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func expectNeedsWorkspaceFiles(expectCfg *config.Expect) bool {
+	if expectCfg == nil {
+		return false
+	}
+	return len(expectCfg.FilesExist) > 0 ||
+		len(expectCfg.FilesNotExist) > 0 ||
+		len(expectCfg.FileContains) > 0
+}
+
 func (e *defaultEvaluator) runMultipleJudges(
 	ctx context.Context,
 	rt runtime.Runtime,

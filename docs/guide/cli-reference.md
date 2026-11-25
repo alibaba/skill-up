@@ -31,21 +31,31 @@ skill-up run [path] [flags]
 | `--iteration`          | `0` (auto)                    | Repeat selected cases for stability/flakiness sampling. `0` auto-appends one run after the latest `iteration-N/` without summarizing history; positive `N` runs N samples and writes `iteration-1/` … `iteration-N/`; when `N > 1`, the terminal summary covers only samples from the current command |
 | `--engine`             | From config                   | Override engine name                                                                                                                                       |
 | `--provider`           | From config                   | Override `engine.model.provider`. When set, the complete `--model` value is preserved as an opaque model ID.                                               |
-| `--model`              | From config                   | Override model. Without `--provider`, the legacy `provider/name` form is split when the prefix is configured; otherwise the complete value is preserved.   |
+| `--model`              | From config                   | Override model. Without `--provider`, the legacy `provider/name` form is split when the prefix is configured; otherwise the complete value is preserved. `qwen_code` keeps the complete value: the prefix only selects provider-scoped credentials, and the adapter rejoins the split reference itself, for `-m`, `OPENAI_MODEL` and the reported applied model, because Qwen Code resolves models by full id. A model replaced wholesale by a provider env such as `ZCODE_MODEL` is forwarded as written. |
 | `--parallelism`        | From config                   | Override `cases.parallelism`. Allowed range: 1–256                                                                                                          |
 | `--baseline`           | From config                   | Override `benchmark.enabled` to `true` for this run                                                                                                         |
 | `--api-key`            | —                             | Pass an API key (higher precedence than env vars)                                                                                                          |
-| `--no-delete`          | `false`                       | Preserve workspaces or containers created by skill-up after evaluation for debugging.                                                                      |
+| `--no-delete`          | `false`                       | Keep workspaces, containers and temporary run directories for debugging. With `agent_home: temporary`, retained homes can contain credentials. |
+| `--cleanup-sessions`   | `false`                       | Also delete the agent's session directory for the workspace after evaluation. `claude_code` and `qodercli` implement it today: they remove `~/.claude/projects/<workspace-key>/` and `~/.qoder/projects/<workspace-key>/` (or `~/.qoder-cn/projects/<workspace-key>/` for the CN edition), sessions and memory included. Off by default because it deletes history that today survives an evaluation; an explicit `--cleanup-sessions=false` overrides `environment.cleanup_sessions: true`, and `--no-delete` takes precedence over both. |
 | `--event-log`          | —                             | Write an ordered v1 JSONL evaluation event stream to a local file. The parent directory must already exist                                                  |
 | `--event-attribute`    | —                             | Attach a namespaced `key=value` string attribute to every event (repeatable; requires `--event-log`)                                                        |
 | `-v, --verbose`        | `0`                           | Increase log verbosity. Default `info`; `-v` / `--verbose` / `--verbose=true` → `debug`; `-vv` / `--verbose=2` → `trace`; `--verbose=false` disables extra detail |
 
 > **Validation scope.** `run` validates the eval-level config plus **only the
 > cases selected** after `--include-case-name` / `--exclude-case-name` filters.
-> An invalid case that is filtered out does not block the run — so a shared
-> eval can hold both a quick `smoke` subset and heavier cases without the latter
-> blocking a filtered smoke run. Use [`skill-up validate`](#skill-up-validate)
+> Semantic validation errors in excluded cases do not block the run. File and
+> metadata errors can still prevent filtering, as described below.
+> Use [`skill-up validate`](#skill-up-validate)
 > to validate the **whole** suite (every case) regardless of filters.
+
+YAML config loading rejects unknown fields, including nested struct fields and
+fields brought in by aliases or `<<` merges. Errors name the field and line.
+Free-form maps such as `engine.kwargs`, environment variables and `context.files`
+still accept arbitrary keys. `run` reads case IDs before strictly decoding selected
+cases, using the filename when an ID is absent. Unknown fields and field-type
+errors in excluded cases do not block the run; unreadable files, malformed YAML,
+and invalid IDs still fail before filtering. A merged `judge` or `judges` block
+counts as present for explicit-null and mutual-exclusion checks.
 
 > **Existing workspace state.** `--workspace` deliberately reuses the same
 > directory for every selected case, retry, and iteration. Runs are serialized,
@@ -143,6 +153,11 @@ Unlike `run` (which validates only the selected cases), `validate` always
 checks the **whole** suite — the eval config and every referenced case file —
 ignoring any case-name filters.
 
+It also loads every mocked MCP fixture declared by the eval or its cases and
+applies the same fixture checks as `run`. Missing files, invalid YAML and invalid
+tool definitions fail validation before any server starts. Real-server credentials
+and connectivity are not checked.
+
 ```bash
 skill-up validate [path to eval.yaml]
 ```
@@ -166,11 +181,75 @@ The validator checks that:
 - All required fields are present
 - Field values are within the allowed range
 
+### Skill content check (`--skill`)
+
+```bash
+skill-up validate --skill <path to skill directory> [--uncited] [--strict]
+```
+
+Lints the content integrity of a single skill as authored on disk. It is a
+source-level check: it does not see what a run actually installs after
+`skills.include`/`skills.exclude` filtering, and it does not run automatically
+before evaluations. Findings print one warning per item:
+
+- SKILL.md opens with a closed YAML frontmatter block (`---` fences)
+- the frontmatter declares non-empty `name` and `description` fields
+- every `references/`, `assets/`, `scripts/` path cited in the markdown body
+  exists on disk. The body is parsed as CommonMark: prose citations, local
+  link/image destinations, and inline code spans that cite a path are checked,
+  while code blocks, remote URLs, and raw HTML are ignored as documentation
+  examples or external resources. Citations may be written with or without a
+  leading `./`, and equivalent spellings of one path
+  (`references/./guide.md`, or `references/my%20guide.md` as a link
+  destination) are normalized before comparison. File names keep all their
+  characters: a link destination is resolved as CommonMark renders it
+  (`<references/my guide.md>`, `assets/diagram\(1\).png`), and a local link
+  is checked by its destination, not its link text; an inline code span is
+  read literally (`assets/icon@2x.png`, or `references/my guide.md` when that
+  file exists), less a trailing `#anchor`; prose citations may use letters of
+  any script (`references/指南.md`). A space ends a path in prose, so cite a
+  file name with spaces through a link destination or an inline code span.
+  An inline code span that does not name an existing file is read as a
+  command line, and only its first word, the script, is checked
+  (`scripts/build.sh --output assets/out.png` checks `scripts/build.sh`
+  alone). Arguments and further commands in the span are not citations, since
+  they often name files the command creates; cite a file a command reads in
+  its own code span or link
+
+Pass `--uncited` to also report files under those directories that are not
+reachable from the body. Truncating the tail of a SKILL.md silently orphans
+the attachments its lost sections cited, and this report surfaces them.
+Reachability is transitive: a file a cited markdown document links to, or one
+a cited script mentions by a root-anchored or `./`-relative path, counts as
+cited even when SKILL.md never names it directly. Dotfiles (`.DS_Store`,
+`.gitkeep`, dot directories) are local metadata and stay silent; a directory
+cited as a link destination (e.g. `[docs](references/)`) covers everything
+beneath it. The report is opt-in because reachability is a heuristic: a file
+a script loads through a computed path (`$(dirname "$0")/lib.sh`, a Python
+import), or one SKILL.md names only as a command argument, is reported even
+though the skill works.
+
+A directory passed via `--skill` that has no SKILL.md is itself a finding.
+Pass `--strict` to promote warnings to failures (exit 1), including the
+`--uncited` report when both flags are set; without it the command exits 0
+and only prints warnings. `--skill` cannot be combined with a positional
+eval.yaml path, and `--uncited` and `--strict` apply only to `--skill`.
+
+On success:
+
+```text
+✓ skill content check passed (./skills/my-skill)
+```
+
 ---
 
 ## skill-up list-cases
 
 List every case referenced by an eval config — handy for quickly inspecting your suite.
+
+This command strictly decodes every referenced case: unknown YAML fields and
+field-type errors fail loading. It does not perform semantic validation or run
+judges. Use `validate` to check configuration semantics.
 
 ```bash
 skill-up list-cases [path to eval.yaml]
@@ -234,7 +313,141 @@ skill-up report result.json --format html --output-dir ./reports
 | `html`  | `report.html`  | Human-readable visualization; open in a browser                    |
 | `markdown` | `report.md` | Concise Markdown summary for CI logs and GitHub PR comments        |
 
-`markdown` is intentionally limited to `skill-up report` as an offline conversion format for an existing `result.json`. It is not currently accepted by `skill-up run --format`, `skill-up debug report --format`, `skill-up debug judge --report`, or `eval.yaml report.formats`.
+For single-run reports, `markdown` is limited to `skill-up report` as an offline conversion format for an existing `result.json`. It is not currently accepted by `skill-up run --format`, `skill-up debug report --format`, `skill-up debug judge --report`, or `eval.yaml report.formats`.
+
+---
+
+## skill-up compare
+
+Compare two or more existing canonical `result.json` (or equivalent `report.json`)
+files without running evaluations or calling any Agent or Judge.
+
+```bash
+skill-up compare <result.json> <result.json>... [flags]
+```
+
+The first file is the reference for deltas and gates. Every remaining file is
+compared independently against it, preserving argument order. This comparison
+role does not determine its display name. Any failed comparison makes the
+command fail; inputs are never compared as a sequential chain.
+
+### Flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--format` | `text` | `text`, `json`, `html`, or `markdown` |
+| `--output` | stdout | Write the comparison to this file; its parent directory must exist |
+| `--baseline-label` | automatic | Override the first run's display label |
+| `--candidate-label` | automatic | Override later runs' display labels in input order; repeat once per later input or omit the flag |
+| `--fail-on-regression` | `false` | Return a non-zero exit code for any shared case moving from PASS to another status |
+| `--max-token-increase-percent` | disabled | Maximum permitted increase in run-level total tokens (finite, non-negative percentage) |
+
+### Examples
+
+```bash
+# Compare several finished runs in one self-contained HTML report
+skill-up compare baseline/result.json skill-a/result.json skill-b/result.json \
+  --format html --output comparison.html
+
+# Two-run comparisons use the same command and report structure
+skill-up compare old/result.json new/result.json --format html --output pair.html
+
+# Markdown tables for PR reviews and CI artifacts
+skill-up compare old/result.json new/result.json --format markdown --output comparison.md \
+  --baseline-label "Released Skill" --candidate-label "Proposed Skill"
+
+# Explicit labels for multiple candidates (repeatable, commas remain literal)
+skill-up compare baseline.json a.json b.json --format markdown --output variants.md \
+  --candidate-label "Skill A" --candidate-label "Skill B"
+
+# Produce a report even if the regression gate fails
+skill-up compare old/result.json new/result.json --format html --output comparison.html \
+  --fail-on-regression --max-token-increase-percent 20
+
+# Stable machine-readable output
+skill-up compare old/result.json new/result.json --format json
+```
+
+All formats use the same comparison and gates. Reports include run metrics,
+metadata, original source paths, a side-by-side overview of all runs, a case
+status matrix across the union of case IDs, and detailed fixed, regressed, changed,
+unchanged, added, and removed cases for each candidate against the baseline.
+The case matrix marks cases absent from a run explicitly; JSON uses null matrix
+cells. Matrix outcomes follow input order, and baseline-only cases are retained.
+JSON always uses the same top-level `baseline`, `runs`, `case_matrix`,
+`comparisons`, and `gates` structure, including for exactly two input files.
+`comparisons` contains one baseline comparison per candidate, with individual
+gate results; top-level `gates` aggregates failures and identifies the candidate.
+All runs have a one-based numeric ID (`runs[].source.id`) assigned in input
+order, including the reference. These IDs are also retained in each comparison's
+source identity; display labels do not change them.
+
+Default display labels are the input paths exactly as supplied. Relative paths
+remain relative (including a leading `./` or `..`); absolute paths remain absolute.
+Directory names are not shortened, and numeric IDs are not used as display labels.
+The source path is shown once, rather than repeated below the label.
+
+Explicit label flags override path-based display labels. The first run is never
+automatically named `Baseline`, nor are later runs automatically named `Candidate`.
+The JSON keys `baseline` and `candidate` describe comparison roles only.
+
+HTML extends the existing evaluation report with a Comparison tab and a run
+selector. In Comparison, the Reference and Compared selectors can choose any two
+inputs, in either direction. The selected pair shows metrics, metadata, coverage,
+and case transitions calculated with the same Go comparison logic. These controls
+do not change the first-input reference used by CLI/CI gates or text/JSON/Markdown.
+The case-response button opens the reused case viewer inside Comparison, showing
+both selected files' primary case results side by side: prompts, full responses
+(including recorded turns), grades and evidence. Case IDs absent on either side
+are explicitly marked absent. Cross-file comparison is read-only; normal Run
+details preserve each file's own with/without-Skill pairing and feedback.
+Pair summaries are pre-rendered for every ordered pair, so HTML size grows with
+the number of run pairs. No Agent or Judge is called when switching pairs. Selecting a run reuses the original Cases and Benchmark views, including
+prompts, responses, formal grades, and evidence. The existing single-run and
+with/without-Skill report presentation is unchanged. Comparison-mode feedback is
+isolated per run and exported locally, without using the single-run feedback API.
+HTML embeds its styles and filtering script, with
+no external assets or network requests; all cases remain readable without
+JavaScript. Markdown includes tables suitable for GitHub PR descriptions.
+Source result artifacts are preserved; output may not overwrite any input.
+
+Cases align by case ID using the existing primary-result rule: prefer
+`with_skill`, then a non-baseline configuration, falling back to `without_skill`
+only when no other result for that case is available. In the usual with/without
+benchmark, cross-file comparison therefore compares **each revision's with_skill
+result**, not all variants against one another. This same selection rule drives
+metrics, the case matrix, transitions, and the interactive side-by-side viewer.
+Each file's internal with/without binding remains in Run details. The page keeps
+this rule in a collapsed explanation; the full selection semantics are documented
+here. Benchmark is the original single-run statistics view (including with/without
+deltas when recorded), and is shown in comparison mode only when the selected
+run actually contains benchmark data. The selected
+configuration is exposed in the matrix and transition tables.
+
+For more than three inputs, overview/matrix columns retain readable widths and
+scroll horizontally with the first column pinned. Selectors wrap to new rows
+on narrow screens and reserve spacing for the dropdown arrow; the pair viewer
+always compares two selected inputs, regardless of the total input count.
+Benchmark reference entries do not double-count case counts or pass rates.
+Configuration identity is retained in case tables. Shared cases flag prompt changes
+when both prompts were recorded; otherwise the prompt comparison is unknown.
+Requested, applied, and observed agent configurations are compared when recorded. Total tokens are the recorded
+run-level total across all configurations; input/output tokens sum primary cases.
+Duration is run wall time, and pass-rate changes are percentage points.
+
+Added and removed cases are shown separately, with shared-case coverage. Aggregate
+changes include each run's full primary case set, so different case sets are not
+paired samples. A change between two non-PASS statuses is classified as changed,
+not fixed or regressed. Recorded zero tokens remain zero; missing token metrics
+are `unknown` in human-readable reports and `null` in JSON, including deltas.
+The token gate fails when the total-token measurement is unknown, or when a zero
+baseline increases to a positive value.
+
+Reports compare recorded outcomes only and do not regrade scores. Missing
+provenance is unknown; matching case IDs do not establish identical prompts,
+suites, Skill revisions, or judge/rubric definitions. Review those conditions
+before interpreting a change as an improvement. Gates are opt-in, apply equally
+to every output format, and write the report before returning a gate failure.
 
 ---
 

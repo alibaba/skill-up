@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -33,13 +34,17 @@ func NewRuleBasedJudge(cfg config.JudgeConfig) *RuleBasedJudge {
 }
 
 // Evaluate implements the Judge interface.
-func (j *RuleBasedJudge) Evaluate(_ context.Context, in Input) (*Result, error) {
+func (j *RuleBasedJudge) Evaluate(ctx context.Context, in Input) (*Result, error) {
 	var allAssertions []AssertionResult
 	failureMatched := false
 
 	// 1. Check failure rules first — any match is immediate FAIL.
 	for _, rule := range j.Failure {
-		ar := evaluateAssertion(rule, in)
+		ar := evaluateAssertion(ctx, rule, in)
+		if ar.Error != nil {
+			err := errors.New(*ar.Error)
+			return NewErrorResult(err, in.TurnsExecuted, in.TurnsTotal), err
+		}
 		if ar.Passed {
 			failureMatched = true
 			// A failure rule "passed" means the bad pattern WAS found → FAIL.
@@ -69,7 +74,11 @@ func (j *RuleBasedJudge) Evaluate(_ context.Context, in Input) (*Result, error) 
 
 	// 2. Check success rules — all must pass.
 	for _, rule := range j.Success {
-		ar := evaluateAssertion(rule, in)
+		ar := evaluateAssertion(ctx, rule, in)
+		if ar.Error != nil {
+			err := errors.New(*ar.Error)
+			return NewErrorResult(err, in.TurnsExecuted, in.TurnsTotal), err
+		}
 		allAssertions = append(allAssertions, ar)
 	}
 
@@ -87,7 +96,7 @@ func (j *RuleBasedJudge) Evaluate(_ context.Context, in Input) (*Result, error) 
 
 // evaluateAssertion dispatches a single Rule to the appropriate handler.
 // Returns an AssertionResult where Passed=true means the assertion condition was met.
-func evaluateAssertion(rule config.Rule, in Input) AssertionResult {
+func evaluateAssertion(ctx context.Context, rule config.Rule, in Input) AssertionResult {
 	switch {
 	case rule.OutputContains != nil:
 		return evalOutputContains(rule.OutputContains, in.FinalMessage)
@@ -98,8 +107,14 @@ func evaluateAssertion(rule config.Rule, in Input) AssertionResult {
 	case rule.ToolCalled != nil:
 		return evalToolCalled(rule.ToolCalled, in.Transcript)
 	case len(rule.FilesExist) > 0:
+		if in.Files != nil {
+			return evalFilesExistRuntime(ctx, rule.FilesExist, in)
+		}
 		return evalFilesExist(rule.FilesExist, in.WorkspacePath)
 	case len(rule.FilesNotExist) > 0:
+		if in.Files != nil {
+			return evalFilesNotExistRuntime(ctx, rule.FilesNotExist, in)
+		}
 		return evalFilesNotExist(rule.FilesNotExist, in.WorkspacePath)
 	case rule.TurnResponseContains != nil:
 		return evalTurnResponseContains(rule.TurnResponseContains, in.TurnResults)
@@ -116,6 +131,52 @@ func evaluateAssertion(rule config.Rule, in Input) AssertionResult {
 			Evidence: "no recognizable rule field set in assertion",
 		}
 	}
+}
+
+func evalFilesExistRuntime(ctx context.Context, files []string, in Input) AssertionResult {
+	for _, f := range files {
+		path, err := normalizeWorkspacePath(in, f)
+		if err != nil {
+			msg := fmt.Sprintf("invalid path %q: %v", f, err)
+			return AssertionResult{Text: "files_exist: " + f, Passed: false, Evidence: msg, Error: &msg}
+		}
+		exists, err := in.Files.Exists(ctx, path)
+		if err != nil {
+			msg := fmt.Sprintf("cannot check file %q: %v", f, err)
+			return AssertionResult{Text: "files_exist: " + f, Passed: false, Evidence: msg, Error: &msg}
+		}
+		if !exists {
+			return AssertionResult{
+				Text:     "files_exist: " + f,
+				Passed:   false,
+				Evidence: fmt.Sprintf("expected file %q does not exist", f),
+			}
+		}
+	}
+	return AssertionResult{Text: "files_exist", Passed: true, Evidence: "all files exist"}
+}
+
+func evalFilesNotExistRuntime(ctx context.Context, files []string, in Input) AssertionResult {
+	for _, f := range files {
+		path, err := normalizeWorkspacePath(in, f)
+		if err != nil {
+			msg := fmt.Sprintf("invalid path %q: %v", f, err)
+			return AssertionResult{Text: "files_not_exist: " + f, Passed: false, Evidence: msg, Error: &msg}
+		}
+		exists, err := in.Files.Exists(ctx, path)
+		if err != nil {
+			msg := fmt.Sprintf("cannot check file %q: %v", f, err)
+			return AssertionResult{Text: "files_not_exist: " + f, Passed: false, Evidence: msg, Error: &msg}
+		}
+		if exists {
+			return AssertionResult{
+				Text:     "files_not_exist: " + f,
+				Passed:   false,
+				Evidence: fmt.Sprintf("file %q exists", f),
+			}
+		}
+	}
+	return AssertionResult{Text: "files_not_exist", Passed: true, Evidence: "all files absent"}
 }
 
 // ---------------------------------------------------------------------------

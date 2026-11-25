@@ -124,14 +124,16 @@ func writeMarkdownHeader(sb *strings.Builder, in Input) {
 }
 
 func writeMarkdownSummary(sb *strings.Builder, in Input) {
+	primary := in
+	primary.CaseResults = in.PrimaryCaseResults()
 	sb.WriteString("## Summary\n\n")
 	sb.WriteString("| Metric | Value |\n")
 	sb.WriteString("|---|---:|\n")
-	fmt.Fprintf(sb, "| Total Cases | %d |\n", len(in.CaseResults))
-	fmt.Fprintf(sb, "| Passed | %d |\n", markdownCountByStatus(in, judge.StatusPass))
-	fmt.Fprintf(sb, "| Failed | %d |\n", markdownCountByStatus(in, judge.StatusFail))
-	fmt.Fprintf(sb, "| Errors | %d |\n", markdownCountByStatus(in, judge.StatusError))
-	fmt.Fprintf(sb, "| Skipped | %d |\n", markdownCountByStatus(in, judge.StatusSkip))
+	fmt.Fprintf(sb, "| Total Cases | %d |\n", len(primary.CaseResults))
+	fmt.Fprintf(sb, "| Passed | %d |\n", markdownCountByStatus(primary, judge.StatusPass))
+	fmt.Fprintf(sb, "| Failed | %d |\n", markdownCountByStatus(primary, judge.StatusFail))
+	fmt.Fprintf(sb, "| Errors | %d |\n", markdownCountByStatus(primary, judge.StatusError))
+	fmt.Fprintf(sb, "| Skipped | %d |\n", markdownCountByStatus(primary, judge.StatusSkip))
 	fmt.Fprintf(sb, "| Pass Rate | %.1f%% |\n", in.OverallPassRate()*100)
 	fmt.Fprintf(sb, "| Evaluation Wall Time | %s |\n", markdownDuration(in.TotalDuration().Milliseconds()))
 	fmt.Fprintf(sb, "| Tested Agent Tokens | %d |\n", in.TotalTokens)

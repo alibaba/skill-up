@@ -88,6 +88,7 @@ func (j *ScriptJudge) runtime(ctx context.Context) (evalruntime.Runtime, func(),
 		return nil, nil, fmt.Errorf("script execution failed: create none runtime: %w", err)
 	}
 	if err := rt.Create(ctx); err != nil {
+		_ = rt.Close()
 		return nil, nil, fmt.Errorf("script execution failed: create none runtime workspace: %w", err)
 	}
 	return rt, func() { _ = rt.Close() }, nil

@@ -574,6 +574,32 @@ func TestBuildReportInput_UsesResolvedRunnerIdentity(t *testing.T) {
 	}
 }
 
+func TestBuildReportInput_MaterializesQwenModelID(t *testing.T) {
+	t.Setenv("ZCODE_API_KEY", "sk-test")
+
+	// The credential layer splits a legacy "provider/model" reference to pick
+	// credentials; the shared entry point dispatches materialization to Qwen, so
+	// the machine-readable applied_configuration.model records the complete id
+	// the command and the session actually use (#383, #399).
+	evalCfg := &config.EvalConfig{Engine: config.EngineConfig{Name: "qwen_code"}}
+	resolved := credential.ResolveRunnerConfig(
+		config.EngineConfig{Name: "qwen_code"}, nil,
+		credential.CLIOverrides{Model: "zcode/GLM-5.3-Flash"},
+	)
+
+	input := buildReportInput("s", map[string]*caseResults{}, nil, time.Time{}, time.Time{}, evalCfg, resolved)
+	if input.AppliedConfiguration == nil || input.AppliedConfiguration.Model != "zcode/GLM-5.3-Flash" {
+		t.Fatalf("applied configuration model = %+v, want zcode/GLM-5.3-Flash", input.AppliedConfiguration)
+	}
+	data, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"model":"zcode/GLM-5.3-Flash"`) {
+		t.Fatalf("final JSON report missing the materialized model id:\n%s", data)
+	}
+}
+
 func TestBuildReportInput_DistinguishesRequestedModelFromLocalFallback(t *testing.T) {
 	t.Parallel()
 
@@ -779,5 +805,45 @@ func TestResultToBenchmarkRun_PreservesSkippedAssertions(t *testing.T) {
 	}
 	if run.Expectations[0].Skipped || !run.Expectations[1].Skipped || !run.Expectations[2].Skipped {
 		t.Fatalf("expectations=%+v", run.Expectations)
+	}
+}
+
+func TestRunner_WriteResults_RejectsUnknownReportFormat(t *testing.T) {
+	r := NewRunner(&config.EvalConfig{}, nil, nil, credential.ResolvedAgentConfig{})
+
+	tmpDir := t.TempDir()
+	if err := r.InitWorkspace(tmpDir, "test-skill", 1); err != nil {
+		t.Fatalf("InitWorkspace failed: %v", err)
+	}
+
+	results := []evaluator.EvalResult{
+		{
+			CaseID:   "case-1",
+			CaseName: "Test Case 1",
+			Prompt:   "Do something",
+			Status:   judge.StatusPass,
+			SessionResult: &agent.SessionResult{
+				FinalMessage: "Done",
+				DurationMs:   1500,
+				Turns:        1,
+			},
+			TurnsTotal:    1,
+			Configuration: "with_skill",
+			Grading: &judge.Result{
+				Status: judge.StatusPass,
+				AssertionResults: []judge.AssertionResult{
+					{Text: "output correct", Passed: true, Evidence: "matched"},
+				},
+				Summary: judge.ResultSummary{Passed: 1, Failed: 0, Total: 1, PassRate: 1.0},
+			},
+		},
+	}
+
+	err := r.WriteResults(context.Background(), results, "test-skill", "/path/to/skill", 1, []string{"bogus"}, time.Time{}, time.Time{})
+	if err == nil {
+		t.Fatal("WriteResults() accepted an unsupported report format")
+	}
+	if want := `unsupported report format "bogus"`; !strings.Contains(err.Error(), want) {
+		t.Fatalf("WriteResults() error = %v, want it to contain %q", err, want)
 	}
 }

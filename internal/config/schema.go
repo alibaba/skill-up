@@ -3,8 +3,6 @@ package config
 import (
 	"time"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/alibaba/skill-up/internal/customengine"
 	"github.com/alibaba/skill-up/internal/runtime"
 )
@@ -26,21 +24,10 @@ type EvalConfig struct {
 	UserSimulator UserSimulatorModel `yaml:"user_simulator,omitempty"`
 }
 
-// UnmarshalYAML records judge field presence so empty or null blocks cannot be ignored.
-func (e *EvalConfig) UnmarshalYAML(node *yaml.Node) error {
-	type plain EvalConfig
-	var decoded plain
-	if err := node.Decode(&decoded); err != nil {
-		return err
-	}
-	*e = EvalConfig(decoded)
-	e.JudgeSet, e.JudgesSet = judgeFieldPresence(node)
-	return nil
-}
-
 // Environment defines the runtime environment for evaluation.
 type Environment struct {
-	Type                  string            `yaml:"type"` // none, opensandbox, docker
+	Type                  string            `yaml:"type"`                 // none, opensandbox, docker
+	AgentHome             string            `yaml:"agent_home,omitempty"` // inherited (default), temporary
 	Image                 string            `yaml:"image,omitempty"`
 	SandboxTemplate       string            `yaml:"sandbox_template,omitempty"`
 	WorkspaceMount        string            `yaml:"workspace_mount,omitempty"`
@@ -53,7 +40,12 @@ type Environment struct {
 	Metadata              map[string]string `yaml:"metadata,omitempty"`
 	Kwargs                map[string]string `yaml:"kwargs,omitempty"`
 	NetworkPolicy         string            `yaml:"network_policy,omitempty"` // deny_all, allow_declared
-	AllowedEgress         []string          `yaml:"allowed_egress,omitempty"` // FQDN/wildcard egress allowlist for allow_declared
+	// CleanupSessions deletes the agent's per-workspace session directory (for
+	// example Claude Code's ~/.claude/projects entry) together with the
+	// workspace. Off by default: it removes user-visible history that today
+	// survives an evaluation.
+	CleanupSessions bool     `yaml:"cleanup_sessions,omitempty"`
+	AllowedEgress   []string `yaml:"allowed_egress,omitempty"` // FQDN/wildcard egress allowlist for allow_declared
 }
 
 // ToRuntimeConfig converts Environment to runtime.Config.
@@ -65,6 +57,7 @@ func (e Environment) ToRuntimeConfig() runtime.Config {
 
 	return runtime.Config{
 		Type:            e.Type,
+		AgentHome:       e.AgentHome,
 		Image:           e.Image,
 		WorkspaceMount:  e.WorkspaceMount,
 		Env:             e.Env,
@@ -110,6 +103,10 @@ type SkillRef struct {
 	Target  string   `yaml:"target,omitempty"`
 	Include []string `yaml:"include,omitempty"`
 	Exclude []string `yaml:"exclude,omitempty"`
+	// InstallName is the directory name the Skill is installed under when
+	// Target is empty, resolved by the evaluator from SKILL.md. It is not
+	// configurable.
+	InstallName string `yaml:"-" json:"-"`
 }
 
 // EngineConfig defines the Agent Engine configuration.
@@ -177,8 +174,14 @@ type RetryPolicy struct {
 	RetryOn    []string `yaml:"retry_on,omitempty"` // timeout, error
 }
 
+// JudgeOutputConfig selects the agent judge result delivery channel.
+type JudgeOutputConfig struct {
+	Mode string `json:"mode,omitempty" yaml:"mode,omitempty"` // final_message (default) or file
+}
+
 // JudgeConfig describes the evaluation strategy.
 type JudgeConfig struct {
+	Output     *JudgeOutputConfig  `json:"output,omitempty" yaml:"output,omitempty"`
 	ID         string              `json:"id,omitempty" yaml:"id,omitempty"`
 	Type       string              `json:"type"                     yaml:"type"` // rule_based, script, agent_judge
 	ScriptPath string              `json:"script_path,omitempty"    yaml:"script_path,omitempty"`
@@ -347,30 +350,9 @@ type CaseConfig struct {
 	// validation keys off it so the check is correct for any case subset (e.g.
 	// the filtered set `skill-up run` executes), not only the full suite.
 	SourceFile string `json:"-" yaml:"-"`
-}
 
-// UnmarshalYAML records judge field presence for case-level overrides.
-func (c *CaseConfig) UnmarshalYAML(node *yaml.Node) error {
-	type plain CaseConfig
-	var decoded plain
-	if err := node.Decode(&decoded); err != nil {
-		return err
-	}
-	*c = CaseConfig(decoded)
-	c.JudgeSet, c.JudgesSet = judgeFieldPresence(node)
-	return nil
-}
-
-func judgeFieldPresence(node *yaml.Node) (singular, plural bool) {
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		switch node.Content[i].Value {
-		case "judge":
-			singular = true
-		case "judges":
-			plural = true
-		}
-	}
-	return singular, plural
+	// judgeHasFields distinguishes an empty block from explicitly configured zero values.
+	judgeHasFields bool
 }
 
 // Input describes the agent input (prompt or turns).

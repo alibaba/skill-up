@@ -3,11 +3,110 @@ package agent
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 
+	"github.com/alibaba/skill-up/internal/config"
+	"github.com/alibaba/skill-up/internal/mcp"
+	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
 )
+
+func provisionMCPBareEnvRefs(t *testing.T) runtime.MCPServerConfig {
+	t.Helper()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "mcp.yaml"), []byte("endpoint: $MCP_URL\nheaders:\n  PRIVATE-TOKEN: $MCP_TOKEN\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	values := map[string]string{"MCP_URL": "https://mcp.example.test/path?x=1&y=2", "MCP_TOKEN": "test token's $literal `text`"}
+	resolved, _, err := (mcp.Provisioner{SkillDir: dir, LookupEnv: func(name string) (string, bool) {
+		value, ok := values[name]
+		return value, ok
+	}}).Provision(config.MCPConfig{Servers: []config.MCPServer{{Name: "remote", Mode: "real", ConfigRef: "mcp.yaml"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved.Servers[0]
+}
+
+func TestProvisionedMCPBareEnvRefs_OpenCode(t *testing.T) {
+	t.Parallel()
+	server := provisionMCPBareEnvRefs(t)
+	cfg, env, err := openCodeMCPServer(server, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg["url"] != "{env:SKILL_UP_OPENCODE_MCP_0_MCP_URL}" {
+		t.Errorf("url = %v", cfg["url"])
+	}
+	headers, ok := cfg["headers"].(map[string]string)
+	if !ok {
+		t.Fatalf("headers have type %T", cfg["headers"])
+	}
+	if headers["PRIVATE-TOKEN"] != "{env:SKILL_UP_OPENCODE_MCP_0_MCP_TOKEN}" {
+		t.Errorf("headers = %v", headers)
+	}
+	for key, value := range server.Env {
+		if env["SKILL_UP_OPENCODE_MCP_0_"+key] != value {
+			t.Errorf("missing runtime value for %s", key)
+		}
+	}
+}
+
+func TestProvisionedMCPBareEnvRefs_Shell(t *testing.T) {
+	t.Parallel()
+	if goruntime.GOOS == platform.GOOSWindows {
+		t.Skip("argument capture requires a POSIX shell")
+	}
+	server := provisionMCPBareEnvRefs(t)
+	dir := t.TempDir()
+	// A private npx stub captures bridge arguments without starting an MCP server.
+	stub := filepath.Join(dir, "npx")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(stub, 0o700); err != nil { // #nosec G302 -- private argument-capture stub must be executable
+		t.Fatal(err)
+	}
+	for _, adapter := range []string{"claude-compatible", "codex-bridge"} {
+		t.Run(adapter, func(t *testing.T) {
+			t.Parallel()
+			var script string
+			var err error
+			if adapter == "codex-bridge" {
+				script, err = buildCodexMCPRemoteBridgeScript(server)
+			} else {
+				script, err = buildClaudeCompatibleMCPInstallCmd("capture", "capture", server)
+				script = "capture() { printf '%s\\n' \"$@\"; };\n" + script
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(script, server.Env["MCP_TOKEN"]) {
+				t.Fatal("script embeds the token instead of its reference")
+			}
+			cmd := exec.CommandContext(t.Context(), "/bin/sh", "-c", script, "capture", server.Env["MCP_URL"])
+			cmd.Env = []string{"PATH=" + dir}
+			for key, value := range server.Env {
+				cmd.Env = append(cmd.Env, key+"="+value)
+			}
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("capture failed: %v: %s", err, output)
+			}
+			for _, want := range []string{server.Env["MCP_URL"], "PRIVATE-TOKEN:" + server.Env["MCP_TOKEN"]} {
+				if !strings.Contains(string(output), "\n"+want+"\n") {
+					t.Errorf("arguments missing %q: %s", want, output)
+				}
+			}
+		})
+	}
+}
 
 func TestBuildCodexMCPInstallCmd_Stdio(t *testing.T) {
 	t.Parallel()

@@ -3,6 +3,7 @@ package report
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/alibaba/skill-up/internal/judge"
@@ -48,6 +49,10 @@ func agentConfigurationModel(configuration *AgentConfiguration) string {
 		return ""
 	}
 	if configuration.Provider == "" {
+		return configuration.Model
+	}
+	// A materialized model id already carries the provider; do not prefix again.
+	if strings.HasPrefix(configuration.Model, configuration.Provider+"/") {
 		return configuration.Model
 	}
 	return configuration.Provider + "/" + configuration.Model

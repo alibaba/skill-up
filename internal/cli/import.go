@@ -42,6 +42,13 @@ var importCmd = &cobra.Command{
 			return errors.New("evals.json missing required field: skill_name")
 		}
 
+		// Convert every eval, files included, before writing anything, so a
+		// missing file leaves earlier output untouched.
+		cases, err := convertAnthropicEvals(evalsData, anthropicSkillRoot(evalsPath), nil)
+		if err != nil {
+			return err
+		}
+
 		// Determine output directory
 		outputDir, _ := cmd.Flags().GetString("output")
 		if outputDir == "" {
@@ -52,10 +59,9 @@ var importCmd = &cobra.Command{
 			return fmt.Errorf("failed to create cases directory: %w", err)
 		}
 
-		// Convert each eval entry to a CaseConfig
-		caseIDs := make([]string, 0, len(evalsData.Evals))
-		for _, eval := range evalsData.Evals {
-			caseCfg := convertEvalToCase(eval, evalsData.SkillName)
+		caseIDs := make([]string, 0, len(cases))
+		for i, caseCfg := range cases {
+			eval := evalsData.Evals[i]
 			caseIDs = append(caseIDs, caseCfg.ID)
 
 			// Marshal to YAML
@@ -111,15 +117,70 @@ type anthropicEval struct {
 	Expectations   []string `json:"expectations"`
 }
 
+// anthropicSkillRoot returns the Skill root that evals.json file paths are
+// relative to: the nearest directory holding SKILL.md above evals.json, or the
+// parent of the directory containing evals.json.
+func anthropicSkillRoot(evalsJSONPath string) string {
+	evalsDir := filepath.Dir(evalsJSONPath)
+	if abs, err := filepath.Abs(evalsDir); err == nil {
+		evalsDir = abs
+	}
+	skillDir, _ := config.FindSkillDir(evalsDir)
+	return skillDir
+}
+
+// convertAnthropicEvals converts evals to cases and reads the files each one
+// lists. Files are not read for cases whose ID selected rejects, so a case the
+// run will filter out cannot fail it; such cases are still returned, so the
+// caller's filter reports matches as before. A nil selected reads all files.
+func convertAnthropicEvals(evalsData anthropicEvals, skillDir string, selected func(caseID string) bool) ([]*config.CaseConfig, error) {
+	root, err := os.OpenRoot(skillDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open skill directory %s: %w", skillDir, err)
+	}
+	defer root.Close() //nolint:errcheck
+
+	cases := make([]*config.CaseConfig, 0, len(evalsData.Evals))
+	for _, eval := range evalsData.Evals {
+		caseCfg := convertEvalToCase(eval, evalsData.SkillName)
+		cases = append(cases, caseCfg)
+		if selected != nil && !selected(caseCfg.ID) {
+			continue
+		}
+		files, err := readEvalFiles(eval, root)
+		if err != nil {
+			return nil, err
+		}
+		caseCfg.Context.Files = files
+	}
+	return cases, nil
+}
+
+// readEvalFiles reads the files an eval lists. skill-creator's evals.json
+// paths are relative to the Skill root; reading through os.Root keeps every
+// read inside it, symlinks included.
+func readEvalFiles(eval anthropicEval, root *os.Root) (map[string]string, error) {
+	if len(eval.Files) == 0 {
+		return nil, nil
+	}
+	files := make(map[string]string, len(eval.Files))
+	for _, f := range eval.Files {
+		if !filepath.IsLocal(filepath.FromSlash(f)) {
+			return nil, fmt.Errorf("eval %d: file %q must be a relative path inside the skill directory", eval.ID, f)
+		}
+		content, err := root.ReadFile(filepath.FromSlash(f))
+		if err != nil {
+			return nil, fmt.Errorf("eval %d: failed to read file %q: %w", eval.ID, f, err)
+		}
+		files[f] = string(content)
+	}
+	return files, nil
+}
+
 // convertEvalToCase converts an Anthropic eval entry to a skill-up CaseConfig.
+// Its context files are filled in by convertAnthropicEvals.
 func convertEvalToCase(eval anthropicEval, skillName string) *config.CaseConfig {
 	caseID := importedCaseID(eval.ID)
-
-	// Build files context
-	files := make(map[string]string)
-	for _, f := range eval.Files {
-		files[f] = f // placeholder - actual file content would need to be read
-	}
 
 	// Since expectations are natural language, use agent_judge
 	judgeCfg := config.JudgeConfig{
@@ -135,9 +196,6 @@ func convertEvalToCase(eval anthropicEval, skillName string) *config.CaseConfig 
 		Tag:         "functional_test",
 		Input: config.Input{
 			Prompt: eval.Prompt,
-		},
-		Context: config.Context{
-			Files: files,
 		},
 		Expect: config.Expect{},
 		Judge:  judgeCfg,

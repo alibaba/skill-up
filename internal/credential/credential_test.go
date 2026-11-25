@@ -13,6 +13,12 @@ import (
 	"github.com/alibaba/skill-up/internal/logging"
 )
 
+// qwenProviderID and qwenBareModelID are the halves of the slashed id used across the Qwen tests.
+const (
+	qwenProviderID  = "zcode"
+	qwenBareModelID = "GLM-5.3-Flash"
+)
+
 var logCaptureMu sync.Mutex
 
 func resolveRunnerConfigForTest(
@@ -52,6 +58,10 @@ func TestResolveRunnerConfig_ExplicitProviderPreservesOpaqueCLIModel(t *testing.
 }
 
 func TestResolveRunnerConfig_ExplicitProviderKeepsConfiguredModel(t *testing.T) {
+	// Provider-scoped env (DASHSCOPE_*) overrides the configured model, so keep host values out.
+	t.Setenv("DASHSCOPE_MODEL", "")
+	t.Setenv("DASHSCOPE_API_KEY", "")
+	t.Setenv("DASHSCOPE_BASE_URL", "")
 	resolved := ResolveRunnerConfig(config.EngineConfig{
 		Name:  "codex",
 		Model: config.ModelConfig{Provider: "openai", Name: "yaml-model"},
@@ -99,29 +109,166 @@ func TestResolveRunnerConfig_OpenCodeDoesNotInferProviderFromModel(t *testing.T)
 	}
 }
 
-func TestMaskAPIKey(t *testing.T) {
-	t.Parallel()
+func TestResolveRunnerConfig_QwenKeepsLegacySplitFromCLI(t *testing.T) {
+	t.Setenv("ZCODE_API_KEY", "sk-test")
 
-	tests := []struct {
-		name     string
-		key      string
-		expected string
-	}{
-		{name: "normal key", key: "sk-abcdefghijklmnopqrstuvwxyz123456", expected: "sk****56"},
-		{name: "short key (4 chars)", key: "abcd", expected: "****"},
-		{name: "shorter than mask length", key: "abc", expected: "****"},
-		{name: "empty key", key: "", expected: "****"},
-		{name: "exactly 5 chars", key: "abcde", expected: "ab****de"},
-		{name: "anthropic key format", key: "sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", expected: "sk****xx"},
-	}
+	for _, engine := range []string{"qwen_code", "qwen-code", "qwen"} {
+		t.Run(engine, func(t *testing.T) {
+			resolved := ResolveRunnerConfig(config.EngineConfig{Name: engine}, nil, CLIOverrides{Model: "zcode/GLM-5.3-Flash"})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			if got := MaskAPIKey(tt.key); got != tt.expected {
-				t.Errorf("MaskAPIKey(%q) = %q, want %q", tt.key, got, tt.expected)
+			// The legacy split still selects provider-scoped credentials, and the
+			// flag tells the adapter to rejoin it.
+			if resolved.Provider != qwenProviderID || resolved.Model != qwenBareModelID {
+				t.Fatalf("resolved provider/model = %q/%q, want zcode/GLM-5.3-Flash", resolved.Provider, resolved.Model)
+			}
+			if !resolved.ModelSplit {
+				t.Fatalf("legacy split not recorded: %#v", resolved)
+			}
+			if resolved.ProviderSource != ValueSourceCLI || resolved.ModelSource != ValueSourceCLI {
+				t.Fatalf("CLI sources not retained: %#v", resolved)
+			}
+			if resolved.APIKey != "sk-test" {
+				t.Fatalf("provider-scoped credentials were not resolved: %#v", resolved)
 			}
 		})
+	}
+}
+
+func TestResolveRunnerConfig_QwenExplicitProviderKeepsBareModel(t *testing.T) {
+	t.Parallel()
+
+	resolved := ResolveRunnerConfig(config.EngineConfig{Name: "qwen_code"}, nil, CLIOverrides{
+		Provider: "openai",
+		Model:    "qwen3-coder-plus",
+	})
+
+	if resolved.Provider != "openai" || resolved.Model != "qwen3-coder-plus" {
+		t.Fatalf("resolved provider/model = %q/%q, want openai/qwen3-coder-plus", resolved.Provider, resolved.Model)
+	}
+	if resolved.ModelSplit {
+		t.Fatalf("bare model beside an explicit provider must not be treated as a split: %#v", resolved)
+	}
+}
+
+func TestResolveRunnerConfig_QwenSlashedYAMLModelStaysOpaque(t *testing.T) {
+	t.Parallel()
+
+	resolved := ResolveRunnerConfig(config.EngineConfig{
+		Name:  "qwen_code",
+		Model: config.ModelConfig{Name: "zcode/GLM-5.3-Flash"},
+	}, nil, CLIOverrides{})
+
+	if resolved.Provider != "" || resolved.Model != "zcode/GLM-5.3-Flash" {
+		t.Fatalf("unconfigured YAML ref split unexpectedly: %q/%q", resolved.Provider, resolved.Model)
+	}
+	if resolved.ModelSplit {
+		t.Fatalf("a whole YAML model must not be treated as a split: %#v", resolved)
+	}
+}
+
+func TestResolveRunnerConfig_QwenYAMLProviderSplitKeepsBareModel(t *testing.T) {
+	t.Setenv("ZCODE_API_KEY", "sk-test")
+
+	resolved := ResolveRunnerConfig(config.EngineConfig{
+		Name:  "qwen_code",
+		Model: config.ModelConfig{Provider: qwenProviderID, Name: qwenBareModelID},
+	}, nil, CLIOverrides{})
+
+	if resolved.Provider != qwenProviderID || resolved.Model != qwenBareModelID || resolved.ModelSplit {
+		t.Fatalf("explicit YAML provider changed: provider=%q model=%q split=%v", resolved.Provider, resolved.Model, resolved.ModelSplit)
+	}
+}
+
+func TestResolveJudgeConfig_LegacySlashedModelRecordsSplit(t *testing.T) {
+	t.Setenv("ZCODE_API_KEY", "sk-test")
+
+	runner := ResolveRunnerConfig(config.EngineConfig{Name: "qwen_code"}, nil, CLIOverrides{})
+	judge := ResolveJudgeConfig(config.JudgeConfig{Model: "zcode/GLM-5.3-Flash"}, runner, nil)
+
+	if judge.Provider != qwenProviderID || judge.Model != qwenBareModelID {
+		t.Fatalf("judge provider/model = %q/%q, want zcode/GLM-5.3-Flash", judge.Provider, judge.Model)
+	}
+	if !judge.ModelSplit {
+		t.Fatalf("judge legacy split not recorded: %#v", judge)
+	}
+}
+
+func TestResolveRunnerConfig_QwenEnvModelOverrideClearsLegacySplit(t *testing.T) {
+	t.Setenv("ZCODE_API_KEY", "sk-test")
+	t.Setenv("ZCODE_MODEL", "zcode/new-model")
+
+	resolved := ResolveRunnerConfig(config.EngineConfig{
+		Name:  "qwen_code",
+		Model: config.ModelConfig{Provider: qwenProviderID, Name: "zcode/old-model"},
+	}, nil, CLIOverrides{})
+
+	// The env override replaces the model wholesale: the adapter must forward
+	// the env value, not rejoin the YAML reference under it.
+	if resolved.Provider != qwenProviderID || resolved.Model != "zcode/new-model" {
+		t.Fatalf("resolved provider/model = %q/%q, want zcode/zcode/new-model", resolved.Provider, resolved.Model)
+	}
+	if resolved.ModelSplit {
+		t.Fatalf("env override must clear the legacy split: %#v", resolved)
+	}
+	if resolved.ModelSource != ValueSourceEnv {
+		t.Fatalf("env source not retained: %#v", resolved)
+	}
+}
+
+func TestResolveJudgeConfig_EnvModelOverrideClearsLegacySplit(t *testing.T) {
+	t.Setenv("ZCODE_API_KEY", "sk-test")
+	t.Setenv("ZCODE_MODEL", "zcode/new-model")
+
+	runner := ResolveRunnerConfig(config.EngineConfig{Name: "qwen_code"}, nil, CLIOverrides{})
+	judge := ResolveJudgeConfig(config.JudgeConfig{Model: "zcode/GLM-5.3-Flash"}, runner, nil)
+
+	// The env override replaces the judge model wholesale: rejoining the
+	// legacy reference would resurrect a model the member overrode.
+	if judge.Provider != qwenProviderID || judge.Model != "zcode/new-model" {
+		t.Fatalf("judge provider/model = %q/%q, want zcode/zcode/new-model", judge.Provider, judge.Model)
+	}
+	if judge.ModelSplit {
+		t.Fatalf("env override must clear the legacy split: %#v", judge)
+	}
+}
+
+func TestResolveJudgeConfig_ExplicitEngineSlashedYAMLModelStaysOpaque(t *testing.T) {
+	t.Setenv("ZCODE_API_KEY", "sk-test")
+
+	runner := ResolveRunnerConfig(config.EngineConfig{Name: "qwen_code"}, nil, CLIOverrides{})
+	judge := ResolveJudgeConfig(config.JudgeConfig{
+		Engine: &config.EngineConfig{
+			Name:  "qwen_code",
+			Model: config.ModelConfig{Name: "zcode/GLM-5.3-Flash"},
+		},
+	}, runner, nil)
+
+	if judge.Provider != "" || judge.Model != "zcode/GLM-5.3-Flash" || judge.ModelSplit {
+		t.Fatalf("judge YAML ref split unexpectedly: %q/%q split=%v", judge.Provider, judge.Model, judge.ModelSplit)
+	}
+}
+
+func TestResolveJudgeConfig_InheritsRunnerLegacySplit(t *testing.T) {
+	t.Setenv("ZCODE_API_KEY", "sk-test")
+
+	runner := ResolveRunnerConfig(config.EngineConfig{Name: "qwen_code"}, nil, CLIOverrides{Model: "zcode/GLM-5.3-Flash"})
+	judge := ResolveJudgeConfig(config.JudgeConfig{}, runner, nil)
+
+	if judge.Provider != qwenProviderID || judge.Model != qwenBareModelID {
+		t.Fatalf("judge provider/model = %q/%q, want inherited zcode/GLM-5.3-Flash", judge.Provider, judge.Model)
+	}
+	if !judge.ModelSplit {
+		t.Fatalf("inherited model must carry the legacy split flag: %#v", judge)
+	}
+}
+
+func TestResolveRunnerConfig_QwenBareCLIModelStaysBare(t *testing.T) {
+	t.Parallel()
+
+	resolved := ResolveRunnerConfig(config.EngineConfig{Name: "qwen_code"}, nil, CLIOverrides{Model: "qwen3-coder-plus"})
+
+	if resolved.Provider != "" || resolved.Model != "qwen3-coder-plus" {
+		t.Fatalf("resolved provider/model = %q/%q, want bare qwen3-coder-plus", resolved.Provider, resolved.Model)
 	}
 }
 
@@ -429,6 +576,22 @@ func TestResolveRunnerConfig_PreservesOpaqueSlashedCLIModel(t *testing.T) {
 	}
 	if resolved.APIKey != "sk-cli-openai" || resolved.APIKeySource != ValueSourceCLI {
 		t.Fatalf("CLI key was not retained for provider-empty model: %#v", resolved)
+	}
+}
+
+func TestResolver_LogEffectiveConfigDoesNotLogKeyMaterial(t *testing.T) {
+	logging.SetVerbosity(1)
+	defer logging.SetVerbosity(0)
+
+	apiKey := strings.Join([]string{"resolver", "test", "credential"}, "-")
+	r := NewResolver("")
+	r.creds["openai"] = &config.APIKeyConfig{APIKey: apiKey}
+	output := captureLogOutput(t, r.logEffectiveConfig)
+	if !strings.Contains(output, "api_key=present") {
+		t.Fatalf("expected credential-presence log, got %q", output)
+	}
+	if strings.Contains(output, apiKey) || strings.Contains(output, "****") {
+		t.Fatalf("key material leaked into log: %q", output)
 	}
 }
 

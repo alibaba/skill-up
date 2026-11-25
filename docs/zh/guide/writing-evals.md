@@ -128,12 +128,22 @@ report:
   artifacts: [transcript]         # 报告中包含的产物
 ```
 
+`report.formats` 只接受 `json`、`junit`、`html`；其它值会直接报配置错误，因为运行时
+原本会跳过未知格式、却仍然打印"报告已保存"。
+
 `skills[].include` 和 `skills[].exclude` 使用
 [doublestar](https://github.com/bmatcuk/doublestar) 语法（`*` 匹配单层路径，
 `**` 可跨目录）。pattern 相对 `skills[].path`，统一使用 `/` 分隔；
 `exclude` 优先于 `include`。未配置 `include` 时默认选择全部文件。
 评测框架目录 `evals/` 始终排除。配置 include 列表时，应显式包含
 `SKILL.md`，确保安装后的目录仍是有效 Skill。`judge.skills` 同样支持这两个字段。
+
+默认情况下，Skill 以其 `SKILL.md` frontmatter 中声明的 `name` 作为目录名安装到
+Agent 的 skills 目录。这样即使源目录名称不同（例如快照副本），Agent 看到的也是
+Skill 自身文本使用的名称。声明的名称只包含 ASCII 字母、数字、`-` 和 `_`，以字母或
+数字开头，不超过 64 个字符，且不是 `CON` 这类 Windows 设备名时才会被采用；否则使用
+源目录名。如果两个未设置 `target` 的条目会被安装到同一个目录，运行会报错：请重命名
+其中一个 Skill，或为它显式设置 `target`。`judge.skills` 遵循同样的规则。
 
 `cases.parallelism` 是配置文件中的默认用例并行数；临时运行时可以用 `skill-up run --parallelism N` 覆盖它，不需要修改 `eval.yaml`。命令行覆盖值必须在 1 到 256 之间。
 
@@ -154,6 +164,36 @@ configuration，并将 applied version 留空。
 但不会传递给 adapter，并会输出迁移警告。自定义可执行命令请使用
 `engine.custom.local.command` 和 `args`；adapter 专用参数请使用
 `engine.kwargs` 或 `engine.custom.kwargs`。
+
+### Codex provider 协议
+
+自定义 Codex provider（包括设置了自定义 `base_url` 的 `openai`）可以通过
+`engine.kwargs.wire_api` 选择 `chat` 或 `responses`。默认值为 `chat`，兼容默认
+安装的 Codex 0.80.0。0.169.0 等新版 Codex 已移除 Chat Completions 支持，需设置
+`wire_api: responses` 并使用支持 Responses API 的后端。该选项不会把仅支持 Chat
+的接口转换为 Responses 接口。使用内置 OpenAI provider 且未设置自定义 URL 时，
+保留 Codex 自身的协议配置。
+
+```yaml
+engine:
+  name: codex
+  version: "0.169.0"
+  kwargs:
+    wire_api: responses
+```
+
+必需 CI 矩阵使用真实 Codex 0.169.0（`responses`）及 0.80.0（`chat`、
+`responses`）连接本地 SSE 服务，核对 CLI 版本，并检查第二轮请求按顺序包含
+第一轮用户消息、第一轮助手回复及第二轮用户消息。0.80.0 还会验证修复前的
+resume 参数顺序：临时恢复旧实现，要求同一测试在第二轮报参数解析错误，再还原
+修复并要求测试通过。
+
+手动 **Model E2E** 工作流的 `codex` 套件另行使用百炼真实模型验证两轮记忆，
+覆盖 0.169.0（`responses`）及 0.80.0（`chat`），需要 `DASHSCOPE_API_KEY`。
+本地模拟服务通过不能代表百炼实测通过；Responses 是否可用还取决于接入地址、
+模型及 API Key 的业务空间绑定。为兼容现有 Chat-only 配置，默认引擎仍保留
+0.80.0 和 `chat`。
+可通过工作流输入 `codex_base_url`、`codex_model` 指定业务空间接口和模型。
 
 ### 采集 workspace 产物（`collect_artifacts`）
 
@@ -234,6 +274,18 @@ engine:
 - `${api_key}` 以及任何看起来像凭据的 kwarg key（`token` / `secret` / `api_key` / `apiKey` / `bearerToken` 等）都不允许出现在 `command` / `args` / `cwd` / `input_file` / `output_file` 中，必须经由 `engine.custom.env` 注入到子进程环境变量里。
 - `${SOMEVAR:-...}` 默认值如果匹配常见凭据特征（`sk-...`、`sk-ant-...`、`ghp_...`、`AIza...`、`AKIA...`、JWT 等），同样会在命令行场景被拒。
 
+**local 适配器的三个常见坑。** 适配器启动 agent CLI 时，除非协议本身要通过 stdin
+传帧，否则应关闭或重定向子进程的 stdin——部分 CLI 会把"打开的 stdin 管道"当作在等
+用户输入，一直阻塞到用例 deadline 且没有任何输出，看起来像 agent 很慢。其次要让 agent
+以非交互方式运行：使用它最自治的权限档，并在 CLI 支持时禁用交互式问询 / 审批工具，
+因为无头评测没有人应答，只有会经过审批点的用例才会挂住。自治权限档只有在运行时隔离了
+agent 时才安全：默认的 `environment.type: none` 会让 CLI 直接在你的宿主机上执行，因此
+`--mode yolo` 这类开关要配合 `environment.type: docker` / `opensandbox`，或显式的工具
+白名单——两者都没有时，它只是移除了审批提示，宿主机权限依然敞开（`qwen_code` 一节有
+同样的提醒）。调用超时时，把子进程 stdout
+的尾部保留到失败信息里；空白超时是最难排查的报告。一个完整的 local 传输示例（ZCode
+CLI）见 [docs/design/custom-engine.md](../../design/custom-engine.md#example-zcode-cli)。
+
 `transport: http` 时，把调用配置写在 `custom.http` 下（替代 `custom.local`）：
 
 ```yaml
@@ -269,7 +321,7 @@ SessionInput / SessionResult 的完整 JSON 契约见 `docs/design/custom-engine
 
 ### MCP 配置说明
 
-MCP 支持 `mode: real` 和 `mode: mocked`。`real` 用于把真实 MCP Server 安装到 `claude_code`、`qodercli`、`codex` 或 `qwen_code` 等 Agent；`mocked` 会由 `internal/mcp` 生成本地 stdio Mock Server，并按普通 MCP 配置安装到 Agent。
+MCP 支持 `mode: real` 和 `mode: mocked`。`real` 用于把真实 MCP Server 安装到 `claude_code`、`qodercli`、`codex` 或 `qwen_code` 等 Agent；`mocked` 会由 `internal/mcp` 生成本地 stdio Mock Server，并按普通 MCP 配置安装到 Agent。对于 `codex`，mocked Server 改为在每条 `codex exec` 命令上通过 `-c mcp_servers.<name>...` 覆盖项定义，不会写入用户的 Codex 配置（`~/.codex/config.toml`）。其脚本在每次运行时写入临时文件。如果该配置中已有同名 Server，或 mocked Server 名称不能作为 Codex 配置键（只能包含字母、数字、`-` 和 `_`），运行会提前报错。
 
 HTTP MCP 可以直接在 `eval.yaml` 中声明，也可以用 `config_ref` 引用 `evals/fixtures/mcp/*.yaml`：
 
@@ -314,7 +366,7 @@ mcp:
       mode: mocked
 ```
 
-也可以通过 `config_ref` 定义工具响应：
+或者通过 `config_ref` 定义 mocked 工具：
 
 ```yaml
 mcp:
@@ -325,6 +377,32 @@ mcp:
 ```
 
 ```yaml
+tools:
+  create_publish_plan_simple:
+    description: Create a publish plan for a project release.
+    input_schema:
+      type: object
+      properties:
+        name: {type: string}
+        planReleaseDate: {type: string}
+      required: [name]
+    response:
+      default:
+        id: 999
+        name: "{{params.name}}"
+        status: ONGOING
+```
+
+`tools` 下的每个条目定义一个工具：
+
+- `response` 必填。每次调用该工具都返回其 `default` 键下的值；若没有 `default` 键，则整个值即为响应。字符串值可以像示例中的 `name` 字段那样用 `params` 模板引用调用参数，并可用 `| default:'<value>'` 指定缺省值。`response: null` 返回 null。
+- `description` 和 `input_schema` 可选，决定 Agent 在 `tools/list` 中看到的内容。不填写时，Agent 看到的描述为 `Mocked MCP tool <name>`，输入 schema 接受任意对象，而不是真实 Server 的描述和参数，因此选择工具的方式可能与面对真实 Server 时不同。空的 `description` 同样沿用占位描述。
+- `input_schema` 一旦填写，就必须是 `type: object` 的映射，因为 MCP 要求输入 schema 是对象类型；空映射（`{}`）会报错，而 `input_schema: null` 沿用默认值。更深层的 JSON Schema 不做校验。schema 只用于声明：Mock Server 不会按它校验调用参数，参数缺失或多余的调用仍然返回该响应。
+- 工具条目只接受 `description`、`input_schema` 和 `response`；出现其他键（例如 MCP 协议里的 `inputSchema`）会报错。
+
+使用 `tool_responses` 映射的 fixture 无需修改，行为不变。其中每个条目即为该工具的 `response`，工具使用默认元数据：
+
+```yaml
 tool_responses:
   create_publish_plan_simple:
     default:
@@ -333,13 +411,13 @@ tool_responses:
       status: ONGOING
 ```
 
-基于 `tool_responses` 的 Mock Server 行为如下：
+同一个 fixture 可以用两种映射声明不同的工具；同一个工具名同时出现在 `tools` 和 `tool_responses` 中会报错。
+
+基于 fixture 的 Mock Server 行为如下：
 
 - 仅支持 stdio。`mode: mocked` 时，skill-up 会拒绝 `transport: http`、`endpoint`、`command` 和 `args`。
 - skill-up 使用 `node` 启动 Mock Server，因此运行环境的 `PATH` 中必须有 `node`。只有当 skill-up 自行安装 Claude Code、Codex、Qwen Code 或 OpenCode 时才会准备 Node.js；预先安装的引擎 CLI 或 Qoder CLI 不会附带 Node.js。
-- 每次调用某个工具都返回该工具的 `default` 响应；若没有 `default` 键，则整个条目即为响应。字符串值可以像示例中的 `name` 字段那样用 `params` 模板引用调用参数，并可用 `| default:'<value>'` 指定缺省值。
-- Agent 看到的每个工具描述均为 `Mocked MCP tool <name>`，输入 schema 接受任意对象，而不是真实 Server 的描述和参数 schema。
-- 调用未在 `tool_responses` 中声明的工具会返回 MCP 错误。
+- 调用 fixture 中未声明的工具会返回 MCP 错误。
 
 环境变量引用支持 `${VAR}` 和完整值 `$VAR` 两种形式，变量名必须匹配 `[A-Za-z_][A-Za-z0-9_]*`。`required_env` 会把变量注入 Agent 运行环境；`headers` 中完整的环境变量引用会额外记录变量名，供 Agent 安装 MCP 时选择合适的传递方式。
 
@@ -385,6 +463,86 @@ mcp:
 | `docker`      | 本地容器隔离，无需远程服务       | 自定义工具链、可复现 CI、离线环境 |
 
 > **建议**：如果你的 Skill 不涉及文件操作，使用 `none` 可以省去沙箱准备时间。
+
+#### 本地 agent 主目录
+
+自动创建的本地 workspace 统一位于系统临时目录下，路径为
+`<system temp>/skill-up-*/workspace/`，其父目录为临时运行目录。
+`environment.agent_home` 决定如何处理 agent 主目录设置：
+
+- `inherited`（默认）：保留继承的主目录设置。
+- `temporary`：使用临时运行目录作为独立主目录，每个 case、基线分组和重试各自创建。
+  此模式支持使用 API 凭据的 Claude Code 和 Codex 评测。
+
+两种模式采用相同的 workspace 布局，切换模式不会改变 `..` 的含义。
+显式指定的 `--workspace` 在两种模式下均保持原位；`temporary` 会为其创建单独的临时主目录。
+
+```yaml
+environment:
+  type: none
+  agent_home: temporary
+```
+
+在 `temporary` 模式下，`HOME`、`USERPROFILE` 和 `CODEX_HOME` 指向临时根目录，
+因此 Codex 的 `auth.json` 和 `sessions/` 不会进入 workspace 产物和 diff。
+会话记录从 `$CODEX_HOME/sessions` 收集。
+
+`CLAUDE_CONFIG_DIR`、XDG 目录和 Windows 应用数据目录也位于临时主目录下，
+这些设置覆盖 setup、续轮和 judge 的执行。
+单次命令的环境变量不能覆盖这些目录；`BASH_ENV` 和 `ENV` 启动文件被禁用。
+可执行文件搜索路径及其他环境变量仍然保留。setup 步骤不能依赖该主目录中的个人 Git
+或包管理器配置；请通过 setup 命令或 `environment.env` 显式提供所需设置。
+
+首版要求显式 API 凭据：Claude Code 使用 `ANTHROPIC_API_KEY` 或
+`ANTHROPIC_AUTH_TOKEN`，Codex 使用 `OPENAI_API_KEY`，也可通过 skill-up 的常规
+凭据配置提供。Codex 每次调用前通过 stdin 在临时主目录内初始化 API-key 登录。
+不复制个人登录文件或系统钥匙串登录；凭据缺失或 run/judge 引擎不受支持时，
+会在 setup 或 agent 执行前报错。
+
+两种模式下，case runtime 关闭时均删除整个临时运行目录。显式指定 `--workspace`
+时保留 workspace，只删除按需创建的临时主目录。`--no-delete` 会保留临时目录树，
+setup 日志会显示临时主目录路径；其中可能保存 Codex API key，
+应按敏感文件处理。此选项隔离常规用户配置和状态，并非文件系统安全边界：
+workspace 指令、系统配置及其他继承的环境变量仍然可用。
+进程隔离请使用容器；Docker 和 OpenSandbox 不支持 `agent_home: temporary`。
+
+#### 会话清理
+
+评测会删除它创建的 workspace，但 agent CLI 可能在 workspace 之外保留按 workspace 保存的状态。Claude Code 会写入 `~/.claude/projects/<workspace-key>/`，其中包含会话记录与 `memory/` 目录；qodercli 会写入 `~/.qoder/projects/<workspace-key>/`（CN 版为 `~/.qoder-cn/`），其中包含会话记录、`<sessionID>/subagents/` 下的子代理记录以及 `*-session.json` 元数据。重复评测会不断堆积在用户自己的会话历史里。
+
+`environment.cleanup_sessions: true`（或 `--cleanup-sessions`）会在删除 workspace 的同时删除该目录。它默认关闭，因为会删除用户可见的历史；目前由 `claude_code` 与 `qodercli` 实现：
+
+```yaml
+environment:
+  type: none
+  cleanup_sessions: true
+```
+
+显式的 `--cleanup-sessions=false` 会覆盖 `cleanup_sessions: true`；只有未显式设置时才会回落到配置。
+
+`--no-delete` 优先：workspace 与会话都会保留，并报告跳过清理。清理也不会在以下情况运行：workspace 由外部拥有（`--workspace`）、runtime 会保留 workspace、或无法证明归属。归属通过解析每份会话记录中的工作目录来判定，而不是字符串搜索，因此工具参数里出现的路径不会被当作身份；只有目录内每份记录都指向本 workspace 才会删除，记录互相冲突、无法解析或没有记录身份时保留。路径仅标点不同的两个 workspace 会共用一个项目目录，此时同样保留。对未实现清理的 agent，运行时会报告不支持；`qwen_code` 属于这一类，因为它的会话文件不记录工作目录，无法证明归属。
+
+#### 按实验分组执行初始化
+
+框架在 setup 前注入 `SKILL_UP_VARIANT`，并让 `none`、Docker 和 OpenSandbox 的后续 runtime 命令都能读取。它标识任务实际使用的执行配置，当前为 `with_skill` 或 `without_skill`。非 benchmark 运行即使 Skill 列表为空也使用 `with_skill`；这个值不代表 Skill 已安装或被调用。未来配置名可以是 `v1.0`、`v1.1` 等，但这个变量本身不会启用自定义分组。
+
+`SKILL_UP_VARIANT` 是保留名：在 `environment.env` 中配置会报错，即使值为空或与实际分组一致。框架会用实际任务配置覆盖宿主机继承值及 MCP 提供的同名值，不修改宿主进程环境。各用例、分组、重试和迭代使用独立的 runtime 环境。
+
+```yaml
+environment:
+  type: none
+  setup_steps:
+    - run: |
+        case "$SKILL_UP_VARIANT" in
+          with_skill)    bash /opt/eval/init-with.sh ;;
+          without_skill) bash /opt/eval/init-without.sh ;;
+          *) exit 1 ;;
+        esac
+benchmark:
+  enabled: true
+```
+
+脚本必须预先存在于所选 runtime 中，case fixtures 在 setup **之后**才上传。以上使用 POSIX shell 语法。本地 qodercli 可通过 `environment.type: none` 使用此配置；benchmark 任务仍使用独立工作区并生成原有对比报告。`--workspace` 与 benchmark 的现有限制保持有效。
 
 #### OpenSandbox 配置
 
@@ -741,7 +899,7 @@ judge:
 
 > **MCP 工具名**：`tool_called`、`tool_called_in_turn` 和 `tool_not_called_in_turn` 会把 `name` 与 Agent Engine 记录的工具名做精确匹配。Claude Code、Codex 和 Qoder CLI 记录的 MCP 工具名格式为 `mcp__<server>__<tool>`，其中 `<server>` 是 `mcp.servers` 中的 `name`。
 
-`output_contains` 执行字面 substring 检查。需要正则表达式时使用 `output_matches`；pattern 使用 Go `regexp` 语法，非法 pattern 会在配置校验阶段失败。
+`output_contains` 执行字面 substring 检查。需要正则表达式时使用 `output_matches`；pattern 使用 Go `regexp` 语法，非法 pattern 会在配置校验阶段失败。 matcher 存在但没有任何值时会被配置校验拒绝：空的 `output_contains`、`output_matches`、`turn_response_contains` 或 `turn_response_not_contains` 否则会以零检查被报告为通过。空条目（`""`）同样会被拒绝：空字面量是任何响应的子串，空 pattern 匹配任何响应，因此 `all: [""]` 无法继续制造假通过。空白本身不算空——`["\n"]` 可以断言输出只有一行，`["  "]` 可以拒绝双空格，两者都按原样比较。
 
 ### judge: script — 自定义脚本评估
 
@@ -893,9 +1051,22 @@ OpenAI/Anthropic 协议冲突，以及 adapter 会忽略的评分模型，会在
 网关若使用原生 provider 名称提供另一种协议，需要在 `credentials.yaml` 中显式配置
 对应协议的 endpoint。
 
+每个 `agent_judge` 结果都会在 `judge_context` 里写明给这个 case 打分的 agent：`engine`，
+以及 skill-up 实际传给它的 `provider` 和 `model`。skill-up 没有传的值会省略，不会拿请求里的
+值顶替：Codex judge 只被覆盖了模型、没有被覆盖 provider 时，只写 `model`、不写 `provider`，
+因为这时的路由由 Codex 本地配置决定。`observed_model` 只有在 adapter 拿到 engine 自己报告的
+模型时才会出现，并不是每个 adapter 都能拿到；没有这个字段表示实际运行的模型未知，不表示它和
+被测 agent 的模型不同。采信分数之前先看一眼 `judge_context`：judge 用的如果就是被测 agent
+自己的模型，相当于给自己的输出打分，往往会偏向自己。
+
 单个 case 的 `judge.engine` 会整体替换 eval 的 judge engine；显式 `judge.model`
 切换为旧模式；两者都未指定时继承 eval 的 engine/model 选择。`judges` 列表仍整体替换，
 成员不会继承单个 judge 的默认配置。
+
+当 eval 使用单个 `judge` 时，省略、空或 null 的 case 级 `judge` 会继承它。
+非空但未设置 `type` 的 case 级块也会继承 eval 的 judge，其自身字段全部被忽略；
+`validate` 和 `run` 会对此发出警告。要应用 case 级覆盖，请显式设置 `type`。
+当 eval 使用 `judges` 列表时，未设置 `type` 的 case 级 `judge` 仍会报错。
 
 Judge 继续使用 case 的 runtime，不新增 `judge.environment`。独立 judge 的 CLI
 在 Docker/OpenSandbox 的评分阶段安装和检查，发生在被测 agent 完成之后。
@@ -1132,6 +1303,19 @@ engine:
 >
 > **注意**：`--api-key` 参数和 `eval.yaml` 中的 provider API key **不会**被用作 qodercli 的认证 token。鉴权来自所选版本对应的 PAT 或本地登录态。
 
+若 CLI 以退出码 0 返回空结果，但 `stop_reason` 为 `tool_use`，说明工具循环尚未完成。
+skill-up 会将其报告为引擎错误并保留原始输出。先检查 `qodercli --version`，
+通过 `qodercli update` 或官方安装器升级，再用原生命令确认，避免误判为 Judge JSON 格式问题。
+Qoder CLI 0.2.0 使用已退役的 `performance` 参数时曾复现此问题，而 `auto` 能正常完成。
+当前客户端 1.1.83 使用可用档位时可以正常完成同样的任务。
+文件输出模式仍允许已正常结束的 `end_turn` 没有聊天文本。
+
+Qoder 已[将 Performance 替换为 Fast](https://docs.qoder.com/product-overview/fast-mode-announcement)。
+先用 `qodercli --list-models` 检查账号可用模型，当前客户端可选择 `fast`。
+若 Qoder 明确警告已将不可用的指定模型降级为其他模型，skill-up 会返回引擎错误；
+即使结果文件合法，Agent Judge 也不会恢复并接受该非预期模型的评分。
+
+
 qodercli 的模型选择：
 
 - 非空的 `engine.model.name` 会去除首尾空白后传给 Qoder 的 `--model`，保留大小写和完整 ID。普通调用、stdin 提示词和恢复会话均遵循此规则。
@@ -1316,3 +1500,39 @@ judge:
 ### Q: 什么时候用 expect，什么时候用 judge？
 
 `expect` 用于快速的、零成本的门槛检查（文件是否存在、关键词是否出现）。`judge` 用于更复杂的质量评估。两者可以同时使用——`expect` 不通过时 `judge` 会被跳过，节省时间和 token。
+
+### Agent Judge 文件输出
+
+设置 `judge.output.mode: file`，让 Judge 编辑框架预创建的 JSON 文件。
+默认模式仍为 `final_message`。文件模式要求 Agent 具有文件工具，并能访问
+Runtime 工作区；内置 none、Docker、OpenSandbox 均提供文件传输能力。
+
+```yaml
+judge:
+  type: agent_judge
+  engine:
+    name: qodercli
+    model:
+      provider: qoder
+      name: fast
+  output:
+    mode: file
+  criteria:
+    - 实现满足要求，并提供具体证据。
+```
+
+每次尝试使用独立路径，模板预填稳定 criterion ID、`passed: null` 和空数组。
+Judge 必须填写全部判断、证据和失败原因。框架只读取该文件并严格校验，
+不以聊天回复作为兜底结果。未修改、漏填、文件缺失、Markdown 包装或非法 JSON
+会触发一次纠正；纠正后仍无效则为 ERROR。有效的 FAIL 不触发纠正。
+纠正重试与首次调用共用原有超时预算，且使用新的模板和路径。
+
+下载的结果保留为 `result-attempt-1.json`、`result-attempt-2.json`，
+聊天原文仍保留为 `raw-response-attempt-*.txt`，样例不会作为备用评分。
+文件模式提高交付可靠性，不保证判断准确率。case 级 agent judge 继承全局设置，
+显式配置 `mode: final_message` 可覆盖；`judges` 列表各成员独立配置。
+可运行示例见 `examples/code-stats/evals/eval-agent-judge-file.yaml`。
+
+即使聊天回复为空，非取消类引擎错误后仍可恢复已通过校验的文件结果，
+报告会标记该调用发生过恢复。显式取消始终返回错误。
+已超时的调用最多允许额外五秒下载已有结果文件，不会重新启动 Agent。

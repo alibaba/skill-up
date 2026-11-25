@@ -290,7 +290,7 @@ func (a *CustomAgent) clearStaleOutputFile(ctx context.Context, rt Runtime, outp
 	// of the workspace.
 	safe, err := workspacePath(rt, outputFile)
 	if err != nil {
-		logging.WarnContextf(ctx, "CustomAgent: refusing to clear output file %s before run: %v", outputFile, err)
+		logging.WarnContextf(ctx, "CustomAgent: refusing to clear output file %s before run: %s", a.maskAPIKey(outputFile), a.maskAPIKey(err.Error()))
 		return false
 	}
 	outputFile = safe
@@ -298,7 +298,7 @@ func (a *CustomAgent) clearStaleOutputFile(ctx context.Context, rt Runtime, outp
 	cmd := "if [ -e " + q + " ]; then rm -f -- " + q + " && printf %s " + shellQuote(customStaleClearedMarker) + "; fi"
 	result, err := rt.Exec(ctx, cmd, ExecOptions{})
 	if err != nil {
-		logging.DebugContextf(ctx, "CustomAgent: could not clear stale output file %s: %v", outputFile, err)
+		logging.DebugContextf(ctx, "CustomAgent: could not clear stale output file %s: %s", a.maskAPIKey(outputFile), a.maskAPIKey(err.Error()))
 		return false
 	}
 	return strings.Contains(result.Stdout, customStaleClearedMarker)
@@ -336,9 +336,9 @@ func (a *CustomAgent) buildLocalExec(ctx context.Context, rt Runtime, opts ExecO
 		// behaves consistently across runtimes (NoneRuntime would otherwise
 		// pass it through relative to the skill-up process) and so a
 		// template-driven cwd cannot escape the workspace.
-		resolved, wpErr := workspacePath(rt, rendered)
+		resolved, wpErr := a.customWorkspacePath(rt, rendered, "local.cwd")
 		if wpErr != nil {
-			return "", ExecOptions{}, fmt.Errorf("local.cwd: %w", wpErr)
+			return "", ExecOptions{}, wpErr
 		}
 		cwd = resolved
 	}
@@ -466,7 +466,7 @@ func (a *CustomAgent) readRawResult(ctx context.Context, rt Runtime, custom *cus
 	if outputFile != "" {
 		safe, err := workspacePath(rt, outputFile)
 		if err != nil {
-			logging.WarnContextf(ctx, "CustomAgent: refusing to read output file %s after run: %v", outputFile, err)
+			logging.WarnContextf(ctx, "CustomAgent: refusing to read output file %s after run: %s", a.maskAPIKey(outputFile), a.maskAPIKey(err.Error()))
 			return strings.TrimSpace(result.Stdout), false
 		}
 		outputFile = safe
@@ -479,7 +479,7 @@ func (a *CustomAgent) readRawResult(ctx context.Context, rt Runtime, custom *cus
 	// same output_file basename.
 	tmpFile, err := os.CreateTemp("", "skill-up-custom-result-*")
 	if err != nil {
-		logging.WarnContextf(ctx, "CustomAgent: cannot create temp file for output_file %s, falling back to stdout: %v", outputFile, err)
+		logging.WarnContextf(ctx, "CustomAgent: cannot create temp file for output_file %s, falling back to stdout: %s", a.maskAPIKey(outputFile), a.maskAPIKey(err.Error()))
 		return result.Stdout, false
 	}
 	tmp := tmpFile.Name()
@@ -487,13 +487,13 @@ func (a *CustomAgent) readRawResult(ctx context.Context, rt Runtime, custom *cus
 	defer func() { _ = os.Remove(tmp) }()
 
 	if err := rt.DownloadFile(ctx, outputFile, tmp); err != nil {
-		logging.WarnContextf(ctx, "CustomAgent: cannot read output_file %s, falling back to stdout: %v", outputFile, err)
+		logging.WarnContextf(ctx, "CustomAgent: cannot read output_file %s, falling back to stdout: %s", a.maskAPIKey(outputFile), a.maskAPIKey(err.Error()))
 		return result.Stdout, false
 	}
 	// The output file exists in the runtime; it is "produced" even if empty.
 	data, err := os.ReadFile(tmp)
 	if err != nil {
-		logging.WarnContextf(ctx, "CustomAgent: cannot read output_file %s, falling back to stdout: %v", outputFile, err)
+		logging.WarnContextf(ctx, "CustomAgent: cannot read output_file %s, falling back to stdout: %s", a.maskAPIKey(outputFile), a.maskAPIKey(err.Error()))
 		return result.Stdout, true
 	}
 	if strings.TrimSpace(string(data)) == "" {
@@ -1174,15 +1174,15 @@ func (a *CustomAgent) completeTemplateVars(baseVars, renderedKwargs map[string]s
 // A non-absolute configured path is resolved against the runtime workspace so
 // it is consistent regardless of local.cwd (the command sees the same path the
 // runtime upload/download APIs key on).
-func resolveCustomIOFiles(rt Runtime, custom *customengine.Config, vars map[string]string) (inputFile, outputFile string, err error) {
+func (a *CustomAgent) resolveCustomIOFiles(rt Runtime, custom *customengine.Config, vars map[string]string) (inputFile, outputFile string, err error) {
 	inputFile = filepath.Join(rt.Workspace(), customDefaultInputFile)
 	if custom.Local.InputFile != "" {
 		rendered, rErr := renderTemplate(custom.Local.InputFile, vars)
 		if rErr != nil {
 			return "", "", fmt.Errorf("render local.input_file: %w", rErr)
 		}
-		if inputFile, err = workspacePath(rt, rendered); err != nil {
-			return "", "", fmt.Errorf("local.input_file: %w", err)
+		if inputFile, err = a.customWorkspacePath(rt, rendered, "local.input_file"); err != nil {
+			return "", "", err
 		}
 	}
 	outputFile = filepath.Join(rt.Workspace(), customDefaultOutputFile)
@@ -1191,11 +1191,28 @@ func resolveCustomIOFiles(rt Runtime, custom *customengine.Config, vars map[stri
 		if rErr != nil {
 			return "", "", fmt.Errorf("render local.output_file: %w", rErr)
 		}
-		if outputFile, err = workspacePath(rt, rendered); err != nil {
-			return "", "", fmt.Errorf("local.output_file: %w", err)
+		if outputFile, err = a.customWorkspacePath(rt, rendered, "local.output_file"); err != nil {
+			return "", "", err
 		}
 	}
 	return inputFile, outputFile, nil
+}
+
+// customWorkspacePath keeps API keys out of filesystem paths and runtime logs.
+func (a *CustomAgent) customWorkspacePath(rt Runtime, path, field string) (string, error) {
+	secretErr := fmt.Errorf("engine.custom.%s contains the API key; use engine.custom.env to pass credentials", field)
+	if a.containsAPIKey(path) {
+		return "", secretErr
+	}
+	resolved, err := workspacePath(rt, path)
+	if err != nil {
+		return "", fmt.Errorf("%s: %s", field, a.maskAPIKey(err.Error()))
+	}
+	// A symlink may resolve a harmless-looking name to a credential-bearing path.
+	if a.containsAPIKey(resolved) {
+		return "", secretErr
+	}
+	return resolved, nil
 }
 
 // workspacePath resolves a path against the runtime workspace and confines it

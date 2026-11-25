@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/logging"
@@ -219,7 +222,16 @@ func (a *applyDiffUploader) Upload(ctx context.Context, rt runtime.Runtime, case
 		return fmt.Errorf("apply_diff %q not found: %w", diffSource, err)
 	}
 
-	tmpPath := filepath.Join(os.TempDir(), filepath.Base(diffSource))
+	tmpPath := ".skill-up-apply-diff-" + uuid.NewString() + ".patch"
+	// Cleanup must also run after a partial upload or a cancelled case.
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		result, err := rt.Exec(cleanupCtx, "rm -f -- "+shellquote.QuotePOSIX(tmpPath), runtime.ExecOptions{Cwd: rt.Workspace()})
+		if err != nil || result.ExitCode != 0 {
+			logging.WarnContextf(cleanupCtx, "Failed to remove temporary diff %s: error=%v exit=%d stderr=%s", tmpPath, err, result.ExitCode, result.Stderr)
+		}
+	}()
 	if err := rt.UploadFile(ctx, diffSource, tmpPath); err != nil {
 		return fmt.Errorf("failed to upload diff file: %w", err)
 	}

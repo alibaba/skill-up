@@ -127,6 +127,10 @@ report:
   artifacts: [transcript]
 ```
 
+`report.formats` only accepts `json`, `junit` and `html`; any other value is a
+configuration error, because the runner would otherwise skip the unknown format
+and still report that the reports were saved.
+
 `skills[].include` and `skills[].exclude` use
 [doublestar](https://github.com/bmatcuk/doublestar) syntax (`*` matches one
 path segment and `**` crosses directories). Patterns are relative to
@@ -135,6 +139,16 @@ path segment and `**` crosses directories). Patterns are relative to
 The evaluation harness directory `evals/` is always excluded. If an include
 list is provided, include `SKILL.md` explicitly so the installed directory
 remains a valid Skill. The same fields are supported by `judge.skills`.
+
+By default a Skill is installed into the Agent's skills directory under the
+`name` declared in its `SKILL.md` frontmatter. The Agent then sees it under
+the name its own text uses, even when the source folder is named differently
+(for example a snapshot copy). The declared name is used when it has only
+ASCII letters, digits, `-` and `_`, starts with a letter or digit, is at most
+64 characters, and is not a Windows device name such as `CON`; otherwise the
+source folder's name is used. Two entries without a `target` that would be
+installed into the same directory are rejected: rename one Skill or give it an
+explicit `target`. `judge.skills` follows the same rules.
 
 `cases.parallelism` is the file-level default. To override it for a single run, use `skill-up run --parallelism N` without modifying `eval.yaml`. Allowed range: **1 to 256**.
 
@@ -167,11 +181,51 @@ to an adapter and are now explicitly ignored with migration warnings. Use
 
 | key | agent | `true` behaviour | unset / `false` |
 | :---: | :---: | :--- | :--- |
-| `bypass_sandbox` | `codex` | Forces `--dangerously-bypass-approvals-and-sandbox`; overrides the runtime-derived choice. Use when the host kernel lacks Landlock support (e.g. some CI containers) | Default: `none` runtime → `--sandbox workspace-write`; other runtimes already bypass |
+| `bypass_sandbox` | `codex` | Forces `--dangerously-bypass-approvals-and-sandbox`; overrides the runtime-derived choice. Use when the host kernel lacks Landlock support (e.g. some CI containers) | Default: `none` runtime → `--sandbox workspace-write`, with tool calls approved for the MCP servers skill-up installed whose names match `^[A-Za-z0-9_-]+$` (other names cannot be addressed by a Codex `-c` override, so Codex still rejects their calls); other runtimes already bypass |
 | `bypass_sandbox` | `claude_code` | No-op — claude already runs with `--permission-mode=bypassPermissions` | No-op |
 | `bypass_sandbox` | `qodercli` | No-op — no equivalent flag | No-op |
 | `bypass_sandbox` | `qwen_code` | No-op — `qwen_code` never imposes its own sandbox (`--yolo` only auto-approves tool calls; it does **not** isolate). Like `claude_code`/`qodercli`, isolation is the runtime's job | No-op |
 | `edition` | `qodercli` | Set to `cn` to use Qoder CLI CN (`qodercn`); switches the installer, credential env, user config/session root, MCP command, and run/resume command together | `global` (Qoder CLI from qoder.com) |
+
+For custom Codex providers (including `openai` with a custom `base_url`),
+`engine.kwargs.wire_api` selects `chat` or `responses`. The default is `chat`
+for the pinned Codex 0.80.0. Newer Codex versions, including 0.169.0, removed
+Chat Completions support: set `wire_api: responses` and use a backend that
+implements the Responses API. This option does not translate a Chat-only
+endpoint into a Responses endpoint. With the built-in OpenAI provider and no
+custom URL, Codex's own protocol configuration is left unchanged.
+
+```yaml
+engine:
+  name: codex
+  version: "0.169.0"
+  kwargs:
+    wire_api: responses
+```
+
+The required CI matrix runs real Codex 0.169.0 (`responses`) and 0.80.0
+(`chat` and `responses`) against a local SSE provider. It checks the exact CLI
+version and verifies that the second request contains the first user message,
+the first assistant reply, and the second user message in order. The 0.80.0
+jobs temporarily restore the original option ordering, require this same test
+to fail on turn two with the parser error, then restore the fix and require a pass.
+
+To reproduce with a preinstalled CLI:
+
+```bash
+SKILL_UP_CODEX_COMPAT_E2E=1 SKILL_UP_CODEX_EXPECTED_VERSION=0.80.0 \
+  SKILL_UP_CODEX_WIRE_API=chat \
+  go test -race -tags e2e -count=1 -v -run '^TestCodexCLICompatibility$' ./e2e
+```
+
+The manual **Model E2E** workflow's `codex` suite separately runs real
+DashScope two-turn recall with 0.169.0 (`responses`) and 0.80.0 (`chat`).
+It requires `DASHSCOPE_API_KEY`; a local fixture pass does not establish
+live-provider compatibility. Responses access also depends on the endpoint,
+model, and the API key's workspace binding. Workflow inputs `codex_base_url`
+and `codex_model` can select the appropriate workspace endpoint and model.
+The default engine remains 0.80.0
+with `chat` to preserve existing Chat-only configurations.
 
 Codex also accepts byte limits for its JSONL artifacts:
 
@@ -270,6 +324,23 @@ Secret-handling rules (enforced at config load):
 - `${api_key}` and any kwarg whose key looks like a credential (`token`, `secret`, `api_key`, `apiKey`, `bearerToken`, …) cannot be referenced from `command` / `args` / `cwd` / `input_file` / `output_file`. Pass them through `engine.custom.env`, where they reach your agent as process environment variables instead of leaking into process listings.
 - `${SOMEVAR:-...}` defaults that contain recognizable credential shapes (`sk-...`, `sk-ant-...`, `ghp_...`, `AIza...`, `AKIA...`, JWTs) are likewise rejected in command-line contexts.
 
+**Local adapters: three pitfalls worth knowing.** If your adapter spawns the agent CLI,
+close or redirect that child's stdin unless the protocol carries frames over stdin —
+several CLIs treat an open stdin pipe as "waiting for input" and block until the case
+deadline with no output, which looks like a slow agent. And make the agent
+non-interactive: drive it in its most autonomous permission mode and disable
+interactive question/approval tools when the CLI has a flag for that, because a
+headless run has nobody to answer and only cases that cross an approval point hang.
+Autonomous mode is only safe when the runtime isolates the agent: `environment.type:
+none` (the default) executes the CLI directly on your host, so pair a `--mode yolo`-style
+flag with `environment.type: docker` / `opensandbox` or an explicit tool allowlist —
+without either one it merely removes the approval prompt and leaves host privileges in
+place, the same warning that applies to `qwen_code` below.
+When a call times out, keep the tail of the child's stdout in the failure message; an
+empty timeout is the hardest report to debug. A worked local-transport example (the
+ZCode CLI) is in
+[docs/design/custom-engine.md](../design/custom-engine.md#example-zcode-cli).
+
 For `transport: http`, configure the call under `custom.http` instead of `custom.local`:
 
 ```yaml
@@ -305,7 +376,7 @@ See `docs/design/custom-engine.md` for the full SessionInput / SessionResult sch
 
 ### MCP configuration
 
-MCP supports `mode: real` and `mode: mocked`. `real` installs a real MCP server into Agents such as `claude_code`, `qodercli`, `codex`, or `qwen_code`; `mocked` makes `internal/mcp` generate a local stdio mock server that is then installed into the Agent like any other MCP server.
+MCP supports `mode: real` and `mode: mocked`. `real` installs a real MCP server into Agents such as `claude_code`, `qodercli`, `codex`, or `qwen_code`; `mocked` makes `internal/mcp` generate a local stdio mock server that is then installed into the Agent like any other MCP server. For `codex`, a mocked server is instead defined on each `codex exec` command with `-c mcp_servers.<name>...` overrides, so nothing is written to the user's Codex config (`~/.codex/config.toml`). Its script is written to a temporary file for each run. A run fails early if that config already has a server with the same name, or if the mocked server's name is not usable as a Codex config key (letters, digits, `-` and `_`).
 
 HTTP MCP servers can be declared inline or pulled in via `config_ref`:
 
@@ -350,7 +421,7 @@ mcp:
       mode: mocked
 ```
 
-Or define tool responses through `config_ref`:
+Or define the mocked tools through `config_ref`:
 
 ```yaml
 mcp:
@@ -361,6 +432,32 @@ mcp:
 ```
 
 ```yaml
+tools:
+  create_publish_plan_simple:
+    description: Create a publish plan for a project release.
+    input_schema:
+      type: object
+      properties:
+        name: {type: string}
+        planReleaseDate: {type: string}
+      required: [name]
+    response:
+      default:
+        id: 999
+        name: "{{params.name}}"
+        status: ONGOING
+```
+
+Each entry under `tools` defines one tool:
+
+- `response` is required. Every call to the tool returns the value under its `default` key, or the whole value when there is no `default` key. String values can insert call arguments with the `params` template used in the example's `name` field, with an optional `| default:'<value>'` fallback. `response: null` returns null.
+- `description` and `input_schema` are optional and set what the Agent sees in `tools/list`. Without them the Agent sees the description `Mocked MCP tool <name>` and an input schema that accepts any object, not the real server's descriptions and parameters, so it may pick tools differently than against the real server. An empty `description` also keeps the placeholder.
+- `input_schema`, when set, must be a mapping with `type: object`, because MCP requires an object schema; an empty mapping (`{}`) is an error, while `input_schema: null` keeps the default. Nothing deeper is validated. The schema is advertised only: the mock does not check call arguments against it, so a call with missing or extra arguments still returns the response.
+- A tool entry accepts only `description`, `input_schema` and `response`. Any other key, such as the MCP wire name `inputSchema`, is an error.
+
+Fixtures that use the `tool_responses` map keep working unchanged. Each entry there is the tool's `response`, and the tool gets the default metadata:
+
+```yaml
 tool_responses:
   create_publish_plan_simple:
     default:
@@ -369,13 +466,13 @@ tool_responses:
       status: ONGOING
 ```
 
-A mocked server built from `tool_responses` behaves as follows:
+One fixture may use both maps for different tools. A tool name declared under both `tools` and `tool_responses` is an error.
+
+A mocked server built from a fixture behaves as follows:
 
 - It uses stdio only. For `mode: mocked`, skill-up rejects `transport: http`, `endpoint`, `command`, and `args`.
 - skill-up starts it with `node`, so `node` must be on `PATH` in the runtime. skill-up sets up Node.js only when it installs Claude Code, Codex, Qwen Code, or OpenCode itself. A preinstalled engine CLI or the Qoder CLI does not bring Node.js with it.
-- Every call to a tool returns that tool's `default` response. If a tool has no `default` key, the whole entry is the response. String values can insert call arguments with the `params` template used in the example's `name` field, with an optional `| default:'<value>'` fallback.
-- The Agent sees each tool with the description `Mocked MCP tool <name>` and an input schema that accepts any object, not the real server's descriptions or parameter schemas.
-- A call to a tool that is not listed under `tool_responses` returns an MCP error.
+- A call to a tool that the fixture does not declare returns an MCP error.
 
 Environment-variable references support both `${VAR}` and full-value `$VAR` forms; the variable name must match `[A-Za-z_][A-Za-z0-9_]*`. Variables listed in `required_env` are injected into the Agent process; full env-var references inside `headers` are also recorded by name so the Agent can pick the right transport mechanism when installing the MCP server.
 
@@ -422,9 +519,98 @@ Rules and constraints:
 
 > **Tip:** if your Skill does not touch the filesystem, `none` avoids sandbox provisioning and is significantly faster.
 
+#### Local agent home
+
+Automatic local workspaces use `<system temp>/skill-up-*/workspace/`, with a
+temporary run directory as their parent. `environment.agent_home` selects how
+agent home settings are handled:
+
+- `inherited` (default): keep the inherited home settings.
+- `temporary`: use the run directory as a separate home for each case, benchmark
+  arm and retry. This mode supports API-key-authenticated Claude Code and Codex runs.
+
+Both modes use the same workspace layout, so switching modes does not change the
+meaning of `..`. An explicit `--workspace` stays at the supplied path in both modes;
+`temporary` gives it a separate temporary home.
+
+```yaml
+environment:
+  type: none
+  agent_home: temporary
+```
+
+In `temporary` mode, `HOME`, `USERPROFILE` and `CODEX_HOME` point to the temporary
+root, so Codex's `auth.json` and `sessions/` stay outside workspace artifacts and
+diffs. Session transcripts are collected from `$CODEX_HOME/sessions`.
+
+`CLAUDE_CONFIG_DIR`, XDG directories and Windows application-data directories
+also live under the temporary home. These settings apply to setup steps, resumed
+turns and judges. Environment overrides cannot redirect those paths back to a personal
+home. Non-interactive shell startup files (`BASH_ENV` and `ENV`) are disabled.
+The existing executable search path and other environment variables are retained.
+Setup steps cannot rely on personal Git or package-manager configuration in this
+home; supply required settings through setup commands or `environment.env`.
+
+This initial mode requires explicit API credentials: `ANTHROPIC_API_KEY` or
+`ANTHROPIC_AUTH_TOKEN` for Claude Code, and `OPENAI_API_KEY` for Codex. The normal
+skill-up credential configuration can supply them too. Codex initializes its
+API-key login through stdin inside the temporary home before each invocation.
+Personal login files and OS-keychain logins are not copied. Missing credentials
+and unsupported run or judge engines fail before setup or agent execution.
+
+In both modes, the whole temporary run directory is deleted when the case runtime
+closes. With an explicit `--workspace`, the workspace is preserved and only a
+temporary home, if requested, is deleted. `--no-delete` preserves the temporary
+tree; temporary home locations are logged during setup.
+Treat a preserved home as sensitive because Codex may store the supplied key there.
+This isolates conventional user configuration and state, not filesystem access:
+workspace instructions, system-wide configuration and other inherited environment
+variables remain available. Use a container for process isolation. Docker and
+OpenSandbox reject `agent_home: temporary`.
+
+#### Session cleanup
+
+An evaluation deletes its workspace, but an agent CLI may keep per-workspace state outside it. Claude Code writes a project directory under `~/.claude/projects/<workspace-key>/` with the session transcript and a `memory/` folder, and qodercli writes `~/.qoder/projects/<workspace-key>/` (or `~/.qoder-cn/` for the CN edition) with the transcript, sub-agent transcripts under `<sessionID>/subagents/`, and `*-session.json` metadata, so repeated runs add up in the user's own session history.
+
+`environment.cleanup_sessions: true` (or `--cleanup-sessions`) removes that directory together with the workspace. It is off by default because it deletes user-visible history, and `claude_code` and `qodercli` implement it today:
+
+```yaml
+environment:
+  type: none
+  cleanup_sessions: true
+```
+
+An explicit `--cleanup-sessions=false` overrides `cleanup_sessions: true`; only an unset flag falls back to the config.
+
+`--no-delete` wins: the workspace and the sessions are both preserved, and the run reports that cleanup was skipped. Cleanup also does not run for an externally owned workspace (`--workspace`), when the runtime keeps the workspace, or when ownership cannot be proven. Ownership is parsed from each transcript's recorded working directory, not searched for as a string, so a path inside a tool argument never counts; a directory is removed only when every transcript in it records this workspace, and it is kept when the transcripts disagree, do not parse, or record nothing. Two workspaces whose paths differ only in punctuation share one project directory, so it is left untouched. For an agent that does not implement cleanup the run reports that it is unsupported; `qwen_code` falls in that group because its chat files record no working directory, so ownership cannot be proven.
+
+#### Branching setup by experiment group
+
+The framework injects `SKILL_UP_VARIANT` before setup and keeps it available to subsequent runtime commands in `none`, Docker, and OpenSandbox. It identifies the scheduled execution configuration: currently `with_skill` or `without_skill`. Non-benchmark runs use `with_skill`, even when the Skill list is empty; this does not prove that a Skill was installed or invoked. Future configurations may use other names (for example, `v1.0` or `v1.1`); custom groups are not enabled by this variable alone.
+
+`SKILL_UP_VARIANT` is reserved: defining it in `environment.env` is an error, including an empty or matching value. The framework overrides an inherited host value and any MCP-provided value with the actual task configuration, without changing the host process environment. Cases, variants, retries, and iterations receive their own runtime environment.
+
+```yaml
+environment:
+  type: none
+  setup_steps:
+    - run: |
+        case "$SKILL_UP_VARIANT" in
+          with_skill)    bash /opt/eval/init-with.sh ;;
+          without_skill) bash /opt/eval/init-without.sh ;;
+          *) exit 1 ;;
+        esac
+benchmark:
+  enabled: true
+```
+
+The scripts must already exist in the selected runtime; case fixtures are uploaded **after** setup. POSIX shell syntax is shown above. Local qodercli can use this setup with `environment.type: none`; benchmark tasks still use independent workspaces and generate the existing comparison report. The existing restriction on `--workspace` with benchmark remains in effect.
+
 #### OpenSandbox configuration
 
 When `environment.type: opensandbox` is used, sandbox auth is read from the `OPENSANDBOX_API_KEY` environment variable. Non-secret options such as service URL or extension flags belong in `environment.kwargs`. The Agent runtime handles its own binary path; you usually do **not** need to set `PATH` inside the eval config.
+
+> **Known limitation:** OpenSandbox workspace file checks (`Exists` and `ReadFile`) reject paths containing `$` because the service expands environment variables in file paths. A literal filename such as `report-$VERSION.txt` therefore returns an error on OpenSandbox. This is tracked upstream at <https://github.com/opensandbox-group/OpenSandbox/issues/2960>.
 
 ```yaml
 environment:
@@ -861,7 +1047,7 @@ judge:
 
 > **MCP tool names:** `tool_called`, `tool_called_in_turn`, and `tool_not_called_in_turn` compare `name` exactly with the tool name the Agent Engine recorded. Claude Code, Codex, and Qoder CLI record MCP tools as `mcp__<server>__<tool>`, where `<server>` is the server `name` from `mcp.servers`.
 
-`output_contains` performs literal substring checks. Use `output_matches` when you need regular expressions; patterns use Go `regexp` syntax and invalid patterns fail config validation.
+`output_contains` performs literal substring checks. Use `output_matches` when you need regular expressions; patterns use Go `regexp` syntax and invalid patterns fail config validation. A matcher that is present but lists no values is rejected by config validation: an empty `output_contains`, `output_matches`, `turn_response_contains`, or `turn_response_not_contains` would otherwise be reported as passing with zero checks. The same applies to the empty entry: an empty literal is a substring of every response and an empty pattern matches every response, so `all: [""]` cannot keep the false-positive pass. Whitespace is not empty — `["\n"]` checks that the output is a single line and `["  "]` rejects a double space, and both are compared as written.
 
 ### judge: script — custom script
 
@@ -1029,11 +1215,29 @@ that the adapter would discard fail before the evaluated agent runs. A gateway
 using a native provider name with another protocol must explicitly configure that
 protocol's endpoint in `credentials.yaml`.
 
+Each `agent_judge` result names the agent that graded the case in its
+`judge_context`: the `engine`, plus the `provider` and `model` that skill-up
+forwarded to it. A value skill-up did not forward is omitted rather than filled
+in from the request: a Codex judge given a model override without a provider
+override is written with `model` and no `provider`, because Codex's local
+configuration picks the route. `observed_model` appears only when the adapter
+captures a model reported by the engine itself, and not every adapter does. When
+it is absent, the model that actually ran is unknown; that does not mean it
+differs from the evaluated agent's. Check `judge_context` before trusting a
+score: a judge that runs the evaluated agent's own model grades its own output
+and tends to favor it.
+
 For a singular case-level `judge`, an explicit `engine` replaces the entire eval
 judge engine; an explicit legacy `model` selects the legacy mode. If neither is
 set, the eval's engine/model selection is inherited. `judges` lists retain their
 existing full-list replacement semantics; members do not inherit a singular
 judge's defaults.
+
+When the eval uses a singular `judge`, an omitted, empty or null case-level
+`judge` inherits it. A non-empty case-level block without `type` also inherits
+the eval judge, ignoring every field in the case block; `validate` and `run`
+warn about this. Set `type` explicitly to apply a case override. When the eval
+uses a `judges` list, a case-level `judge` without `type` remains an error.
 
 The judge continues to use the case runtime; there is no `judge.environment`.
 An independent judge's CLI is installed and checked in Docker/OpenSandbox during
@@ -1280,6 +1484,22 @@ engine:
 >
 > **Note:** the `--api-key` flag and any provider API key declared in `eval.yaml` are **not** used as the qodercli auth token. Authentication comes from the selected edition's PAT or local login state.
 
+If a run returns an empty result with `stop_reason: tool_use`, the CLI has not
+finished its tool loop even if it exits zero. skill-up reports this as an engine
+error and retains the raw output. Check `qodercli --version` and update the CLI
+with `qodercli update` or the official installer. A native-CLI reproduction
+separates this issue from judge JSON formatting. Qoder CLI 0.2.0 reproduced it
+with the retired `performance` argument while `auto` completed normally. The
+current client (1.1.83) completed the same tasks with available tiers.
+A completed `end_turn` with empty chat is still allowed for file-based judges.
+
+Qoder has [replaced Performance with Fast](https://docs.qoder.com/product-overview/fast-mode-announcement).
+Use `qodercli --list-models` to check account availability and select `fast` on
+current clients. If Qoder explicitly warns that an unavailable requested model
+was replaced with a fallback, skill-up returns an engine error. Agent judges do
+not recover a verdict from that unintended model, even from a valid result file.
+
+
 qodercli model selection:
 
 - A non-empty `engine.model.name` is passed to Qoder's `--model` after trimming
@@ -1484,3 +1704,45 @@ All paths (including `cases.files` and fixture paths) are resolved relative to t
 ### When should I use `expect` vs `judge`?
 
 Use `expect` for fast, zero-cost gating (file existence, keyword presence). Use `judge` for richer quality grading. They compose well — when `expect` fails, `judge` is skipped, saving time and tokens.
+
+### Agent judge result files
+
+Set `judge.output.mode: file` to have the Judge edit a framework-created JSON
+file instead of returning JSON in its final chat message. The default remains
+`final_message`. This requires an agent with file tools and a shared runtime
+workspace; built-in none, Docker, and OpenSandbox runtimes provide file transfer.
+
+```yaml
+judge:
+  type: agent_judge
+  engine:
+    name: qodercli
+    model:
+      provider: qoder
+      name: fast
+  output:
+    mode: file
+  criteria:
+    - The implementation satisfies the required behavior with concrete evidence.
+```
+
+Each attempt receives a fresh runtime path and a template with stable criterion
+IDs, `passed: null`, and empty evidence/failure arrays. The Judge must replace all
+placeholders. The framework reads only that file, validates the existing strict
+result contract, and retries correction once if needed. Final chat prose is
+preserved for diagnosis but never used as a fallback verdict. A valid failing
+verdict does not trigger correction. Retries share the original timeout budget.
+
+Unchanged, incomplete, missing, fenced, or malformed files remain errors after
+correction. File output improves delivery reliability; it does not guarantee
+better evaluation accuracy. The framework saves `result-attempt-1.json` and,
+when downloaded, `result-attempt-2.json` beside the original
+`raw-response-attempt-*.txt` chat artifacts. No sample result is used as a backup
+score. Case-level agent judges inherit the global output setting; explicitly set
+`mode: final_message` to override it. Explicit `judges` members are independent.
+See `examples/code-stats/evals/eval-agent-judge-file.yaml` for a runnable example.
+
+A validated file can be recovered after a non-cancellation engine error even if
+chat is empty; reports disclose the recovered call. Explicit cancellation is
+never recovered. After an expired deadline, recovery permits up to five seconds
+only to download the existing result file, without restarting the agent.

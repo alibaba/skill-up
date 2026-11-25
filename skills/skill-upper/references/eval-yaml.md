@@ -9,6 +9,7 @@ schema_version: v1alpha1
 
 environment:
   type: none                      # none | opensandbox | docker
+  agent_home: inherited           # inherited (default) | temporary
 
 mcp:
   servers:
@@ -84,6 +85,15 @@ report:
 | `opensandbox` | Remote sandbox for files and commands | `OPENSANDBOX_API_KEY`; service settings in `environment.kwargs` or `OPENSANDBOX_BASE_URL` |
 | `docker` | Local container isolation | Docker CLI and daemon; pull the image beforehand |
 
+For `none`, `environment.agent_home: temporary` gives each case, benchmark arm
+and retry a separate home. It requires Claude Code or Codex and explicit API
+credentials for the run and any agent judges. The default `inherited` mode keeps
+inherited home settings. Both modes use `<system temp>/skill-up-*/workspace/` for an
+automatic workspace. An explicit `--workspace` stays in place; temporary mode
+gives it a separate home. `--no-delete` retains the temporary tree, which can
+contain credentials. See the [local agent home guide](https://alibaba.github.io/skill-up/guide/writing-evals.html#local-agent-home)
+for credential requirements and cleanup behavior.
+
 ### OpenSandbox example
 
 ```yaml
@@ -122,6 +132,7 @@ Docker CLI and daemon are required. `network_policy: deny_all` creates a contain
 - `mode: real` installs a real MCP server for the agent.
 - HTTP MCP may be configured inline or with `config_ref` pointing to `evals/fixtures/mcp/*.yaml`.
 - Stdio MCP accepts `command` and `args`.
+- A mocked `config_ref` fixture declares tools under `tools`: each entry has a required `response` (its `default` key, or the whole value, is returned on every call; `null` is allowed) and optional `description` and `input_schema` (a mapping with `type: object`) advertised in `tools/list`, never enforced on calls. The older `tool_responses` map (name to response) still works; a name may not appear in both maps.
 - Environment references use `${VAR}` or a whole-value `$VAR`; `required_env` injects variables into the agent environment.
 - Evaluation-level `mcp` provides defaults. A case may declare `mcp.servers` (currently `mode: mocked` only), replacing a same-named server as a whole to swap mocked fixtures under the same server and tool names. `config_ref` remains relative to the Skill root.
 

@@ -5,6 +5,33 @@ import (
 	"testing"
 )
 
+func TestEnvironmentAgentHome(t *testing.T) {
+	for _, kind := range []string{runtimeTypeNone, runtimeTypeDocker, runtimeTypeOpenSandbox} {
+		for _, mode := range []string{"", "inherited", "temporary", "unknown"} {
+			t.Run(kind+"/"+mode, func(t *testing.T) {
+				cfg := &EvalConfig{
+					SchemaVersion: "v1alpha1",
+					Environment:   Environment{Type: kind, AgentHome: mode, Image: "test-image"},
+					Engine:        EngineConfig{Name: "claude_code"},
+					Cases:         CasesConfig{Files: []string{"case.yaml"}},
+					Judge:         JudgeConfig{Type: "rule_based"},
+				}
+				err := NewValidator().ValidateEvalConfig(cfg)
+				wantErr := mode == "unknown" || (mode == "temporary" && kind != runtimeTypeNone)
+				if wantErr && (err == nil || !strings.Contains(err.Error(), "environment.agent_home")) {
+					t.Fatalf("error = %v, want agent_home error", err)
+				}
+				if !wantErr && err != nil {
+					t.Fatal(err)
+				}
+				if got := cfg.Environment.ToRuntimeConfig().AgentHome; got != mode {
+					t.Fatalf("runtime agent_home = %q, want %q", got, mode)
+				}
+			})
+		}
+	}
+}
+
 //nolint:maintidx,funlen // table-driven test cases drive the line count; splitting hurts readability.
 func TestValidator_ValidateEvalConfig(t *testing.T) {
 	t.Parallel()
@@ -127,6 +154,202 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			},
 			wantErr: true,
 			errMsg:  "judge.failure[0]: assertion has no recognizable matcher field",
+		},
+		{
+			name: "empty output_contains matcher is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{OutputContains: &OutputContainsRule{}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0].output_contains must include at least one of all, any, or not",
+		},
+		{
+			name: "empty output_matches lists are rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Failure: []Rule{{OutputMatches: &OutputMatchesRule{Any: []string{}}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.failure[0].output_matches must include at least one of all, any, or not",
+		},
+		{
+			name: "empty turn_response_contains matcher is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{TurnResponseContains: &TurnResponseContainsRule{Turn: 1}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0].turn_response_contains must include at least one of contains_all or contains_any",
+		},
+		{
+			name: "empty turn_response_not_contains matcher is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{TurnResponseNotContains: &TurnResponseNotContainsRule{Turn: 1}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0].turn_response_not_contains.not_contains must not be empty",
+		},
+		{
+			name: "blank output_contains entry is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{OutputContains: &OutputContainsRule{All: []string{""}}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0].output_contains.all[0] must not be empty",
+		},
+		{
+			name: "blank turn_response matcher entry is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{TurnResponseContains: &TurnResponseContainsRule{Turn: 1, ContainsAll: []string{"ok", ""}}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0].turn_response_contains.contains_all[1] must not be empty",
+		},
+		{
+			// Whitespace is a matcher: the runtime passes it to strings.Contains
+			// and regexp.MatchString as written, so ["\n"] asserts a single-line
+			// output and ["  "] rejects a double space.
+			name: "whitespace matchers are accepted",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{OutputContains: &OutputContainsRule{Not: []string{"\n"}}},
+						{OutputContains: &OutputContainsRule{All: []string{" ", "\t"}}},
+						{OutputMatches: &OutputMatchesRule{Not: []string{"  ", "\\s{3}"}}},
+						{TurnResponseContains: &TurnResponseContainsRule{Turn: 1, ContainsAny: []string{"\n"}}},
+						{TurnResponseNotContains: &TurnResponseNotContainsRule{Turn: 1, NotContains: []string{"  "}}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "matchers with values are accepted",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{
+						{OutputContains: &OutputContainsRule{Not: []string{"error"}}},
+						{OutputMatches: &OutputMatchesRule{Any: []string{"^ok$"}}},
+						{TurnResponseContains: &TurnResponseContainsRule{Turn: 1, ContainsAll: []string{"ok"}}},
+						{TurnResponseNotContains: &TurnResponseNotContainsRule{Turn: 1, NotContains: []string{"error"}}},
+					},
+				},
+			},
+			wantErr: false,
 		},
 		{
 			name: "rules with supported matchers are accepted",
@@ -867,6 +1090,41 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			wantErr: true,
 			errMsg:  "allow_declared is not supported for environment.type docker",
 		},
+		{
+			name: "supported report formats are accepted",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine:        EngineConfig{Name: "codex"},
+				Cases:         CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+				Report:        ReportConfig{Formats: []string{"json", "junit", "html"}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "unknown report format is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine:        EngineConfig{Name: "codex"},
+				Cases:         CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+				Report:        ReportConfig{Formats: []string{"json", "bogus"}},
+			},
+			wantErr: true,
+			errMsg:  `report.formats[1] must be one of json, junit, html (got "bogus")`,
+		},
+		{
+			name: "empty report format entry is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine:        EngineConfig{Name: "codex"},
+				Cases:         CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+				Report:        ReportConfig{Formats: []string{""}},
+			},
+			wantErr: true,
+			errMsg:  "report.formats[0] must not be empty",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1003,6 +1261,19 @@ func TestValidator_ValidateCaseConfig(t *testing.T) {
 			},
 			wantErr: true,
 			errMsg:  "judge.failure[0]: assertion has no recognizable matcher field",
+		},
+		{
+			name: "empty output_contains matcher is rejected in a case judge",
+			cfg: &CaseConfig{
+				ID:    "test-case",
+				Input: Input{Prompt: "Say hello"},
+				Judge: JudgeConfig{
+					Type:    "rule_based",
+					Success: []Rule{{OutputContains: &OutputContainsRule{All: []string{}, Any: []string{}, Not: []string{}}}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0].output_contains must include at least one of all, any, or not",
 		},
 		{
 			name: "turn-level matcher rules with valid turn references are accepted",
@@ -2331,6 +2602,18 @@ func TestValidator_RejectsWhitespaceOnlyInput(t *testing.T) {
 			}
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestValidatorReservedVariant(t *testing.T) {
+	for _, value := range []string{"", "with_skill", "without_skill", "v1.0"} {
+		t.Run(value, func(t *testing.T) {
+			cfg := &EvalConfig{SchemaVersion: "v1alpha1", Environment: Environment{Type: "none", Env: map[string]string{"SKILL_UP_VARIANT": value}}, Engine: EngineConfig{Name: "qodercli"}, Cases: CasesConfig{Files: []string{"case.yaml"}}}
+			err := NewValidator().ValidateEvalConfig(cfg)
+			if err == nil || !strings.Contains(err.Error(), "environment.env.SKILL_UP_VARIANT is reserved") {
+				t.Fatalf("expected reserved-name error, got %v", err)
 			}
 		})
 	}

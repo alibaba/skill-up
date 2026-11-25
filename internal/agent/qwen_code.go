@@ -56,9 +56,11 @@ func NewQwenCodeAgent(cfg Config) *QwenCodeAgent {
 		cfg.SkillPath = ".qwen/skills"
 	}
 
-	return &QwenCodeAgent{
+	agent := &QwenCodeAgent{
 		CLIAgent: CLIAgent{BaseAgent: NewBaseAgent(cfg)},
 	}
+
+	return agent
 }
 
 // Install installs Qwen Code when it is not already available in the runtime.
@@ -209,6 +211,21 @@ func (a *QwenCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 
 func (a *QwenCodeAgent) appliedModelName(_ context.Context) string {
 	return strings.TrimSpace(a.Cfg.ModelName)
+}
+
+// materializeQwenModel assembles the complete model id Qwen Code is asked for.
+// Qwen resolves its modelProviders entries by the full id, while the credential
+// layer splits a legacy "provider/model" reference to pick provider-scoped
+// credentials and keeps the bare half plus the ModelSplit flag (#383). Resolve-
+// AdapterConfig dispatches here so the command, the session result, telemetry
+// and the run report all consume this one materialized value.
+func materializeQwenModel(params credential.ResolvedAgentConfig) string {
+	model := strings.TrimSpace(params.AppliedModel)
+	provider := strings.TrimSpace(params.AppliedProvider)
+	if params.ModelSplit && model != "" && provider != "" {
+		return provider + "/" + model
+	}
+	return model
 }
 
 func buildQwenCodeRunCmd(instruction, model string) string {

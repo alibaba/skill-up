@@ -162,7 +162,7 @@ input:
 func TestCLI_Import(t *testing.T) {
 	t.Parallel()
 
-	evalsPath := filepath.Join(getProjectRoot(), "e2e", "testdata", "evals.json")
+	evalsPath := filepath.Join(getProjectRoot(), "e2e", "testdata", "import-skill", "evals", "evals.json")
 	tmpDir := t.TempDir()
 
 	result := RunSimple(t, "import", evalsPath, "--output", tmpDir)
@@ -170,6 +170,16 @@ func TestCLI_Import(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("expected exit 0, got %d\nstdout: %s\nstderr: %s",
 			result.ExitCode, result.Stdout, result.Stderr)
+	}
+
+	// evals.json lists evals/files/input.txt relative to the Skill root; the
+	// case must carry the file's text, not its path.
+	caseData, err := os.ReadFile(filepath.Join(tmpDir, "cases", "case-1.yaml"))
+	if err != nil {
+		t.Fatalf("read case-1.yaml: %v", err)
+	}
+	if !strings.Contains(string(caseData), "Input file for the import e2e test.") {
+		t.Errorf("case-1.yaml does not carry the listed file's content:\n%s", caseData)
 	}
 
 	for _, rel := range []string{"cases/case-1.yaml", "cases/case-2.yaml", "eval.yaml"} {

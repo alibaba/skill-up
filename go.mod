@@ -3,14 +3,15 @@ module github.com/alibaba/skill-up
 go 1.26.0
 
 require (
-	github.com/alibaba/OpenSandbox/sdks/sandbox/go v1.1.1
-	github.com/anthropics/anthropic-sdk-go v1.81.0
-	github.com/bmatcuk/doublestar/v4 v4.10.3
+	github.com/alibaba/OpenSandbox/sdks/sandbox/go v1.2.0
+	github.com/anthropics/anthropic-sdk-go v1.84.0
+	github.com/bmatcuk/doublestar/v4 v4.10.4
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
-	github.com/openai/openai-go/v3 v3.78.0
+	github.com/openai/openai-go/v3 v3.99.0
 	github.com/spf13/cobra v1.10.2
-	github.com/spf13/pflag v1.0.10
+	github.com/spf13/pflag v1.1.0
+	github.com/yuin/goldmark v1.8.7
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.47.0
@@ -38,7 +39,7 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/standard-webhooks/standard-webhooks/libraries v0.0.1 // indirect
-	github.com/tidwall/gjson v1.19.0 // indirect
+	github.com/tidwall/gjson v1.20.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect

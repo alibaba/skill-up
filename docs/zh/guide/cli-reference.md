@@ -31,12 +31,23 @@ skill-up run [path] [flags]
 | `--iteration`         | `0`（auto）                  | 重复运行已选用例，用于稳定性/flaky 采样。`0` 表示在最新 `iteration-N/` 后自动追加一轮，但不汇总历史结果；正整数 `N` 表示运行 N 次采样，产物写入 `iteration-1/` 到 `iteration-N/`；当 `N > 1` 时，终端摘要只覆盖本次命令执行的采样 |
 | `--engine`            | 配置文件中的值                | 覆盖 Engine 名称                                                                                                                                          |
 | `--provider`          | 配置文件中的值                | 覆盖 `engine.model.provider`。指定后，完整的 `--model` 值将作为不透明模型 ID 透传。                                                                        |
-| `--model`             | 配置文件中的值                | 覆盖模型。未指定 `--provider` 时兼容历史 `provider/name` 写法：前缀是已配置 provider 时拆分，否则完整透传。                                                |
+| `--model`             | 配置文件中的值                | 覆盖模型。未指定 `--provider` 时兼容历史 `provider/name` 写法：前缀是已配置 provider 时拆分，否则完整透传。`qwen_code` 始终拿到完整值：前缀只用于选择 provider 作用域凭据，adapter 自己把拆开的引用重新拼合，供 `-m`、`OPENAI_MODEL` 和报告里的实际模型共同使用，因为 Qwen Code 按完整 ID 解析模型。被 `ZCODE_MODEL` 等 provider 环境变量整体替换的模型按替换值原样转发。 |
 | `--parallelism`       | 配置文件中的值                | 覆盖 `cases.parallelism`，用于临时调整用例并行数，取值范围为 1 到 256                                                                                       |
 | `--baseline`          | 配置文件中的值                | 为本次运行覆盖 `benchmark.enabled` 为 `true`                                                                                                                |
 | `--api-key`           | —                            | 传入 API Key（优先级高于环境变量）                                                                                                                          |
-| `--no-delete`         | `false`                      | 评测后保留由 skill-up 创建的 workspace 或容器，便于调试。                                                                                                   |
+| `--no-delete`         | `false`                      | 保留 workspace、容器和临时运行目录以便调试。启用 `agent_home: temporary` 时，保留的主目录可能包含凭据。 |
+| `--cleanup-sessions`  | `false`                      | 评测后同时删除 agent 为该 workspace 保存的会话目录。目前 `claude_code` 与 `qodercli` 支持：分别删除 `~/.claude/projects/<workspace-key>/` 与 `~/.qoder/projects/<workspace-key>/`（CN 版为 `~/.qoder-cn/projects/<workspace-key>/`）目录，包含会话记录与 memory。默认关闭，因为它会删除今天在评测后仍会保留的历史；显式的 `--cleanup-sessions=false` 会覆盖 `environment.cleanup_sessions: true`，`--no-delete` 优先级最高。 |
 | `-v, --verbose`       | `0`                          | 增加日志详细程度。默认输出 `info`；`-v`/`--verbose`/`--verbose=true` 输出 `debug`；`-vv`/`--verbose=2` 输出 `trace`；`--verbose=false` 关闭附加详细日志        |
+
+> **校验范围。** `run` 校验 eval 级配置，以及经过 `--include-case-name` /
+> `--exclude-case-name` 筛选的用例。被排除用例的语义校验错误不会阻止运行，
+> 但文件读取或元数据错误仍可能阻止筛选。使用 `skill-up validate` 校验整个套件。
+
+YAML 配置加载会拒绝未知字段，包括嵌套结构中的字段以及通过别名或 `<<` 合并引入的字段，
+错误包含字段名和行号。`engine.kwargs`、环境变量和 `context.files` 等自由映射仍允许任意键。
+`run` 先读取用例 ID 进行筛选，再严格解码选中的用例；缺少 ID 时使用不含扩展名的文件名。
+被排除用例中的未知字段和其他字段类型错误不会阻止运行，但无法读取文件、YAML 语法错误或
+无效 ID 仍会在筛选前报错。合并引入的 `judge` 和 `judges` 也参与显式空值和互斥校验。
 
 > **已有 workspace 的状态语义。** `--workspace` 会让所有已选 case、retry 和
 > iteration 串行复用同一个目录；配置的 setup、fixture、skill 安装及 agent 修改都会
@@ -118,6 +129,10 @@ skill-up run ./evals/eval.yaml -v
 
 校验评测配置文件是否合法。建议在运行前先执行校验。
 
+同时读取 eval 和所有 case 声明的 mocked MCP fixture，并使用与 `run` 相同的检查。
+文件缺失、YAML 错误或工具定义无效时校验失败，不会启动服务器。
+不检查真实服务器的凭据或连接状态。
+
 ```bash
 skill-up validate [path to eval.yaml]
 ```
@@ -141,11 +156,62 @@ skill-up validate ./evals/eval.yaml
 - 必填字段是否完整
 - 字段值是否合法
 
+### Skill 内容检查（`--skill`）
+
+```bash
+skill-up validate --skill <skill 目录路径> [--uncited] [--strict]
+```
+
+对单个 skill 的源文件做内容完整性检查。这是源码级检查：它看不到一次
+run 在 `skills.include`/`skills.exclude` 过滤后实际安装的内容，也不会在
+评测前自动执行。发现的问题逐条输出 warning：
+
+- SKILL.md 以闭合的 YAML frontmatter（`---` 围栏）开头
+- frontmatter 中 `name`、`description` 字段非空
+- 正文中引用的 `references/`、`assets/`、`scripts/` 相对路径在磁盘上存在。
+  正文按 CommonMark 解析：正文行文、本地链接/图片目标、以及引用路径的行内代码
+  均参与检查；代码块、远程 URL 和原始 HTML 视为文档示例或外部资源，不参与检查。
+  引用路径带不带前导 `./` 均可识别，同一路径的等价写法（`references/./guide.md`，
+  或链接目标中的 `references/my%20guide.md`）会先归一化再比对。文件名中的字符
+  完整保留：链接目标按 CommonMark 的渲染规则解析（`<references/my guide.md>`、
+  `assets/diagram\(1\).png`），本地链接只按链接目标检查，不检查链接文字；行内
+  代码按字面读取（`assets/icon@2x.png`；`references/my guide.md` 在该文件存在时
+  整体视为文件名），末尾的 `#锚点` 不计入文件名；正文行文中的路径也可以包含中文等
+  非 ASCII 文字（`references/指南.md`）。正文行文中遇到空格即视为路径结束，文件名
+  含空格时请用链接目标或行内代码引用。不能对应到已存在文件的行内代码按命令行处理，
+  只检查第一个词，即脚本本身（`scripts/build.sh --output assets/out.png` 只检查
+  `scripts/build.sh`）。命令参数和同一段行内代码里的后续命令都不算引用，因为它们
+  常常是命令要生成的文件；命令要读取的附件，请单独用行内代码或链接引用
+
+传入 `--uncited` 时，还会报出这些目录下存在、但从正文出发不可达的文件。
+SKILL.md 尾部被截断时，丢失段落引用过的附件会悄无声息地变成孤立文件，这项
+报告可以把它们找出来。可达性是传递的：被引用的 markdown 文档链接到的文件、
+被引用的脚本以根相对路径或 `./` 相对路径提到的文件，都视为已被引用，即使
+SKILL.md 从未直接点名。点文件（`.DS_Store`、`.gitkeep`、点目录）属于本地
+元数据，不参与检查；以链接目标形式引用目录（如 `[docs](references/)`）即视为
+覆盖其下所有文件。这项报告需要显式开启，因为可达性是启发式的：脚本通过计算
+得到的路径加载的文件（`$(dirname "$0")/lib.sh`、Python import），以及 SKILL.md
+只作为命令参数提到的文件，即使 skill 能正常工作也会被报出。
+
+通过 `--skill` 传入的目录若没有 SKILL.md，本身即为一条告警。
+传入 `--strict` 可将 warning 提升为失败（退出码 1），同时传入 `--uncited` 时
+也包括未引用附件；不传则仅打印 warning、退出码为 0。`--skill` 不能与
+eval.yaml 路径参数同时使用，`--uncited` 和 `--strict` 只对 `--skill` 生效。
+
+成功输出：
+
+```plain
+✓ skill content check passed (./skills/my-skill)
+```
+
 ---
 
 ## skill-up list-cases
 
 列出评测配置中的所有用例，方便快速查看。
+
+此命令严格解码所有引用的用例；未知 YAML 字段和字段类型错误会导致加载失败。
+它不执行语义校验，也不运行 judge。检查配置语义请使用 `validate`。
 
 ```bash
 skill-up list-cases [path to eval.yaml]

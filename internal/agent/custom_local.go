@@ -36,7 +36,7 @@ func (t *localTransport) run(ctx context.Context, rt Runtime, opts ExecOptions, 
 
 	// Resolve the I/O paths with the full variable set (so they may use
 	// ${kwargs.<key>}), then expose the resolved paths to command rendering.
-	inputFile, outputFile, err := resolveCustomIOFiles(rt, custom, prep.vars)
+	inputFile, outputFile, err := a.resolveCustomIOFiles(rt, custom, prep.vars)
 	if err != nil {
 		return nil, err
 	}

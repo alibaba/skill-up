@@ -125,13 +125,30 @@ Before completing an integration, confirm each item:
   `SessionInput` itself carries no kwargs map.
 - When it needs workspace files, it relies only on `custom.http.files` or on explicit
   paths inside the local runtime workspace.
-- It returns a parseable `SessionResult` for both success and failure.
+- It returns a parseable `SessionResult` for both success and failure, and the
+  config reads it from where the adapter writes it: a local adapter that writes a
+  file needs `local.output_file` set to that path, since stdout is read otherwise.
 - It returns at least `exit_code` and `final_message`.
 - Every file that needs to be archived is written into `SessionResult.artifacts`,
   not relying on `skill-up` to auto-scan.
 - It does not require secrets to be written into `eval.yaml`; the API key is
   referenced through `${api_key}` after credential resolution.
 - It does not depend on implicit session state across cases, variants, or iterations.
+- If the local adapter spawns the agent CLI, close or redirect that child's stdin
+  unless the protocol carries frames over stdin. Several CLIs treat an open stdin
+  pipe as "waiting for input" and block until the case deadline without producing
+  output, which reads as a slow agent rather than a deadlock.
+- Make the agent non-interactive. Run it in the most autonomous permission mode it
+  offers, and disable interactive question/approval tools when the CLI has a flag
+  for that. A headless run has nobody to answer a prompt, so only the cases that
+  cross an approval point hang while simple cases pass — easily misdiagnosed as
+  the task being too slow. That mode is only safe under a runtime that isolates:
+  the default `environment.type: none` runs the CLI on your host, so pair it with
+  `environment.type: docker` / `opensandbox` or an explicit tool allowlist.
+  Otherwise the mode removes the approval prompt without removing host privileges.
+- When the invocation fails or times out, return the tail of the child's stdout in
+  the failure message or `final_message`; an empty timeout is the hardest failure
+  to diagnose from a report.
 
 Minimal `SessionResult`:
 
@@ -252,6 +269,10 @@ How `${api_key}` is used is decided by the Custom Engine config:
 `api_key` must not be auto-injected into every custom agent's environment variables
 or HTTP headers. Auto-injection makes the auth semantics of different providers and
 agents opaque, and easily leaks credentials that should not be passed downstream.
+
+Local `input_file`, `output_file`, and `cwd` paths must not contain the resolved
+API key, including values expanded through kwargs or symlinks. Such paths are
+rejected before use; pass credentials through `custom.env` instead.
 
 The real value of `api_key` must be masked in logs, debug output, error messages, and
 reports.
@@ -554,6 +575,105 @@ Invocation rules:
 File modifications by a local task should happen under `${workspace}`. If those files
 need to enter the report directory, the agent must explicitly declare them in the
 `artifacts` of the result.
+
+### Example: ZCode CLI
+
+ZCode is a Claude Code-shaped CLI with a headless mode, and a
+small adapter is enough to run it over the local transport. Its flags map onto the
+SessionInput contract like this: `-p <prompt>`, `--json`, `--resume <sessionId>`
+for stateful turns, `--cwd <dir>`, `--mode <build|edit|plan|yolo|guarded>`, and
+`--disallowed-tools <names>`.
+
+The adapter (a ~100-line Node script, attached to GitHub issue #377) reads the
+`SessionInput`, spawns ZCode with those flags, parses the JSON reply, and writes the
+`SessionResult`. The engine config stays declarative (the adapter path resolves
+inside the runtime workspace, so ship it with the skill or copy it in first).
+
+The Docker runtime below needs two things the stock `node:22` image does not
+provide:
+
+- **A ZCode build inside the image.** The adapter starts ZCode with `node`, so
+  the image needs the ZCode bundle and whatever it loads next to it. Derive an
+  image and point `image` at that:
+
+  ```dockerfile
+  FROM node:22
+  COPY zcode/ /opt/zcode/
+  ENV ZCODE_CLI=/opt/zcode/zcode.cjs
+  ```
+
+- **`ZCODE_CLI` set to the path inside the container.** `${ZCODE_CLI}` is
+  expanded on the host when the config loads, and the value reaches the
+  container through `docker --env` unchanged, so a host install path is not
+  visible in the container. The default below is the in-container path; if you
+  export the variable yourself, export that same path and not the path of a
+  host install. Without `ZCODE_CLI` the reference adapter falls back to
+  `D:\Program Files\ZCode\resources\glm\zcode.cjs`, a Windows desktop path a
+  Linux container does not have.
+
+Shipping the build with the case files works as well: a `context.repo_fixture`
+directory is uploaded into the runtime workspace, so
+`ZCODE_CLI: ${workspace}/zcode.cjs` points at the copy.
+
+```yaml
+environment:
+  # `yolo` removes ZCode's approval prompts, so it needs an isolating runtime.
+  # `none` runs ZCode on your host with your privileges.
+  type: docker
+  # The image has to carry a ZCode build; see the Dockerfile above.
+  image: your-registry/zcode:22
+engine:
+  name: zcode
+  custom:
+    transport: local
+    conversation_mode: stateful
+    response_format: session_result
+    timeout_seconds: 300
+    env:
+      ZCODE_CLI: ${ZCODE_CLI:-/opt/zcode/zcode.cjs}
+      ZCODE_MODE: ${kwargs.mode}
+    kwargs:
+      mode: yolo  # needs the isolating runtime above; see the notes below
+    local:
+      command: node
+      args:
+        - adapters/zcode-runner.mjs
+        - --input
+        - ${input_file}
+        - --output
+        - ${output_file}
+      cwd: ${workspace}
+      output_file: ${output_file}
+```
+
+`output_file` repeats the `--output` argument above on purpose. The adapter writes
+its `SessionResult` to that file and prints nothing to stdout, and a local transport
+reads the result from stdout unless `local.output_file` names the file — so without
+the last line the run completes and reports no usable result. Keep the two values
+the same path.
+
+Three behaviours are worth knowing before copying it:
+
+- `--mode yolo` removes ZCode's approval prompts, so it belongs under an isolating
+  runtime (`environment.type: docker` / `opensandbox`). With the default `none`
+  runtime ZCode executes shell and file tools on your host with your privileges; on
+  `none`, use `--mode build` (or `guarded`) and narrow `--disallowed-tools` instead.
+- Tool calls that would wait for a human must not: run in the CLI's most autonomous
+  permission mode (`--mode yolo` above) and, where the CLI supports it, disallow the
+  interactive question tool (`--disallowed-tools AskUserQuestion`). Otherwise cases
+  that reach an approval point hang until the deadline while simple cases pass.
+- On the Windows desktop CLI 0.17.1 build tested in issue #377, headless ZCode
+  resolved the model from the personal channel's `providerOrder` and offered no
+  per-run `--model` flag, so `${model}` / `${model_name}` could not be forwarded
+  there. This is a finding about that build, not a documented API limit: ZCode
+  v3.18.2's standalone configuration docs describe selecting a custom provider
+  and model through a separate configuration file
+  (`ZCODE_PERSONAL_PROVIDER_CONFIG_FILE`), which says nothing about a `--model`
+  flag or subscription-account models. Scope per-case model selection to the
+  version you run. If your build documents a model flag, the wrapper has to
+  parse the option and forward it itself: `local.args` only hands the value to
+  the wrapper, and the reference adapter does not pass arbitrary options
+  through to ZCode.
 
 ## HTTP transport
 

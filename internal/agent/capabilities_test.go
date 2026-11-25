@@ -13,7 +13,10 @@ import (
 	"github.com/alibaba/skill-up/internal/logging"
 )
 
-const testDashscopeProvider = "dashscope"
+const (
+	testDashscopeProvider = "dashscope"
+	qwenSlashedModelID    = "zcode/GLM-5.3-Flash"
+)
 
 func TestValidateJudgeAdapterConfig(t *testing.T) {
 	t.Parallel()
@@ -44,7 +47,10 @@ func TestValidateJudgeAdapterConfig(t *testing.T) {
 }
 
 func TestIndependentJudgeUsesProtocolScopedConnection(t *testing.T) {
-	t.Parallel()
+	// Provider-scoped env (ANTHROPIC_*) overrides the credentials file, so keep host values out.
+	t.Setenv("ANTHROPIC_MODEL", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_BASE_URL", "")
 	path := filepath.Join(t.TempDir(), "credentials.yaml")
 	if err := os.WriteFile(path, []byte("providers:\n  anthropic:\n    openai:\n      api_key: judge-key\n      base_url: https://gateway.example.test/v1\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -63,6 +69,94 @@ func TestIndependentJudgeUsesProtocolScopedConnection(t *testing.T) {
 	}
 	if params.AppliedAPIKey != "judge-key" || params.AppliedBaseURL != "https://gateway.example.test/v1" || params.AppliedModel != "gateway-model" {
 		t.Fatalf("wrong judge connection: %+v", params)
+	}
+}
+
+func TestResolveAdapterConfig_QwenRecordsLegacySplitForTheAdapter(t *testing.T) {
+	t.Setenv("ZCODE_API_KEY", "sk-test")
+
+	for _, tt := range []struct {
+		name      string
+		engine    config.EngineConfig
+		cli       credential.CLIOverrides
+		wantProv  string
+		wantModel string
+		wantSplit bool
+	}{
+		{
+			name:     "CLI slashed ref records the split",
+			engine:   config.EngineConfig{Name: "qwen_code"},
+			cli:      credential.CLIOverrides{Model: qwenSlashedModelID},
+			wantProv: "zcode", wantModel: "GLM-5.3-Flash", wantSplit: true,
+		},
+		{
+			name:     "explicit provider with a bare model is not prefixed",
+			engine:   config.EngineConfig{Name: "qwen_code"},
+			cli:      credential.CLIOverrides{Provider: "openai", Model: "qwen3-coder-plus"},
+			wantProv: "openai", wantModel: "qwen3-coder-plus",
+		},
+		{
+			name:      "YAML slashed model is already opaque",
+			engine:    config.EngineConfig{Name: "qwen_code", Model: config.ModelConfig{Name: qwenSlashedModelID}},
+			wantModel: qwenSlashedModelID,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			resolved := credential.ResolveRunnerConfig(tt.engine, nil, tt.cli)
+			applied := ResolveAdapterConfig(resolved, nil)
+			// The credential layer records the split flag; the shared entry point
+			// dispatches to Qwen, which materializes the id it actually runs.
+			if applied.AppliedProvider != tt.wantProv || applied.Model != tt.wantModel {
+				t.Fatalf("provider/model = %q/%q, want %q/%q",
+					applied.AppliedProvider, applied.Model, tt.wantProv, tt.wantModel)
+			}
+			wantApplied := tt.wantModel
+			if tt.wantSplit {
+				wantApplied = qwenSlashedModelID
+			}
+			if applied.AppliedModel != wantApplied {
+				t.Fatalf("applied model = %q, want %q", applied.AppliedModel, wantApplied)
+			}
+			if applied.ModelSplit != tt.wantSplit {
+				t.Fatalf("adapter config split = %v, want %v", applied.ModelSplit, tt.wantSplit)
+			}
+			agent, err := DetectAgentWithResolvedConfig(applied)
+			if err != nil {
+				t.Fatal(err)
+			}
+			qwen, ok := agent.(*QwenCodeAgent)
+			if !ok {
+				t.Fatalf("agent type = %T, want *QwenCodeAgent", agent)
+			}
+			// The agent runs the materialized id: -m, the session result, telemetry
+			// and the run report all read this one value.
+			if got := qwen.Cfg.ModelName; got != wantApplied {
+				t.Fatalf("adapter model = %q, want %q", got, wantApplied)
+			}
+		})
+	}
+}
+
+func TestResolveAdapterConfig_QwenJudgeInheritsLegacySplit(t *testing.T) {
+	t.Setenv("ZCODE_API_KEY", "sk-test")
+
+	runner := credential.ResolveRunnerConfig(config.EngineConfig{Name: "qwen_code"}, nil, credential.CLIOverrides{Model: qwenSlashedModelID})
+	judge := credential.ResolveJudgeConfig(config.JudgeConfig{}, runner, nil)
+	applied := ResolveAdapterConfig(judge, nil)
+	if applied.AppliedProvider != "zcode" || applied.AppliedModel != qwenSlashedModelID || !applied.ModelSplit {
+		t.Fatalf("judge adapter config = provider %q model %q split %v, want zcode/GLM-5.3-Flash split",
+			applied.AppliedProvider, applied.AppliedModel, applied.ModelSplit)
+	}
+	agent, err := DetectAgentWithResolvedConfig(applied)
+	if err != nil {
+		t.Fatal(err)
+	}
+	qwen, ok := agent.(*QwenCodeAgent)
+	if !ok {
+		t.Fatalf("judge agent type = %T, want *QwenCodeAgent", agent)
+	}
+	if got := qwen.Cfg.ModelName; got != qwenSlashedModelID {
+		t.Fatalf("judge materialized model = %q, want zcode/GLM-5.3-Flash", got)
 	}
 }
 
@@ -233,7 +327,13 @@ func TestResolveAdapterConfig_QoderModelAndConnectionIsolation(t *testing.T) {
 }
 
 func TestResolveAdapterConfig_QoderRunnerAndJudgeModels(t *testing.T) {
-	t.Parallel()
+	// Provider-scoped env (OPENAI_*, QODER_*) overrides the resolved models, so keep host values out.
+	t.Setenv("OPENAI_MODEL", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_BASE_URL", "")
+	t.Setenv("QODER_MODEL", "")
+	t.Setenv("QODER_API_KEY", "")
+	t.Setenv("QODER_BASE_URL", "")
 
 	for _, tc := range []struct {
 		name string
@@ -245,7 +345,6 @@ func TestResolveAdapterConfig_QoderRunnerAndJudgeModels(t *testing.T) {
 		{"legacy-provider-model", credential.CLIOverrides{Model: "openai/Qwen3.7-Plus"}, "Qwen3.7-Plus"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runner := credential.ResolveRunnerConfig(config.EngineConfig{
 				Name:  "qodercli",
 				Model: config.ModelConfig{Name: "openai/custom-ID"},
@@ -646,4 +745,19 @@ func containsWarning(warnings []string, substring string) bool {
 	return slices.ContainsFunc(warnings, func(warning string) bool {
 		return strings.Contains(warning, substring)
 	})
+}
+
+func TestResolveAdapterConfig_CodexWireAPI(t *testing.T) {
+	t.Parallel()
+	for _, wireAPI := range []string{"chat", "responses"} {
+		t.Run(wireAPI, func(t *testing.T) {
+			t.Parallel()
+			got := ResolveAdapterConfig(credential.ResolvedAgentConfig{
+				Engine: "codex", Kwargs: map[string]string{KwargWireAPI: wireAPI},
+			}, nil)
+			if got.Kwargs[KwargWireAPI] != wireAPI {
+				t.Fatalf("resolved wire_api = %q, want %q", got.Kwargs[KwargWireAPI], wireAPI)
+			}
+		})
+	}
 }

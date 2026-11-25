@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -32,6 +33,31 @@ func TestRunCommand_UsesUsageAwareArgs(t *testing.T) {
 
 	if runCmd.Args == nil {
 		t.Fatal("expected run command args validator to be configured")
+	}
+}
+
+func TestLoadRunInputsRejectsMalformedCasePatterns(t *testing.T) {
+	for _, flag := range []string{"include-case-name", "exclude-case-name"} {
+		for _, auto := range []bool{false, true} {
+			for _, pattern := range []string{"[abc", "trailing\\", "[z-a", "[]"} {
+				t.Run(fmt.Sprintf("%s/auto=%t/%s", flag, auto, pattern), func(t *testing.T) {
+					cmd := newRunPhaseTestCommand(t)
+					for _, value := range []string{"*", pattern} {
+						if err := cmd.Flags().Set(flag, value); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if err := cmd.Flags().Set("auto", strconv.FormatBool(auto)); err != nil {
+						t.Fatal(err)
+					}
+					_, _, _, err := loadRunInputs(cmd.Context(), cmd, []string{filepath.Join(t.TempDir(), "missing.yaml")})
+					want := fmt.Sprintf("invalid --%s pattern %q", flag, pattern)
+					if err == nil || !strings.Contains(err.Error(), want) {
+						t.Fatalf("error = %v, want %s before reading any files", err, want)
+					}
+				})
+			}
+		}
 	}
 }
 
@@ -293,6 +319,119 @@ func TestRunEvalValidatesOnlySelectedCases(t *testing.T) {
 	}
 }
 
+// An unknown top-level key in a filtered-out case must not block the run, but
+// it must fail validation once that case is selected (#365).
+func TestRunEvalReportsUnknownKeysOnlyForSelectedCases(t *testing.T) {
+	root := t.TempDir()
+	writeAutoModeSkill(t, root)
+	writeSmokeAndFullEval(t, root)
+	typo := "id: full\ninput:\n  prompt: Do full\njudgez:\n  type: rule_based\n"
+	if err := os.WriteFile(filepath.Join(root, "evals", "cases", "full.yaml"), []byte(typo), 0o600); err != nil {
+		t.Fatalf("failed to write full.yaml: %v", err)
+	}
+
+	dryRunCmd := func() *cobra.Command {
+		cmd := newRunPhaseTestCommand(t)
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		for name, val := range map[string]string{"dry-run": testFlagBoolTrue, runtimeFlagName: "none"} {
+			if err := cmd.Flags().Set(name, val); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return cmd
+	}
+
+	okCmd := dryRunCmd()
+	if err := okCmd.Flags().Set("include-case-name", "smoke"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := captureStdout(t, func() error { return runEval(okCmd, []string{root}) }); err != nil {
+		t.Fatalf("filtered run over the valid smoke case should succeed, got %v", err)
+	}
+
+	_, err := captureStdout(t, func() error { return runEval(dryRunCmd(), []string{root}) })
+	if err == nil || !strings.Contains(err.Error(), `field judgez not found`) {
+		t.Fatalf("unfiltered run error = %v, want unknown field \"judgez\"", err)
+	}
+}
+
+func TestLoadRunInputsFiltersBeforeStrictYAMLDecode(t *testing.T) {
+	for _, auto := range []bool{false, true} {
+		for _, invalid := range []string{"input: {promt: typo}\n", "input: wrong-type\n"} {
+			t.Run(fmt.Sprintf("auto=%t/%s", auto, invalid), func(t *testing.T) {
+				root := t.TempDir()
+				writeAutoModeSkill(t, root)
+				writeSmokeAndFullEval(t, root)
+				if err := os.WriteFile(filepath.Join(root, "evals", "cases", "full.yaml"), []byte("id: full\n"+invalid), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				cmd := newRunPhaseTestCommand(t)
+				if err := cmd.Flags().Set("auto", strconv.FormatBool(auto)); err != nil {
+					t.Fatal(err)
+				}
+				if err := cmd.Flags().Set("exclude-case-name", "full"); err != nil {
+					t.Fatal(err)
+				}
+				cases, _, _, err := loadRunInputs(t.Context(), cmd, []string{root})
+				if err != nil || len(cases) != 1 || cases[0].ID != "smoke" {
+					t.Fatalf("filtered cases=%v, error=%v", cases, err)
+				}
+				allCmd := newRunPhaseTestCommand(t)
+				if err := allCmd.Flags().Set("auto", strconv.FormatBool(auto)); err != nil {
+					t.Fatal(err)
+				}
+				if _, _, _, err := loadRunInputs(t.Context(), allCmd, []string{root}); err == nil {
+					t.Fatal("unfiltered load accepted malformed case")
+				}
+			})
+		}
+	}
+}
+
+func TestCountResultStatusBenchmark(t *testing.T) {
+	results := []evaluator.EvalResult{
+		{CaseID: "pass", Configuration: "without_skill", Status: judge.StatusFail},
+		{CaseID: "pass", Configuration: "with_skill", Status: judge.StatusPass},
+		{CaseID: "fail", Configuration: "with_skill", Status: judge.StatusFail},
+		{CaseID: "fail", Configuration: "without_skill", Status: judge.StatusPass},
+		{CaseID: "error", Configuration: "with_skill", Status: judge.StatusError},
+		{CaseID: "skip", Configuration: "with_skill", Status: judge.StatusSkip},
+		{CaseID: "skip", Configuration: "without_skill", Status: judge.StatusError},
+		{CaseID: "baseline-only", Configuration: "without_skill", Status: judge.StatusError},
+	}
+	passed, failed, errored := countResultStatus(results)
+	if passed != 1 || failed != 1 || errored != 1 {
+		t.Fatalf("counts = %d/%d/%d, want 1/1/1", passed, failed, errored)
+	}
+}
+
+func TestCountResultStatusPreservesTrials(t *testing.T) {
+	for _, configuration := range []string{"", evaluator.ConfigurationWithSkill} {
+		t.Run(configuration, func(t *testing.T) {
+			results := []evaluator.EvalResult{
+				{CaseID: "repeated", Configuration: configuration, Status: judge.StatusFail},
+				{CaseID: "repeated", Configuration: configuration, Status: judge.StatusError},
+				{CaseID: "repeated", Configuration: configuration, Status: judge.StatusPass},
+				{CaseID: "repeated", Configuration: configuration, Status: judge.StatusSkip},
+			}
+			if configuration != "" {
+				for _, result := range results {
+					result.Configuration = evaluator.ConfigurationWithoutSkill
+					results = append(results, result)
+				}
+			}
+			passed, failed, errored := countResultStatus(results)
+			if passed != 1 || failed != 1 || errored != 1 {
+				t.Fatalf("counts = %d/%d/%d, want 1/1/1", passed, failed, errored)
+			}
+			if err := exitStatusError(io.Discard, results); err == nil {
+				t.Fatal("earlier failed trials must still fail the run")
+			}
+		})
+	}
+}
+
 func TestRunPhaseHelpers(t *testing.T) {
 	var out bytes.Buffer
 	observer := &uiProgressObserver{}
@@ -307,10 +446,10 @@ func TestRunPhaseHelpers(t *testing.T) {
 	}
 
 	results := []evaluator.EvalResult{
-		{Status: judge.StatusPass},
-		{Status: judge.StatusFail},
-		{Status: judge.StatusError},
-		{Status: judge.StatusSkip},
+		{CaseID: "pass", Status: judge.StatusPass},
+		{CaseID: "fail", Status: judge.StatusFail},
+		{CaseID: "error", Status: judge.StatusError},
+		{CaseID: "skip", Status: judge.StatusSkip},
 	}
 	passed, failed, errored := countResultStatus(results)
 	if passed != 1 || failed != 1 || errored != 1 {
@@ -622,7 +761,7 @@ func TestLoadAnthropicEvals(t *testing.T) {
 		t.Fatalf("failed to close temp file: %v", err)
 	}
 
-	cases, err := loadAnthropicEvals(tmpFile.Name())
+	cases, err := loadAnthropicEvals(tmpFile.Name(), nil)
 	if err != nil {
 		t.Fatalf("loadAnthropicEvals failed: %v", err)
 	}
@@ -672,7 +811,7 @@ func TestLoadAutoModeEvaluation_EvalsJSONInstallsLocalSkill(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cases, evalCfg, loader, err := loadAutoModeEvaluation(t.Context(), root)
+	cases, evalCfg, loader, err := loadAutoModeEvaluation(t.Context(), root, nil)
 	if err != nil {
 		t.Fatalf("loadAutoModeEvaluation failed: %v", err)
 	}
@@ -690,13 +829,33 @@ func TestLoadAutoModeEvaluation_EvalsJSONInstallsLocalSkill(t *testing.T) {
 	}
 }
 
+func TestLoadAutoModeEvaluation_EvalsJSONReadsFilesFromSkillRoot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeSkillFile(t, root, "SKILL.md", "# Test Skill")
+	writeSkillFile(t, root, "evals/files/data.csv", "a,b\n1,2\n")
+	writeSkillFile(t, root, "evals/evals.json", `{"skill_name":"test-skill","evals":[{"id":1,"prompt":"Summarize the csv","files":["evals/files/data.csv"],"expectations":["Mentions the csv"]}]}`)
+
+	cases, _, _, err := loadAutoModeEvaluation(t.Context(), root, nil)
+	if err != nil {
+		t.Fatalf("loadAutoModeEvaluation failed: %v", err)
+	}
+	if len(cases) != 1 {
+		t.Fatalf("expected 1 case, got %d", len(cases))
+	}
+	if got := cases[0].Context.Files["evals/files/data.csv"]; got != "a,b\n1,2\n" {
+		t.Fatalf("data.csv content = %q, want the file's bytes", got)
+	}
+}
+
 func TestLoadAutoModeEvaluation_PrefersEvalYAML(t *testing.T) {
 	root := t.TempDir()
 	writeAutoModeSkill(t, root)
 	writeAutoModeEvalYAML(t, root, "yaml-case")
 	writeAutoModeEvalsJSON(t, root)
 
-	cases, _, _, err := loadAutoModeEvaluation(t.Context(), root)
+	cases, _, _, err := loadAutoModeEvaluation(t.Context(), root, nil)
 	if err != nil {
 		t.Fatalf("loadAutoModeEvaluation failed: %v", err)
 	}
@@ -714,7 +873,7 @@ func TestLoadAutoModeEvaluation_FallsBackToEvalsJSON(t *testing.T) {
 	writeAutoModeSkill(t, root)
 	writeAutoModeEvalsJSON(t, root)
 
-	cases, _, _, err := loadAutoModeEvaluation(t.Context(), root)
+	cases, _, _, err := loadAutoModeEvaluation(t.Context(), root, nil)
 	if err != nil {
 		t.Fatalf("loadAutoModeEvaluation failed: %v", err)
 	}
@@ -733,7 +892,7 @@ func TestLoadManualModeEvaluationAcceptsSkillRootOrEvalFile(t *testing.T) {
 	writeAutoModeEvalYAML(t, root, "manual-case")
 	evalPath := filepath.Join(root, "evals", "eval.yaml")
 
-	gotPath, cases, evalCfg, loader, err := loadManualModeEvaluation(t.Context(), root)
+	gotPath, cases, evalCfg, loader, err := loadManualModeEvaluation(t.Context(), root, nil)
 	if err != nil {
 		t.Fatalf("loadManualModeEvaluation(root) returned error: %v", err)
 	}
@@ -744,7 +903,7 @@ func TestLoadManualModeEvaluationAcceptsSkillRootOrEvalFile(t *testing.T) {
 		t.Fatalf("root eval/loader = %+v/%s", evalCfg.Engine, loader.SkillDir())
 	}
 
-	gotPath, cases, _, _, err = loadManualModeEvaluation(t.Context(), evalPath)
+	gotPath, cases, _, _, err = loadManualModeEvaluation(t.Context(), evalPath, nil)
 	if err != nil {
 		t.Fatalf("loadManualModeEvaluation(file) returned error: %v", err)
 	}
@@ -752,7 +911,7 @@ func TestLoadManualModeEvaluationAcceptsSkillRootOrEvalFile(t *testing.T) {
 		t.Fatalf("file load path/cases = %q/%d", gotPath, len(cases))
 	}
 
-	if _, _, _, _, err := loadManualModeEvaluation(t.Context(), filepath.Join(root, "missing")); err == nil {
+	if _, _, _, _, err := loadManualModeEvaluation(t.Context(), filepath.Join(root, "missing"), nil); err == nil {
 		t.Fatal("expected error for missing eval.yaml")
 	}
 }
@@ -1071,7 +1230,7 @@ func TestLoadAutoModeEvaluation_AddsLocalSkillWhenSkillFileExists(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	cases, evalCfg, loader, err := loadAutoModeEvaluation(t.Context(), root)
+	cases, evalCfg, loader, err := loadAutoModeEvaluation(t.Context(), root, nil)
 	if err != nil {
 		t.Fatalf("loadAutoModeEvaluation: %v", err)
 	}
@@ -1103,7 +1262,7 @@ func TestLoadAutoModeEvaluation_DoesNotAddLocalSkillWithoutSkillFile(t *testing.
 		t.Fatal(err)
 	}
 
-	cases, evalCfg, loader, err := loadAutoModeEvaluation(t.Context(), root)
+	cases, evalCfg, loader, err := loadAutoModeEvaluation(t.Context(), root, nil)
 	if err != nil {
 		t.Fatalf("loadAutoModeEvaluation: %v", err)
 	}
@@ -1151,7 +1310,7 @@ expect:
 		t.Fatal(err)
 	}
 
-	_, _, evalCfg, loader, err := loadFromEvalYAML(filepath.Join(evalsDir, "eval.yaml"))
+	_, _, evalCfg, loader, err := loadFromEvalYAML(filepath.Join(evalsDir, "eval.yaml"), nil)
 	if err != nil {
 		t.Fatalf("loadFromEvalYAML: %v", err)
 	}
@@ -1201,7 +1360,7 @@ expect:
 	}
 
 	evalPath := filepath.Join(evalsDir, "eval.yaml")
-	gotEvalPath, cases, evalCfg, loader, err := loadFromEvalYAML(evalPath)
+	gotEvalPath, cases, evalCfg, loader, err := loadFromEvalYAML(evalPath, nil)
 	if err != nil {
 		t.Fatalf("loadFromEvalYAML: %v", err)
 	}
@@ -1330,6 +1489,7 @@ func TestEvaluateOptionsFromFlags(t *testing.T) {
 
 	cmd := &cobra.Command{}
 	cmd.Flags().Bool("no-delete", false, "")
+	cmd.Flags().Bool("cleanup-sessions", false, "")
 	cmd.Flags().String("output-dir", "", "")
 	cmd.Flags().String("workspace", "", "")
 	cmd.Flags().Int("iteration", 1, "")
@@ -1337,6 +1497,9 @@ func TestEvaluateOptionsFromFlags(t *testing.T) {
 
 	if err := cmd.Flags().Set("no-delete", testFlagBoolTrue); err != nil {
 		t.Fatalf("set no-delete: %v", err)
+	}
+	if err := cmd.Flags().Set("cleanup-sessions", testFlagBoolTrue); err != nil {
+		t.Fatalf("set cleanup-sessions: %v", err)
 	}
 	if err := cmd.Flags().Set("output-dir", "/tmp/custom-output"); err != nil {
 		t.Fatalf("set output-dir: %v", err)
@@ -1356,6 +1519,12 @@ func TestEvaluateOptionsFromFlags(t *testing.T) {
 
 	if opts.DeleteWorkspace {
 		t.Fatal("DeleteWorkspace = true, want false when --no-delete is set")
+	}
+	if !opts.CleanupSessions {
+		t.Fatal("CleanupSessions = false, want true when --cleanup-sessions is set; --no-delete precedence applies where the workspace is deleted")
+	}
+	if !opts.CleanupSessionsSet {
+		t.Fatal("CleanupSessionsSet = false, want true when the flag is given")
 	}
 	if opts.OutputDir != "/tmp/custom-output" {
 		t.Fatalf("OutputDir = %q, want /tmp/custom-output", opts.OutputDir)
@@ -1427,6 +1596,7 @@ func TestEvaluateOptionsFromFlags_RejectsNegativeIteration(t *testing.T) {
 
 	cmd := &cobra.Command{}
 	cmd.Flags().Bool("no-delete", false, "")
+	cmd.Flags().Bool("cleanup-sessions", false, "")
 	cmd.Flags().String("output-dir", "", "")
 	cmd.Flags().String("workspace", "", "")
 	cmd.Flags().Int("iteration", 0, "")

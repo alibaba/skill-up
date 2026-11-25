@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
+	"github.com/alibaba/skill-up/pkg/transcript"
 )
 
 func TestDeliverPrompt_InlineBelowThreshold(t *testing.T) {
@@ -138,6 +140,14 @@ func (r *promptDeliveryTestRuntime) DownloadFile(context.Context, string, string
 	return nil
 }
 func (r *promptDeliveryTestRuntime) DownloadDir(context.Context, string, string) error { return nil }
+func (r *promptDeliveryTestRuntime) Exists(context.Context, string) (bool, error) {
+	return false, runtime.ErrFileNotFound
+}
+
+func (r *promptDeliveryTestRuntime) ReadFile(context.Context, string) ([]byte, error) {
+	return nil, runtime.ErrFileNotFound
+}
+
 func (r *promptDeliveryTestRuntime) Exec(context.Context, string, runtime.ExecOptions) (runtime.ExecResult, error) {
 	return runtime.ExecResult{}, nil
 }
@@ -173,4 +183,109 @@ func TestDeliverPrompt_WindowsUsesFile(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResumedPromptDelivery(t *testing.T) {
+	for _, engine := range []string{"claude_code", "qodercli", "qodercn"} {
+		for _, tc := range []struct {
+			name, goos, threshold, prompt, mode string
+			failUpload                          bool
+		}{
+			{"inline", platform.GOOSLinux, "1024", "follow up", "inline", false},
+			{"large", platform.GOOSLinux, "16", strings.Repeat("agent's reply\n", 3000), "file", false},
+			{"windows", platform.GOOSWindows, "65536", "follow up", "file", false},
+			{"upload failure", platform.GOOSLinux, "0", "follow up", "file", true},
+		} {
+			t.Run(engine+"/"+tc.name, func(t *testing.T) {
+				t.Setenv(envPromptInlineMaxBytes, tc.threshold)
+				var ag SessionResumer = NewClaudeCodeAgent(Config{ModelName: "model-a"})
+				if engine != "claude_code" {
+					edition := qoderEditionGlobal
+					if engine == "qodercn" {
+						edition = qoderEditionCN
+					}
+					ag = NewQoderCLIAgent(Config{ModelName: "model-a", Kwargs: map[string]string{KwargEdition: edition}})
+				}
+				rt := &resumedPromptRuntime{
+					promptDeliveryTestRuntime: promptDeliveryTestRuntime{
+						workspace: filepath.Join(t.TempDir(), "workspace with spaces"),
+						shell:     platform.Shell{GOOS: tc.goos, Family: platform.ShellPOSIX, BashPath: "bash.exe"},
+					},
+					failUpload: tc.failUpload,
+				}
+				artifactDir := t.TempDir()
+				result, err := ag.RunTurn(context.Background(), rt, ExecOptions{ArtifactDir: artifactDir},
+					transcript.Message{Role: transcript.RoleUser, Content: tc.prompt}, "existing-session")
+				if tc.failUpload {
+					if err == nil || result == nil || result.ExitCode != 1 || result.SessionID != "existing-session" || rt.command != "" {
+						t.Fatalf("upload failure: result=%+v err=%v command=%q", result, err, rt.command)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertResumedPromptDelivery(t, rt, result, engine, tc.mode, tc.prompt, artifactDir)
+			})
+		}
+	}
+}
+
+func assertResumedPromptDelivery(t *testing.T, rt *resumedPromptRuntime, result *SessionResult, engine, mode, prompt, artifactDir string) {
+	t.Helper()
+	if result.SessionID != "existing-session" || result.PromptDelivery == nil || result.PromptDelivery.Mode != mode {
+		t.Fatalf("resume metadata: session=%q delivery=%+v", result.SessionID, result.PromptDelivery)
+	}
+	resumeFlag := " -r 'existing-session'"
+	binary := engine
+	if engine == "claude_code" {
+		binary = "claude"
+		resumeFlag = " --resume existing-session"
+	}
+	if !strings.Contains(rt.command, resumeFlag) || !strings.Contains(rt.command, " --model 'model-a'") || !strings.Contains(rt.command, binary+" ") {
+		t.Fatalf("resume identity lost: %s", rt.command)
+	}
+	if mode == "inline" {
+		if !strings.Contains(rt.command, shellQuote(prompt)) || rt.uploadedTarget != "" {
+			t.Fatalf("incorrect inline delivery: %s", rt.command)
+		}
+		return
+	}
+	assertResumedPromptFile(t, rt, engine, prompt, artifactDir)
+}
+
+func assertResumedPromptFile(t *testing.T, rt *resumedPromptRuntime, engine, prompt, artifactDir string) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(artifactDir, "prompt.txt"))
+	if err != nil || string(data) != prompt || rt.uploadedContent != prompt {
+		t.Fatalf("prompt bytes not preserved: %v", err)
+	}
+	if !strings.HasPrefix(rt.command, "cat "+shellQuote(rt.uploadedTarget)+" | ") || strings.Contains(rt.command, prompt) {
+		t.Fatalf("incorrect file delivery: %s", rt.command)
+	}
+	if engine != "claude_code" && !strings.HasSuffix(rt.command, " -p '-'") {
+		t.Fatalf("Qoder must read stdin: %s", rt.command)
+	}
+}
+
+type resumedPromptRuntime struct {
+	promptDeliveryTestRuntime
+
+	command    string
+	failUpload bool
+}
+
+func (r *resumedPromptRuntime) UploadFile(ctx context.Context, source, target string) error {
+	if r.failUpload {
+		return errors.New("upload failed")
+	}
+	return r.promptDeliveryTestRuntime.UploadFile(ctx, source, target)
+}
+
+func (r *resumedPromptRuntime) Exec(_ context.Context, command string, _ runtime.ExecOptions) (runtime.ExecResult, error) {
+	if strings.Contains(command, "--permission-mode") {
+		r.command = command
+		return runtime.ExecResult{Stdout: `{"type":"result","result":"OK"}`}, nil
+	}
+	return runtime.ExecResult{}, nil
 }

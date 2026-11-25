@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,38 +15,91 @@ import (
 )
 
 const (
+	// AgentHomeInherited preserves inherited agent home settings.
+	AgentHomeInherited = "inherited"
+	// AgentHomeTemporary redirects agent home settings to the run directory.
+	AgentHomeTemporary = "temporary"
+	// VariantEnvName identifies the framework-owned execution configuration variable.
+	VariantEnvName = "SKILL_UP_VARIANT"
 	// ClaudeDirMode is the default directory mode for Claude files.
 	ClaudeDirMode = 0o755
 	// ClaudeFileMode is the default file mode for Claude files.
 	ClaudeFileMode = 0o600
 )
 
-// mergeEnv returns the host env (os.Environ) with persistentEnv and callEnv
+// ErrFileNotFound is returned by runtime file operations when a requested path
+// does not exist. Callers can distinguish a missing file from an access failure.
+var ErrFileNotFound = errors.New("runtime file not found")
+
+// mergeEnv returns hostEnv (os.Environ form) with persistentEnv and callEnv
 // overlaid, in that order (callEnv wins). Values are forwarded LITERALLY: no
 // $VAR / ${VAR} expansion. This matches the docker and opensandbox runtimes,
 // which also pass env literally — callers that need shell expansion should
 // either resolve the value first or prepend `export X=...` to the command.
-func mergeEnv(persistentEnv, callEnv map[string]string) []string {
-	envMap := envMapFromList(os.Environ())
-	maps.Copy(envMap, persistentEnv)
-	maps.Copy(envMap, callEnv)
-
-	env := make([]string, 0, len(envMap))
-	for k, v := range envMap {
-		env = append(env, k+"="+v)
-	}
-	return env
-}
-
-func envMapFromList(env []string) map[string]string {
-	envMap := make(map[string]string, len(env))
-	for _, item := range env {
-		key, value, ok := strings.Cut(item, "=")
-		if ok {
-			envMap[key] = value
+//
+// goos is the target the child runs on. Windows treats names that differ only
+// in case (Path, PATH) as one variable, so there a later layer replaces the
+// earlier entry and its spelling. Without that, both spellings reach os/exec,
+// which keeps the last one on Windows, so precedence would follow map
+// iteration order. When one layer itself holds several spellings, the one
+// sorting last wins. Entries are returned sorted.
+func mergeEnv(hostEnv []string, persistentEnv, callEnv map[string]string, goos string) []string {
+	keyName := envKeyName(goos)
+	entries := make(map[string]string, len(hostEnv))
+	for _, item := range hostEnv {
+		if key, value, ok := cutEnvEntry(item); ok {
+			entries[keyName(key)] = key + "=" + value
 		}
 	}
-	return envMap
+	for _, layer := range []map[string]string{persistentEnv, callEnv} {
+		for _, key := range slices.Sorted(maps.Keys(layer)) {
+			entries[keyName(key)] = key + "=" + layer[key]
+		}
+	}
+	return slices.Sorted(maps.Values(entries))
+}
+
+// envKeyName returns the mapping from a variable's spelling to the name the
+// goos target knows it by: upper-cased on Windows, the spelling itself
+// elsewhere.
+func envKeyName(goos string) func(string) string {
+	if goos == platform.GOOSWindows {
+		return strings.ToUpper
+	}
+	return func(key string) string { return key }
+}
+
+// cutEnvEntry splits a "KEY=value" entry. Windows stores per-drive working
+// directories as entries such as `=C:=C:\dir`, whose name starts with "=".
+func cutEnvEntry(item string) (key, value string, ok bool) {
+	key, value, ok = strings.Cut(item, "=")
+	if ok && key == "" {
+		if name, rest, found := strings.Cut(value, "="); found {
+			return "=" + name, rest, true
+		}
+	}
+	return key, value, ok
+}
+
+// dropEnvKeySpellings deletes from target every other spelling of a variable
+// that src is about to set on the goos target, so that merging src next
+// replaces the variable instead of adding a second spelling of it. Keys that
+// src spells identically stay: the merge overwrites them, and target and src
+// may be the same map.
+func dropEnvKeySpellings(target, src map[string]string, goos string) {
+	keyName := envKeyName(goos)
+	names := make(map[string]struct{}, len(src))
+	for key := range src {
+		names[keyName(key)] = struct{}{}
+	}
+	for key := range target {
+		if _, same := src[key]; same {
+			continue
+		}
+		if _, ok := names[keyName(key)]; ok {
+			delete(target, key)
+		}
+	}
 }
 
 func mergeEnvMaps(persistentEnv, callEnv map[string]string) map[string]string {
@@ -135,6 +189,12 @@ type Runtime interface {
 	UploadFile(ctx context.Context, sourcePath, targetPath string) error
 	UploadDir(ctx context.Context, sourceDir, targetDir string) error
 	DownloadFile(ctx context.Context, sourcePath, targetPath string) error
+	// Exists reports whether a workspace path exists. A confirmed absence
+	// returns (false, nil); an inconclusive check returns an error.
+	Exists(ctx context.Context, sourcePath string) (bool, error)
+	// ReadFile returns the contents of a workspace file. ErrFileNotFound is
+	// returned when the path is confirmed absent.
+	ReadFile(ctx context.Context, sourcePath string) ([]byte, error)
 	// DownloadDir copies sourceDir from the runtime workspace to targetDir on the host.
 	// For NoneRuntime, sourceDir may be relative to Workspace or an absolute host path.
 	DownloadDir(ctx context.Context, sourceDir, targetDir string) error
@@ -156,6 +216,14 @@ type Runtime interface {
 	Shell() platform.Shell
 }
 
+// WorkspaceOwner is implemented by runtimes that can be handed a workspace they
+// did not create. Close preserves such a workspace even when deletion is
+// requested, so callers that remove per-workspace state elsewhere (for example
+// an agent's session directory) must check this before doing so.
+type WorkspaceOwner interface {
+	OwnsWorkspace() bool
+}
+
 // FileReadSeeker combines io.ReadSeeker for file access.
 type FileReadSeeker interface {
 	io.ReadSeeker
@@ -169,6 +237,7 @@ type SetupStep struct {
 // Config holds all runtime configuration options.
 type Config struct {
 	Type           string
+	AgentHome      string
 	Image          string
 	WorkspaceMount string
 	// WorkspaceDir reuses an existing host directory as the workspace for the
@@ -215,14 +284,36 @@ type MCPConfig struct {
 
 // SkillConfig identifies a skill source and its target install location.
 type SkillConfig struct {
-	Source  string
-	Target  string
+	Source string
+	Target string
+	// Name is the skill's declared name (SKILL.md frontmatter), when it is
+	// known and usable as a directory name.
+	Name    string
 	Include []string
 	Exclude []string
 }
 
+// DirName returns the directory a skill is installed under when Target is not
+// set: its declared Name, so the agent sees the skill under the name its own
+// text uses, or the source directory's basename when no name is known.
+func (c SkillConfig) DirName() string {
+	if c.Name != "" {
+		return c.Name
+	}
+	return filepath.Base(c.Source)
+}
+
 // NewRuntime creates a Runtime based on the config type.
 func NewRuntime(cfg Config) (Runtime, error) {
+	switch cfg.AgentHome {
+	case "", AgentHomeInherited:
+	case AgentHomeTemporary:
+		if cfg.Type != "none" {
+			return nil, errors.New("agent_home: temporary requires the none runtime")
+		}
+	default:
+		return nil, fmt.Errorf("unknown agent_home %q: must be inherited or temporary", cfg.AgentHome)
+	}
 	var (
 		rt  Runtime
 		err error

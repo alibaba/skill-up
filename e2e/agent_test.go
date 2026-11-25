@@ -556,9 +556,9 @@ cases:
 
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "Hello"
+  success:
+    - output_contains:
+        any: ["Hello"]
 
 report:
   formats: [json]
@@ -656,9 +656,9 @@ cases:
 
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "Hello"
+  success:
+    - output_contains:
+        any: ["Hello"]
 
 report:
   formats: [json]
@@ -754,9 +754,9 @@ cases:
 
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "hello"
+  success:
+    - output_contains:
+        any: ["hello"]
 
 report:
   formats: [json]
@@ -1113,9 +1113,9 @@ benchmark:
   enabled: false
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "hello"
+  success:
+    - output_contains:
+        any: ["hello"]
 report:
   formats: [json]
   artifacts: [transcript]
@@ -1202,9 +1202,9 @@ cases:
 
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "hello"
+  success:
+    - output_contains:
+        any: ["hello"]
 
 report:
   formats: [json]
@@ -1275,9 +1275,9 @@ cases:
 
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "hello"
+  success:
+    - output_contains:
+        any: ["hello"]
 
 report:
   formats: [json]
@@ -1376,9 +1376,9 @@ cases:
 
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "hello"
+  success:
+    - output_contains:
+        any: ["hello"]
 
 report:
   formats: [json]
@@ -1460,9 +1460,9 @@ cases:
 
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "hello"
+  success:
+    - output_contains:
+        any: ["hello"]
 
 report:
   formats: [json]
@@ -1519,9 +1519,9 @@ cases:
 
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "hello"
+  success:
+    - output_contains:
+        any: ["hello"]
 
 report:
   formats: [json]
@@ -2052,9 +2052,9 @@ cases:
 
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "hello"
+  success:
+    - output_contains:
+        any: ["hello"]
 
 report:
   formats: [json]
@@ -2479,9 +2479,9 @@ cases:
 
 judge:
   type: rule_based
-  rule_based:
-    must_contain:
-      - "hello"
+  success:
+    - output_contains:
+        any: ["hello"]
 
 report:
   formats: [json]

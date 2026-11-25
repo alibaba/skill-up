@@ -104,7 +104,7 @@ Anthropic 的 `evals.json` 格式如下：
 | `prompt`            | `input.prompt`                             |
 | `expectations`      | `judge.criteria`（agent_judge 评估标准）    |
 | `expected_output`   | 用例的 `description`                        |
-| `files`             | `context.files`                            |
+| `files`             | `context.files`（从 Skill 根目录读取每个文件，放到工作区中的相同路径） |
 
 ---
 

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -53,6 +54,7 @@ const (
 	qoderExposeTokenUsageEnabled = "true"
 	qoderAgentSDKEntrypointEnv   = "QODER_AGENT_SDK_ENTRYPOINT"
 	qoderJSONOutputFlag          = " --output-format json"
+	qoderStopReasonToolUse       = "tool_use"
 )
 
 func qoderProfileForKwargs(kwargs map[string]string) qoderCLIProfile {
@@ -166,6 +168,7 @@ func (a *QoderCLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 
 	result, err := rt.Exec(ctx, cmd, opts)
 	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result)
+	resultErr := qoderResultError(result.Stdout, result.Stderr, a.appliedModelName(ctx))
 	if sessionResult != nil {
 		sessionResult.PromptDelivery = promptDelivery
 	}
@@ -179,13 +182,16 @@ func (a *QoderCLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 				Artifacts:  &SessionArtifacts{},
 			}
 		}
-		return sessionResult, fmt.Errorf("%s run failed%s: %w", a.profile.binary, a.modelErrorContext(), err)
+		return sessionResult, fmt.Errorf("%s run failed%s: %w", a.profile.binary, a.modelErrorContext(), errors.Join(err, resultErr))
 	}
 
 	if result.ExitCode != 0 {
-		return sessionResult, fmt.Errorf("%s run failed%s (exit %d): %s", a.profile.binary, a.modelErrorContext(), result.ExitCode, result.Stderr)
+		return sessionResult, errors.Join(fmt.Errorf("%s run failed%s (exit %d): %s", a.profile.binary, a.modelErrorContext(), result.ExitCode, result.Stderr), resultErr)
 	}
 
+	if resultErr != nil {
+		return sessionResult, fmt.Errorf("%s run failed%s: %w", a.profile.binary, a.modelErrorContext(), resultErr)
+	}
 	return sessionResult, nil
 }
 
@@ -321,6 +327,44 @@ func (a *QoderCLIAgent) buildSessionResult(ctx context.Context, rt Runtime, opts
 	}
 }
 
+// qoderResultError checks the CLI's result envelope independently of its exit
+// code. Older clients can exit zero while stopping in an unfinished tool turn.
+func qoderResultError(output, stderr, requestedModel string) error {
+	if requestedModel != "" && strings.Contains(stderr, fmt.Sprintf("Model %q is not available right now; using ", requestedModel)) {
+		return fmt.Errorf("%w: qoder selected a fallback instead of %q; choose an available model with --list-models", ErrRequestedModelUnavailable, requestedModel)
+	}
+	trimmed := strings.TrimSpace(output)
+	data := []byte(trimmed)
+	if !strings.HasPrefix(trimmed, "{") || !json.Valid(data) {
+		return nil
+	}
+	var header struct {
+		Type any `json:"type"`
+	}
+	if err := json.Unmarshal(data, &header); err != nil {
+		return fmt.Errorf("decode qoder result type: %w", err)
+	}
+	kind, ok := header.Type.(string)
+	if !ok || kind != "result" {
+		return nil
+	}
+	var result struct {
+		Subtype    string `json:"subtype"`
+		IsError    bool   `json:"is_error"`
+		StopReason string `json:"stop_reason"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return fmt.Errorf("decode qoder result envelope: %w", err)
+	}
+	if result.IsError || strings.HasPrefix(result.Subtype, "error") {
+		return fmt.Errorf("qoder reported an error result (subtype=%q)", result.Subtype)
+	}
+	if result.StopReason == qoderStopReasonToolUse {
+		return fmt.Errorf("qoder returned an incomplete result (stop_reason=%q); check the CLI version and upgrade if needed", result.StopReason)
+	}
+	return nil
+}
+
 func parseQoderSessionID(output string) string {
 	var envelope struct {
 		SessionID string `json:"session_id"`
@@ -347,7 +391,20 @@ func (a *QoderCLIAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOption
 	start := time.Now()
 
 	instruction := message.Content
-	cmd := buildQoderResumeCmdForBinary(a.profile.binary, instruction, a.appliedModelName(ctx), sessionID)
+	cmd, promptDelivery, err := deliverPrompt(ctx, rt, opts, instruction, promptCommandBuilder{
+		Inline: func(prompt string) string {
+			return buildQoderResumeCmdForBinary(a.profile.binary, prompt, a.appliedModelName(ctx), sessionID)
+		},
+		StdinFile: func(path string) string {
+			return "cat " + shellQuote(path) + " | " + buildQoderResumeCmdForBinary(a.profile.binary, "-", a.appliedModelName(ctx), sessionID)
+		},
+	})
+	if err != nil {
+		return &SessionResult{
+			Engine: a.Name(), SessionID: sessionID, ExitCode: 1,
+			DurationMs: time.Since(start).Milliseconds(), Artifacts: &SessionArtifacts{},
+		}, err
+	}
 
 	envVars := a.qoderRunEnvVars()
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))
@@ -355,8 +412,10 @@ func (a *QoderCLIAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOption
 
 	result, err := rt.Exec(ctx, cmd, opts)
 	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result)
+	resultErr := qoderResultError(result.Stdout, result.Stderr, a.appliedModelName(ctx))
 	if sessionResult != nil {
 		sessionResult.SessionID = sessionID
+		sessionResult.PromptDelivery = promptDelivery
 	}
 	if err != nil {
 		if sessionResult == nil {
@@ -369,13 +428,16 @@ func (a *QoderCLIAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOption
 				Artifacts:  &SessionArtifacts{},
 			}
 		}
-		return sessionResult, fmt.Errorf("%s resume failed%s: %w", a.profile.binary, a.modelErrorContext(), err)
+		return sessionResult, fmt.Errorf("%s resume failed%s: %w", a.profile.binary, a.modelErrorContext(), errors.Join(err, resultErr))
 	}
 
 	if result.ExitCode != 0 {
-		return sessionResult, fmt.Errorf("%s resume failed%s (exit %d): %s", a.profile.binary, a.modelErrorContext(), result.ExitCode, result.Stderr)
+		return sessionResult, errors.Join(fmt.Errorf("%s resume failed%s (exit %d): %s", a.profile.binary, a.modelErrorContext(), result.ExitCode, result.Stderr), resultErr)
 	}
 
+	if resultErr != nil {
+		return sessionResult, fmt.Errorf("%s resume failed%s: %w", a.profile.binary, a.modelErrorContext(), resultErr)
+	}
 	return sessionResult, nil
 }
 
@@ -395,12 +457,29 @@ func (a *QoderCLIAgent) findSessionFile(ctx context.Context, rt Runtime) string 
 	return findQoderSessionFileInConfigDir(ctx, rt, a.profile.configDir)
 }
 
-func findQoderSessionFileInConfigDir(ctx context.Context, rt Runtime, configDir string) string {
-	return findAgentSessionJSONL(ctx, rt, agentSessionLookup{
+// qoderSessionLookup describes where qodercli keeps its per-workspace session
+// directories. The lookup and the post-run cleanup share it so they cannot
+// disagree about which directory belongs to this run; the projects root differs
+// between the global and CN editions.
+func qoderSessionLookup(configDir string) agentSessionLookup {
+	return agentSessionLookup{
 		projectsRootTmpl: "$home/" + configDir + "/projects",
 		sessionDepth:     1,
 		findExtra:        `! -name "*-session.json"`,
-	})
+	}
+}
+
+func findQoderSessionFileInConfigDir(ctx context.Context, rt Runtime, configDir string) string {
+	return findAgentSessionJSONL(ctx, rt, qoderSessionLookup(configDir))
+}
+
+// CleanupSessionDir removes the project directory qodercli created for this
+// workspace. Without it, every run deposits a transcript into the user's own
+// session history even though the workspace itself is deleted. The directory
+// also holds the sub-agent transcripts under <sessionID>/subagents/ and the
+// <sessionID>-session.json metadata; both belong to this run and go with it.
+func (a *QoderCLIAgent) CleanupSessionDir(ctx context.Context, rt Runtime) error {
+	return removeAgentSessionDir(ctx, rt, qoderSessionLookup(a.profile.configDir))
 }
 
 // Install installs the selected Qoder CLI edition via its official install script.

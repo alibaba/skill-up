@@ -91,7 +91,7 @@ jobs:
         run: go test -race -timeout 120s -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
 
@@ -158,6 +158,97 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  codex-compat:
+    name: Codex compatibility (${{ matrix.version }}, ${{ matrix.wire_api }})
+    needs: classify
+    if: needs.classify.outputs.run_full == 'true'
+    runs-on: [self-hosted, linux, x64, trusted]
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: "0.169.0"
+            wire_api: responses
+          - version: "0.80.0"
+            wire_api: chat
+          - version: "0.80.0"
+            wire_api: responses
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.x"
+          cache: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+
+      - name: Install pinned Codex
+        env:
+          CODEX_VERSION: ${{ matrix.version }}
+        run: |
+          set -euo pipefail
+          prefix=$(mktemp -d "$RUNNER_TEMP/codex-compat.XXXXXX")
+          cp ".github/codex-compat/$CODEX_VERSION/"package*.json "$prefix/"
+          npm ci --prefix "$prefix" --ignore-scripts --registry=https://registry.npmjs.org
+          echo "$prefix/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: Prove the regression test fails before the fix
+        if: matrix.version == '0.80.0'
+        env:
+          SKILL_UP_CODEX_COMPAT_E2E: "1"
+          SKILL_UP_CODEX_EXPECTED_VERSION: ${{ matrix.version }}
+          SKILL_UP_CODEX_WIRE_API: ${{ matrix.wire_api }}
+        run: |
+          set -euo pipefail
+          original=$(mktemp "$RUNNER_TEMP/codex-source.XXXXXX")
+          cp internal/agent/codex.go "$original"
+          trap 'cp "$original" internal/agent/codex.go; rm -f "$original"' EXIT
+          git apply --ignore-whitespace <<'PATCH'
+          diff --git a/internal/agent/codex.go b/internal/agent/codex.go
+          --- a/internal/agent/codex.go
+          +++ b/internal/agent/codex.go
+          @@ -1010,9 +1010,9 @@
+           func buildCodexResumeCmdWithLastMessage(sessionID, instruction, model string, provider codexProviderConfig, lastMessagePath, mcpFlags string) string {
+               // In 0.80.0 this is an exec-only option, not a global resume option.
+          -    cmd := "codex exec"
+          +    cmd := "codex exec resume"
+               if lastMessagePath != "" {
+                   cmd += " --output-last-message " + shellQuote(lastMessagePath)
+               }
+          -    cmd += " resume --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox" + mcpFlags
+          +    cmd += " --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox" + mcpFlags
+               cmd += codexProviderFlags(provider)
+               if model != "" {
+          PATCH
+          log=$(mktemp "$RUNNER_TEMP/codex-regression.XXXXXX")
+          if go test -race -tags e2e -timeout 600s -count=1 -v \
+            -run '^TestCodexCLICompatibility$' ./e2e > "$log" 2>&1; then
+            cat "$log"
+            echo "::error::Pre-fix implementation unexpectedly passed."
+            exit 1
+          fi
+          cat "$log"
+          grep -F "turn 2:" "$log"
+          grep -F "unexpected argument '--output-last-message'" "$log"
+
+      - name: Verify home modes, API-key login, resume and session collection
+        run: go test -race -tags e2e -timeout 600s -count=1 -v -run '^TestCodexCLICompatibility$' ./e2e
+        env:
+          SKILL_UP_CODEX_COMPAT_E2E: "1"
+          SKILL_UP_CODEX_EXPECTED_VERSION: ${{ matrix.version }}
+          SKILL_UP_CODEX_WIRE_API: ${{ matrix.wire_api }}
+
   lint:
     name: Lint
     needs: classify
@@ -201,10 +292,13 @@ jobs:
       - name: Run revive
         run: revive -config revive.toml ./...
 
+      - name: Test canary fixture scripts
+        run: python3 -m unittest discover -s scripts/routing-canary -p "test_*.py" -v
+
   gate:
     name: CI Gate
     if: ${{ !cancelled() }}
-    needs: [classify, build, e2e-smoke, lint]
+    needs: [classify, build, e2e-smoke, codex-compat, lint]
     runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 5
     env:
@@ -212,6 +306,7 @@ jobs:
       CLASSIFY_RESULT: ${{ needs.classify.result }}
       BUILD_RESULT: ${{ needs.build.result }}
       E2E_RESULT: ${{ needs.e2e-smoke.result }}
+      CODEX_RESULT: ${{ needs.codex-compat.result }}
       LINT_RESULT: ${{ needs.lint.result }}
     steps:
       - name: Verify required jobs
@@ -229,7 +324,7 @@ jobs:
           fi
 
           failed=false
-          for result in "$BUILD_RESULT" "$E2E_RESULT" "$LINT_RESULT"; do
+          for result in "$BUILD_RESULT" "$E2E_RESULT" "$CODEX_RESULT" "$LINT_RESULT"; do
             if [ "$result" != "success" ]; then
               failed=true
             fi
@@ -238,6 +333,7 @@ jobs:
             echo "Required CI jobs did not all succeed:" >&2
             echo "  Build & Test: $BUILD_RESULT" >&2
             echo "  E2E Smoke: $E2E_RESULT" >&2
+            echo "  Codex compatibility: $CODEX_RESULT" >&2
             echo "  Lint: $LINT_RESULT" >&2
             exit 1
           fi

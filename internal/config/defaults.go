@@ -63,7 +63,9 @@ func deepCopyEvalConfig(cfg *EvalConfig) *EvalConfig {
 
 func loadDefaults() (*EvalConfig, error) {
 	var cfg EvalConfig
-	if err := yaml.Unmarshal(defaultsYAML, &cfg); err != nil {
+	var err error
+	cfg.JudgeSet, cfg.JudgesSet, err = decodeConfig(defaultsYAML, &cfg)
+	if err != nil {
 		return nil, err
 	}
 

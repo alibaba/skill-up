@@ -13,8 +13,12 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alibaba/skill-up/internal/credential"
@@ -29,6 +33,44 @@ import (
 type CodexAgent struct {
 	CLIAgent
 }
+
+// codexRuntimeMCP is what InstallMCP recorded for one runtime: the server names
+// to approve, and the mocked servers to define on each codex exec command.
+type codexRuntimeMCP struct {
+	owner   *CodexAgent
+	approve []string
+	defined []runtime.MCPServerConfig
+}
+
+// codexMCPByRuntime is shared by every CodexAgent. Cases share one agent and
+// run concurrently, and the evaluator creates a separate adapter for an agent
+// judge, which runs in the case's runtime and must see the case's servers.
+var codexMCPByRuntime = struct {
+	sync.Mutex
+
+	entries map[string]codexRuntimeMCP
+}{entries: make(map[string]codexRuntimeMCP)}
+
+// codexRuntimeKey identifies a runtime. Docker and OpenSandbox runtimes of
+// concurrent cases report the same workspace path, so the path alone would mix
+// their servers. The address is safe to use because the evaluator releases the
+// entry before the runtime is closed and can be collected.
+func codexRuntimeKey(rt Runtime) string {
+	if v := reflect.ValueOf(rt); v.Kind() == reflect.Pointer {
+		return fmt.Sprintf("%T@%x:%s", rt, v.Pointer(), rt.Workspace())
+	}
+	return rt.Workspace()
+}
+
+func codexMCPForRuntime(rt Runtime) codexRuntimeMCP {
+	codexMCPByRuntime.Lock()
+	defer codexMCPByRuntime.Unlock()
+	return codexMCPByRuntime.entries[codexRuntimeKey(rt)]
+}
+
+// codexConfigKeyPattern matches the server names a dotted `-c mcp_servers.<name>...`
+// path can address. Codex fails to load its config for any other name.
+var codexConfigKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 const (
 	codexEngineName     = "codex"
@@ -50,6 +92,10 @@ const (
 	codexFnCall                 = "function_call"
 	codexFnCallOut              = "function_call_output"
 	codexTokenCount             = "token_count"
+	codexItemCompleted          = "item_completed"
+	codexSessionMCPToolCall     = "McpToolCall"
+	codexSessionCommandExec     = "CommandExecution"
+	codexCommandToolName        = "command_execution"
 	codexStdoutArtifactPath     = "stdout.json"
 	codexRunArtifactPrefix      = "skill-up-codex."
 	codexDefaultRecordBytes     = 16 << 20
@@ -132,13 +178,168 @@ func (a *CodexAgent) Install(ctx context.Context, rt Runtime) error {
 
 // InstallMCP installs MCP servers with the Codex CLI.
 func (a *CodexAgent) InstallMCP(ctx context.Context, rt Runtime, mcpCfg runtime.MCPConfig) error {
+	a.rememberMCPServers(ctx, rt, nil, nil)
 	if len(mcpCfg.Servers) == 0 {
 		return nil
 	}
 	if err := ensureNodeRuntime(ctx, rt, codexEngineName, ExecOptions{}); err != nil {
 		return err
 	}
-	return installMCPServers(ctx, rt, mcpCfg, buildCodexMCPInstallCmd)
+	var defined, installed []runtime.MCPServerConfig
+	for _, server := range mcpCfg.Servers {
+		if server.Mode != mcpModeMocked {
+			installed = append(installed, server)
+			continue
+		}
+		if err := checkCodexCommandLineServer(server); err != nil {
+			return err
+		}
+		defined = append(defined, server)
+	}
+	if err := checkCodexMCPNamesFree(ctx, rt, defined); err != nil {
+		return err
+	}
+	if err := installMCPServers(ctx, rt, runtime.MCPConfig{Servers: installed}, buildCodexMCPInstallCmd); err != nil {
+		return err
+	}
+	a.rememberMCPServers(ctx, rt, mcpCfg.Servers, defined)
+	return nil
+}
+
+// checkCodexCommandLineServer rejects a mocked server that cannot be defined
+// with -c flags on the codex exec command. Mocked servers are never installed
+// with codex mcp add, which writes into the user's global Codex config and
+// leaves the entry there after the run.
+func checkCodexCommandLineServer(server runtime.MCPServerConfig) error {
+	if !codexConfigKeyPattern.MatchString(server.Name) {
+		return fmt.Errorf("mocked MCP server %q cannot be used with codex: the name must match %s", server.Name, codexConfigKeyPattern)
+	}
+	if server.Transport != mcpTransportStdio || server.Command == "" || len(server.Env) > 0 || len(server.Headers) > 0 {
+		return fmt.Errorf("mocked MCP server %q cannot be used with codex: only a generated stdio command without env or headers is supported", server.Name)
+	}
+	return nil
+}
+
+// codexConfiguredMCPServer is the part of a `codex mcp list --json` entry
+// skill-up reads.
+type codexConfiguredMCPServer struct {
+	Name string `json:"name"`
+}
+
+// checkCodexMCPNamesFree fails when the user's Codex config already has a
+// server with one of these names. A server defined with -c flags is merged
+// into a same-named entry rather than replacing it, so the mock would inherit
+// the user's settings, or Codex would fail to load its config.
+func checkCodexMCPNamesFree(ctx context.Context, rt Runtime, servers []runtime.MCPServerConfig) error {
+	if len(servers) == 0 {
+		return nil
+	}
+	result, err := rt.Exec(ctx, "codex mcp list --json", ExecOptions{})
+	if err != nil {
+		return fmt.Errorf("list the MCP servers in the Codex config: %w", err)
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("list the MCP servers in the Codex config: exit %d: %s", result.ExitCode, strings.TrimSpace(result.Stderr))
+	}
+	var configured []codexConfiguredMCPServer
+	if err := json.Unmarshal([]byte(strings.TrimSpace(result.Stdout)), &configured); err != nil {
+		return fmt.Errorf("read the MCP servers in the Codex config: %w", err)
+	}
+	for _, server := range servers {
+		if slices.ContainsFunc(configured, func(c codexConfiguredMCPServer) bool { return c.Name == server.Name }) {
+			return fmt.Errorf("codex already has an MCP server named %q in its config, so skill-up cannot add its mocked server under that name; rename the mocked server, or remove the entry with `codex mcp remove %s` if an earlier skill-up run left it there", server.Name, server.Name)
+		}
+	}
+	return nil
+}
+
+// rememberMCPServers replaces what is recorded for a runtime. An empty install
+// by another adapter, such as an agent judge preparing its own config, keeps
+// the case's servers; the adapter that recorded them can clear them.
+func (a *CodexAgent) rememberMCPServers(ctx context.Context, rt Runtime, servers, defined []runtime.MCPServerConfig) {
+	var names []string
+	for _, server := range servers {
+		if !codexConfigKeyPattern.MatchString(server.Name) {
+			logging.WarnContextf(ctx, "CodexAgent: cannot auto-approve MCP server %q (name must match %s); Codex may reject its tool calls under --sandbox workspace-write", server.Name, codexConfigKeyPattern)
+			continue
+		}
+		names = append(names, server.Name)
+	}
+	slices.Sort(names)
+	names = slices.Compact(names)
+
+	key := codexRuntimeKey(rt)
+	codexMCPByRuntime.Lock()
+	defer codexMCPByRuntime.Unlock()
+	if len(servers) == 0 {
+		if current, ok := codexMCPByRuntime.entries[key]; ok && current.owner != a {
+			return
+		}
+		delete(codexMCPByRuntime.entries, key)
+		return
+	}
+	codexMCPByRuntime.entries[key] = codexRuntimeMCP{owner: a, approve: names, defined: slices.Clone(defined)}
+}
+
+// ReleaseRuntime drops the MCP servers recorded for rt once its case is done.
+func (a *CodexAgent) ReleaseRuntime(rt Runtime) {
+	codexMCPByRuntime.Lock()
+	defer codexMCPByRuntime.Unlock()
+	delete(codexMCPByRuntime.entries, codexRuntimeKey(rt))
+}
+
+// mcpDefinitionFlags defines the workspace's mocked MCP servers with -c
+// overrides. Codex reads them for this invocation only, so nothing is written
+// to its config; a resumed turn needs the same flags again. A generated
+// `node -e <script>` server has its script written into the run's artifact
+// directory first, so several mocks do not lengthen the command line.
+func (a *CodexAgent) mcpDefinitionFlags(ctx context.Context, rt Runtime, runArtifactDir string) (string, error) {
+	servers := codexMCPForRuntime(rt).defined
+
+	var flags strings.Builder
+	for i, server := range servers {
+		args := server.Args
+		if len(args) == 2 && args[0] == "-e" {
+			// Numbered rather than named: names that differ only in case would
+			// share a file on case-insensitive disks. .cjs keeps the script
+			// CommonJS even under a package.json that sets "type": "module".
+			scriptPath := targetPathJoin(rt.Shell().GOOS, runArtifactDir, fmt.Sprintf("mcp-server-%d.cjs", i))
+			if err := persistRuntimeArtifact(ctx, rt, scriptPath, args[1]); err != nil {
+				return "", fmt.Errorf("write mocked MCP server %q script: %w", server.Name, err)
+			}
+			args = []string{scriptPath}
+		}
+		command, err := json.Marshal(server.Command)
+		if err != nil {
+			return "", fmt.Errorf("mcp server %q command is invalid: %w", server.Name, err)
+		}
+		// A JSON array of strings is also a valid TOML array of basic strings.
+		argList, err := json.Marshal(append([]string{}, args...))
+		if err != nil {
+			return "", fmt.Errorf("mcp server %q args are invalid: %w", server.Name, err)
+		}
+		prefix := "mcp_servers." + server.Name
+		flags.WriteString(" -c ")
+		flags.WriteString(shellQuote(prefix + ".command=" + string(command)))
+		flags.WriteString(" -c ")
+		flags.WriteString(shellQuote(prefix + ".args=" + string(argList)))
+	}
+	return flags.String(), nil
+}
+
+// mcpApprovalFlags approves tool calls to the MCP servers skill-up installed.
+// codex exec runs with approval policy "never", so under --sandbox
+// workspace-write Codex rejects every MCP call that needs approval. Only these
+// servers are approved, not other servers in the user's Codex config.
+func (a *CodexAgent) mcpApprovalFlags(rt Runtime) string {
+	names := codexMCPForRuntime(rt).approve
+
+	var flags strings.Builder
+	for _, name := range names {
+		flags.WriteString(" -c ")
+		flags.WriteString(shellQuote("mcp_servers." + name + `.default_tools_approval_mode="approve"`))
+	}
+	return flags.String()
 }
 
 func buildCodexMCPInstallCmd(server runtime.MCPServerConfig) (string, error) {
@@ -265,6 +466,9 @@ func defaultCodexInstallCmdForVersion(configuredVersion string) string {
 // CheckCredentials checks if OPENAI_API_KEY is set.
 // Codex can also rely on local login state, so missing env var is informational only.
 func (a *CodexAgent) CheckCredentials(ctx context.Context) error {
+	if err := a.checkWireAPI(); err != nil {
+		return err
+	}
 	a.logCredentialStatus(
 		ctx,
 		credential.EnvOpenAIAPIKey,
@@ -283,8 +487,7 @@ func (a *CodexAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, 
 		// First turn — delegate to Run which creates a new session.
 		return a.Run(ctx, rt, opts, []transcript.Message{message})
 	}
-
-	if err := requireBashTargetShell(rt); err != nil {
+	if err := errors.Join(a.checkWireAPI(), requireBashTargetShell(rt)); err != nil {
 		return nil, fmt.Errorf("%s: %w", a.Name(), err)
 	}
 	start := time.Now()
@@ -296,7 +499,7 @@ func (a *CodexAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, 
 	}))
 	ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, opts.Env)
 
-	if err := ensureNodeRuntime(ctx, rt, codexEngineName, opts); err != nil {
+	if err := prepareCodexRuntime(ctx, rt, opts); err != nil {
 		return &SessionResult{
 			Engine:     a.Name(),
 			SessionID:  sessionID,
@@ -309,7 +512,12 @@ func (a *CodexAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, 
 	if err != nil {
 		return nil, err
 	}
-	cmd := buildCodexResumeCmdWithLastMessage(sessionID, instruction, a.appliedModelName(ctx), a.runProviderConfig(ctx), lastMessagePath) +
+	mcpFlags, err := a.mcpDefinitionFlags(ctx, rt, runArtifactDir)
+	if err != nil {
+		cleanupCodexRunArtifacts(ctx, rt, runArtifactDir)
+		return nil, err
+	}
+	cmd := buildCodexResumeCmdWithLastMessage(sessionID, instruction, a.appliedModelName(ctx), a.runProviderConfig(ctx), lastMessagePath, mcpFlags) +
 		" >" + shellQuote(stdoutPath)
 
 	result, err := rt.Exec(ctx, cmd, opts)
@@ -346,7 +554,7 @@ func (a *CodexAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, 
 //nolint:dupl
 func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, messages []transcript.Message) (finalResult *SessionResult, finalErr error) {
 	defer func() { a.annotateSessionResult(finalResult) }()
-	if err := requireBashTargetShell(rt); err != nil {
+	if err := errors.Join(a.checkWireAPI(), requireBashTargetShell(rt)); err != nil {
 		return nil, fmt.Errorf("%s: %w", a.Name(), err)
 	}
 	start := time.Now()
@@ -357,13 +565,13 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 	// (e.g. CI containers that block Landlock syscalls).
 	sandboxFlag := codexBypassSandbox
 	if rt.RequiresProcessSandbox() && !EngineKwargBool(a.Cfg.Kwargs, KwargBypassSandbox) {
-		sandboxFlag = codexProcessSandbox
+		sandboxFlag = codexProcessSandbox + a.mcpApprovalFlags(rt)
 	}
 	envVars := a.credentialEnvVars(credential.EnvOpenAIAPIKey, credential.EnvOpenAIBaseURL)
 	opts = a.mergeExecOptionsEnv(ctx, opts, envVars, a.buildAgentObservabilityAttrs(nil))
 	ctx = observability.ContextWithConfiguredAgentSpanAttributes(ctx, opts.Env)
 
-	if err := ensureNodeRuntime(ctx, rt, codexEngineName, opts); err != nil {
+	if err := prepareCodexRuntime(ctx, rt, opts); err != nil {
 		return &SessionResult{
 			Engine:     a.Name(),
 			ExitCode:   1,
@@ -375,6 +583,12 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 	if err != nil {
 		return nil, err
 	}
+	mcpFlags, err := a.mcpDefinitionFlags(ctx, rt, runArtifactDir)
+	if err != nil {
+		cleanupCodexRunArtifacts(ctx, rt, runArtifactDir)
+		return nil, err
+	}
+	sandboxFlag += mcpFlags
 	runCmd, promptDelivery, err := deliverPrompt(ctx, rt, opts, instruction, promptCommandBuilder{
 		Inline: func(prompt string) string {
 			return buildCodexRunCmdWithLastMessage(prompt, a.appliedModelName(ctx), a.runProviderConfig(ctx), sandboxFlag, lastMessagePath)
@@ -438,6 +652,20 @@ type codexProviderConfig struct {
 	WireAPI string
 }
 
+func (a *CodexAgent) wireAPI() string {
+	if value := a.Cfg.Kwargs[KwargWireAPI]; value != "" {
+		return value
+	}
+	return codexCustomWireAPI
+}
+
+func (a *CodexAgent) checkWireAPI() error {
+	if value := a.wireAPI(); value != "chat" && value != "responses" {
+		return fmt.Errorf("codex engine kwarg wire_api must be chat or responses, got %q", value)
+	}
+	return nil
+}
+
 func (a *CodexAgent) runProviderConfig(ctx context.Context) codexProviderConfig {
 	// Empty provider + non-empty BaseURL is the same situation as
 	// provider="openai" + non-empty BaseURL: the caller pointed codex at a
@@ -449,7 +677,8 @@ func (a *CodexAgent) runProviderConfig(ctx context.Context) codexProviderConfig 
 	// with wire_api="responses"), which makes any /chat/completions-only
 	// upstream (idealab, dashscope OpenAI-compat, …) return 400 from
 	// `codex_api::endpoint::responses`. wire_api="chat" forces codex onto
-	// /chat/completions instead.
+	// /chat/completions instead. Keep that default for the pinned 0.80.0 CLI;
+	// newer CLIs require wire_api=responses and a Responses-capable endpoint.
 	//
 	// We can't reuse the literal "openai" name because codex ships a
 	// built-in provider config under that key and merging the override
@@ -465,7 +694,7 @@ func (a *CodexAgent) runProviderConfig(ctx context.Context) codexProviderConfig 
 			Label:   codexOpenAIOverrideProvider,
 			BaseURL: a.Cfg.BaseURL,
 			EnvKey:  credential.EnvOpenAIAPIKey,
-			WireAPI: codexCustomWireAPI,
+			WireAPI: a.wireAPI(),
 		}
 	}
 	if reason := codexCustomProviderUnavailableReason(a.Cfg.ModelProvider, a.Cfg.BaseURL); reason != "" {
@@ -477,7 +706,7 @@ func (a *CodexAgent) runProviderConfig(ctx context.Context) codexProviderConfig 
 		Label:   a.Cfg.ModelProvider,
 		BaseURL: a.Cfg.BaseURL,
 		EnvKey:  credential.EnvOpenAIAPIKey,
-		WireAPI: codexCustomWireAPI,
+		WireAPI: a.wireAPI(),
 	}
 }
 
@@ -614,6 +843,13 @@ func downloadCodexJSONL(
 		return "", cleanup, fmt.Errorf("download %s JSONL artifact %s", source, remotePath)
 	}
 	return artifactPath, cleanup, nil
+}
+
+func prepareCodexRuntime(ctx context.Context, rt Runtime, opts ExecOptions) error {
+	if err := ensureNodeRuntime(ctx, rt, codexEngineName, opts); err != nil {
+		return err
+	}
+	return initializeIsolatedCodexAuth(ctx, rt, opts)
 }
 
 func prepareCodexRunArtifacts(ctx context.Context, rt Runtime) (dir, lastMessagePath, stdoutPath string, err error) {
@@ -775,14 +1011,16 @@ func buildCodexRunStdinCmdWithLastMessage(promptPath, model string, provider cod
 // Note: `codex exec resume` does not support --sandbox; the session inherits
 // sandbox mode from its initial creation. We use --dangerously-bypass-approvals-and-sandbox
 // to ensure non-interactive execution (approvals are skipped).
-func buildCodexResumeCmdWithLastMessage(sessionID, instruction, model string, provider codexProviderConfig, lastMessagePath string) string {
-	cmd := "codex exec resume --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox"
+func buildCodexResumeCmdWithLastMessage(sessionID, instruction, model string, provider codexProviderConfig, lastMessagePath, mcpFlags string) string {
+	// In 0.80.0 this is an exec-only option, not a global resume option.
+	cmd := "codex exec"
+	if lastMessagePath != "" {
+		cmd += " --output-last-message " + shellQuote(lastMessagePath)
+	}
+	cmd += " resume --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox" + mcpFlags
 	cmd += codexProviderFlags(provider)
 	if model != "" {
 		cmd += " -m " + shellQuote(model)
-	}
-	if lastMessagePath != "" {
-		cmd += " --output-last-message " + shellQuote(lastMessagePath)
 	}
 	cmd += " " + shellQuote(sessionID)
 	cmd += " " + shellQuote(instruction)
@@ -852,6 +1090,11 @@ type codexItem struct {
 	AggregatedOutput string         `json:"aggregated_output,omitempty"`
 	ExitCode         *int           `json:"exit_code,omitempty"`
 	Status           string         `json:"status,omitempty"`
+	Error            *codexItemErr  `json:"error,omitempty"`
+}
+
+type codexItemErr struct {
+	Message string `json:"message,omitempty"`
 }
 
 type codexUsage struct {
@@ -1055,10 +1298,7 @@ func applyCodexItemCompleted(state *codexParseState, event codexEvent) {
 			})
 		}
 
-		status := toolStatusSuccess
-		if event.Item.ExitCode != nil && *event.Item.ExitCode != 0 {
-			status = toolStatusError
-		}
+		status := codexCommandResultStatus(event.Item.ExitCode, event.Item.Status)
 
 		state.messages = append(state.messages, transcript.Message{
 			Role: transcript.RoleToolResult,
@@ -1080,7 +1320,7 @@ func applyCodexItemCompleted(state *codexParseState, event codexEvent) {
 			ToolResult: &transcript.ToolResultInfo{
 				CallID:  event.Item.ID,
 				Status:  codexMCPToolResultStatus(event.Item.Status),
-				Content: codexMCPToolResultContent(event.Item.Result),
+				Content: codexMCPToolOutput(event.Item.Result, event.Item.Error),
 			},
 			Turn: turn,
 		})
@@ -1109,6 +1349,15 @@ func codexMCPToolName(server, tool string) string {
 	return "mcp__" + server + "__" + tool
 }
 
+// codexMCPToolOutput falls back to the error message because a failed call
+// (for example one refused by the approval policy) carries no result.
+func codexMCPToolOutput(result any, itemErr *codexItemErr) string {
+	if result == nil && itemErr != nil {
+		return itemErr.Message
+	}
+	return codexMCPToolResultContent(result)
+}
+
 func codexMCPToolResultContent(result any) string {
 	if result == nil {
 		return ""
@@ -1120,16 +1369,20 @@ func codexMCPToolResultContent(result any) string {
 	return string(data)
 }
 
+// codexSessionLookupScript finds the session file of a thread. Codex writes
+// sessions under $CODEX_HOME, which defaults to $HOME/.codex.
+const codexSessionLookupScript = `codex_home=$(printenv CODEX_HOME)
+if [ -z "$codex_home" ]; then home=$(printenv HOME); [ -n "$home" ] || exit 0; codex_home="$home/.codex"; fi
+root="$codex_home/sessions"; [ -d "$root" ] || exit 0
+find "$root" -type f -name "*$SKILL_UP_CODEX_THREAD_ID*.jsonl" 2>/dev/null | head -1`
+
 func findCodexSessionPath(ctx context.Context, rt Runtime, threadID string) string {
 	threadID = strings.TrimSpace(threadID)
 	if threadID == "" {
 		return ""
 	}
 
-	script := `home=$(printenv HOME); [ -n "$home" ] || exit 0
-root="$home/.codex/sessions"; [ -d "$root" ] || exit 0
-find "$root" -type f -name "*$SKILL_UP_CODEX_THREAD_ID*.jsonl" 2>/dev/null | head -1`
-	result, err := rt.Exec(ctx, script, ExecOptions{
+	result, err := rt.Exec(ctx, codexSessionLookupScript, ExecOptions{
 		Env: map[string]string{"SKILL_UP_CODEX_THREAD_ID": threadID},
 	})
 	if err != nil || result.ExitCode != 0 {
@@ -1161,6 +1414,7 @@ type codexSessionPayload struct {
 	CallID    string                 `json:"call_id,omitempty"`
 	Output    string                 `json:"output,omitempty"`
 	Info      *codexSessionTokenInfo `json:"info,omitempty"`
+	Item      json.RawMessage        `json:"item,omitempty"`
 }
 
 type codexSessionContent struct {
@@ -1178,6 +1432,31 @@ type codexSessionParseResult struct {
 	inputTokens  int
 	outputTokens int
 	err          error
+	// functionCallIDs maps the call ID of each function_call item to its
+	// transcript index. Codex also writes an item_completed event for a direct
+	// exec_command call, under the same ID, after the function_call.
+	functionCallIDs map[string]int
+	// functionResultIDs maps a function_call_output call ID to its transcript
+	// index, and failedItemIDs holds direct calls whose item reported failure
+	// before their output arrived. The item and the output come in either order.
+	functionResultIDs map[string]int
+	failedItemIDs     map[string]struct{}
+}
+
+// codexSessionItem is an item_completed payload. In the session file a
+// CommandExecution command is an argv array, not the string the stream uses.
+type codexSessionItem struct {
+	Type             string         `json:"type"`
+	ID               string         `json:"id"`
+	Server           string         `json:"server,omitempty"`
+	Tool             string         `json:"tool,omitempty"`
+	Arguments        map[string]any `json:"arguments,omitempty"`
+	Result           any            `json:"result,omitempty"`
+	Error            *codexItemErr  `json:"error,omitempty"`
+	Status           string         `json:"status,omitempty"`
+	Command          []string       `json:"command,omitempty"`
+	AggregatedOutput string         `json:"aggregated_output,omitempty"`
+	ExitCode         *int           `json:"exit_code,omitempty"`
 }
 
 func parseCodexSessionFile(sessionFile string) codexSessionParseResult {
@@ -1222,7 +1501,12 @@ func applyCodexSessionFileEvent(parsed *codexSessionParseResult, currentTurn *in
 			parsed.finalMsg = finalMsg
 		}
 		*currentTurn = turn
+		recordCodexSessionFunctionMessage(parsed, *event.Payload, len(messages))
 	case "event_msg":
+		if event.Payload.Type == codexItemCompleted {
+			applyCodexSessionItem(parsed, event.Payload.Item, *currentTurn)
+			return
+		}
 		messages, finalMsg, inputTokens, outputTokens := applyCodexSessionEventMsg(*event.Payload, *currentTurn)
 		parsed.transcript = append(parsed.transcript, messages...)
 		if finalMsg != "" {
@@ -1309,6 +1593,125 @@ func applyCodexSessionEventMsg(payload codexSessionPayload, currentTurn int) (ms
 		}
 	}
 	return msgs, finalMsg, inputTokens, outputTokens
+}
+
+// applyCodexSessionItem records an MCP call or a shell command from an
+// item_completed event. Newer Codex CLIs run both from inside their code tool,
+// so the session file has no function_call for them and this event is the only
+// record. For a direct call Codex writes both a function_call and an item under
+// the same ID; that call takes the item's name and arguments, which match the
+// stream transcript, and keeps the result from its function_call_output.
+func applyCodexSessionItem(parsed *codexSessionParseResult, raw json.RawMessage, currentTurn int) {
+	call, result, ok := codexSessionItemCall(raw)
+	if !ok {
+		return
+	}
+	if idx, recorded := parsed.functionCallIDs[call.ID]; recorded {
+		parsed.transcript[idx].ToolCall = &call
+		if result.Status == toolStatusError {
+			markCodexSessionCallFailed(parsed, call.ID)
+		}
+		return
+	}
+	turn := max(currentTurn, 1)
+	parsed.transcript = append(parsed.transcript,
+		transcript.Message{Role: transcript.RoleToolCall, ToolCall: &call, Turn: turn},
+		transcript.Message{Role: transcript.RoleToolResult, ToolResult: &result, Turn: turn},
+	)
+}
+
+// recordCodexSessionFunctionMessage indexes a function_call or its output so a
+// later item for the same direct call can be merged into it.
+func recordCodexSessionFunctionMessage(parsed *codexSessionParseResult, payload codexSessionPayload, appended int) {
+	if payload.CallID == "" || appended != 1 {
+		return
+	}
+	idx := len(parsed.transcript) - 1
+	switch payload.Type {
+	case codexFnCall:
+		if parsed.functionCallIDs == nil {
+			parsed.functionCallIDs = make(map[string]int)
+		}
+		parsed.functionCallIDs[payload.CallID] = idx
+	case codexFnCallOut:
+		if parsed.functionResultIDs == nil {
+			parsed.functionResultIDs = make(map[string]int)
+		}
+		parsed.functionResultIDs[payload.CallID] = idx
+		if _, failed := parsed.failedItemIDs[payload.CallID]; failed {
+			parsed.transcript[idx].ToolResult.Status = toolStatusError
+		}
+	}
+}
+
+// markCodexSessionCallFailed marks a direct call's result as an error, now if
+// its function_call_output is already recorded, or when it arrives.
+func markCodexSessionCallFailed(parsed *codexSessionParseResult, callID string) {
+	if idx, ok := parsed.functionResultIDs[callID]; ok {
+		parsed.transcript[idx].ToolResult.Status = toolStatusError
+		return
+	}
+	if parsed.failedItemIDs == nil {
+		parsed.failedItemIDs = make(map[string]struct{})
+	}
+	parsed.failedItemIDs[callID] = struct{}{}
+}
+
+// codexSessionItemCall converts an McpToolCall or CommandExecution item into
+// the tool call and result the stream path produces. Other item types and
+// items that do not decode are skipped.
+func codexSessionItemCall(raw json.RawMessage) (transcript.ToolCallInfo, transcript.ToolResultInfo, bool) {
+	var item codexSessionItem
+	if len(raw) == 0 || json.Unmarshal(raw, &item) != nil {
+		return transcript.ToolCallInfo{}, transcript.ToolResultInfo{}, false
+	}
+	switch item.Type {
+	case codexSessionMCPToolCall:
+		return transcript.ToolCallInfo{ID: item.ID, Name: codexMCPToolName(item.Server, item.Tool), Arguments: item.Arguments},
+			transcript.ToolResultInfo{
+				CallID:  item.ID,
+				Status:  codexMCPToolResultStatus(item.Status),
+				Content: codexMCPToolOutput(item.Result, item.Error),
+			}, true
+	case codexSessionCommandExec:
+		return transcript.ToolCallInfo{
+				ID:        item.ID,
+				Name:      codexCommandToolName,
+				Arguments: map[string]any{"command": codexJoinCommand(item.Command)},
+			},
+			transcript.ToolResultInfo{
+				CallID:  item.ID,
+				Status:  codexCommandResultStatus(item.ExitCode, item.Status),
+				Content: item.AggregatedOutput,
+			}, true
+	default:
+		return transcript.ToolCallInfo{}, transcript.ToolResultInfo{}, false
+	}
+}
+
+// codexCommandResultStatus fails a command on a nonzero exit code or a failed
+// status. A command that failed before its process started has no exit code.
+func codexCommandResultStatus(exitCode *int, status string) string {
+	if exitCode != nil && *exitCode != 0 {
+		return toolStatusError
+	}
+	return codexMCPToolResultStatus(status)
+}
+
+var codexShellSafeArg = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
+
+// codexJoinCommand joins a session argv into the shell string the stream
+// reports, quoting only the arguments that need it.
+func codexJoinCommand(argv []string) string {
+	parts := make([]string, len(argv))
+	for i, arg := range argv {
+		if codexShellSafeArg.MatchString(arg) {
+			parts[i] = arg
+		} else {
+			parts[i] = shellQuote(arg)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 func codexUsageInputTotal(u codexUsage) int {

@@ -7,21 +7,286 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Record the agent that graded each `agent_judge` case in its `judge_context`:
+  the `engine`, plus the `provider` and `model` that skill-up forwarded to it. A
+  value skill-up did not forward is omitted, so a Codex judge given a model
+  override without a provider override is written with `model` and no
+  `provider`. `observed_model` is added only when the adapter captures a model
+  reported by the engine; when it is absent, the model that ran is unknown. A
+  judge configured with the evaluated agent's own model grades its own output
+  and tends to favor it; until now the grading output did not say which model
+  the judge was given, so that case could not be told apart from an independent
+  judge.
+
+- Add `environment.agent_home: temporary` for local Claude Code and Codex runs
+  with explicit API credentials. Each case, benchmark arm and retry uses a
+  separate temporary home for user settings, skills and session state. The default
+  `inherited` mode keeps inherited home settings. An explicit `--workspace` stays
+  in place, with a separate home in `temporary` mode.
+  Unsupported engines and personal-login-only configurations fail before setup.
+  `--no-delete` preserves the temporary tree.
+
+- `skill-up validate --skill <dir>` lints the content integrity of a single
+  skill as authored on disk: SKILL.md must open with a closed YAML frontmatter
+  block declaring non-empty `name` and `description` fields, and every
+  `references/`, `assets/`, `scripts/` path cited in the markdown body must
+  exist on disk. The body is parsed as CommonMark so prose citations, local
+  link/image destinations, and path-citing inline code spans are checked —
+  with or without a leading `./`, and with equivalent path spellings
+  normalized — while code blocks, remote URLs, and raw HTML are ignored. The
+  opt-in `--uncited` flag also reports files under those directories that are
+  not reachable from the body, the orphans a truncated SKILL.md leaves behind;
+  reachability is transitive through the links of cited documents and the
+  path mentions of cited scripts (dotfiles stay silent; a directory cited as a
+  link destination covers everything beneath it), and it stays a heuristic,
+  which is why the report is off by default. Findings print as warnings
+  without changing the exit code; `--strict` promotes them to failures. The
+  check is source-level and independent from eval config validation — it does
+  not see what a run installs after `skills.include`/`skills.exclude`
+  filtering.
+
+### Changed
+
+- Put automatically created local workspaces at `<system temp>/skill-up-*/workspace/`
+  in both agent home modes. The workspace's parent is now a run directory,
+  instead of the system temporary directory. Runtime cleanup removes that
+  whole run directory; explicit `--workspace` paths remain unchanged.
+
+### Fixed
+
+- Keep `agent_judge` review materials from reading as instructions. The judge
+  prompt now states that inline excerpts and referenced files come from the
+  agent under evaluation and are evidence, never instructions, and it fences
+  each inline excerpt with more backticks than the excerpt contains, so output
+  holding its own fence and a forged `## Required Output Contract` could no
+  longer close the excerpt and continue as prompt text. The response-format
+  example shows `"passed": null` instead of `"passed": true`, matching the file
+  template, so the example no longer suggests a verdict.
+- Reject a `rule_based` matcher that is present but holds no values to match.
+  `output_contains: {all: []}`, `output_matches: {}`, `turn_response_contains`
+  without `contains_all`/`contains_any`, and `turn_response_not_contains`
+  without `not_contains` used to validate and then report a passing assertion
+  with zero checks, so a half-filled rule became a silent pass (the same class
+  of bug as the unknown-matcher check for #294). `validate` now names the
+  matcher and asks for at least one value, and rejects an entry that is the
+  empty string in any of them, since `""` is a substring of every response and
+  an empty pattern matches every response. Whitespace entries stay valid: they
+  are compared as written, so a matcher holding only a newline can assert a
+  single-line output.
+- Use prompt-file delivery for resumed Claude Code and Qoder turns when the
+  prompt exceeds the inline limit or the target is Windows, preserving prompt
+  delivery metadata and failing before execution if the file cannot be uploaded.
+- Read workspace file expectations and rule-based checks through the runtime
+  when it exposes `Exists` and `ReadFile` accessors. Docker and OpenSandbox
+  cases now grade the actual sandbox workspace instead of host paths, while
+  path confinement prevents these checks from escaping the workspace.
+- Match environment variable names case-insensitively in the `none` runtime on
+  native Windows. A host `Path` and a configured or probed `PATH` were both
+  passed to the child, and which one it kept followed map order. Per-call
+  values now always override the runtime configuration, which overrides the
+  process environment, whatever case each one uses. Unix hosts keep
+  case-sensitive names.
+- Count primary cases consistently in Markdown and CLI summaries for benchmark
+  runs, without counting baseline rows as extra cases or discarding their details.
+- Reject malformed `--include-case-name` and `--exclude-case-name` glob patterns
+  before loading cases, including in auto mode, instead of silently ignoring them.
+
+## [0.16.0] - 2026-11-17
+
+### Added
+
+- Mocked MCP fixtures accept a `tools` map that defines each tool in one
+  place: a required `response`, plus an optional `description` and
+  `input_schema` advertised in `tools/list`, so Agents see the same tool
+  metadata as against the real server. A tool that leaves the metadata out
+  keeps the placeholder description and open object schema; the schema is
+  advertised only, not enforced on calls. Existing `tool_responses` fixtures
+  keep working unchanged and may sit beside `tools` for other tool names.
+
+- Remove the qodercli project directory a run creates under
+  `~/.qoder/projects` (or `~/.qoder-cn/projects` for the CN edition) when
+  session cleanup is requested. The directory is removed only when every
+  transcript in it records this workspace, so the shared-directory and
+  unproven-ownership safeguards apply to qodercli exactly as they do to Claude
+  Code.
+
+### Fixed
+- Correct the contribution guide to describe the existing CLA Assistant process
+  and employer-authorization considerations.
+- Place Codex's `--output-last-message` before `resume` so resumed turns work
+  with the default Codex 0.80.0 CLI. Custom providers now accept
+  `engine.kwargs.wire_api: responses` for newer Codex versions that removed
+  Chat Completions support. The default remains `chat` for 0.80.0 compatibility;
+  selecting `responses` requires a Responses-capable endpoint.
+- Check eval-level and case-level mocked MCP fixtures during `validate`, including
+  missing files, YAML errors and invalid tool definitions, without starting servers.
+- Warn when a non-empty case-level `judge` has no `type` and its fields are
+  ignored in favor of the eval judge. `validate` and `run` preserve the
+  existing fallback behavior; omitted, empty and null blocks inherit without
+  a warning. Explicitly typed overrides and validation against an eval-level
+  `judges` list are unchanged.
+- Stop writing mocked MCP servers into the user's global Codex config. The
+  `codex` engine now defines each mocked server on the `codex exec` command,
+  including resumed turns, with `-c mcp_servers.<name>...` overrides, instead
+  of running `codex mcp add`, which replaced a same-named server of the user's
+  and left the mock in `~/.codex/config.toml` after the run. The mock's script
+  is written to a temporary file per run. A run fails early when that config
+  already has a server with the mocked server's name, when the config cannot
+  be listed, or when the name is not a valid Codex config key. Real MCP servers
+  are still installed with `codex mcp add`.
+- Reject `report.formats` values other than `json`, `junit` and `html` during
+  configuration validation. An unknown value used to pass validation and then be
+  silently skipped by the runner, which still printed that the reports were
+  saved, so a typo produced no report at all. The runner now also returns an
+  error if an unsupported format reaches it without going through validation.
+
+- Keep the complete model ID for the `qwen_code` engine when `--model
+  provider/name` names a configured provider: the credential layer still splits
+  the prefix to select provider-scoped credentials, but now only records that a
+  legacy split happened, and the `qwen_code` adapter itself rejoins
+  `provider + "/" + name` and forwards it to `-m` and `OPENAI_MODEL`. Qwen
+  Code's own `modelProviders` lookup therefore still matches the registered id
+  (for example `zcode/GLM-5.3-Flash`) instead of receiving a bare name and
+  falling back to `OPENAI_API_KEY`. A model ID written without a prefix is
+  passed through unchanged, `opencode` keeps such IDs opaque as before, and a
+  model replaced wholesale by a provider env or credential file clears the
+  flag, so the replacement is forwarded as written. The applied model reported
+  for the run is the value the adapter materializes, so the report, `-m` and
+  `OPENAI_MODEL` cannot disagree.
+- Stop reporting a successful Claude Code answer as a provider rate-limit or
+  authentication failure when its text mentions phrases such as "rate limit" or
+  "authentication error". Answer text is scanned for these failures only when
+  the run exits non-zero or the text is an error report; stderr, Claude Code
+  `API Error:` output, JSON result events flagged `is_error`, and API errors
+  recorded in the session are still detected.
+- Preserve OpenSandbox stdout/stderr line boundaries when joining execution
+  output messages. Multi-line commands such as artifact listing now split
+  correctly, while messages that already carry a trailing newline are not
+  double-spaced.
+- Remove the Claude Code project directory a run creates under
+  `~/.claude/projects` when `environment.cleanup_sessions: true` or
+  `--cleanup-sessions` asks for it and the workspace is deleted, so eval
+  sessions stop accumulating in the user's own history. Off by default; an
+  explicit `--cleanup-sessions=false` overrides `cleanup_sessions: true`, and
+  `--no-delete` keeps both and reports the skip. A directory is removed only
+  when every transcript in it records this workspace, parsed from its identity
+  fields rather than string-matched, and directories whose ownership is unclear
+  are kept. An agent without support for cleanup is reported instead of
+  silently skipped.
+- Run judges when `post_condition.on_fail: skip_remaining` fails on the final conversation turn, including single-turn conversations.
+- Install a Skill under the `name` declared in its `SKILL.md` frontmatter
+  instead of its source folder's name, so the Agent lists and invokes it by its
+  own name when the folder is named differently (for example a snapshot copy).
+  A Skill without a usable declared name keeps the folder name. The agent judge
+  prompt and reports name each judge Skill the same way. Two `skills` or
+  `judge.skills` entries that would be installed into the same directory are
+  now rejected instead of being merged.
+
+### Changed
+- Update the OpenAI Go SDK to 3.97.0 and pflag to 1.1.0.
+
+### Upgrade notes and known limitations
+- **Session cleanup is opt-in:** Claude Code and Qoder session directories are
+  removed only when cleanup is requested and ownership can be established.
+  `--no-delete` retains the workspace and session data.
+- **Validation:** invalid report formats and mocked MCP fixture definitions now
+  fail early. Non-empty case `judge` blocks without a `type` still inherit the
+  eval judge, but now warn when their fields are ignored.
+- **Skill names:** installation now uses the `SKILL.md` frontmatter name when
+  available. Correct duplicate declared names that would share an installation
+  directory before upgrading.
+- **Codex wire API:** the default remains `chat` for Codex 0.80.0. For newer
+  CLIs that removed Chat Completions, explicitly select
+  `engine.kwargs.wire_api: responses` and use a Responses-capable endpoint.
+- **GitHub Action availability:** this CLI release does not update the official
+  Action's pinned runner image, which still bundles skill-up `0.7.0`. Its
+  `skill-up-version` input does not override the preinstalled binary. Using these
+  CLI features in the Action requires a separately updated or custom image.
+
+## [0.15.0] - 2026-11-09
+
+### Added
+- Add `skill-up compare <result.json> <result.json>...` for offline
+  comparison with self-contained HTML, shareable Markdown, text, and JSON
+  reports, an overview and case matrix across all runs, per-candidate baseline
+  comparisons, input paths as default labels, explicit label
+  overrides, and optional regression and token-growth gates. HTML extends the
+  existing report with a comparison tab and run selector, retaining the original
+  case details and leaving existing report output unchanged. Comparison supports
+  selecting any two input files and reviewing aligned prompts, responses, and
+  grades side by side without changing CI gate references. Color-code pass rates,
+  case statuses, and metric changes, with cost/time direction handled separately.
+  Document primary-result selection for cross-file comparisons; use canonical
+  primary cases in the interactive viewer, and keep dropdowns and multi-run
+  tables readable with padding, wrapping, and horizontal scrolling. Align the
+  Compare controls, collapse secondary explanations, and omit empty Benchmark
+  tabs in comparison mode.
+- Expose the framework-owned `SKILL_UP_VARIANT` execution group to setup and subsequent runtime commands across none, Docker, and OpenSandbox; reject the reserved name in `environment.env`.
+- Add opt-in `judge.output.mode: file` for agent judges, with per-attempt JSON
+  templates, strict validation, isolated correction retries, and result artifacts.
+
 ### Changed
 - Strengthen `skill-upper` evolution with original/candidate comparisons,
   evidence-based acceptance and reversion, and regression checks. Keep the
   English and Chinese Quick Start prompts linked to that canonical workflow.
 - Require Go 1.26 or later for source builds and update the Go CI toolchain.
-- Update the OpenAI Go SDK to 3.77.0, OpenTelemetry to 1.47.0, and
-  DeepSeek Harness packages to 0.1.5-rc.3 while retaining the required cordis 4.0.2.
+- Update the OpenAI Go SDK to 3.86.0, Anthropic Go SDK to 1.84.0,
+  OpenSandbox Go SDK to 1.1.1, OpenTelemetry to 1.47.0, and DeepSeek Harness
+  packages to 0.1.5-rc.3 while retaining the required cordis 4.0.2.
 
 ### Fixed
+- Reject API keys in custom-engine local file paths and working directories before
+  filesystem operations, and redact workspace validation errors returned to callers.
+- Reject Qoder CLI error envelopes and unfinished `tool_use` results even when
+  the process exits zero, retaining session artifacts for diagnosis and valid
+  file-verdict recovery. Reject reported model fallbacks and prevent agent judges
+  from accepting a verdict from an unavailable requested model. Update the file
+  judge example to the current Fast tier.
+- Preserve multi-turn post-condition failure reasons in the HTML cross-run case comparison when judging was not reached.
+- Use patched Vite/esbuild dependencies for the documentation site while
+  retaining VitePress 1.x.
+- Remove overflow-prone runtime kwargs preallocation while preserving
+  eval-over-user precedence and independent merged maps.
+- Avoid logging API key fragments and redact secrets in custom-engine
+  output-file paths and errors without changing file operations or fallbacks.
+- Expand full-value `$VAR` references in real MCP headers and OpenCode endpoints, matching the existing `${VAR}` form.
+- Restore the Docker Action's temporary home ownership and owner permissions on exit so private engine state does not block self-hosted runner cleanup.
+- Isolate `context.git.apply_diff` uploads per invocation so parallel cases cannot overwrite patches with the same filename. Remove the uploaded patch after applying it, including on failures and cancellation.
 - Reject whitespace-only `input.prompt` and `input.turns[].content` during validation while preserving mutual-exclusion semantics and the original prompt bytes.
 - Clarify nested YAML comments and keep `skill-upper` scaffolding focused on
   the requested cases and scoring contract. Accept read-only checksum queries
   in the localized-regression judge while rejecting checksum manifest modes.
   Keep credential-probe verification within the caller's allowed command profile.
 - Add `case_results[].judge_recovery` metadata to reports when an agent judge verdict is recovered after a call error, distinguishing recovered output from a healthy judge call.
+- Keep MCP tool calls and shell commands in Codex transcripts built from the session file, so `tool_called` matches calls that newer Codex CLIs make from their code tool. A failed Codex MCP call now keeps its error message as the tool result.
+- Find Codex session files under `$CODEX_HOME/sessions` when `CODEX_HOME` is set, instead of always under `$HOME/.codex/sessions`.
+- Let Codex call the MCP servers skill-up installs on the `none` runtime. Codex rejected these calls under `--sandbox workspace-write` with "approval policy is never"; skill-up now approves tool calls for those servers only, with the sandbox kept. Server names outside `^[A-Za-z0-9_-]+$` are not covered.
+- Read the files listed in Anthropic `evals.json` entries from the Skill root during `skill-up import` and `skill-up run --auto`. Cases previously received each file's path as its content; a missing file or a path outside the Skill now fails with a clear error.
+- Reject unknown YAML fields in eval and case configs, including nested fields and merged keys, using strict decoding. Case-name filters run before strict case decoding; merged judge blocks retain presence checks. This prevents misspelled judge blocks from silently passing with zero checks.
+
+### Upgrade notes and known limitations
+- **Source builds:** Go 1.26 or later is now required. Prebuilt CLI archives do
+  not require a locally installed Go toolchain.
+- **Strict YAML validation:** unknown fields, including nested fields and merged
+  keys, now fail config loading. Remove obsolete keys and correct spelling before
+  upgrading. Run `skill-up validate` on each suite to check all cases; case-name
+  filters in `skill-up run` select cases before strict case decoding.
+- **Qoder execution and scores:** error envelopes, unfinished `tool_use` results,
+  and reported fallbacks from a requested model now fail even if the CLI exits
+  zero. Previously accepted runs may therefore fail after upgrading. Check the
+  retained artifacts, update the Qoder CLI, and select an available model as
+  appropriate. File-mode verdict recovery does not accept an unavailable
+  requested model.
+- **Multi-turn evaluation:** a failed `post_condition` with
+  `on_fail: skip_remaining` on the final turn (including a one-turn conversation)
+  still forces FAIL and skips judging. The fix proposed in
+  [#380](https://github.com/alibaba/skill-up/pull/380) is not included.
+- **GitHub Action availability:** this CLI release does not update the official
+  Action's pinned runner image, which still bundles skill-up `0.7.0`. Its
+  `skill-up-version` input does not override the preinstalled binary. Using these
+  CLI features in the Action requires a separately updated or custom image.
 
 ## [0.14.0] - 2026-10-20
 
@@ -790,7 +1055,9 @@ The `v0.5.0` release tag is available at
   project and delivers the end-to-end capability to declare eval environments,
   run cases and emit structured reports as described in [README.md](README.md).
 
-[Unreleased]: https://github.com/alibaba/skill-up/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/alibaba/skill-up/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/alibaba/skill-up/releases/tag/v0.16.0
+[0.15.0]: https://github.com/alibaba/skill-up/releases/tag/v0.15.0
 [0.14.0]: https://github.com/alibaba/skill-up/releases/tag/v0.14.0
 [0.13.0]: https://github.com/alibaba/skill-up/releases/tag/v0.13.0
 [0.12.0]: https://github.com/alibaba/skill-up/releases/tag/v0.12.0

@@ -99,6 +99,7 @@ func (d *judgeDebugInput) toJudgeInput() judge.Input {
 		ExitCode:       d.ExitCode,
 		SkillDir:       d.SkillDir,
 		WorkspacePath:  d.WorkspacePath,
+		Files:          judge.NewLocalWorkspaceFiles(d.WorkspacePath),
 		WorkspaceDiff:  d.WorkspaceDiff,
 		GeneratedFiles: d.GeneratedFiles,
 		TurnsExecuted:  d.TurnsExecuted,
@@ -234,7 +235,10 @@ func prepareDebugTranscriptFile(input judgeDebugInput) (string, func(), error) {
 // to a synthesised Result, otherwise dispatches to the configured judge. Logs a
 // one-line PASS/FAIL summary to cmd's stderr so the debug UX matches the real run.
 func evaluateJudgeWithExpect(ctx context.Context, cmd *cobra.Command, j judge.Judge, cfg config.JudgeConfig, expect *config.Expect, judgeInput judge.Input) (*judge.Result, error) {
-	er := judge.CheckExpect(expect, judgeInput)
+	er := judge.CheckExpectContext(ctx, expect, judgeInput)
+	if er.Error != nil {
+		return judge.NewErrorResult(errors.New(*er.Error), judgeInput.TurnsExecuted, judgeInput.TurnsTotal), errors.New(*er.Error)
+	}
 	if !er.Passed {
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "[expect] FAIL — %d checks failed, judge skipped\n", len(er.Failures))
 		return judge.NewExpectFailureResult(er, cfg, judgeInput), nil

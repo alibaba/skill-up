@@ -14,9 +14,18 @@ on:
         options:
           - all
           - none-runtime
+          - codex
           - windows-none-runtime
           - opensandbox
           - docker
+      codex_base_url:
+        description: 'Codex DashScope endpoint (must support the selected protocol)'
+        type: string
+        default: https://dashscope.aliyuncs.com/compatible-mode/v1
+      codex_model:
+        description: 'Model for the Codex DashScope suite'
+        type: string
+        default: qwen3.6-plus
 
 concurrency:
   group: model-e2e-${{ github.ref }}
@@ -25,6 +34,58 @@ concurrency:
 permissions: {}
 
 jobs:
+  codex:
+    name: Codex DashScope (${{ matrix.version }}, ${{ matrix.wire_api }})
+    if: inputs.suite == 'all' || inputs.suite == 'codex'
+    runs-on: [self-hosted, linux, x64, trusted]
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: "0.169.0"
+            wire_api: responses
+          - version: "0.80.0"
+            wire_api: chat
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.x"
+          cache: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+
+      - name: Install pinned Codex
+        env:
+          CODEX_VERSION: ${{ matrix.version }}
+        run: |
+          set -euo pipefail
+          prefix=$(mktemp -d "$RUNNER_TEMP/codex-live.XXXXXX")
+          cp ".github/codex-compat/$CODEX_VERSION/"package*.json "$prefix/"
+          npm ci --prefix "$prefix" --ignore-scripts --registry=https://registry.npmjs.org
+          echo "$prefix/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: Run real DashScope two-turn recall
+        run: go test -race -tags e2e -timeout 300s -count=1 -v -run '^TestCodexDashScopeMultiTurn$' ./e2e
+        env:
+          SKILL_UP_CODEX_LIVE_E2E: "1"
+          SKILL_UP_CODEX_EXPECTED_VERSION: ${{ matrix.version }}
+          SKILL_UP_CODEX_WIRE_API: ${{ matrix.wire_api }}
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          OPENAI_BASE_URL: ${{ inputs.codex_base_url }}
+          OPENAI_MODEL: ${{ inputs.codex_model }}
+
   e2e:
     name: E2E (none runtime, live models)
     if: inputs.suite == 'all' || inputs.suite == 'none-runtime'
@@ -68,33 +129,16 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Install claude-code CLI
+      - name: Install locked agent CLIs
         if: steps.secrets.outputs.available == 'true'
         run: |
           set -euo pipefail
-          npm install -g --include=optional '@anthropic-ai/claude-code@2.1.217'
-          claude --version
-
-      - name: Install codex CLI
-        if: steps.secrets.outputs.available == 'true'
-        run: |
-          set -euo pipefail
-          npm install -g --include=optional '@openai/codex@0.80.0'
-          codex --version
-
-      - name: Install OpenCode CLI
-        if: steps.secrets.outputs.available == 'true'
-        run: |
-          set -euo pipefail
-          npm install -g --include=optional --registry=https://registry.npmjs.org 'opencode-ai@1.18.33'
-          opencode --version
-
-      - name: Install qwen-code CLI
-        if: steps.secrets.outputs.available == 'true'
-        run: |
-          set -euo pipefail
-          npm install -g '@qwen-code/qwen-code@0.20.1'
-          qwen --version
+          cd .github/model-e2e/linux
+          npm ci --include=optional --registry=https://registry.npmjs.org
+          for cli in claude codex opencode qwen; do
+            ./node_modules/.bin/"$cli" --version
+          done
+          echo "$(pwd)/node_modules/.bin" >> "$GITHUB_PATH"
 
       - name: Install qodercli (pinned v1.1.41)
         if: steps.secrets.outputs.available == 'true'
@@ -181,7 +225,7 @@ jobs:
 
       - name: Install uv
         if: steps.secrets.outputs.available == 'true'
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
       - name: Install OpenSandbox server
         if: steps.secrets.outputs.available == 'true'
@@ -422,13 +466,14 @@ jobs:
   summary:
     name: Model E2E Summary
     if: always()
-    needs: [e2e, e2e-opensandbox, e2e-docker, e2e-windows]
+    needs: [codex, e2e, e2e-opensandbox, e2e-docker, e2e-windows]
     runs-on: [self-hosted, linux, x64, trusted]
     timeout-minutes: 5
     permissions: {}
     steps:
       - name: Write job summary
         env:
+          CODEX_RESULT: ${{ needs.codex.result }}
           NONE_RESULT: ${{ needs.e2e.result }}
           WINDOWS_RESULT: ${{ needs.e2e-windows.result }}
           OPENSANDBOX_RESULT: ${{ needs.e2e-opensandbox.result }}
@@ -443,12 +488,13 @@ jobs:
             echo
             echo "| Runtime | Result |"
             echo "|---|---|"
+            echo "| Codex DashScope (modern + legacy) | ${CODEX_RESULT} |"
             echo "| none | ${NONE_RESULT} |"
             echo "| none (Windows, Claude) | ${WINDOWS_RESULT} |"
             echo "| OpenSandbox | ${OPENSANDBOX_RESULT} |"
             echo "| Docker | ${DOCKER_RESULT} |"
           } >> "$GITHUB_STEP_SUMMARY"
-          for result in "$NONE_RESULT" "$WINDOWS_RESULT" "$OPENSANDBOX_RESULT" "$DOCKER_RESULT"; do
+          for result in "$CODEX_RESULT" "$NONE_RESULT" "$WINDOWS_RESULT" "$OPENSANDBOX_RESULT" "$DOCKER_RESULT"; do
             if [ "$result" != success ] && [ "$result" != skipped ]; then
               echo "::error::One or more selected live-model suites failed"
               exit 1

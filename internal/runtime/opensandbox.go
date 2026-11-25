@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -58,6 +59,10 @@ type openSandboxClient interface {
 	DownloadFile(ctx context.Context, remotePath, rangeHeader string, opts ...opensandbox.DownloadFileOptions) (io.ReadCloser, error)
 	SearchFiles(ctx context.Context, dir, pattern string) ([]opensandbox.FileInfo, error)
 	RunCommandWithOpts(ctx context.Context, req opensandbox.RunCommandRequest, handlers *opensandbox.ExecutionHandlers) (*opensandbox.Execution, error)
+}
+
+type openSandboxFileInfoClient interface {
+	GetFileInfo(ctx context.Context, remotePath string) (map[string]opensandbox.FileInfo, error)
 }
 
 var createOpenSandbox = createOpenSandboxCompat
@@ -364,6 +369,73 @@ func (r *OpenSandboxRuntime) DownloadFile(ctx context.Context, sourcePath, targe
 	}
 	source := r.remotePath(sourcePath)
 	return r.downloadRemoteFile(ctx, source, targetPath, 0)
+}
+
+// Exists reports whether a file or directory exists in the sandbox workspace.
+func (r *OpenSandboxRuntime) Exists(ctx context.Context, sourcePath string) (bool, error) {
+	if err := r.ensureCreated(); err != nil {
+		return false, err
+	}
+	source := r.remotePath(sourcePath)
+	if err := rejectOpenSandboxExpandedPath(source); err != nil {
+		return false, err
+	}
+	client, ok := r.sandbox.(openSandboxFileInfoClient)
+	if !ok {
+		return false, errors.New("opensandbox client does not support file metadata")
+	}
+	infos, err := client.GetFileInfo(ctx, source)
+	if err != nil {
+		if isOpenSandboxFileNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("get sandbox file info %s: %w", source, err)
+	}
+	_, ok = infos[source]
+	return ok, nil
+}
+
+// ReadFile returns the contents of a file in the sandbox workspace.
+func (r *OpenSandboxRuntime) ReadFile(ctx context.Context, sourcePath string) ([]byte, error) {
+	if err := r.ensureCreated(); err != nil {
+		return nil, err
+	}
+	source := r.remotePath(sourcePath)
+	if err := rejectOpenSandboxExpandedPath(source); err != nil {
+		return nil, err
+	}
+	rc, err := r.sandbox.DownloadFile(ctx, source, "")
+	if err != nil {
+		if isOpenSandboxFileNotFound(err) {
+			return nil, ErrFileNotFound
+		}
+		return nil, fmt.Errorf("download sandbox file %s: %w", source, err)
+	}
+	defer func() { _ = rc.Close() }()
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return nil, fmt.Errorf("read sandbox file %s: %w", source, err)
+	}
+	return data, nil
+}
+
+func isOpenSandboxFileNotFound(err error) bool {
+	var apiErr *opensandbox.APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.StatusCode == http.StatusNotFound && apiErr.Response.Code == "FILE_NOT_FOUND"
+}
+
+// rejectOpenSandboxExpandedPath keeps the server's environment-variable
+// expansion from changing what a workspace-relative path names. A literal
+// filename containing "$" would otherwise resolve to a different file or fail
+// with an unset-variable error.
+func rejectOpenSandboxExpandedPath(source string) error {
+	if strings.Contains(source, "$") {
+		return fmt.Errorf("opensandbox path %q contains environment expansion syntax", source)
+	}
+	return nil
 }
 
 func (r *OpenSandboxRuntime) downloadRemoteFile(ctx context.Context, source, targetPath string, mode int) error {
@@ -841,8 +913,11 @@ func joinOutputMessages(messages []opensandbox.OutputMessage) string {
 	for _, msg := range messages {
 		total += len(msg.Text)
 	}
-	b.Grow(total)
-	for _, msg := range messages {
+	b.Grow(total + len(messages))
+	for i, msg := range messages {
+		if i > 0 && !strings.HasSuffix(messages[i-1].Text, "\n") && !strings.HasPrefix(msg.Text, "\n") {
+			b.WriteByte('\n')
+		}
 		b.WriteString(msg.Text)
 	}
 	return b.String()

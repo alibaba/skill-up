@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/platform"
 	"github.com/alibaba/skill-up/internal/runtime"
@@ -115,6 +116,74 @@ func TestBuildQwenCodeRunCmd(t *testing.T) {
 	noModel := buildQwenCodeRunCmd("do it", "")
 	if strings.Contains(noModel, "-m ") {
 		t.Fatalf("expected no -m flag when model empty, got %q", noModel)
+	}
+}
+
+func TestBuildQwenCodeRunCmdKeepsSlashedModelID(t *testing.T) {
+	t.Parallel()
+
+	// Qwen Code resolves models by the full id its modelProviders registered
+	// (for example zcode/GLM-5.3-Flash), so a slashed id must reach -m intact
+	// (#383).
+	cmd := buildQwenCodeRunCmd("do it", qwenSlashedModelID)
+	if !strings.Contains(cmd, "-m '"+qwenSlashedModelID+"'") {
+		t.Fatalf("run cmd did not keep the full model id:\n%s", cmd)
+	}
+}
+
+func TestQwenCodeRun_ForwardsResolvedSlashedModel(t *testing.T) {
+	t.Setenv("ZCODE_API_KEY", "sk-test")
+
+	// Full path: credential resolution splits the provider prefix only to pick
+	// credentials and records the split; the adapter materializes the id, so -m,
+	// OPENAI_MODEL, and the value annotateSessionResult reports are one value (#383).
+	resolved := credential.ResolveRunnerConfig(
+		config.EngineConfig{Name: "qwen_code"}, nil,
+		credential.CLIOverrides{Model: qwenSlashedModelID},
+	)
+	applied := ResolveAdapterConfig(resolved, nil)
+	if applied.AppliedProvider != "zcode" || !applied.ModelSplit || applied.AppliedModel != qwenSlashedModelID {
+		t.Fatalf("adapter config provider/split/applied = %q/%v/%q, want zcode/split/zcode/GLM-5.3-Flash",
+			applied.AppliedProvider, applied.ModelSplit, applied.AppliedModel)
+	}
+	ag, err := DetectAgentWithResolvedConfig(applied)
+	if err != nil {
+		t.Fatalf("detect agent: %v", err)
+	}
+
+	rt := &qwenTestRuntime{
+		workspace:  t.TempDir(),
+		execResult: runtime.ExecResult{Stdout: "ok\n", ExitCode: 0},
+	}
+	result, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{
+		Role:    transcript.RoleUser,
+		Content: "hi",
+		Turn:    1,
+	}})
+	if err != nil {
+		t.Fatalf("run qwen_code: %v", err)
+	}
+	if !strings.Contains(rt.runCommand, "-m '"+qwenSlashedModelID+"'") {
+		t.Fatalf("run cmd did not forward the full model id: %s", rt.runCommand)
+	}
+	if got := rt.lastExecEnv[credential.EnvOpenAIModel]; got != qwenSlashedModelID {
+		t.Fatalf("OPENAI_MODEL = %q, want the full id", got)
+	}
+	if result.AppliedModel != qwenSlashedModelID {
+		t.Fatalf("reported applied model = %q, want the full id", result.AppliedModel)
+	}
+	// Telemetry reads the same materialized id and must not prefix the provider
+	// onto the already qualified value.
+	qwen, ok := ag.(*QwenCodeAgent)
+	if !ok {
+		t.Fatalf("agent type = %T, want *QwenCodeAgent", ag)
+	}
+	attrs := qwen.buildAgentObservabilityAttrs(map[string]string{"skill_up.case.id": "case-1"})
+	if got := attrs["skill_up.model"]; got != qwenSlashedModelID {
+		t.Fatalf("telemetry skill_up.model = %q, want the single qualified id", got)
+	}
+	if got := attrs["skill_up.model.applied"]; got != qwenSlashedModelID {
+		t.Fatalf("telemetry skill_up.model.applied = %q, want the single qualified id", got)
 	}
 }
 
@@ -337,6 +406,14 @@ func (r *qwenTestRuntime) UploadFile(context.Context, string, string) error   { 
 func (r *qwenTestRuntime) UploadDir(context.Context, string, string) error    { return nil }
 func (r *qwenTestRuntime) DownloadFile(context.Context, string, string) error { return nil }
 func (r *qwenTestRuntime) DownloadDir(context.Context, string, string) error  { return nil }
+func (r *qwenTestRuntime) Exists(context.Context, string) (bool, error) {
+	return false, runtime.ErrFileNotFound
+}
+
+func (r *qwenTestRuntime) ReadFile(context.Context, string) ([]byte, error) {
+	return nil, runtime.ErrFileNotFound
+}
+
 func (r *qwenTestRuntime) Exec(_ context.Context, command string, opts runtime.ExecOptions) (runtime.ExecResult, error) {
 	if command == qwenCodeExecPathProbeCmd {
 		stdout := r.probeResponseStdout

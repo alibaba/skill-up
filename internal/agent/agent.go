@@ -23,6 +23,9 @@ import (
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
 
+// ErrRequestedModelUnavailable prevents accepting output from an unintended fallback model.
+var ErrRequestedModelUnavailable = errors.New("requested model unavailable")
+
 // ErrAgentNotFound is returned when the agent executable is not found.
 var ErrAgentNotFound = errors.New("agent not found in PATH")
 
@@ -104,6 +107,33 @@ type RuntimeObservation struct {
 // after the executable availability check succeeds.
 type RuntimeInspector interface {
 	InspectRuntime(ctx context.Context, rt Runtime) (RuntimeObservation, error)
+}
+
+// SessionDirCleaner is implemented by agents that keep per-workspace state
+// outside the workspace itself — Claude Code writes a project directory under
+// $HOME/.claude/projects and qodercli under $HOME/.qoder/projects for every
+// workspace they run in. Deleting the workspace leaves that directory behind,
+// which is what this removes.
+//
+// The evaluator calls it only when the workspace is deleted, so --no-delete
+// keeps both.
+type SessionDirCleaner interface {
+	CleanupSessionDir(ctx context.Context, rt Runtime) error
+}
+
+// RuntimeReleaser is implemented by agents that keep in-process state for a
+// runtime between InstallMCP and Run. The evaluator calls it once a case is
+// done with its runtime, before closing it, whether or not the case succeeded.
+type RuntimeReleaser interface {
+	ReleaseRuntime(rt Runtime)
+}
+
+// ReleaseRuntime lets ag drop any state it keeps for rt. Agents without such
+// state are left alone.
+func ReleaseRuntime(ag Agent, rt Runtime) {
+	if releaser, ok := ag.(RuntimeReleaser); ok {
+		releaser.ReleaseRuntime(rt)
+	}
 }
 
 // Preflight checks executable availability and then collects optional static
@@ -203,6 +233,8 @@ var (
 	_ SessionResumer = (*QoderCLIAgent)(nil)
 	_ SessionResumer = (*CodexAgent)(nil)
 	_ SessionResumer = (*OpenCodeAgent)(nil)
+
+	_ RuntimeReleaser = (*CodexAgent)(nil)
 )
 
 // BaseAgent provides common functionality for agents.
@@ -273,9 +305,9 @@ func (a *BaseAgent) CheckCredentials(ctx context.Context) error {
 	return nil
 }
 
-func (a *BaseAgent) logCredentialStatus(ctx context.Context, apiKeyEnv, baseURLEnv, missingMessage string) {
+func (a *BaseAgent) logCredentialStatus(ctx context.Context, credentialEnvName, baseURLEnv, missingMessage string) {
 	if a.Cfg.APIKey != "" {
-		logging.DebugContextf(ctx, "%s detected for %s (masked: %s, source=agent_config)", apiKeyEnv, a.Name(), credential.MaskAPIKey(a.Cfg.APIKey))
+		logging.DebugContextf(ctx, "%s detected for %s (source=agent_config)", credentialEnvName, a.Name())
 		if baseURLEnv != "" && a.Cfg.BaseURL != "" {
 			logging.DebugContextf(ctx, "%s detected for %s (value: %s, source=agent_config)", baseURLEnv, a.Name(), a.Cfg.BaseURL)
 		}
@@ -283,8 +315,8 @@ func (a *BaseAgent) logCredentialStatus(ctx context.Context, apiKeyEnv, baseURLE
 	}
 	// Fall back to the current provider's process env for observability only.
 	// This does not scan unrelated providers.
-	if apiKey := os.Getenv(apiKeyEnv); apiKey != "" {
-		logging.DebugContextf(ctx, "%s detected for %s (source=process_env)", apiKeyEnv, a.Name())
+	if os.Getenv(credentialEnvName) != "" {
+		logging.DebugContextf(ctx, "%s detected for %s (source=process_env)", credentialEnvName, a.Name())
 		if baseURLEnv != "" && os.Getenv(baseURLEnv) != "" {
 			logging.DebugContextf(ctx, "%s detected for %s (source=process_env)", baseURLEnv, a.Name())
 		}
@@ -313,7 +345,7 @@ func (a *BaseAgent) credentialEnvVars(apiKeyEnv, baseURLEnv string) map[string]s
 func (a *BaseAgent) installSkillDefault(ctx context.Context, rt Runtime, skillCfg runtime.SkillConfig) error {
 	target := skillCfg.Target
 	if target == "" && a.Cfg.SkillPath != "" {
-		target = filepath.Join(a.Cfg.SkillPath, filepath.Base(skillCfg.Source))
+		target = filepath.Join(a.Cfg.SkillPath, skillCfg.DirName())
 	}
 	return installSkill(ctx, rt, skillCfg.Source, target, skillCfg.Include, skillCfg.Exclude)
 }
@@ -437,9 +469,11 @@ func (a *BaseAgent) buildAgentObservabilityAttrs(extra map[string]string) map[st
 	if a.Cfg.RequestedProvider != "" {
 		attrs["skill_up.provider.requested"] = a.Cfg.RequestedProvider
 	}
-	if a.Cfg.ModelName != "" {
-		attrs["skill_up.model"] = formatAgentModel(a.Cfg.ModelProvider, a.Cfg.ModelName)
-		attrs["skill_up.model.applied"] = formatAgentModel(a.Cfg.ModelProvider, a.Cfg.ModelName)
+	// Cfg.ModelName is the materialized id: ResolveAdapterConfig dispatched the
+	// engine-specific materialization before the adapter was built.
+	if model := strings.TrimSpace(a.Cfg.ModelName); model != "" {
+		attrs["skill_up.model"] = formatAgentModel(a.Cfg.ModelProvider, model)
+		attrs["skill_up.model.applied"] = formatAgentModel(a.Cfg.ModelProvider, model)
 	}
 	if a.Cfg.RequestedModelName != "" {
 		attrs["skill_up.model.requested"] = formatAgentModel(a.Cfg.RequestedProvider, a.Cfg.RequestedModelName)
@@ -458,7 +492,7 @@ func (a *BaseAgent) annotateSessionResult(result *SessionResult) {
 	result.RequestedProvider = a.Cfg.RequestedProvider
 	result.AppliedProvider = a.Cfg.ModelProvider
 	result.RequestedModel = a.Cfg.RequestedModelName
-	result.AppliedModel = a.Cfg.ModelName
+	result.AppliedModel = strings.TrimSpace(a.Cfg.ModelName)
 	for _, warning := range a.Cfg.Warnings {
 		result.Warnings = appendUniqueWarning(result.Warnings, warning)
 	}
@@ -470,6 +504,10 @@ func formatAgentModel(provider, model string) string {
 	}
 	if model == "" {
 		return provider
+	}
+	// A materialized id already carries the provider; do not prefix it again.
+	if strings.HasPrefix(model, provider+"/") {
+		return model
 	}
 	return provider + "/" + model
 }

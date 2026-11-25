@@ -71,7 +71,8 @@ func (l *Loader) LoadEvalConfig() (*EvalConfig, error) {
 	}
 
 	var cfg EvalConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	cfg.JudgeSet, cfg.JudgesSet, err = decodeConfig(data, &cfg)
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse eval.yaml: %w", err)
 	}
 
@@ -82,14 +83,15 @@ func (l *Loader) LoadEvalConfig() (*EvalConfig, error) {
 	return &cfg, nil
 }
 
-// applyDocumentedDefaults fills the four implicit defaults documented in
-// README.md and docs/guide/getting-started.md, sourcing values from
-// defaults.yaml so the code and the documented values cannot drift apart.
+// applyDocumentedDefaults fills implicit defaults from defaults.yaml.
 // Use -1 (or any negative value) to opt out of the case-level timeout —
 // withCaseTimeout treats <=0 as "no deadline", but 0 is reserved here for
 // "not configured, use default".
 func applyDocumentedDefaults(cfg *EvalConfig) {
 	d := DefaultEvalConfig()
+	if cfg.Environment.AgentHome == "" {
+		cfg.Environment.AgentHome = d.Environment.AgentHome
+	}
 	if cfg.Cases.Defaults.TimeoutSeconds == 0 {
 		cfg.Cases.Defaults.TimeoutSeconds = d.Cases.Defaults.TimeoutSeconds
 	}
@@ -106,6 +108,10 @@ func applyDocumentedDefaults(cfg *EvalConfig) {
 
 // LoadCaseConfig loads a single case file.
 func (l *Loader) LoadCaseConfig(casePath string) (*CaseConfig, error) {
+	return l.loadSelectedCase(casePath, nil)
+}
+
+func (l *Loader) loadSelectedCase(casePath string, selected func(string) bool) (*CaseConfig, error) {
 	// casePath is resolved from the skill root so eval configs work the same
 	// whether invoked from the skill directory or by passing evals/eval.yaml.
 	fullPath := filepath.Join(l.skillDir, casePath)
@@ -115,8 +121,24 @@ func (l *Loader) LoadCaseConfig(casePath string) (*CaseConfig, error) {
 		return nil, fmt.Errorf("failed to read case file %s: %w", casePath, err)
 	}
 
+	if selected != nil {
+		var metadata struct {
+			ID string `yaml:"id"`
+		}
+		if err := yaml.Unmarshal(data, &metadata); err != nil {
+			return nil, fmt.Errorf("failed to parse case metadata %s: %w", casePath, err)
+		}
+		if metadata.ID == "" {
+			metadata.ID = stripExt(filepath.Base(casePath))
+		}
+		if !selected(metadata.ID) {
+			return nil, nil
+		}
+	}
+
 	var cfg CaseConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	cfg.JudgeSet, cfg.JudgesSet, err = decodeConfig(data, &cfg)
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse case file %s: %w", casePath, err)
 	}
 
@@ -134,17 +156,49 @@ func (l *Loader) LoadCaseConfig(casePath string) (*CaseConfig, error) {
 
 // LoadAllCases loads all case files referenced in the eval config.
 func (l *Loader) LoadAllCases(eval *EvalConfig) ([]*CaseConfig, error) {
+	return l.LoadSelectedCases(eval, nil)
+}
+
+// LoadSelectedCases reads case IDs before strictly decoding the selected cases.
+// A nil selector loads every case.
+func (l *Loader) LoadSelectedCases(eval *EvalConfig, selected func(string) bool) ([]*CaseConfig, error) {
 	cases := make([]*CaseConfig, 0, len(eval.Cases.Files))
 
 	for _, caseFile := range eval.Cases.Files {
-		cfg, err := l.LoadCaseConfig(caseFile)
+		cfg, err := l.loadSelectedCase(caseFile, selected)
 		if err != nil {
 			return nil, err
 		}
-		cases = append(cases, cfg)
+		if cfg != nil {
+			cases = append(cases, cfg)
+		}
 	}
 
 	return cases, nil
+}
+
+func decodeConfig(data []byte, target any) (judgeSet, judgesSet bool, err error) {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(target); err != nil {
+		return false, false, err
+	}
+	// Decode effective keys separately so null, aliases and merges retain presence.
+	var fields map[string]yaml.Node
+	if err := yaml.Unmarshal(data, &fields); err != nil {
+		return false, false, err
+	}
+	_, judgeSet = fields["judge"]
+	_, judgesSet = fields["judges"]
+	if c, ok := target.(*CaseConfig); ok && judgeSet {
+		node := fields["judge"]
+		var judgeFields map[string]yaml.Node
+		if err := node.Decode(&judgeFields); err != nil {
+			return false, false, err
+		}
+		c.judgeHasFields = len(judgeFields) > 0
+	}
+	return judgeSet, judgesSet, nil
 }
 
 // LoadAll loads the eval config and all cases.
@@ -188,6 +242,12 @@ func (l *Loader) SkillName() (string, bool) {
 	return parseSkillName(l.skillDir)
 }
 
+// SkillNameInDir returns the `name:` declared in the YAML frontmatter of
+// skillDir's SKILL.md, with the same ("", false) fallbacks as Loader.SkillName.
+func SkillNameInDir(skillDir string) (string, bool) {
+	return parseSkillName(skillDir)
+}
+
 // CasesDir returns the path to the cases directory.
 func (l *Loader) CasesDir() string {
 	return filepath.Join(l.skillDir, evalsSubdir, casesSubdir)
@@ -229,9 +289,11 @@ func FindSkillDir(startDir string) (string, bool) {
 }
 
 // skillFrontmatter holds the fields skill-up reads from a SKILL.md YAML
-// frontmatter block. Only the name is needed today.
+// frontmatter block: the loader reads the name, and CheckSkillIntegrity
+// additionally requires name and description to be non-empty.
 type skillFrontmatter struct {
-	Name string `yaml:"name"`
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
 }
 
 // parseSkillName reads SKILL.md from skillDir and extracts the `name` field of
@@ -267,21 +329,8 @@ func parseSkillName(skillDir string) (string, bool) {
 // frontmatter fence or the closing fence is missing, so the markdown body is
 // never fed to the YAML parser.
 func extractFrontmatter(data []byte) ([]byte, bool) {
-	lines := bytes.Split(data, []byte("\n"))
-
-	// Require the very first line to be a `---` fence (trailing whitespace/CR
-	// tolerated), then return everything up to the next fence.
-	if len(lines) == 0 || !isFence(lines[0]) {
-		return nil, false
-	}
-
-	for i := 1; i < len(lines); i++ {
-		if isFence(lines[i]) {
-			return bytes.Join(lines[1:i], []byte("\n")), true
-		}
-	}
-
-	return nil, false
+	frontmatter, _, ok := splitFrontmatter(bytes.Split(data, []byte("\n")))
+	return frontmatter, ok
 }
 
 // isFence reports whether a line is a `---` frontmatter fence, tolerating a

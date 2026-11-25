@@ -21,6 +21,36 @@ import (
 
 const windowsGOOS = "windows"
 
+func TestJudgePlanNeedsWorkspaceFiles(t *testing.T) {
+	plan := config.JudgePlan{Judges: []config.JudgeConfig{
+		{Type: "rule_based", Success: []config.Rule{{FilesExist: []string{"a"}}}},
+	}}
+	if !judgePlanNeedsWorkspaceFiles(plan) {
+		t.Fatal("expected rule_based files_exist to require workspace files")
+	}
+
+	plan = config.JudgePlan{Judges: []config.JudgeConfig{
+		{Type: "script", ScriptPath: "check.sh"},
+		{Type: "agent_judge", Criteria: []string{"quality"}},
+	}}
+	if judgePlanNeedsWorkspaceFiles(plan) {
+		t.Fatal("did not expect script or agent_judge to require workspace files")
+	}
+}
+
+func TestExpectNeedsWorkspaceFiles(t *testing.T) {
+	expect := &config.Expect{FilesExist: []string{"out.json"}}
+	if !expectNeedsWorkspaceFiles(expect) {
+		t.Fatal("expected files_exist to require workspace files")
+	}
+
+	exitCode := 0
+	expect = &config.Expect{ExitCode: &exitCode}
+	if expectNeedsWorkspaceFiles(expect) {
+		t.Fatal("did not expect exit_code to require workspace files")
+	}
+}
+
 func TestMultiJudgeEvaluatesOneExecutionWithSharedWorkspace(t *testing.T) {
 	if goruntime.GOOS == windowsGOOS {
 		t.Skip("POSIX script fixture")

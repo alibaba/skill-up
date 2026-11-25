@@ -918,6 +918,14 @@ func (r *qoderTestRuntime) DownloadFile(context.Context, string, string) error {
 	return nil
 }
 func (r *qoderTestRuntime) DownloadDir(context.Context, string, string) error { return nil }
+func (r *qoderTestRuntime) Exists(context.Context, string) (bool, error) {
+	return false, runtime.ErrFileNotFound
+}
+
+func (r *qoderTestRuntime) ReadFile(context.Context, string) ([]byte, error) {
+	return nil, runtime.ErrFileNotFound
+}
+
 func (r *qoderTestRuntime) Exec(_ context.Context, command string, opts runtime.ExecOptions) (runtime.ExecResult, error) {
 	// Probe calls (agent.Install via probeAndMergePATH) get a canned
 	// literal PATH and are NOT recorded as a real command. Exact-match
@@ -969,4 +977,271 @@ func (r *qoderTestRuntime) MergeEnv(env map[string]string) {
 
 func (r *qoderTestRuntime) Shell() platform.Shell {
 	return platform.Shell{GOOS: platform.GOOSLinux, Family: platform.ShellPOSIX}
+}
+
+func TestQoderCLIResultEnvelope(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct{ name, output, wantErr, stderr string }{
+		{"completed chat", `{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","result":"OK"}`, "", ""},
+		{"completed without chat", `{"type":"result","subtype":"success","stop_reason":"end_turn","result":""}`, "", ""},
+		{"legacy envelope", `{"type":"result","result":"OK"}`, "", ""},
+		{"legacy text", "OK", "", ""},
+		{"legacy JSON number", "42", "", ""},
+		{"legacy JSON array", "[1,2]", "", ""},
+		{"legacy JSON object", `{"is_error":"domain data"}`, "", ""},
+		{"unrelated typed object", `{"type":{"nested":1},"is_error":"domain data"}`, "", ""},
+		{"unfinished empty turn", `{"type":"result","subtype":"success","is_error":false,"stop_reason":"tool_use","result":""}`, "incomplete result", ""},
+		{"unfinished prose turn", `{"type":"result","stop_reason":"tool_use","result":"Reading files"}`, "incomplete result", ""},
+		{"error flag", `{"type":"result","subtype":"success","is_error":true,"result":"Not logged in"}`, "error result", ""},
+		{"error subtype", `{"type":"result","subtype":"error_max_turns","result":""}`, "error result", ""},
+		{"explicit model fallback", `{"type":"result","result":"OK","stop_reason":"end_turn"}`, "requested model unavailable", `Model "performance" is not available right now; using "auto" instead. Use /model to choose another model.`},
+		{"unrelated warning", `{"type":"result","result":"OK"}`, "", "1 warning loading skill configs"},
+		{"invalid envelope field", `{"type":"result","is_error":"no"}`, "decode qoder result envelope", ""},
+	} {
+		for _, resume := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/resume=%t", tt.name, resume), func(t *testing.T) {
+				t.Parallel()
+				rt := &qoderTestRuntime{workspace: t.TempDir(), execResult: runtime.ExecResult{Stdout: tt.output, Stderr: tt.stderr}}
+				ag := NewQoderCLIAgent(Config{ModelName: "performance"})
+				opts := ExecOptions{ArtifactDir: t.TempDir()}
+				msg := transcript.Message{Role: transcript.RoleUser, Content: "evaluate", Turn: 1}
+				var result *SessionResult
+				var err error
+				if resume {
+					result, err = ag.RunTurn(context.Background(), rt, opts, msg, "existing-session")
+				} else {
+					result, err = ag.Run(context.Background(), rt, opts, []transcript.Message{msg})
+				}
+				errorText := ""
+				if err != nil {
+					errorText = err.Error()
+				}
+				if (err != nil) != (tt.wantErr != "") || !strings.Contains(errorText, tt.wantErr) {
+					t.Fatalf("error=%v, want %q", err, tt.wantErr)
+				}
+				if errors.Is(err, ErrRequestedModelUnavailable) != (tt.name == "explicit model fallback") {
+					t.Fatalf("model fallback error not classified: %v", err)
+				}
+				if result == nil {
+					t.Fatal("session diagnostics must be preserved")
+				}
+				raw, readErr := os.ReadFile(filepath.Join(opts.ArtifactDir, "stdout.json"))
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				if string(raw) != tt.output {
+					t.Fatalf("raw output changed: %s", raw)
+				}
+			})
+		}
+	}
+}
+
+func TestQoderCLIModelFallbackPreservesClassificationOnFailure(t *testing.T) {
+	t.Parallel()
+	for _, resume := range []bool{false, true} {
+		for _, execErr := range []error{nil, context.Canceled} {
+			t.Run(fmt.Sprintf("resume=%t/execErr=%v", resume, execErr), func(t *testing.T) {
+				t.Parallel()
+				rt := &qoderTestRuntime{workspace: t.TempDir(), execResult: runtime.ExecResult{ExitCode: 1, Stdout: `{"type":"result","result":"OK"}`, Stderr: `Model "performance" is not available right now; using "auto" instead.`}, execErr: execErr}
+				ag := NewQoderCLIAgent(Config{ModelName: "performance"})
+				msg := transcript.Message{Role: transcript.RoleUser, Content: "evaluate", Turn: 1}
+				var result *SessionResult
+				var err error
+				if resume {
+					result, err = ag.RunTurn(context.Background(), rt, ExecOptions{}, msg, "session")
+				} else {
+					result, err = ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{msg})
+				}
+				if !errors.Is(err, ErrRequestedModelUnavailable) {
+					t.Fatalf("fallback classification lost: %v", err)
+				}
+				if execErr != nil && !errors.Is(err, execErr) {
+					t.Fatalf("execution error lost: %v", err)
+				}
+				if result == nil {
+					t.Fatal("session diagnostics lost")
+				}
+			})
+		}
+	}
+}
+
+type qoderCleanupCase struct {
+	name      string
+	edition   string
+	configDir string
+	dirName   string
+	sessions  map[string]string
+	wantKept  bool
+}
+
+func TestQoderCleanupSessionDir(t *testing.T) {
+	if goruntime.GOOS == platform.GOOSWindows {
+		// The workspace-key path layout embeds a POSIX workspace path, which
+		// cannot be a directory component on Windows.
+		t.Skip("qoder workspace-key path layout is POSIX-only")
+	}
+
+	identity := func(cwd string) string { return `{"cwd":"` + cwd + `"}` }
+	directories := func(dirs ...string) string {
+		quoted := make([]string, 0, len(dirs))
+		for _, d := range dirs {
+			quoted = append(quoted, `"`+d+`"`)
+		}
+		return `{"type":"workspace-directories","directories":[` + strings.Join(quoted, ",") + `]}`
+	}
+	for _, tc := range []qoderCleanupCase{
+		{
+			name:     "removes the directory whose sessions record this workspace as directories",
+			sessions: map[string]string{"a.jsonl": directories("{{workspace}}")},
+		},
+		{
+			name:     "removes the directory whose sessions record this workspace as cwd",
+			sessions: map[string]string{"a.jsonl": identity("{{workspace}}")},
+		},
+		{
+			name:     "keeps a directory whose workspace-directories entry names another workspace",
+			sessions: map[string]string{"a.jsonl": directories("{{workspace}}", "/elsewhere/a-b")},
+			wantKept: true,
+		},
+		{
+			name: "keeps a directory with one transcript for another workspace",
+			sessions: map[string]string{
+				"a.jsonl": identity("{{workspace}}"),
+				"b.jsonl": identity("/elsewhere/a-b"),
+			},
+			wantKept: true,
+		},
+		{
+			name:     "keeps a directory whose sessions record no working directory",
+			sessions: map[string]string{"a.jsonl": `{"type":"workspace-directories","directories":[]}`},
+			wantKept: true,
+		},
+		{
+			name:     "keeps a directory whose transcript does not parse",
+			sessions: map[string]string{"a.jsonl": "not json"},
+			wantKept: true,
+		},
+		{
+			// The lookup can find a directory whose name does not match the
+			// workspace key; cleanup must not silently skip it.
+			name:     "removes a directory whose name does not match the workspace key",
+			dirName:  "-hashed-9f2c7a",
+			sessions: map[string]string{"a.jsonl": identity("{{workspace}}")},
+		},
+		{
+			name:      "removes the CN edition directory under .qoder-cn",
+			edition:   qoderEditionCN,
+			configDir: ".qoder-cn",
+			sessions:  map[string]string{"a.jsonl": identity("{{workspace}}")},
+		},
+		{
+			// Sub-agent transcripts and the *-session.json metadata live inside
+			// the same per-workspace directory and belong to this run too.
+			name: "removes the directory along with sub-agent transcripts and session metadata",
+			sessions: map[string]string{
+				"a.jsonl":                        identity("{{workspace}}"),
+				"nested/subagents/agent-1.jsonl": identity("{{workspace}}"),
+				"a-session.json":                 `{"sessionId":"a"}`,
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) { assertQoderCleanupCase(t, tc) })
+	}
+}
+
+func assertQoderCleanupCase(t *testing.T, tc qoderCleanupCase) {
+	t.Helper()
+
+	rt, projectDir, unrelated, globalDir := qoderCleanupFixture(t, tc)
+	defer func() { _ = rt.Close() }()
+
+	ag := qoderCleanupAgent(tc)
+	if err := ag.CleanupSessionDir(context.Background(), rt); err != nil {
+		t.Fatalf("CleanupSessionDir: %v", err)
+	}
+	assertQoderCleanupOutcome(t, tc, projectDir, unrelated, globalDir)
+	if err := ag.CleanupSessionDir(context.Background(), rt); err != nil {
+		t.Fatalf("CleanupSessionDir is not idempotent: %v", err)
+	}
+}
+
+// qoderCleanupFixture lays out a fake HOME with this workspace's project
+// directory, another workspace's directory, and (for the CN edition) the global
+// edition's root, all before cleanup runs.
+func qoderCleanupFixture(t *testing.T, tc qoderCleanupCase) (rt runtime.Runtime, projectDir, unrelated, globalDir string) {
+	t.Helper()
+
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	rt, err := runtime.NewRuntime(runtime.Config{Type: "none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	configDir := tc.configDir
+	if configDir == "" {
+		configDir = ".qoder"
+	}
+	workspace := workspaceForRuntime(rt)
+	dirName := tc.dirName
+	if dirName == "" {
+		dirName = canonicalWorkspaceKey(workspace)
+	}
+	projectDir = filepath.Join(tmpHome, configDir, "projects", dirName)
+	for name, body := range tc.sessions {
+		path := filepath.Join(projectDir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body = strings.ReplaceAll(body, "{{workspace}}", workspace)
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	unrelated = filepath.Join(tmpHome, configDir, "projects", "-another-workspace")
+	if err := os.MkdirAll(unrelated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if configDir == ".qoder-cn" {
+		globalDir = filepath.Join(tmpHome, ".qoder", "projects", dirName)
+		if err := os.MkdirAll(globalDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return rt, projectDir, unrelated, globalDir
+}
+
+func qoderCleanupAgent(tc qoderCleanupCase) *QoderCLIAgent {
+	kwargs := map[string]string{}
+	if tc.edition == qoderEditionCN {
+		kwargs[KwargEdition] = qoderEditionCN
+	}
+	return NewQoderCLIAgent(Config{Kwargs: kwargs})
+}
+
+func assertQoderCleanupOutcome(t *testing.T, tc qoderCleanupCase, projectDir, unrelated, globalDir string) {
+	t.Helper()
+
+	_, statErr := os.Stat(projectDir)
+	if kept := statErr == nil; kept != tc.wantKept {
+		t.Fatalf("project directory kept = %t, want %t (stat err=%v)", kept, tc.wantKept, statErr)
+	}
+	if _, err := os.Stat(unrelated); err != nil {
+		t.Fatalf("unrelated project directory was removed: %v", err)
+	}
+	if globalDir != "" {
+		if _, err := os.Stat(globalDir); err != nil {
+			t.Fatalf("global edition directory was removed by CN cleanup: %v", err)
+		}
+	}
 }

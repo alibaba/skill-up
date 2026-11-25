@@ -5,6 +5,7 @@ import (
 	"maps"
 	"math"
 	"path"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/alibaba/skill-up/internal/agentkind"
 	"github.com/alibaba/skill-up/internal/customengine"
+	"github.com/alibaba/skill-up/internal/logging"
 )
 
 // Judge type constants.
@@ -70,6 +72,9 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 		errs = append(errs, "environment.type must be one of: none, opensandbox, docker")
 	}
 
+	errs = append(errs, validateReservedEnvironment(cfg.Environment)...)
+	errs = append(errs, validateHomeIsolation(cfg.Environment)...)
+
 	// Docker-runtime fields that would otherwise silently pass `skill-up
 	// validate` and only fail later when NewDockerRuntime constructs the
 	// container — catch them at the preflight gate.
@@ -88,6 +93,8 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 
 	// engine.model.provider and engine.model.name are optional.
 	// When omitted, the engine uses its local default model configuration.
+
+	errs = append(errs, validateReportFormats(cfg.Report.Formats)...)
 
 	// cases.files is required and must have at least one file
 	if len(cfg.Cases.Files) == 0 {
@@ -276,6 +283,14 @@ func validateJudgeTypeAndLocalFields(judge JudgeConfig) []string {
 	}
 	errs = append(errs, validateSkillRefs("judge.skills", judge.Skills)...)
 	errs = append(errs, validateJudgeEngine(judge)...)
+	if judge.Output != nil {
+		if judge.Type != "" && judge.Type != judgeTypeAgentJudge {
+			errs = append(errs, "judge.output is only supported when judge.type is agent_judge")
+		}
+		if mode := judge.Output.Mode; mode != "" && mode != "file" && mode != "final_message" {
+			errs = append(errs, "judge.output.mode must be one of: final_message, file")
+		}
+	}
 
 	errs = append(errs, validatePassThreshold(judge.PassThreshold)...)
 	errs = append(errs, validateJudgeMetrics("judge.metrics", judge.Metrics)...)
@@ -288,6 +303,8 @@ func validateJudgeTypeAndLocalFields(judge JudgeConfig) []string {
 	errs = append(errs, validateOutputMatchesRules("judge.failure", judge.Failure)...)
 	errs = append(errs, validateRecognizableRules("judge.success", judge.Success)...)
 	errs = append(errs, validateRecognizableRules("judge.failure", judge.Failure)...)
+	errs = append(errs, validateNonVacuousRules("judge.success", judge.Success)...)
+	errs = append(errs, validateNonVacuousRules("judge.failure", judge.Failure)...)
 
 	return errs
 }
@@ -354,6 +371,76 @@ func ruleHasRecognizableField(rule Rule) bool {
 		rule.TurnResponseNotContains != nil ||
 		rule.ToolCalledInTurn != nil ||
 		rule.ToolNotCalledInTurn != nil
+}
+
+// validateNonVacuousRules rejects matchers that are present but hold no values
+// to match. The runtime evaluates an empty matcher as "nothing to check" and
+// reports the assertion as passed, so a half-filled rule such as
+//
+//	success:
+//	  - output_contains:
+//	      all: []
+//
+// turns into a silent pass with zero checks (see #294 for the same class of
+// bug with unknown matcher names). validateRecognizableRules only catches rules
+// that name no matcher at all.
+//
+// The same reasoning covers an empty entry (""), which is a substring of every
+// response and, as a regular expression, matches every response: it would
+// preserve the false-positive pass without checking the output. Whitespace is
+// left alone — ["\n"] or ["  "] checks the output for real, and the runtime
+// compares the value as written.
+func validateNonVacuousRules(field string, rules []Rule) []string {
+	var errs []string
+	for i, rule := range rules {
+		prefix := fmt.Sprintf("%s[%d]", field, i)
+		if oc := rule.OutputContains; oc != nil {
+			if len(oc.All)+len(oc.Any)+len(oc.Not) == 0 {
+				errs = append(errs, prefix+".output_contains must include at least one of all, any, or not")
+			}
+			errs = append(errs, validateNonBlankMatcherValues(prefix+".output_contains.all", oc.All)...)
+			errs = append(errs, validateNonBlankMatcherValues(prefix+".output_contains.any", oc.Any)...)
+			errs = append(errs, validateNonBlankMatcherValues(prefix+".output_contains.not", oc.Not)...)
+		}
+		if om := rule.OutputMatches; om != nil {
+			if len(om.All)+len(om.Any)+len(om.Not) == 0 {
+				errs = append(errs, prefix+".output_matches must include at least one of all, any, or not")
+			}
+			errs = append(errs, validateNonBlankMatcherValues(prefix+".output_matches.all", om.All)...)
+			errs = append(errs, validateNonBlankMatcherValues(prefix+".output_matches.any", om.Any)...)
+			errs = append(errs, validateNonBlankMatcherValues(prefix+".output_matches.not", om.Not)...)
+		}
+		if trc := rule.TurnResponseContains; trc != nil {
+			if len(trc.ContainsAll)+len(trc.ContainsAny) == 0 {
+				errs = append(errs, prefix+".turn_response_contains must include at least one of contains_all or contains_any")
+			}
+			errs = append(errs, validateNonBlankMatcherValues(prefix+".turn_response_contains.contains_all", trc.ContainsAll)...)
+			errs = append(errs, validateNonBlankMatcherValues(prefix+".turn_response_contains.contains_any", trc.ContainsAny)...)
+		}
+		if trn := rule.TurnResponseNotContains; trn != nil {
+			if len(trn.NotContains) == 0 {
+				errs = append(errs, prefix+".turn_response_not_contains.not_contains must not be empty")
+			}
+			errs = append(errs, validateNonBlankMatcherValues(prefix+".turn_response_not_contains.not_contains", trn.NotContains)...)
+		}
+	}
+	return errs
+}
+
+// validateNonBlankMatcherValues rejects the empty entry in a matcher list. An
+// empty literal is a substring of every response and an empty regular
+// expression matches every response, so it would keep the vacuous pass this
+// validation exists to remove. Whitespace is a matcher like any other: the
+// runtime passes it to strings.Contains or regexp.MatchString untrimmed, so
+// ["\n"] can assert a single-line output and ["  "] can reject a double space.
+func validateNonBlankMatcherValues(field string, values []string) []string {
+	var errs []string
+	for i, value := range values {
+		if value == "" {
+			errs = append(errs, fmt.Sprintf("%s[%d] must not be empty", field, i))
+		}
+	}
+	return errs
 }
 
 func validateOutputMatchesRules(field string, rules []Rule) []string {
@@ -429,6 +516,26 @@ func validateSkillPatterns(field string, patterns []string) []string {
 		}
 		if !doublestar.ValidatePattern(pattern) {
 			errs = append(errs, fmt.Sprintf("%s[%d] is not a valid glob pattern: %q", field, i, pattern))
+		}
+	}
+	return errs
+}
+
+// validateReportFormats rejects report.formats values that both the runner and
+// the offline report command would otherwise ignore. An unknown value used to
+// pass validation and then produce no report at all, so a typo looked like a
+// successful run.
+func validateReportFormats(formats []string) []string {
+	var errs []string
+	for i, format := range formats {
+		if strings.TrimSpace(format) == "" {
+			errs = append(errs, fmt.Sprintf("report.formats[%d] must not be empty", i))
+			continue
+		}
+		switch format {
+		case "json", "junit", "html":
+		default:
+			errs = append(errs, fmt.Sprintf("report.formats[%d] must be one of json, junit, html (got %q)", i, format))
 		}
 	}
 	return errs
@@ -589,6 +696,7 @@ func (v *Validator) ValidateCasesWithEvalDefaults(eval *EvalConfig, cases []*Cas
 			continue
 		}
 		effectiveJudge := mergeJudgeConfigForValidation(eval.Judge, c.Judge)
+		warnIgnoredCaseJudge(c)
 		if errs := validateJudgeTypeAndRequiredFields(effectiveJudge); len(errs) > 0 {
 			return fmt.Errorf("case %s: validation errors:\n  - %s", c.ID, strings.Join(errs, "\n  - "))
 		}
@@ -598,6 +706,12 @@ func (v *Validator) ValidateCasesWithEvalDefaults(eval *EvalConfig, cases []*Cas
 		}
 	}
 	return nil
+}
+
+func warnIgnoredCaseJudge(c *CaseConfig) {
+	if c.Judge.Type == "" && (c.judgeHasFields || !reflect.ValueOf(c.Judge).IsZero()) {
+		logging.Warnf("case %s: judge.type is missing; case judge fields are ignored and the eval judge is used. Set judge.type to apply a case override", c.ID)
+	}
 }
 
 func validateJudgeTurnRules(members []JudgeConfig, turnsTotal int) []string {
@@ -697,6 +811,9 @@ func mergeJudgeConfigForValidation(global, caseLevel JudgeConfig) JudgeConfig {
 		return global
 	}
 	merged := caseLevel
+	if merged.Type == judgeTypeAgentJudge && merged.Output == nil {
+		merged.Output = global.Output
+	}
 	if merged.Model == "" && merged.Engine == nil {
 		merged.Model = global.Model
 		if merged.Type == judgeTypeAgentJudge {
@@ -871,6 +988,26 @@ func validateCustomHTTP(h *customengine.HTTPConfig) []string {
 
 func isValidRuntimeType(t string) bool {
 	return t == runtimeTypeNone || t == runtimeTypeOpenSandbox || t == runtimeTypeDocker
+}
+
+func validateHomeIsolation(env Environment) []string {
+	switch env.AgentHome {
+	case "", "inherited":
+	case "temporary":
+		if env.Type != runtimeTypeNone {
+			return []string{"environment.agent_home: temporary requires environment.type: none"}
+		}
+	default:
+		return []string{fmt.Sprintf("environment.agent_home %q must be inherited or temporary", env.AgentHome)}
+	}
+	return nil
+}
+
+func validateReservedEnvironment(env Environment) []string {
+	if _, exists := env.Env["SKILL_UP_VARIANT"]; exists {
+		return []string{"environment.env.SKILL_UP_VARIANT is reserved for the framework"}
+	}
+	return nil
 }
 
 // validateDockerEnvironment collects preflight errors for fields the docker

@@ -218,6 +218,7 @@ Rule assertions:
 - Requires `criterion_id`, `passed`, non-empty `evidence`, and explicit `failures` arrays
 - `pass_threshold` (default 0.7): `pass_rate >= threshold` → PASS
 - Provides the internal helper `buildJudgePrompt()` to construct the evaluation prompt
+- Optional `judge.output.mode: file` reads a fresh runtime JSON template instead of chat output; null placeholders and empty evidence cannot pass validation. Downloaded files are retained as `result-attempt-N.json`.
 - Accepts one strict JSON object, optionally wrapped in one complete JSON code fence; unknown fields and trailing content are rejected
 - Retries exactly once when strict decoding or semantic validation fails. The retry shares the original timeout budget and only asks the Judge agent to correct its output contract.
 - Resumes the Judge session when the agent exposes `SessionResumer` and a session ID; otherwise it starts an independent first turn and serializes the original prompt, raw response, and correction instructions into one user message so single-instruction adapters preserve the complete context.
