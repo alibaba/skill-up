@@ -107,8 +107,12 @@ func projectOTLPRouting(c Config, pending map[string]string) projectOTLPRoutes {
 			routes.add(key)
 		}
 	}
-	for key, value := range c.Env {
-		if _, exists := os.LookupEnv(key); exists || value == "" {
+	// An empty or blank project value counts too. It is not applied, or is
+	// read as unset, but in the merged config it has already replaced a
+	// trusted value for the same key, so the exporter falls back to another
+	// route.
+	for key := range c.Env {
+		if _, exists := os.LookupEnv(key); exists {
 			continue
 		}
 		if _, exists := pending[key]; !exists && c.envSources[key] == sourceProject {

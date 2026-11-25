@@ -84,7 +84,7 @@ var otlpLoopbackCases = []otlpLoopbackCase{
 `,
 		project: `telemetry:
   traces:
-    endpoint: PROJECT/v1/traces
+    endpoint: {{project}}/v1/traces
 `,
 		want: []otlpExport{{otlpProjectCollector, otlpTracesPath, ""}},
 	},
@@ -92,7 +92,7 @@ var otlpLoopbackCases = []otlpLoopbackCase{
 		name: "trusted endpoint keeps the header beside ordinary project defaults",
 		user: `env:
   OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
-  OTEL_EXPORTER_OTLP_ENDPOINT: TRUSTED
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{trusted}}
   OTEL_EXPORTER_OTLP_HEADERS: authorization=${SKILL_UP_TEST_OTLP_HEADER}
 `,
 		project: `env:
@@ -104,11 +104,11 @@ var otlpLoopbackCases = []otlpLoopbackCase{
 		name: "project metrics endpoint with metrics off keeps the traces header",
 		user: `env:
   OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
-  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: TRUSTED/v1/traces
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: {{trusted}}/v1/traces
   OTEL_EXPORTER_OTLP_TRACES_HEADERS: authorization=${SKILL_UP_TEST_OTLP_HEADER}
 `,
 		project: `env:
-  OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: PROJECT/v1/metrics
+  OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: {{project}}/v1/metrics
 `,
 		want: []otlpExport{{otlpTrustedCollector, otlpTracesPath, otlpLoopbackHeader}},
 	},
@@ -117,12 +117,12 @@ var otlpLoopbackCases = []otlpLoopbackCase{
 		user: `env:
   OTEL_METRICS_EXPORTER: otlp
   OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
-  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: TRUSTED/v1/traces
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: {{trusted}}/v1/traces
   OTEL_EXPORTER_OTLP_TRACES_HEADERS: authorization=${SKILL_UP_TEST_OTLP_HEADER}
   OTEL_EXPORTER_OTLP_METRICS_HEADERS: authorization=${SKILL_UP_TEST_OTLP_HEADER}
 `,
 		project: `env:
-  OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: PROJECT/v1/metrics
+  OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: {{project}}/v1/metrics
 `,
 		want: []otlpExport{
 			{otlpTrustedCollector, otlpTracesPath, otlpLoopbackHeader},
@@ -137,15 +137,41 @@ var otlpLoopbackCases = []otlpLoopbackCase{
   OTEL_EXPORTER_OTLP_TRACES_HEADERS: authorization=${SKILL_UP_TEST_OTLP_HEADER}
 `,
 		project: `env:
-  OTEL_EXPORTER_OTLP_ENDPOINT: PROJECT
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{project}}
 `,
 		want: []otlpExport{{otlpProjectCollector, otlpTracesPath, ""}},
+	},
+	{
+		name: "blank project traces endpoint that replaces the trusted one withholds the header",
+		user: `env:
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{trusted}}
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: {{trusted}}/custom/traces
+  OTEL_EXPORTER_OTLP_TRACES_HEADERS: authorization=${SKILL_UP_TEST_OTLP_HEADER}
+`,
+		project: `env:
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: " "
+`,
+		want: []otlpExport{{otlpTrustedCollector, otlpTracesPath, ""}},
+	},
+	{
+		name: "empty project traces endpoint that replaces the trusted one withholds the header",
+		user: `env:
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{trusted}}
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: {{trusted}}/custom/traces
+  OTEL_EXPORTER_OTLP_TRACES_HEADERS: authorization=${SKILL_UP_TEST_OTLP_HEADER}
+`,
+		project: `env:
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ""
+`,
+		want: []otlpExport{{otlpTrustedCollector, otlpTracesPath, ""}},
 	},
 	{
 		name: "project TLS roots withhold the header on a trusted endpoint",
 		user: `env:
   OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
-  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: TRUSTED/v1/traces
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: {{trusted}}/v1/traces
   OTEL_EXPORTER_OTLP_TRACES_HEADERS: authorization=${SKILL_UP_TEST_OTLP_HEADER}
 `,
 		project: `env:
@@ -215,8 +241,8 @@ func runOTLPLoopbackCase(t *testing.T, tc otlpLoopbackCase, collectors map[strin
 	t.Chdir(t.TempDir())
 
 	placeholders := strings.NewReplacer(
-		"TRUSTED", collectors[otlpTrustedCollector].URL,
-		"PROJECT", collectors[otlpProjectCollector].URL,
+		"{{trusted}}", collectors[otlpTrustedCollector].URL,
+		"{{project}}", collectors[otlpProjectCollector].URL,
 	)
 	if err := os.WriteFile(userPath, []byte(placeholders.Replace(tc.user)), 0o600); err != nil {
 		t.Fatal(err)

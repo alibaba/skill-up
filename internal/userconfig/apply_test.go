@@ -262,8 +262,8 @@ func TestApplyEnv_ExpandedOTLPHeaderRouting(t *testing.T) {
 		fixture    = "SKILL_UP_TEST_HEADER_VALUE"
 		empty      = "SKILL_UP_TEST_EMPTY_VALUE"
 		kept       = "authorization=fixture"
+		tracesDest = envOtelExporterOTLPTracesEndpt
 	)
-	tracesDest := envOtelExporterOTLPTracesEndpt
 	for _, tt := range []struct {
 		name       string
 		project    Config
@@ -293,21 +293,20 @@ func TestApplyEnv_ExpandedOTLPHeaderRouting(t *testing.T) {
 		{name: "blank process signal endpoint falls back to the shared project endpoint", project: Config{Env: map[string]string{endpoint: "https://project.invalid"}}, inherited: map[string]string{tracesDest: " "}, header: traces},
 		{name: "signal endpoint that expands to nothing falls back to the shared project endpoint", project: Config{Env: map[string]string{endpoint: "https://project.invalid"}}, explicit: Config{Env: map[string]string{tracesDest: "${" + empty + "}"}}, inherited: map[string]string{empty: ""}, header: traces},
 		{name: "signal endpoint that expands to a value shields its header", project: Config{Env: map[string]string{endpoint: "https://project.invalid"}}, explicit: Config{Env: map[string]string{tracesDest: "${" + empty + "}"}}, inherited: map[string]string{empty: "https://trusted.invalid"}, header: traces, wantHeader: kept, wantSet: true},
+		{name: "blank project signal endpoint still counts as project routing", project: Config{Env: map[string]string{tracesDest: " "}}, inherited: map[string]string{endpoint: "https://trusted.invalid"}, header: traces},
+		{name: "empty project signal endpoint still counts as project routing", project: Config{Env: map[string]string{tracesDest: ""}}, inherited: map[string]string{endpoint: "https://trusted.invalid"}, header: traces},
+		{name: "empty project signal endpoint keeps another signal's header", project: Config{Env: map[string]string{tracesDest: ""}}, header: metrics, wantHeader: kept, wantSet: true},
+		{name: "blank structured project protocol still counts as project routing", project: Config{Telemetry: Telemetry{Traces: TracesConfig{Protocol: " "}}}, header: traces},
 		{name: "trusted signal endpoint does not cover the shared project protocol", project: Config{Env: map[string]string{protocol: "http/protobuf"}}, explicit: Config{Env: map[string]string{tracesDest: "https://trusted.invalid"}}, header: traces},
 		{name: "project certificate file", project: Config{Env: map[string]string{certFile: "project.pem"}}, header: traces},
 		{name: "project certificate directory", project: Config{Env: map[string]string{certDir: "project-certs"}}, explicit: Config{Env: map[string]string{endpoint: "https://trusted.invalid"}}, header: generic},
 		{name: "process certificate file overrides the project one", project: Config{Env: map[string]string{certFile: "project.pem"}}, inherited: map[string]string{certFile: "trusted.pem"}, header: traces, wantHeader: kept, wantSet: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			for _, key := range []string{
+			unsetForTest(t,
 				generic, traces, metrics, logs, endpoint, metricDest, protocol, logsCert, proxy,
-				certFile, certDir, tracesDest, empty, "SKILL_UP_TEST_OTHER",
-			} {
-				t.Setenv(key, "")
-				if err := os.Unsetenv(key); err != nil {
-					t.Fatal(err)
-				}
-			}
+				certFile, certDir, tracesDest, empty, "SKILL_UP_TEST_OTHER", envOtelExporterOTLPTracesProto,
+			)
 			t.Setenv(fixture, "fixture")
 			for key, value := range tt.inherited {
 				t.Setenv(key, value)
@@ -323,5 +322,16 @@ func TestApplyEnv_ExpandedOTLPHeaderRouting(t *testing.T) {
 				t.Errorf("header = %q, set=%t; want %q, set=%t", got, set, tt.wantHeader, tt.wantSet)
 			}
 		})
+	}
+}
+
+// unsetForTest removes keys for the test and restores them afterwards.
+func unsetForTest(t *testing.T, keys ...string) {
+	t.Helper()
+	for _, key := range keys {
+		t.Setenv(key, "")
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
