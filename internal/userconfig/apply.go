@@ -26,10 +26,11 @@ const (
 // environment, only setting keys that are currently unset. It returns the list
 // of keys that were actually applied (sorted) for logging and debugging.
 // Only env values from the user or explicit discovery layer expand ${VAR}.
-// Newly expanded OTLP headers are withheld if project defaults supply routing.
+// A newly expanded OTLP header is withheld when project defaults supply
+// routing or transport settings for an exporter that would carry it.
 func ApplyEnv(c Config) ([]string, error) {
 	pending := telemetryEnv(c.Telemetry)
-	projectRoute := hasProjectOTLPRoute(c, pending)
+	routes := projectOTLPRouting(c, pending)
 	for key, value := range c.Env {
 		if _, exists := os.LookupEnv(key); exists || value == "" {
 			continue
@@ -42,7 +43,7 @@ func ApplyEnv(c Config) ([]string, error) {
 			value, expanded = expandEnvDefault(value)
 			// Keep project routing and pre-existing headers intact, but do
 			// not add credentials derived by this new expansion to it.
-			if expanded && projectRoute && isOTLPHeaderDefault(key) {
+			if expanded && routes.withholds(c, pending, key) {
 				continue
 			}
 		}
@@ -68,27 +69,97 @@ func ApplyEnv(c Config) ([]string, error) {
 	return applied, nil
 }
 
-// hasProjectOTLPRoute checks structured and arbitrary defaults before any
+// projectOTLPRoutes records the project defaults that will reach the process
+// environment and decide where an OTLP exporter sends data or which peer it
+// accepts.
+type projectOTLPRoutes struct {
+	// transport is set by proxy and TLS root settings, which every exporter
+	// in this process and in child agents can pick up.
+	transport bool
+	// options maps a signal ("" for the settings shared by all signals) to
+	// the endpoint, protocol and TLS options the project supplies for it.
+	options map[string]map[string]bool
+}
+
+// projectOTLPRouting checks structured and arbitrary defaults before any
 // environment writes. Existing process variables and structured fields retain
 // their usual precedence over defaults for the same key.
-func hasProjectOTLPRoute(c Config, pending map[string]string) bool {
+func projectOTLPRouting(c Config, pending map[string]string) projectOTLPRoutes {
+	routes := projectOTLPRoutes{options: map[string]map[string]bool{}}
 	for key, source := range map[string]string{
 		envOtelExporterOTLPTracesEndpt: c.tracesEndpointSource,
 		envOtelExporterOTLPTracesProto: c.tracesProtocolSource,
 	} {
 		if _, exists := os.LookupEnv(key); !exists && source == sourceProject && pending[key] != "" {
-			return true
+			routes.add(key)
 		}
 	}
 	for key, value := range c.Env {
 		if _, exists := os.LookupEnv(key); exists || value == "" {
 			continue
 		}
-		if _, exists := pending[key]; !exists && c.envSources[key] == sourceProject && isOTLPRouteDefault(key) {
+		if _, exists := pending[key]; !exists && c.envSources[key] == sourceProject {
+			routes.add(key)
+		}
+	}
+	return routes
+}
+
+func (r *projectOTLPRoutes) add(key string) {
+	key = strings.ToUpper(key)
+	if isTransportDefault(key) {
+		r.transport = true
+		return
+	}
+	signal, option, ok := parseOTLPOption(key)
+	if !ok || option == otlpOptionHeaders {
+		return
+	}
+	if r.options[signal] == nil {
+		r.options[signal] = map[string]bool{}
+	}
+	r.options[signal][option] = true
+}
+
+// withholds reports whether a newly expanded header default must not be
+// applied. A signal's own header follows that signal's effective route: its
+// own options, then the shared ones it does not override from a trusted
+// source. The shared header can reach more than one signal's exporter, so any
+// project route withholds it rather than depending on every exporter or child
+// agent to resolve precedence identically.
+func (r *projectOTLPRoutes) withholds(c Config, pending map[string]string, key string) bool {
+	signal, option, ok := parseOTLPOption(strings.ToUpper(key))
+	if !ok || option != otlpOptionHeaders {
+		return false
+	}
+	if r.transport {
+		return true
+	}
+	if signal == "" {
+		return len(r.options) > 0
+	}
+	if len(r.options[signal]) > 0 {
+		return true
+	}
+	for shared := range r.options[""] {
+		if !hasTrustedSignalOption(c, pending, signal, shared) {
 			return true
 		}
 	}
 	return false
+}
+
+// hasTrustedSignalOption reports whether the signal's own option is set, so
+// the shared project value does not apply to it. Project values for the
+// signal's own option are recorded in projectOTLPRoutes and never reach here.
+func hasTrustedSignalOption(c Config, pending map[string]string, signal, option string) bool {
+	key := otlpEnvPrefix + signal + "_" + option
+	// An exporter treats an empty variable as unset and falls back to the
+	// shared one.
+	if value, exists := os.LookupEnv(key); exists {
+		return value != ""
+	}
+	return pending[key] != "" || c.Env[key] != ""
 }
 
 // Resolve against the process environment before installing any defaults, so
@@ -105,24 +176,42 @@ func expandEnvDefault(value string) (string, bool) {
 	return result, expanded
 }
 
-// A generic OTLP header can reach more than one signal's exporter. Treat
-// unshadowed project routing keys conservatively rather than depending on
-// every exporter or child agent to resolve endpoint precedence identically.
-func isOTLPRouteDefault(key string) bool {
-	key = strings.ToUpper(key)
-	switch key {
-	case "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "GRPC_PROXY", "NO_GRPC_PROXY", "REQUEST_METHOD":
-		return true
-	}
-	return strings.HasPrefix(key, "OTEL_EXPORTER_OTLP_") &&
-		(strings.HasSuffix(key, "_ENDPOINT") || strings.HasSuffix(key, "_PROTOCOL") ||
-			strings.HasSuffix(key, "_INSECURE") || strings.HasSuffix(key, "_CERTIFICATE"))
+const (
+	otlpEnvPrefix     = "OTEL_EXPORTER_OTLP_"
+	otlpOptionHeaders = "HEADERS"
+)
+
+// otlpRouteOptions lists the option suffixes this guard reads. A longer
+// suffix precedes the suffix it ends with.
+var otlpRouteOptions = []string{
+	"CLIENT_CERTIFICATE", "CERTIFICATE", "ENDPOINT", "PROTOCOL", "INSECURE", otlpOptionHeaders,
 }
 
-func isOTLPHeaderDefault(key string) bool {
-	switch strings.ToUpper(key) {
-	case "OTEL_EXPORTER_OTLP_HEADERS", "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
-		"OTEL_EXPORTER_OTLP_METRICS_HEADERS", "OTEL_EXPORTER_OTLP_LOGS_HEADERS":
+// parseOTLPOption splits an upper-case OTEL_EXPORTER_OTLP_[<SIGNAL>_]<OPTION>
+// key. The signal is empty for the options shared by all signals.
+func parseOTLPOption(key string) (signal, option string, ok bool) {
+	rest, found := strings.CutPrefix(key, otlpEnvPrefix)
+	if !found {
+		return "", "", false
+	}
+	for _, candidate := range otlpRouteOptions {
+		if rest == candidate {
+			return "", candidate, true
+		}
+		if prefix, matched := strings.CutSuffix(rest, "_"+candidate); matched && prefix != "" {
+			return prefix, candidate, true
+		}
+	}
+	return "", "", false
+}
+
+// isTransportDefault reports whether an upper-case key changes how any HTTPS
+// or gRPC client reaches or verifies its peer. Go reads SSL_CERT_FILE and
+// SSL_CERT_DIR for system roots on Linux and other Unix systems.
+func isTransportDefault(key string) bool {
+	switch key {
+	case "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "GRPC_PROXY", "NO_GRPC_PROXY", "REQUEST_METHOD",
+		"SSL_CERT_FILE", "SSL_CERT_DIR":
 		return true
 	default:
 		return false

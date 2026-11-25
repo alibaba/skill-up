@@ -46,9 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Expand environment placeholders only in trusted user or explicit config
-  defaults. Keep automatic project defaults, but withhold newly expanded OTLP
-  headers when project defaults can control telemetry routing. Reject repeated
-  `--config` and ignore relative `XDG_CONFIG_HOME` in discovery and initialization.
+  defaults. Keep automatic project defaults, but withhold a newly expanded OTLP
+  header when project defaults can control the route, proxy or TLS roots of a
+  signal that would carry it. Reject repeated `--config` and ignore relative
+  `XDG_CONFIG_HOME` in discovery and initialization.
 
 - Keep `agent_judge` review materials from reading as instructions. The judge
   prompt now states that inline excerpts and referenced files come from the

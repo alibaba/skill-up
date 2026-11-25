@@ -254,9 +254,15 @@ func TestApplyEnv_ExpandedOTLPHeaderRouting(t *testing.T) {
 		logs       = "OTEL_EXPORTER_OTLP_LOGS_HEADERS"
 		endpoint   = "OTEL_EXPORTER_OTLP_ENDPOINT"
 		metricDest = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"
+		protocol   = "OTEL_EXPORTER_OTLP_PROTOCOL"
+		logsCert   = "OTEL_EXPORTER_OTLP_LOGS_CERTIFICATE"
 		proxy      = "https_proxy"
+		certFile   = "SSL_CERT_FILE"
+		certDir    = "SSL_CERT_DIR"
 		fixture    = "SKILL_UP_TEST_HEADER_VALUE"
+		kept       = "authorization=fixture"
 	)
+	tracesDest := envOtelExporterOTLPTracesEndpt
 	for _, tt := range []struct {
 		name       string
 		project    Config
@@ -275,11 +281,23 @@ func TestApplyEnv_ExpandedOTLPHeaderRouting(t *testing.T) {
 		{name: "process overrides project endpoint", project: Config{Env: map[string]string{endpoint: "https://project.invalid"}}, inherited: map[string]string{endpoint: "https://trusted.invalid"}, header: generic, wantHeader: "authorization=fixture", wantSet: true},
 		{name: "process header untouched", project: Config{Env: map[string]string{endpoint: "https://project.invalid"}}, inherited: map[string]string{generic: "existing=literal"}, header: generic, wantHeader: "existing=literal", wantSet: true},
 		{name: "structured config wins over env", project: Config{Env: map[string]string{envOtelExporterOTLPTracesEndpt: "https://project.invalid"}}, explicit: Config{Telemetry: Telemetry{Traces: TracesConfig{Endpoint: "https://trusted.invalid"}}}, header: generic, wantHeader: "authorization=fixture", wantSet: true},
+		{name: "another signal's endpoint keeps a signal header", project: Config{Env: map[string]string{metricDest: "https://project.invalid"}}, header: traces, wantHeader: kept, wantSet: true},
+		{name: "another signal's endpoint withholds the shared header", project: Config{Env: map[string]string{metricDest: "https://project.invalid"}}, header: generic},
+		{name: "another signal's certificate keeps a signal header", project: Config{Env: map[string]string{logsCert: "project.pem"}}, header: metrics, wantHeader: kept, wantSet: true},
+		{name: "structured traces endpoint keeps the metrics header", project: Config{Telemetry: Telemetry{Traces: TracesConfig{Endpoint: "https://project.invalid"}}}, header: metrics, wantHeader: kept, wantSet: true},
+		{name: "structured traces endpoint withholds the traces header", project: Config{Telemetry: Telemetry{Traces: TracesConfig{Endpoint: "https://project.invalid"}}}, header: traces},
+		{name: "trusted signal endpoint shields its header from the shared project endpoint", project: Config{Env: map[string]string{endpoint: "https://project.invalid"}}, explicit: Config{Env: map[string]string{tracesDest: "https://trusted.invalid"}}, header: traces, wantHeader: kept, wantSet: true},
+		{name: "process signal endpoint shields its header from the shared project endpoint", project: Config{Env: map[string]string{endpoint: "https://project.invalid"}}, inherited: map[string]string{tracesDest: "https://trusted.invalid"}, header: traces, wantHeader: kept, wantSet: true},
+		{name: "empty process signal endpoint falls back to the shared project endpoint", project: Config{Env: map[string]string{endpoint: "https://project.invalid"}}, inherited: map[string]string{tracesDest: ""}, header: traces},
+		{name: "trusted signal endpoint does not cover the shared project protocol", project: Config{Env: map[string]string{protocol: "http/protobuf"}}, explicit: Config{Env: map[string]string{tracesDest: "https://trusted.invalid"}}, header: traces},
+		{name: "project certificate file", project: Config{Env: map[string]string{certFile: "project.pem"}}, header: traces},
+		{name: "project certificate directory", project: Config{Env: map[string]string{certDir: "project-certs"}}, explicit: Config{Env: map[string]string{endpoint: "https://trusted.invalid"}}, header: generic},
+		{name: "process certificate file overrides the project one", project: Config{Env: map[string]string{certFile: "project.pem"}}, inherited: map[string]string{certFile: "trusted.pem"}, header: traces, wantHeader: kept, wantSet: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			for _, key := range []string{
-				generic, traces, metrics, logs, endpoint, metricDest, proxy,
-				envOtelExporterOTLPTracesEndpt, "SKILL_UP_TEST_OTHER",
+				generic, traces, metrics, logs, endpoint, metricDest, protocol, logsCert, proxy,
+				certFile, certDir, tracesDest, "SKILL_UP_TEST_OTHER",
 			} {
 				t.Setenv(key, "")
 				if err := os.Unsetenv(key); err != nil {

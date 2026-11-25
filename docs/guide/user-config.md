@@ -73,7 +73,7 @@ Semantics:
 
 ### Credential boundary
 
-Automatically discovered project files still supply defaults. Newly expanded OTLP headers are withheld when effective project settings can control the destination or transport. This protection applies only to headers produced by expansion; it does not change the treatment of literal headers, headers already in the process environment, or evaluation execution. Review any config before selecting it with `--config`, which trusts the file for expansion. For `init`, `--config` is only a copy source and is not used to supply defaults.
+Automatically discovered project files still supply defaults. A newly expanded OTLP header is withheld when project defaults can control where the exporter that carries it sends data, or which peer that exporter accepts. The check is per signal: `OTEL_EXPORTER_OTLP_TRACES_HEADERS` follows the traces route, meaning the traces endpoint, protocol and TLS options, then the shared `OTEL_EXPORTER_OTLP_*` options that no trusted traces setting overrides. A project that only sets a metrics endpoint therefore does not withhold it. The shared `OTEL_EXPORTER_OTLP_HEADERS` can reach every signal, so any project route setting withholds it. Project proxy settings and TLS root settings (`SSL_CERT_FILE`, `SSL_CERT_DIR`) count for every signal. This protection applies only to headers produced by expansion; it does not change the treatment of literal headers, headers already in the process environment, or evaluation execution. Review any config before selecting it with `--config`, which trusts the file for expansion. For `init`, `--config` is only a copy source and is not used to supply defaults.
 
 ---
 
