@@ -274,6 +274,18 @@ engine:
 - `${api_key}` 以及任何看起来像凭据的 kwarg key（`token` / `secret` / `api_key` / `apiKey` / `bearerToken` 等）都不允许出现在 `command` / `args` / `cwd` / `input_file` / `output_file` 中，必须经由 `engine.custom.env` 注入到子进程环境变量里。
 - `${SOMEVAR:-...}` 默认值如果匹配常见凭据特征（`sk-...`、`sk-ant-...`、`ghp_...`、`AIza...`、`AKIA...`、JWT 等），同样会在命令行场景被拒。
 
+**local 适配器的三个常见坑。** 适配器启动 agent CLI 时，除非协议本身要通过 stdin
+传帧，否则应关闭或重定向子进程的 stdin——部分 CLI 会把"打开的 stdin 管道"当作在等
+用户输入，一直阻塞到用例 deadline 且没有任何输出，看起来像 agent 很慢。其次要让 agent
+以非交互方式运行：使用它最自治的权限档，并在 CLI 支持时禁用交互式问询 / 审批工具，
+因为无头评测没有人应答，只有会经过审批点的用例才会挂住。自治权限档只有在运行时隔离了
+agent 时才安全：默认的 `environment.type: none` 会让 CLI 直接在你的宿主机上执行，因此
+`--mode yolo` 这类开关要配合 `environment.type: docker` / `opensandbox`，或显式的工具
+白名单——两者都没有时，它只是移除了审批提示，宿主机权限依然敞开（`qwen_code` 一节有
+同样的提醒）。调用超时时，把子进程 stdout
+的尾部保留到失败信息里；空白超时是最难排查的报告。一个完整的 local 传输示例（ZCode
+CLI）见 [docs/design/custom-engine.md](../../design/custom-engine.md#example-zcode-cli)。
+
 `transport: http` 时，把调用配置写在 `custom.http` 下（替代 `custom.local`）：
 
 ```yaml
@@ -1038,6 +1050,14 @@ judge:
 OpenAI/Anthropic 协议冲突，以及 adapter 会忽略的评分模型，会在被测 agent 执行前报错。
 网关若使用原生 provider 名称提供另一种协议，需要在 `credentials.yaml` 中显式配置
 对应协议的 endpoint。
+
+每个 `agent_judge` 结果都会在 `judge_context` 里写明给这个 case 打分的 agent：`engine`，
+以及 skill-up 实际传给它的 `provider` 和 `model`。skill-up 没有传的值会省略，不会拿请求里的
+值顶替：Codex judge 只被覆盖了模型、没有被覆盖 provider 时，只写 `model`、不写 `provider`，
+因为这时的路由由 Codex 本地配置决定。`observed_model` 只有在 adapter 拿到 engine 自己报告的
+模型时才会出现，并不是每个 adapter 都能拿到；没有这个字段表示实际运行的模型未知，不表示它和
+被测 agent 的模型不同。采信分数之前先看一眼 `judge_context`：judge 用的如果就是被测 agent
+自己的模型，相当于给自己的输出打分，往往会偏向自己。
 
 单个 case 的 `judge.engine` 会整体替换 eval 的 judge engine；显式 `judge.model`
 切换为旧模式；两者都未指定时继承 eval 的 engine/model 选择。`judges` 列表仍整体替换，

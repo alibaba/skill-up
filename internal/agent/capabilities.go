@@ -114,6 +114,13 @@ func ResolveAdapterConfig(params credential.ResolvedAgentConfig, resolver *crede
 	params.AppliedBaseURL = connection.BaseURL
 	params.AppliedProvider = resolveAppliedProvider(&params, capabilities)
 	params.AppliedModel = resolveAppliedModel(&params, capabilities)
+	// Materialization is engine-specific: the adapter that knows how its CLI
+	// receives a model id reconstructs it here, before the command, telemetry
+	// and the run report consume the same applied value (#383, #399).
+	switch params.Engine {
+	case agentkind.QwenCode, agentkind.QwenCodeAlias, agentkind.QwenAlias:
+		params.AppliedModel = materializeQwenModel(params)
+	}
 	validateBaseURL(&params, capabilities)
 	resolveAppliedVersion(&params, capabilities)
 	validateKwargs(&params, capabilities)
@@ -267,7 +274,6 @@ func resolveAppliedModel(params *credential.ResolvedAgentConfig, capabilities Ca
 	if requested == "" {
 		return ""
 	}
-
 	if capabilities.ModelPolicy == ModelPolicyCodexProvider {
 		if reason := codexCustomProviderUnavailableReason(params.Provider, params.AppliedBaseURL); reason != "" {
 			return ""

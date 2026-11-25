@@ -324,6 +324,23 @@ Secret-handling rules (enforced at config load):
 - `${api_key}` and any kwarg whose key looks like a credential (`token`, `secret`, `api_key`, `apiKey`, `bearerToken`, …) cannot be referenced from `command` / `args` / `cwd` / `input_file` / `output_file`. Pass them through `engine.custom.env`, where they reach your agent as process environment variables instead of leaking into process listings.
 - `${SOMEVAR:-...}` defaults that contain recognizable credential shapes (`sk-...`, `sk-ant-...`, `ghp_...`, `AIza...`, `AKIA...`, JWTs) are likewise rejected in command-line contexts.
 
+**Local adapters: three pitfalls worth knowing.** If your adapter spawns the agent CLI,
+close or redirect that child's stdin unless the protocol carries frames over stdin —
+several CLIs treat an open stdin pipe as "waiting for input" and block until the case
+deadline with no output, which looks like a slow agent. And make the agent
+non-interactive: drive it in its most autonomous permission mode and disable
+interactive question/approval tools when the CLI has a flag for that, because a
+headless run has nobody to answer and only cases that cross an approval point hang.
+Autonomous mode is only safe when the runtime isolates the agent: `environment.type:
+none` (the default) executes the CLI directly on your host, so pair a `--mode yolo`-style
+flag with `environment.type: docker` / `opensandbox` or an explicit tool allowlist —
+without either one it merely removes the approval prompt and leaves host privileges in
+place, the same warning that applies to `qwen_code` below.
+When a call times out, keep the tail of the child's stdout in the failure message; an
+empty timeout is the hardest report to debug. A worked local-transport example (the
+ZCode CLI) is in
+[docs/design/custom-engine.md](../design/custom-engine.md#example-zcode-cli).
+
 For `transport: http`, configure the call under `custom.http` instead of `custom.local`:
 
 ```yaml
@@ -1197,6 +1214,18 @@ fallbacks. Known native OpenAI/Anthropic protocol mismatches and model overrides
 that the adapter would discard fail before the evaluated agent runs. A gateway
 using a native provider name with another protocol must explicitly configure that
 protocol's endpoint in `credentials.yaml`.
+
+Each `agent_judge` result names the agent that graded the case in its
+`judge_context`: the `engine`, plus the `provider` and `model` that skill-up
+forwarded to it. A value skill-up did not forward is omitted rather than filled
+in from the request: a Codex judge given a model override without a provider
+override is written with `model` and no `provider`, because Codex's local
+configuration picks the route. `observed_model` appears only when the adapter
+captures a model reported by the engine itself, and not every adapter does. When
+it is absent, the model that actually ran is unknown; that does not mean it
+differs from the evaluated agent's. Check `judge_context` before trusting a
+score: a judge that runs the evaluated agent's own model grades its own output
+and tends to favor it.
 
 For a singular case-level `judge`, an explicit `engine` replaces the entire eval
 judge engine; an explicit legacy `model` selects the legacy mode. If neither is

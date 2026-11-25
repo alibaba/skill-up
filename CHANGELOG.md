@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Record the agent that graded each `agent_judge` case in its `judge_context`:
+  the `engine`, plus the `provider` and `model` that skill-up forwarded to it. A
+  value skill-up did not forward is omitted, so a Codex judge given a model
+  override without a provider override is written with `model` and no
+  `provider`. `observed_model` is added only when the adapter captures a model
+  reported by the engine; when it is absent, the model that ran is unknown. A
+  judge configured with the evaluated agent's own model grades its own output
+  and tends to favor it; until now the grading output did not say which model
+  the judge was given, so that case could not be told apart from an independent
+  judge.
+
 - Add `environment.agent_home: temporary` for local Claude Code and Codex runs
   with explicit API credentials. Each case, benchmark arm and retry uses a
   separate temporary home for user settings, skills and session state. The default
@@ -136,6 +147,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   silently skipped by the runner, which still printed that the reports were
   saved, so a typo produced no report at all. The runner now also returns an
   error if an unsupported format reaches it without going through validation.
+
+- Keep the complete model ID for the `qwen_code` engine when `--model
+  provider/name` names a configured provider: the credential layer still splits
+  the prefix to select provider-scoped credentials, but now only records that a
+  legacy split happened, and the `qwen_code` adapter itself rejoins
+  `provider + "/" + name` and forwards it to `-m` and `OPENAI_MODEL`. Qwen
+  Code's own `modelProviders` lookup therefore still matches the registered id
+  (for example `zcode/GLM-5.3-Flash`) instead of receiving a bare name and
+  falling back to `OPENAI_API_KEY`. A model ID written without a prefix is
+  passed through unchanged, `opencode` keeps such IDs opaque as before, and a
+  model replaced wholesale by a provider env or credential file clears the
+  flag, so the replacement is forwarded as written. The applied model reported
+  for the run is the value the adapter materializes, so the report, `-m` and
+  `OPENAI_MODEL` cannot disagree.
 - Stop reporting a successful Claude Code answer as a provider rate-limit or
   authentication failure when its text mentions phrases such as "rate limit" or
   "authentication error". Answer text is scanned for these failures only when

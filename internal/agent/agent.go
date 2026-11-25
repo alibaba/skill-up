@@ -469,9 +469,11 @@ func (a *BaseAgent) buildAgentObservabilityAttrs(extra map[string]string) map[st
 	if a.Cfg.RequestedProvider != "" {
 		attrs["skill_up.provider.requested"] = a.Cfg.RequestedProvider
 	}
-	if a.Cfg.ModelName != "" {
-		attrs["skill_up.model"] = formatAgentModel(a.Cfg.ModelProvider, a.Cfg.ModelName)
-		attrs["skill_up.model.applied"] = formatAgentModel(a.Cfg.ModelProvider, a.Cfg.ModelName)
+	// Cfg.ModelName is the materialized id: ResolveAdapterConfig dispatched the
+	// engine-specific materialization before the adapter was built.
+	if model := strings.TrimSpace(a.Cfg.ModelName); model != "" {
+		attrs["skill_up.model"] = formatAgentModel(a.Cfg.ModelProvider, model)
+		attrs["skill_up.model.applied"] = formatAgentModel(a.Cfg.ModelProvider, model)
 	}
 	if a.Cfg.RequestedModelName != "" {
 		attrs["skill_up.model.requested"] = formatAgentModel(a.Cfg.RequestedProvider, a.Cfg.RequestedModelName)
@@ -490,7 +492,7 @@ func (a *BaseAgent) annotateSessionResult(result *SessionResult) {
 	result.RequestedProvider = a.Cfg.RequestedProvider
 	result.AppliedProvider = a.Cfg.ModelProvider
 	result.RequestedModel = a.Cfg.RequestedModelName
-	result.AppliedModel = a.Cfg.ModelName
+	result.AppliedModel = strings.TrimSpace(a.Cfg.ModelName)
 	for _, warning := range a.Cfg.Warnings {
 		result.Warnings = appendUniqueWarning(result.Warnings, warning)
 	}
@@ -502,6 +504,10 @@ func formatAgentModel(provider, model string) string {
 	}
 	if model == "" {
 		return provider
+	}
+	// A materialized id already carries the provider; do not prefix it again.
+	if strings.HasPrefix(model, provider+"/") {
+		return model
 	}
 	return provider + "/" + model
 }
