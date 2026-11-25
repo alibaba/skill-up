@@ -168,11 +168,6 @@ func (r *Runner) BuildExecutionPlan(cases []*config.CaseConfig, opts EvaluateOpt
 		runCount = 1
 		startIteration = nextIterationNumber(workspaceDir)
 	}
-	configurations := []string{evaluator.ConfigurationWithSkill}
-	if r.evalCfg.Benchmark.Enabled {
-		configurations = append(configurations, evaluator.ConfigurationWithoutSkill)
-	}
-
 	return ExecutionPlan{
 		SkillDir:     skillDir,
 		SkillName:    skillName,
@@ -183,9 +178,19 @@ func (r *Runner) BuildExecutionPlan(cases []*config.CaseConfig, opts EvaluateOpt
 			cases,
 			startIteration,
 			runCount,
-			configurations,
+			PlanConfigurations(r.evalCfg),
 		),
 	}
+}
+
+// PlanConfigurations lists the configurations each case runs under. A
+// benchmark adds the run without the evaluated skill.
+func PlanConfigurations(evalCfg *config.EvalConfig) []string {
+	configurations := []string{evaluator.ConfigurationWithSkill}
+	if evalCfg.Benchmark.Enabled {
+		configurations = append(configurations, evaluator.ConfigurationWithoutSkill)
+	}
+	return configurations
 }
 
 // Evaluate runs all cases through evaluator and agent, returns results.
