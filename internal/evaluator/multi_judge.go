@@ -125,19 +125,25 @@ func (e *defaultEvaluator) runJudgeMember(ctx context.Context, rt runtime.Runtim
 	if graded.Status == judge.StatusError && graded.Error != nil {
 		causes = append(causes, graded.Error)
 	}
-	stop := memberStop(memberCtx)
+	if memberErr := applyMemberStop(memberCtx, &outcome, member, graded); memberErr != nil {
+		causes = append(causes, memberErr)
+	}
+	outcome.DurationMs = time.Since(started).Milliseconds()
+	return outcome, causes
+}
+
+func applyMemberStop(ctx context.Context, outcome *JudgeOutcome, member config.JudgeConfig, graded EvalResult) error {
+	ctxErr := ctx.Err()
+	stop := memberStop(ctx, ctxErr)
 	decision := memberDecisionFor(graded, stop)
 	outcome.Metrics = gradedMetrics(member, graded, decision)
 	outcome.Execution = memberExecution(graded, stop, decision, judge.SlotsFromConfig(member.Metrics))
 	// A deadline observed after metric collection belongs in the execution
 	// metadata. It did not interrupt this member's scoring pass.
 	if stop.Cause != judge.CauseDeadlineExpiry || !metricsFinalized(&graded) {
-		if memberErr := recordMemberContextError(memberCtx, &outcome, decision); memberErr != nil {
-			causes = append(causes, memberErr)
-		}
+		return recordMemberContextError(ctxErr, outcome, decision)
 	}
-	outcome.DurationMs = time.Since(started).Milliseconds()
-	return outcome, causes
+	return nil
 }
 
 func memberDecisionFor(graded EvalResult, stop judge.Stop) MemberDecision {
@@ -158,8 +164,7 @@ func memberDecisionFor(graded EvalResult, stop judge.Stop) MemberDecision {
 	return MemberNotAccepted
 }
 
-func recordMemberContextError(ctx context.Context, outcome *JudgeOutcome, decision MemberDecision) error {
-	err := ctx.Err()
+func recordMemberContextError(err error, outcome *JudgeOutcome, decision MemberDecision) error {
 	if err == nil {
 		return nil
 	}
@@ -172,9 +177,9 @@ func recordMemberContextError(ctx context.Context, outcome *JudgeOutcome, decisi
 	return err
 }
 
-// memberStop reads the deadline source chosen when the member was started.
-func memberStop(ctx context.Context) judge.Stop {
-	return judge.ClassifyStop(ctx.Err(), judge.StopObservation{DeadlineSource: judge.DeadlineSource(ctx), SignalObserved: SignalObserved(ctx)})
+// memberStop classifies the captured error using the member's recorded deadline source.
+func memberStop(ctx context.Context, ctxErr error) judge.Stop {
+	return judge.ClassifyStop(ctxErr, judge.StopObservation{DeadlineSource: judge.DeadlineSource(ctx), SignalObserved: SignalObserved(ctx)})
 }
 
 // stopDetail renders a human-readable stop note. The machine-readable cause and

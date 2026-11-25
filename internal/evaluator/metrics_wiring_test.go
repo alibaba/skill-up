@@ -110,7 +110,7 @@ func TestMemberStopAttributesSources(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, member := tc.build(t)
-			got := memberStop(member)
+			got := memberStop(member, member.Err())
 			if got != tc.want {
 				t.Fatalf("memberStop = %+v, want %+v", got, tc.want)
 			}
@@ -163,7 +163,7 @@ func TestRecordMemberContextErrorKeepsAcceptedResults(t *testing.T) {
 			if tc.accepted {
 				decision = MemberAccepted
 			}
-			err := recordMemberContextError(ctx, &outcome, decision)
+			err := recordMemberContextError(ctx.Err(), &outcome, decision)
 			if outcome.Status != tc.wantStatus {
 				t.Fatalf("status = %s, want %s", outcome.Status, tc.wantStatus)
 			}
@@ -426,7 +426,7 @@ func TestAcceptedResultKeepsScoresAfterLaterStop(t *testing.T) {
 	if outcome.Result.Metrics.Metrics[0].Availability != judge.Available {
 		t.Fatal("an accepted score was downgraded")
 	}
-	if got := recordMemberContextError(canceledPlain(), &outcome, MemberAccepted); got == nil {
+	if got := recordMemberContextError(canceledPlain().Err(), &outcome, MemberAccepted); got == nil {
 		t.Fatal("expected the cancellation error to still be reported")
 	}
 	if outcome.Status != judge.StatusPass {

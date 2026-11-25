@@ -723,6 +723,48 @@ func TestExecuteCaseGroupedCompletedMetricErrorDoesNotRetryAsTimeout(t *testing.
 	}
 }
 
+// deadlineAfterSnapshotContext becomes expired as its first Err call returns
+// the still-live snapshot. No goroutines or timer scheduling are involved.
+type deadlineAfterSnapshotContext struct {
+	done chan struct{}
+}
+
+func (c *deadlineAfterSnapshotContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (c *deadlineAfterSnapshotContext) Done() <-chan struct{}       { return c.done }
+func (c *deadlineAfterSnapshotContext) Value(any) any               { return nil }
+
+func (c *deadlineAfterSnapshotContext) Err() error {
+	select {
+	case <-c.done:
+		return context.DeadlineExceeded
+	default:
+		close(c.done)
+		return nil
+	}
+}
+
+func TestGroupedCompletedMetricErrorDeadlineAfterSnapshot(t *testing.T) {
+	graded, member := collectResultMissingRequiredMetric(t, true)
+	finalizeJudgeMetrics(context.Background(), &graded, member)
+	if !metricsFinalized(&graded) || graded.Status != judge.StatusError || graded.Error == nil {
+		t.Fatalf("expected a finalized metric contract error, got %s (%v)", graded.Status, graded.Error)
+	}
+
+	ctx := &deadlineAfterSnapshotContext{done: make(chan struct{})}
+	outcome := JudgeOutcome{ID: member.ID, Status: graded.Status, Error: judgeOutcomeError(graded)}
+	causes := []error{graded.Error}
+	if err := applyMemberStop(ctx, &outcome, member, graded); err != nil {
+		causes = append(causes, err)
+	}
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Fatal("expected the deadline to expire after the first Err read")
+	}
+	result := EvalResult{Status: judge.StatusError, Error: multiJudgeError([]JudgeOutcome{outcome}, causes)}
+	if reason, ok := retryReasonForResult(result); !ok || reason == retryReasonTimeout || errors.Is(result.Error, context.DeadlineExceeded) {
+		t.Fatalf("retry reason = %q (%t), error = %v, want only the metric contract error", reason, ok, result.Error)
+	}
+}
+
 func runGroupedJudgeTimeoutWithLateCaseDeadline(t *testing.T, pending []config.JudgeConfig) EvalResult {
 	t.Helper()
 	members := []config.JudgeConfig{
@@ -1871,7 +1913,7 @@ func TestFinalMetricsAreValidatedAfterLateDeadline(t *testing.T) {
 			finalizeJudgeMetrics(ctx, &graded, member)
 			assertFinalMetricsContractError(t, graded)
 			if tc.grouped {
-				stop := memberStop(ctx)
+				stop := memberStop(ctx, ctx.Err())
 				decision := memberDecisionFor(graded, stop)
 				if decision != MemberNotAccepted {
 					t.Fatal("member with a missing required slot must not be accepted")
