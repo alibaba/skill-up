@@ -30,7 +30,9 @@ const (
 // routing or transport settings for an exporter that would carry it.
 func ApplyEnv(c Config) ([]string, error) {
 	pending := telemetryEnv(c.Telemetry)
-	routes := projectOTLPRouting(c, pending)
+	// Resolve every default first, so the guard reads the values an exporter
+	// will see rather than their templates.
+	defaults := make(map[string]envDefault, len(c.Env))
 	for key, value := range c.Env {
 		if _, exists := os.LookupEnv(key); exists || value == "" {
 			continue
@@ -38,16 +40,21 @@ func ApplyEnv(c Config) ([]string, error) {
 		if _, exists := pending[key]; exists {
 			continue
 		}
+		resolved := envDefault{value: value}
 		if source := c.envSources[key]; source == sourceUser || source == sourceExplicit {
-			var expanded bool
-			value, expanded = expandEnvDefault(value)
-			// Keep project routing and pre-existing headers intact, but do
-			// not add credentials derived by this new expansion to it.
-			if expanded && routes.withholds(c, pending, key) {
-				continue
-			}
+			resolved.value, resolved.expanded = expandEnvDefault(value)
 		}
-		pending[key] = value
+		defaults[key] = resolved
+	}
+
+	routes := projectOTLPRouting(c, pending)
+	for key, resolved := range defaults {
+		// Keep project routing and pre-existing headers intact, but do
+		// not add credentials derived by this new expansion to it.
+		if resolved.expanded && routes.withholds(pending, defaults, key) {
+			continue
+		}
+		pending[key] = resolved.value
 	}
 
 	keys := make([]string, 0, len(pending))
@@ -67,6 +74,12 @@ func ApplyEnv(c Config) ([]string, error) {
 		applied = append(applied, k)
 	}
 	return applied, nil
+}
+
+// envDefault is an env default after ${VAR} expansion.
+type envDefault struct {
+	value    string
+	expanded bool
 }
 
 // projectOTLPRoutes records the project defaults that will reach the process
@@ -127,7 +140,7 @@ func (r *projectOTLPRoutes) add(key string) {
 // source. The shared header can reach more than one signal's exporter, so any
 // project route withholds it rather than depending on every exporter or child
 // agent to resolve precedence identically.
-func (r *projectOTLPRoutes) withholds(c Config, pending map[string]string, key string) bool {
+func (r *projectOTLPRoutes) withholds(pending map[string]string, defaults map[string]envDefault, key string) bool {
 	signal, option, ok := parseOTLPOption(strings.ToUpper(key))
 	if !ok || option != otlpOptionHeaders {
 		return false
@@ -142,24 +155,27 @@ func (r *projectOTLPRoutes) withholds(c Config, pending map[string]string, key s
 		return true
 	}
 	for shared := range r.options[""] {
-		if !hasTrustedSignalOption(c, pending, signal, shared) {
+		if !hasTrustedSignalOption(pending, defaults, signal, shared) {
 			return true
 		}
 	}
 	return false
 }
 
-// hasTrustedSignalOption reports whether the signal's own option is set, so
-// the shared project value does not apply to it. Project values for the
+// hasTrustedSignalOption reports whether the signal's own option has a value,
+// so the shared project value does not apply to it. Project values for the
 // signal's own option are recorded in projectOTLPRoutes and never reach here.
-func hasTrustedSignalOption(c Config, pending map[string]string, signal, option string) bool {
+// An exporter treats an empty or blank variable as unset and falls back to
+// the shared one, so only the resolved value counts.
+func hasTrustedSignalOption(pending map[string]string, defaults map[string]envDefault, signal, option string) bool {
 	key := otlpEnvPrefix + signal + "_" + option
-	// An exporter treats an empty variable as unset and falls back to the
-	// shared one.
 	if value, exists := os.LookupEnv(key); exists {
-		return value != ""
+		return strings.TrimSpace(value) != ""
 	}
-	return pending[key] != "" || c.Env[key] != ""
+	if value, exists := pending[key]; exists {
+		return strings.TrimSpace(value) != ""
+	}
+	return strings.TrimSpace(defaults[key].value) != ""
 }
 
 // Resolve against the process environment before installing any defaults, so

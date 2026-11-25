@@ -260,6 +260,7 @@ func TestApplyEnv_ExpandedOTLPHeaderRouting(t *testing.T) {
 		certFile   = "SSL_CERT_FILE"
 		certDir    = "SSL_CERT_DIR"
 		fixture    = "SKILL_UP_TEST_HEADER_VALUE"
+		empty      = "SKILL_UP_TEST_EMPTY_VALUE"
 		kept       = "authorization=fixture"
 	)
 	tracesDest := envOtelExporterOTLPTracesEndpt
@@ -289,6 +290,9 @@ func TestApplyEnv_ExpandedOTLPHeaderRouting(t *testing.T) {
 		{name: "trusted signal endpoint shields its header from the shared project endpoint", project: Config{Env: map[string]string{endpoint: "https://project.invalid"}}, explicit: Config{Env: map[string]string{tracesDest: "https://trusted.invalid"}}, header: traces, wantHeader: kept, wantSet: true},
 		{name: "process signal endpoint shields its header from the shared project endpoint", project: Config{Env: map[string]string{endpoint: "https://project.invalid"}}, inherited: map[string]string{tracesDest: "https://trusted.invalid"}, header: traces, wantHeader: kept, wantSet: true},
 		{name: "empty process signal endpoint falls back to the shared project endpoint", project: Config{Env: map[string]string{endpoint: "https://project.invalid"}}, inherited: map[string]string{tracesDest: ""}, header: traces},
+		{name: "blank process signal endpoint falls back to the shared project endpoint", project: Config{Env: map[string]string{endpoint: "https://project.invalid"}}, inherited: map[string]string{tracesDest: " "}, header: traces},
+		{name: "signal endpoint that expands to nothing falls back to the shared project endpoint", project: Config{Env: map[string]string{endpoint: "https://project.invalid"}}, explicit: Config{Env: map[string]string{tracesDest: "${" + empty + "}"}}, inherited: map[string]string{empty: ""}, header: traces},
+		{name: "signal endpoint that expands to a value shields its header", project: Config{Env: map[string]string{endpoint: "https://project.invalid"}}, explicit: Config{Env: map[string]string{tracesDest: "${" + empty + "}"}}, inherited: map[string]string{empty: "https://trusted.invalid"}, header: traces, wantHeader: kept, wantSet: true},
 		{name: "trusted signal endpoint does not cover the shared project protocol", project: Config{Env: map[string]string{protocol: "http/protobuf"}}, explicit: Config{Env: map[string]string{tracesDest: "https://trusted.invalid"}}, header: traces},
 		{name: "project certificate file", project: Config{Env: map[string]string{certFile: "project.pem"}}, header: traces},
 		{name: "project certificate directory", project: Config{Env: map[string]string{certDir: "project-certs"}}, explicit: Config{Env: map[string]string{endpoint: "https://trusted.invalid"}}, header: generic},
@@ -297,7 +301,7 @@ func TestApplyEnv_ExpandedOTLPHeaderRouting(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			for _, key := range []string{
 				generic, traces, metrics, logs, endpoint, metricDest, protocol, logsCert, proxy,
-				certFile, certDir, tracesDest, "SKILL_UP_TEST_OTHER",
+				certFile, certDir, tracesDest, empty, "SKILL_UP_TEST_OTHER",
 			} {
 				t.Setenv(key, "")
 				if err := os.Unsetenv(key); err != nil {
