@@ -13,6 +13,7 @@ import (
 	"github.com/alibaba/skill-up/internal/config"
 	"github.com/alibaba/skill-up/internal/credential"
 	"github.com/alibaba/skill-up/internal/judge"
+	"github.com/alibaba/skill-up/internal/report"
 	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
@@ -183,6 +184,65 @@ func sharedJudgeWorkspaceCheck(t *testing.T, workspace, engine string) func(cont
 			return nil, err
 		}
 		return &agent.SessionResult{FinalMessage: `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["checked"],"failures":[]}]}`}, nil
+	}
+}
+
+// TestCodexJudgeGradingFileOmitsUnappliedProvider checks the written
+// grading.json of a Codex judge that gets a model override without a provider
+// override: Codex's local configuration then picks the route, so the file must
+// name the model and leave the provider out.
+func TestCodexJudgeGradingFileOmitsUnappliedProvider(t *testing.T) {
+	// Provider-scoped env (OPENAI_*) overrides the judge config, so keep host values out.
+	t.Setenv("OPENAI_MODEL", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_BASE_URL", "")
+	original := agentDetectWithResolvedConfig
+	agentDetectWithResolvedConfig = func(params credential.ResolvedAgentConfig) (agent.Agent, error) {
+		// Label the session the way the adapter does from its resolved config.
+		return &mockAgent{name: params.Engine, runFunc: func(context.Context, runtime.Runtime, agent.ExecOptions, []transcript.Message) (*agent.SessionResult, error) {
+			return &agent.SessionResult{
+				Engine:            params.Engine,
+				RequestedProvider: params.Provider,
+				AppliedProvider:   params.AppliedProvider,
+				RequestedModel:    params.Model,
+				AppliedModel:      params.AppliedModel,
+				FinalMessage:      `{"results":[{"criterion_id":"criterion-1","passed":true,"evidence":["checked"],"failures":[]}]}`,
+			}, nil
+		}}, nil
+	}
+	t.Cleanup(func() { agentDetectWithResolvedConfig = original })
+
+	runAgent := &mockAgent{name: "runner", output: "completed"}
+	judgeCfg := config.JudgeConfig{Type: "agent_judge", Engine: &config.EngineConfig{
+		Name: "codex", Model: config.ModelConfig{Provider: "openai", Name: "judge-model"},
+	}, Criteria: []string{"quality"}}
+	e := newTestEvaluator(EvalOptions{Agent: runAgent, EvalCfg: &config.EvalConfig{Environment: config.Environment{Type: "none"}, Judge: judgeCfg}})
+	result := e.executeCase(context.Background(), &config.CaseConfig{ID: "case", Input: config.Input{Prompt: "task"}}, "without_skill", &mockRuntime{workspace: t.TempDir()}, runAgent)
+	if result.Status != judge.StatusPass || result.Grading == nil {
+		t.Fatalf("result=%+v", result)
+	}
+
+	path := filepath.Join(t.TempDir(), "grading.json")
+	if err := report.WriteGradingJSON(path, report.ConvertToAnthropicGrading(result.Grading)); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var written struct {
+		JudgeContext map[string]any `json:"judge_context"`
+	}
+	if err := json.Unmarshal(data, &written); err != nil {
+		t.Fatal(err)
+	}
+	if written.JudgeContext["engine"] != "codex" || written.JudgeContext["model"] != "judge-model" {
+		t.Fatalf("judge_context=%v, want engine codex and model judge-model", written.JudgeContext)
+	}
+	for _, key := range []string{"provider", "observed_model"} {
+		if value, ok := written.JudgeContext[key]; ok {
+			t.Fatalf("judge_context has %s=%v, which the judge engine was not given and did not report", key, value)
+		}
 	}
 }
 

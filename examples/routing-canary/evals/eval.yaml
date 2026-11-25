@@ -1,0 +1,36 @@
+schema_version: v1alpha1
+
+# The routing canary from https://github.com/alibaba/skill-up/issues/166.
+# It installs two Skills whose triggers do not overlap, then asks three
+# questions: one that only `canary-routing` matches, one that no Skill
+# matches, and one that only `literary-translation` matches.
+#
+# The case expectations are checked on the workspace (the marker files the
+# Skill bodies write), so a PASS means the Skill instructions were actually
+# applied, not just that the answer looked similar.
+environment:
+  type: none
+
+skills:
+  - source: local_path
+    path: skill
+  - source: local_path
+    path: translator
+
+engine:
+  name: claude_code
+
+cases:
+  files:
+    - evals/cases/relevant.yaml
+    - evals/cases/unrelated.yaml
+    - evals/cases/competing.yaml
+  defaults:
+    timeout_seconds: 180
+    max_turns: 3
+  parallelism: 1
+
+report:
+  formats: [json]
+  artifacts:
+    - transcript

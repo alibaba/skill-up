@@ -31,11 +31,11 @@ skill-up run [path] [flags]
 | `--iteration`         | `0`（auto）                  | 重复运行已选用例，用于稳定性/flaky 采样。`0` 表示在最新 `iteration-N/` 后自动追加一轮，但不汇总历史结果；正整数 `N` 表示运行 N 次采样，产物写入 `iteration-1/` 到 `iteration-N/`；当 `N > 1` 时，终端摘要只覆盖本次命令执行的采样 |
 | `--engine`            | 配置文件中的值                | 覆盖 Engine 名称                                                                                                                                          |
 | `--provider`          | 配置文件中的值                | 覆盖 `engine.model.provider`。指定后，完整的 `--model` 值将作为不透明模型 ID 透传。                                                                        |
-| `--model`             | 配置文件中的值                | 覆盖模型。未指定 `--provider` 时兼容历史 `provider/name` 写法：前缀是已配置 provider 时拆分，否则完整透传。                                                |
+| `--model`             | 配置文件中的值                | 覆盖模型。未指定 `--provider` 时兼容历史 `provider/name` 写法：前缀是已配置 provider 时拆分，否则完整透传。`qwen_code` 始终拿到完整值：前缀只用于选择 provider 作用域凭据，adapter 自己把拆开的引用重新拼合，供 `-m`、`OPENAI_MODEL` 和报告里的实际模型共同使用，因为 Qwen Code 按完整 ID 解析模型。被 `ZCODE_MODEL` 等 provider 环境变量整体替换的模型按替换值原样转发。 |
 | `--parallelism`       | 配置文件中的值                | 覆盖 `cases.parallelism`，用于临时调整用例并行数，取值范围为 1 到 256                                                                                       |
 | `--baseline`          | 配置文件中的值                | 为本次运行覆盖 `benchmark.enabled` 为 `true`                                                                                                                |
 | `--api-key`           | —                            | 传入 API Key（优先级高于环境变量）                                                                                                                          |
-| `--no-delete`         | `false`                      | 评测后保留由 skill-up 创建的 workspace 或容器，便于调试。                                                                                                   |
+| `--no-delete`         | `false`                      | 保留 workspace、容器和临时运行目录以便调试。启用 `agent_home: temporary` 时，保留的主目录可能包含凭据。 |
 | `--cleanup-sessions`  | `false`                      | 评测后同时删除 agent 为该 workspace 保存的会话目录。目前 `claude_code` 与 `qodercli` 支持：分别删除 `~/.claude/projects/<workspace-key>/` 与 `~/.qoder/projects/<workspace-key>/`（CN 版为 `~/.qoder-cn/projects/<workspace-key>/`）目录，包含会话记录与 memory。默认关闭，因为它会删除今天在评测后仍会保留的历史；显式的 `--cleanup-sessions=false` 会覆盖 `environment.cleanup_sessions: true`，`--no-delete` 优先级最高。 |
 | `-v, --verbose`       | `0`                          | 增加日志详细程度。默认输出 `info`；`-v`/`--verbose`/`--verbose=true` 输出 `debug`；`-vv`/`--verbose=2` 输出 `trace`；`--verbose=false` 关闭附加详细日志        |
 

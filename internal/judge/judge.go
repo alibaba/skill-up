@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
 	"github.com/alibaba/skill-up/internal/agent"
+	"github.com/alibaba/skill-up/internal/runtime"
 	"github.com/alibaba/skill-up/pkg/transcript"
 )
 
@@ -26,6 +28,48 @@ const (
 	// StatusError indicates an unexpected execution error.
 	StatusError Status = "ERROR"
 )
+
+// WorkspaceFiles exposes the minimal workspace access needed by host-side file
+// checks. Implementations may read a local directory or a remote runtime.
+type WorkspaceFiles interface {
+	Exists(ctx context.Context, relPath string) (bool, error)
+	ReadFile(ctx context.Context, relPath string) ([]byte, error)
+}
+
+type hostPathWorkspaceFiles interface {
+	hostWorkspacePaths()
+}
+
+type localWorkspaceFiles string
+
+func (localWorkspaceFiles) hostWorkspacePaths() {}
+
+func (l localWorkspaceFiles) Exists(_ context.Context, relPath string) (bool, error) {
+	_, err := os.Stat(filepath.Join(string(l), relPath))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (l localWorkspaceFiles) ReadFile(_ context.Context, relPath string) ([]byte, error) {
+	data, err := os.ReadFile(filepath.Join(string(l), relPath))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, runtime.ErrFileNotFound
+		}
+		return nil, err
+	}
+	return data, nil
+}
+
+// NewLocalWorkspaceFiles returns a WorkspaceFiles backed by a host directory.
+func NewLocalWorkspaceFiles(dir string) WorkspaceFiles {
+	return localWorkspaceFiles(dir)
+}
 
 // Judge scores or validates engine output for a case.
 type Judge interface {
@@ -66,8 +110,11 @@ type Input struct {
 	ExitCode int
 
 	// WorkspacePath is the absolute path to the case workspace root directory.
-	// Used by workspace-scoped file checks and script judge.
+	// Runtime-executed judges use it as the execution working directory.
 	WorkspacePath string
+
+	// Files provides workspace file access for host-side checks.
+	Files WorkspaceFiles
 
 	// SkillDir is the absolute path to the directory containing SKILL.md.
 	// Fixture-style references such as golden_file are resolved from here.
@@ -180,6 +227,16 @@ type ContextMetadata struct {
 	Manifest        *ContextManifest `json:"manifest,omitempty"`
 	PromptDelivery  string           `json:"prompt_delivery,omitempty"`
 	PromptBytes     int              `json:"prompt_bytes,omitempty"`
+	// Engine names the agent that graded the case, so a report shows whether the
+	// judge was independent of the evaluated agent. Provider and Model are the
+	// values skill-up forwarded to that engine; one it did not forward stays
+	// empty, because the engine's own configuration then decides it.
+	// ObservedModel is set only when the adapter captured a model the engine
+	// reported; empty means the model that ran is unknown.
+	Engine        string `json:"engine,omitempty"`
+	Provider      string `json:"provider,omitempty"`
+	Model         string `json:"model,omitempty"`
+	ObservedModel string `json:"observed_model,omitempty"`
 }
 
 // SessionResultError preserves a judge-side session result when evaluation fails.
@@ -229,6 +286,10 @@ type AssertionResult struct {
 
 	// Evidence provides the concrete reason for the pass/fail determination.
 	Evidence string `json:"evidence"`
+
+	// Error records an access/inconclusive error that prevents a reliable
+	// pass/fail determination for this assertion.
+	Error *string `json:"error,omitempty"`
 }
 
 // ResultSummary aggregates assertion statistics.
@@ -308,6 +369,39 @@ func NewErrorResult(err error, turnsExecuted, turnsTotal int) *Result {
 		AssertionResults: []AssertionResult{},
 		Summary:          ResultSummary{},
 	}
+}
+
+// normalizeWorkspacePath resolves and validates a workspace-relative path using
+// the runtime backend's path rules, returning the normalized path for I/O.
+func normalizeWorkspacePath(in Input, rel string) (string, error) {
+	_, hostPaths := in.Files.(hostPathWorkspaceFiles)
+	_, noneRuntime := in.Files.(*runtime.NoneRuntime)
+	if hostPaths || noneRuntime {
+		clean := filepath.Clean(rel)
+		if filepath.IsAbs(clean) {
+			return "", fmt.Errorf("path %q escapes workspace %q", rel, in.WorkspacePath)
+		}
+		workspace := filepath.Clean(in.WorkspacePath)
+		joined := filepath.Join(workspace, clean)
+		if joined != workspace && !strings.HasPrefix(joined, workspace+string(filepath.Separator)) {
+			return "", fmt.Errorf("path %q escapes workspace %q", rel, in.WorkspacePath)
+		}
+		return clean, nil
+	}
+	workspace := path.Clean(in.WorkspacePath)
+	slash := strings.ReplaceAll(rel, "\\", "/")
+	if len(slash) >= 2 && slash[1] == ':' {
+		return "", fmt.Errorf("path %q escapes workspace %q", rel, workspace)
+	}
+	clean := path.Clean(slash)
+	if path.IsAbs(clean) {
+		return "", fmt.Errorf("path %q escapes workspace %q", rel, workspace)
+	}
+	joined := path.Join(workspace, clean)
+	if joined != workspace && !strings.HasPrefix(joined, workspace+"/") {
+		return "", fmt.Errorf("path %q escapes workspace %q", rel, workspace)
+	}
+	return clean, nil
 }
 
 // fileExistsInWorkspace checks whether a file exists within the workspace.

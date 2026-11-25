@@ -274,6 +274,18 @@ engine:
 - `${api_key}` 以及任何看起来像凭据的 kwarg key（`token` / `secret` / `api_key` / `apiKey` / `bearerToken` 等）都不允许出现在 `command` / `args` / `cwd` / `input_file` / `output_file` 中，必须经由 `engine.custom.env` 注入到子进程环境变量里。
 - `${SOMEVAR:-...}` 默认值如果匹配常见凭据特征（`sk-...`、`sk-ant-...`、`ghp_...`、`AIza...`、`AKIA...`、JWT 等），同样会在命令行场景被拒。
 
+**local 适配器的三个常见坑。** 适配器启动 agent CLI 时，除非协议本身要通过 stdin
+传帧，否则应关闭或重定向子进程的 stdin——部分 CLI 会把"打开的 stdin 管道"当作在等
+用户输入，一直阻塞到用例 deadline 且没有任何输出，看起来像 agent 很慢。其次要让 agent
+以非交互方式运行：使用它最自治的权限档，并在 CLI 支持时禁用交互式问询 / 审批工具，
+因为无头评测没有人应答，只有会经过审批点的用例才会挂住。自治权限档只有在运行时隔离了
+agent 时才安全：默认的 `environment.type: none` 会让 CLI 直接在你的宿主机上执行，因此
+`--mode yolo` 这类开关要配合 `environment.type: docker` / `opensandbox`，或显式的工具
+白名单——两者都没有时，它只是移除了审批提示，宿主机权限依然敞开（`qwen_code` 一节有
+同样的提醒）。调用超时时，把子进程 stdout
+的尾部保留到失败信息里；空白超时是最难排查的报告。一个完整的 local 传输示例（ZCode
+CLI）见 [docs/design/custom-engine.md](../../design/custom-engine.md#example-zcode-cli)。
+
 `transport: http` 时，把调用配置写在 `custom.http` 下（替代 `custom.local`）：
 
 ```yaml
@@ -451,6 +463,48 @@ mcp:
 | `docker`      | 本地容器隔离，无需远程服务       | 自定义工具链、可复现 CI、离线环境 |
 
 > **建议**：如果你的 Skill 不涉及文件操作，使用 `none` 可以省去沙箱准备时间。
+
+#### 本地 agent 主目录
+
+自动创建的本地 workspace 统一位于系统临时目录下，路径为
+`<system temp>/skill-up-*/workspace/`，其父目录为临时运行目录。
+`environment.agent_home` 决定如何处理 agent 主目录设置：
+
+- `inherited`（默认）：保留继承的主目录设置。
+- `temporary`：使用临时运行目录作为独立主目录，每个 case、基线分组和重试各自创建。
+  此模式支持使用 API 凭据的 Claude Code 和 Codex 评测。
+
+两种模式采用相同的 workspace 布局，切换模式不会改变 `..` 的含义。
+显式指定的 `--workspace` 在两种模式下均保持原位；`temporary` 会为其创建单独的临时主目录。
+
+```yaml
+environment:
+  type: none
+  agent_home: temporary
+```
+
+在 `temporary` 模式下，`HOME`、`USERPROFILE` 和 `CODEX_HOME` 指向临时根目录，
+因此 Codex 的 `auth.json` 和 `sessions/` 不会进入 workspace 产物和 diff。
+会话记录从 `$CODEX_HOME/sessions` 收集。
+
+`CLAUDE_CONFIG_DIR`、XDG 目录和 Windows 应用数据目录也位于临时主目录下，
+这些设置覆盖 setup、续轮和 judge 的执行。
+单次命令的环境变量不能覆盖这些目录；`BASH_ENV` 和 `ENV` 启动文件被禁用。
+可执行文件搜索路径及其他环境变量仍然保留。setup 步骤不能依赖该主目录中的个人 Git
+或包管理器配置；请通过 setup 命令或 `environment.env` 显式提供所需设置。
+
+首版要求显式 API 凭据：Claude Code 使用 `ANTHROPIC_API_KEY` 或
+`ANTHROPIC_AUTH_TOKEN`，Codex 使用 `OPENAI_API_KEY`，也可通过 skill-up 的常规
+凭据配置提供。Codex 每次调用前通过 stdin 在临时主目录内初始化 API-key 登录。
+不复制个人登录文件或系统钥匙串登录；凭据缺失或 run/judge 引擎不受支持时，
+会在 setup 或 agent 执行前报错。
+
+两种模式下，case runtime 关闭时均删除整个临时运行目录。显式指定 `--workspace`
+时保留 workspace，只删除按需创建的临时主目录。`--no-delete` 会保留临时目录树，
+setup 日志会显示临时主目录路径；其中可能保存 Codex API key，
+应按敏感文件处理。此选项隔离常规用户配置和状态，并非文件系统安全边界：
+workspace 指令、系统配置及其他继承的环境变量仍然可用。
+进程隔离请使用容器；Docker 和 OpenSandbox 不支持 `agent_home: temporary`。
 
 #### 会话清理
 
@@ -996,6 +1050,14 @@ judge:
 OpenAI/Anthropic 协议冲突，以及 adapter 会忽略的评分模型，会在被测 agent 执行前报错。
 网关若使用原生 provider 名称提供另一种协议，需要在 `credentials.yaml` 中显式配置
 对应协议的 endpoint。
+
+每个 `agent_judge` 结果都会在 `judge_context` 里写明给这个 case 打分的 agent：`engine`，
+以及 skill-up 实际传给它的 `provider` 和 `model`。skill-up 没有传的值会省略，不会拿请求里的
+值顶替：Codex judge 只被覆盖了模型、没有被覆盖 provider 时，只写 `model`、不写 `provider`，
+因为这时的路由由 Codex 本地配置决定。`observed_model` 只有在 adapter 拿到 engine 自己报告的
+模型时才会出现，并不是每个 adapter 都能拿到；没有这个字段表示实际运行的模型未知，不表示它和
+被测 agent 的模型不同。采信分数之前先看一眼 `judge_context`：judge 用的如果就是被测 agent
+自己的模型，相当于给自己的输出打分，往往会偏向自己。
 
 单个 case 的 `judge.engine` 会整体替换 eval 的 judge engine；显式 `judge.model`
 切换为旧模式；两者都未指定时继承 eval 的 engine/model 选择。`judges` 列表仍整体替换，

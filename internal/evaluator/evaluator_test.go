@@ -162,6 +162,28 @@ func (m *mockRuntime) DownloadDir(ctx context.Context, sourceDir, targetDir stri
 	return copyDir(source, targetDir)
 }
 
+func (m *mockRuntime) Exists(_ context.Context, sourcePath string) (bool, error) {
+	_, err := os.Stat(filepath.Join(m.workspace, sourcePath))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (m *mockRuntime) ReadFile(_ context.Context, sourcePath string) ([]byte, error) {
+	data, err := os.ReadFile(filepath.Join(m.workspace, sourcePath))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, runtime.ErrFileNotFound
+		}
+		return nil, err
+	}
+	return data, nil
+}
+
 func (m *mockRuntime) Exec(ctx context.Context, command string, opts runtime.ExecOptions) (runtime.ExecResult, error) {
 	m.execCall.Add(1)
 	if m.execFunc != nil {
@@ -4310,7 +4332,7 @@ func TestExecuteCase_ExpectScoringBenchmark(t *testing.T) {
 }
 
 func TestPrepareRuntimeVariantIsolation(t *testing.T) {
-	if goruntime.GOOS == "windows" {
+	if goruntime.GOOS == windowsGOOS {
 		t.Skip("POSIX setup script")
 	}
 	t.Setenv(runtime.VariantEnvName, "inherited-wrong-value")
@@ -4353,6 +4375,26 @@ printf '%s' "$SKILL_UP_VARIANT" > variant`}},
 			t.Errorf("host variant changed: %q", got)
 		}
 	})
+}
+
+func TestIsolatedHomeRejectsUnsupportedJudgeBeforeSetup(t *testing.T) {
+	if goruntime.GOOS == windowsGOOS {
+		t.Skip("POSIX setup script")
+	}
+	workspace := t.TempDir()
+	cfg := &config.EvalConfig{
+		Environment: config.Environment{Type: "none", AgentHome: "temporary", SetupSteps: []config.SetupStep{{Run: "touch setup-ran"}}},
+		Engine:      config.EngineConfig{Name: "claude_code"},
+		Judge:       config.JudgeConfig{Type: "agent_judge", Engine: &config.EngineConfig{Name: "qwen_code", Model: config.ModelConfig{Provider: "openai", Name: "test-model"}}},
+	}
+	e := newTestEvaluator(EvalOptions{EvalCfg: cfg, WorkspaceDir: workspace, DeleteWorkspace: true})
+	_, _, err := e.prepareRuntimeForCase(context.Background(), &config.CaseConfig{ID: "isolated"}, ConfigurationWithSkill, agent.NewClaudeCodeAgent(agent.Config{APIKey: "test-key"}))
+	if err == nil || !strings.Contains(err.Error(), "supports only claude_code and codex") {
+		t.Fatalf("error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "setup-ran")); !os.IsNotExist(err) {
+		t.Fatalf("setup ran before judge isolation check: %v", err)
+	}
 }
 
 func TestPrepareRuntimeRejectsReservedVariant(t *testing.T) {
