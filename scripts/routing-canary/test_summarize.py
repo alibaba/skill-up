@@ -274,6 +274,46 @@ class SummarizeFixtureTest(unittest.TestCase):
         self.assertEqual(cells[6], "yes", "the SKILL.md reference observed before the error must be preserved")
         self.assertEqual(cells[8], "-", "an unobserved catalog in a failed run is unknown")
 
+    def test_timeout_without_an_error_event_reports_unknown_evidence(self) -> None:
+        """A run can time out after a valid text event and never emit an error event.
+
+        The transcript then looks complete, so nothing in it says the run
+        stopped early — but `result.json` already reports ERROR, and the
+        evidence the run never reached is unknown, not absent.
+        """
+        write_json(self.iteration / "result.json", {"case_results": [{"case_id": "relevant", "status": "ERROR"}]})
+        write_transcript(
+            self.iteration / "relevant",
+            [
+                {"type": "text", "sessionID": "ses_123", "part": {"text": "working"}},
+                {"type": "tool_use", "name": "Bash", "input": {"command": "true"}},
+            ],
+        )
+
+        text = render(self.root)
+        cells = [cell.strip() for cell in row(text, "relevant").strip().strip("|").split("|")]
+        self.assertEqual(cells[2], "ERROR", "the execution status comes from result.json")
+        self.assertEqual(cells[4], "present", "the transcript itself is readable and complete")
+        self.assertEqual(cells[6], "-", "no SKILL.md reference was observed, so it is unknown rather than absent")
+        self.assertEqual(cells[8], "-", "no catalog was observed, so it is unknown rather than absent")
+
+    def test_timeout_keeps_the_evidence_it_did_observe(self) -> None:
+        """The fallback only downgrades what was not observed."""
+        write_json(self.iteration / "result.json", {"case_results": [{"case_id": "relevant", "status": "ERROR"}]})
+        write_transcript(
+            self.iteration / "relevant",
+            [
+                {"type": "tool_use", "name": "Skill", "input": {"command": "cat .claude/skills/skill/SKILL.md"}},
+                {"type": "text", "sessionID": "ses_123", "part": {"text": "working"}},
+            ],
+        )
+
+        text = render(self.root)
+        cells = [cell.strip() for cell in row(text, "relevant").strip().strip("|").split("|")]
+        self.assertEqual(cells[5], "Skill", "the observed Skill call is preserved")
+        self.assertEqual(cells[6], "yes", "an observed SKILL.md reference stays a positive observation")
+        self.assertEqual(cells[8], "-", "the catalog was not observed, so it is unknown")
+
     def test_transcript_without_result_json_still_renders(self) -> None:
         write_transcript(
             self.iteration / "unrelated",

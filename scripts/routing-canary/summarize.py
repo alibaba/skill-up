@@ -205,6 +205,18 @@ def summarize_case(case_dir: Path, status: str) -> dict:
             "catalog_injected": None,
         }
     info = summarize_transcript(transcripts[0])
+    # A run can fail without leaving a structured error event: an agent that
+    # times out after writing a valid text event is the common shape. The
+    # transcript then looks complete, but the run never got far enough to show
+    # what it did not show — and `result.json` already knows it failed. Use the
+    # execution status as the fallback signal, so an unobserved signal reads as
+    # unknown instead of absent. Positive observations stay: the run did reach
+    # those before it failed.
+    if status.upper() == "ERROR":
+        if not info["skill_file_referenced"]:
+            info["skill_file_referenced"] = None
+        if not info["catalog_injected"]:
+            info["catalog_injected"] = None
     info["execution"] = status
     info["graded"] = graded_result(case_dir)
     info["transcript"] = info.pop("state")
