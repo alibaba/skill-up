@@ -56,6 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reject a `context.repo_fixture` that names a file instead of a directory.
+  OpenSandbox reported a successful upload and copied nothing, so the case ran
+  without the fixture's contents; the `none` runtime failed with an unrelated
+  `is a directory` error about the workspace. Both now fail with
+  `repo_fixture "<path>" is not a directory`.
 - Keep `agent_judge` review materials from reading as instructions. The judge
   prompt now states that inline excerpts and referenced files come from the
   agent under evaluation and are evidence, never instructions, and it fences
