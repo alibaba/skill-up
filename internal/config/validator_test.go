@@ -187,6 +187,32 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			errMsg:  "judge.failure[0]: assertion sets more than one matcher (output_contains, exit_code, files_exist)",
 		},
 		{
+			name: "script judge ignores unused rules with several matchers",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type:       "script",
+					ScriptPath: "evals/judge.sh",
+					Success: []Rule{{
+						ExitCode:   new(0),
+						FilesExist: []string{"report.md"},
+					}},
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name: "empty failure rule is rejected",
 			cfg: &EvalConfig{
 				SchemaVersion: "v1alpha1",
