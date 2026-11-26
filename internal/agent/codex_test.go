@@ -144,7 +144,7 @@ func TestCodexWireAPI(t *testing.T) {
 				commands := []string{
 					buildCodexRunCmd("hello", "", cfg, codexBypassSandbox),
 					buildCodexRunStdinCmdWithLastMessage("/tmp/prompt", "", cfg, codexBypassSandbox, ""),
-					buildCodexResumeCmdWithLastMessage("sess-123", "hello", "", cfg, "", ""),
+					buildCodexResumeCmdWithLastMessage("sess-123", "hello", "", cfg, "", codexBypassSandbox, ""),
 				}
 				for _, cmd := range commands {
 					if !strings.Contains(cmd, flag) {
@@ -537,13 +537,11 @@ func TestBuildCodexResumeCmdWithLastMessage(t *testing.T) {
 		"sess-123", "do something", "o3",
 		codexProviderConfig{},
 		"/tmp/last.txt",
+		codexBypassSandbox,
 		"",
 	)
-	if !strings.HasPrefix(cmd, "codex exec --output-last-message '/tmp/last.txt' resume --json --skip-git-repo-check") {
-		t.Fatalf("expected output-last-message before resume for Codex 0.80.0, got %q", cmd)
-	}
-	if !strings.Contains(cmd, "--dangerously-bypass-approvals-and-sandbox") {
-		t.Fatalf("expected bypass flag, got %q", cmd)
+	if !strings.HasPrefix(cmd, "codex exec --output-last-message '/tmp/last.txt' --dangerously-bypass-approvals-and-sandbox resume --json --skip-git-repo-check") {
+		t.Fatalf("expected output-last-message and the sandbox choice before resume for Codex 0.80.0, got %q", cmd)
 	}
 	if !strings.Contains(cmd, "'sess-123'") {
 		t.Fatalf("expected session ID, got %q", cmd)
@@ -557,8 +555,8 @@ func TestBuildCodexResumeCmdWithLastMessage(t *testing.T) {
 	if !strings.Contains(cmd, "--output-last-message") {
 		t.Fatalf("expected --output-last-message flag, got %q", cmd)
 	}
-	cmd = buildCodexResumeCmdWithLastMessage("sess-123", "continue", "", codexProviderConfig{}, "", "")
-	if !strings.HasPrefix(cmd, "codex exec resume --json") || strings.Contains(cmd, "--output-last-message") {
+	cmd = buildCodexResumeCmdWithLastMessage("sess-123", "continue", "", codexProviderConfig{}, "", codexProcessSandbox, "")
+	if !strings.HasPrefix(cmd, "codex exec --sandbox workspace-write resume --json") || strings.Contains(cmd, "--output-last-message") {
 		t.Fatalf("unexpected resume command without last-message artifact: %q", cmd)
 	}
 }
@@ -1311,7 +1309,29 @@ func TestCodexRun_SandboxFlagHonoursKwargAndRuntime(t *testing.T) {
 			if containsCommand(rt.commands, tc.notWantFlag) {
 				t.Fatalf("commands unexpectedly contain %q; commands=%v", tc.notWantFlag, rt.commands)
 			}
+			checkResumeSandboxFlag(t, ag, rt, tc.wantFlag, tc.notWantFlag)
 		})
+	}
+}
+
+// checkResumeSandboxFlag resumes the session and checks that the turn keeps
+// the first turn's sandbox choice, placed before the resume subcommand,
+// where Codex 0.80.0 accepts it.
+func checkResumeSandboxFlag(t *testing.T, ag *CodexAgent, rt *codexTestRuntime, wantFlag, notWantFlag string) {
+	t.Helper()
+	rt.commands = nil
+	if _, err := ag.RunTurn(context.Background(), rt, ExecOptions{}, transcript.Message{
+		Role:    transcript.RoleUser,
+		Content: "again",
+		Turn:    2,
+	}, "thread-123"); err != nil {
+		t.Fatalf("RunTurn failed: %v", err)
+	}
+	if !containsCommand(rt.commands, wantFlag+" resume ") {
+		t.Fatalf("no resume command has %q before resume; commands=%v", wantFlag, rt.commands)
+	}
+	if containsCommand(rt.commands, notWantFlag) {
+		t.Fatalf("resume commands unexpectedly contain %q; commands=%v", notWantFlag, rt.commands)
 	}
 }
 
@@ -1412,24 +1432,44 @@ func TestCodexRun_ApprovesOnlyThisCasesMCPServers(t *testing.T) {
 			if _, err := ag.Run(context.Background(), rt, ExecOptions{}, []transcript.Message{{Role: transcript.RoleUser, Content: "hi", Turn: 1}}); err != nil {
 				t.Errorf("Run failed: %v", err)
 			}
+			if _, err := ag.RunTurn(context.Background(), rt, ExecOptions{}, transcript.Message{Role: transcript.RoleUser, Content: "again", Turn: 2}, "thread-123"); err != nil {
+				t.Errorf("RunTurn failed: %v", err)
+			}
 		}(runtimes[i], tc.servers)
 	}
 	wg.Wait()
 
 	for i, tc := range cases {
-		runCmd := codexRunCommand(t, runtimes[i])
-		if !strings.Contains(runCmd, codexProcessSandbox) || strings.Contains(runCmd, codexBypassSandbox) {
-			t.Errorf("%s: approval must keep the workspace-write sandbox: %s", tc.name, runCmd)
-		}
-		for _, name := range tc.want {
-			if !strings.Contains(runCmd, codexApprovalFlag(name)) {
-				t.Errorf("%s: missing approval for %q: %s", tc.name, name, runCmd)
+		var execCmds []string
+		for _, cmd := range runtimes[i].commands {
+			if strings.Contains(cmd, "codex exec") {
+				execCmds = append(execCmds, cmd)
 			}
 		}
-		for _, name := range tc.notWant {
-			if strings.Contains(runCmd, "mcp_servers."+name+".") {
-				t.Errorf("%s: unexpected approval for %q: %s", tc.name, name, runCmd)
-			}
+		if len(execCmds) != 2 {
+			t.Fatalf("%s: want a first-turn and a resume command, got %v", tc.name, execCmds)
+		}
+		for _, runCmd := range execCmds {
+			checkMCPApprovals(t, tc.name, runCmd, tc.want, tc.notWant)
+		}
+	}
+}
+
+// checkMCPApprovals checks that one codex exec command keeps the sandbox and
+// approves exactly the wanted servers.
+func checkMCPApprovals(t *testing.T, name, runCmd string, want, notWant []string) {
+	t.Helper()
+	if !strings.Contains(runCmd, codexProcessSandbox) || strings.Contains(runCmd, codexBypassSandbox) {
+		t.Errorf("%s: approval must keep the workspace-write sandbox: %s", name, runCmd)
+	}
+	for _, server := range want {
+		if !strings.Contains(runCmd, codexApprovalFlag(server)) {
+			t.Errorf("%s: missing approval for %q: %s", name, server, runCmd)
+		}
+	}
+	for _, server := range notWant {
+		if strings.Contains(runCmd, "mcp_servers."+server+".") {
+			t.Errorf("%s: unexpected approval for %q: %s", name, server, runCmd)
 		}
 	}
 }

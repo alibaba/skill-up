@@ -56,6 +56,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep the Codex sandbox on resumed turns. On the `none` runtime the first
+  turn ran with `--sandbox workspace-write`, but every later turn of a
+  multi-turn or user-simulator case ran with
+  `--dangerously-bypass-approvals-and-sandbox`, on the host. Resumed turns now
+  use the first turn's choice, including `bypass_sandbox`, and keep the
+  approvals for the MCP servers skill-up installed.
 - Keep `agent_judge` review materials from reading as instructions. The judge
   prompt now states that inline excerpts and referenced files come from the
   agent under evaluation and are evidence, never instructions, and it fences
