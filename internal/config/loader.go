@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -114,6 +115,9 @@ func (l *Loader) LoadCaseConfig(casePath string) (*CaseConfig, error) {
 func (l *Loader) loadSelectedCase(casePath string, selected func(string) bool) (*CaseConfig, error) {
 	// casePath is resolved from the skill root so eval configs work the same
 	// whether invoked from the skill directory or by passing evals/eval.yaml.
+	if err := validateCaseFilePath(l.skillDir, casePath); err != nil {
+		return nil, err
+	}
 	fullPath := filepath.Join(l.skillDir, casePath)
 
 	data, err := os.ReadFile(fullPath)
@@ -152,6 +156,50 @@ func (l *Loader) loadSelectedCase(casePath string, selected func(string) bool) (
 	cfg.SourceFile = casePath
 
 	return &cfg, nil
+}
+
+// validateCaseFilePath rejects absolute and parent-traversal paths before the
+// loader uses a cases.files entry with os.ReadFile. The separator checks are
+// intentionally cross-platform so a configuration copied between operating
+// systems cannot turn a Windows-style path into a traversal on another host.
+func validateCaseFilePath(root, casePath string) error {
+	if strings.TrimSpace(casePath) == "" {
+		return fmt.Errorf("invalid case file path %q: path must be relative and stay within the skill directory", casePath)
+	}
+
+	normalized := strings.ReplaceAll(casePath, `\`, "/")
+	if isAbsoluteCaseFilePath(casePath, normalized) {
+		return fmt.Errorf("invalid case file path %q: path must be relative and stay within the skill directory", casePath)
+	}
+	if slices.Contains(strings.Split(normalized, "/"), "..") {
+		return fmt.Errorf("invalid case file path %q: path must be relative and stay within the skill directory", casePath)
+	}
+	if !caseFileWithinRoot(root, casePath) {
+		return fmt.Errorf("invalid case file path %q: path must be relative and stay within the skill directory", casePath)
+	}
+	return nil
+}
+
+func isAbsoluteCaseFilePath(casePath, normalized string) bool {
+	if filepath.IsAbs(casePath) || strings.HasPrefix(normalized, "/") {
+		return true
+	}
+	return len(normalized) >= 2 &&
+		((normalized[0] >= 'A' && normalized[0] <= 'Z') || (normalized[0] >= 'a' && normalized[0] <= 'z')) &&
+		normalized[1] == ':'
+}
+
+func caseFileWithinRoot(root, casePath string) bool {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	fullAbs, err := filepath.Abs(filepath.Join(root, casePath))
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(filepath.Clean(rootAbs), filepath.Clean(fullAbs))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // LoadAllCases loads all case files referenced in the eval config.

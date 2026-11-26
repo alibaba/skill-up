@@ -1581,6 +1581,43 @@ func TestValidator_ValidateCaseConfig(t *testing.T) {
 	}
 }
 
+func TestValidator_CaseIDPathSafety(t *testing.T) {
+	t.Parallel()
+
+	validLongID := "a" + strings.Repeat("b", 63)
+	tests := []struct {
+		name    string
+		id      string
+		wantErr bool
+	}{
+		{name: "empty is resolved by loader", id: ""},
+		{name: "ascii letters and digits", id: "Case01"},
+		{name: "underscore and hyphen", id: "case_01-prod"},
+		{name: "maximum length", id: validLongID},
+		{name: "parent traversal", id: "../victim", wantErr: true},
+		{name: "cleaned traversal", id: "a/../b", wantErr: true},
+		{name: "absolute path", id: "/tmp/victim", wantErr: true},
+		{name: "backslash traversal", id: `..\victim`, wantErr: true},
+		{name: "leading punctuation", id: "-case", wantErr: true},
+		{name: "too long", id: "a" + strings.Repeat("b", 64), wantErr: true},
+		{name: "space", id: "case id", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := &CaseConfig{ID: tt.id, Input: Input{Prompt: "hello"}}
+			err := NewValidator().ValidateCaseConfig(cfg)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateCaseConfig(%q) error = %v, wantErr %t", tt.id, err, tt.wantErr)
+			}
+			if tt.wantErr && !strings.Contains(err.Error(), "id must start with an ASCII letter or digit") {
+				t.Fatalf("ValidateCaseConfig(%q) error = %v, want case ID safety diagnostic", tt.id, err)
+			}
+		})
+	}
+}
+
 func TestValidator_ValidateAll(t *testing.T) {
 	t.Parallel()
 	validator := NewValidator()
