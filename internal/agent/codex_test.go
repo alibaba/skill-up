@@ -584,7 +584,7 @@ Reading additional input from stdin...
 {"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'rg --files -uu'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
 {"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'rg --files -uu'","aggregated_output":"foo.txt\n","exit_code":0,"status":"completed"}}
 {"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"foo.txt is here."}}
-{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":20,"cache_creation_input_tokens":3,"output_tokens":7}}
+{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":20,"output_tokens":7}}
 `
 
 	parsed := parseCodexOutput(context.Background(), output)
@@ -611,8 +611,9 @@ Reading additional input from stdin...
 	if finalMsg != "foo.txt is here." {
 		t.Fatalf("expected final message to be parsed, got %q", finalMsg)
 	}
-	if inputTokens != 123 {
-		t.Fatalf("expected input tokens 123, got %d", inputTokens)
+	// cached_input_tokens is part of input_tokens in Codex, not extra.
+	if inputTokens != 100 {
+		t.Fatalf("expected input tokens 100, got %d", inputTokens)
 	}
 	if outputTokens != 7 {
 		t.Fatalf("expected output tokens 7, got %d", outputTokens)
@@ -838,8 +839,10 @@ func TestParseCodexSessionFile(t *testing.T) {
 	if parsed.finalMsg != "# Code Statistics" {
 		t.Fatalf("expected final message from session, got %q", parsed.finalMsg)
 	}
-	if parsed.inputTokens != 117772 {
-		t.Fatalf("expected input tokens 117772, got %d", parsed.inputTokens)
+	// Codex reports 56448 of the 61324 input tokens as cached; they are not
+	// added on top.
+	if parsed.inputTokens != 61324 {
+		t.Fatalf("expected input tokens 61324, got %d", parsed.inputTokens)
 	}
 	if parsed.outputTokens != 1115 {
 		t.Fatalf("expected output tokens 1115, got %d", parsed.outputTokens)
@@ -1150,7 +1153,7 @@ func TestCodexRun_PreservesArtifactsOnNonZeroExit(t *testing.T) {
 			Stdout: `{"type":"thread.started","thread_id":"thread-123"}
 {"type":"turn.started"}
 {"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"I hit a problem."}}
-{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":2,"cache_creation_input_tokens":1,"output_tokens":3}}`,
+{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3}}`,
 			Stderr:   "codex failed",
 			ExitCode: 1,
 		},
@@ -1206,7 +1209,7 @@ func TestCodexRun_MergesConfiguredEnvVars(t *testing.T) {
 			Stdout: `{"type":"thread.started","thread_id":"thread-123"}
 {"type":"turn.started"}
 {"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"done"}}
-{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":1}}`,
+{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}`,
 			ExitCode: 0,
 		},
 	}
@@ -1251,7 +1254,7 @@ func TestCodexRun_SandboxFlagHonoursKwargAndRuntime(t *testing.T) {
 	stdout := `{"type":"thread.started","thread_id":"thread-123"}
 {"type":"turn.started"}
 {"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"done"}}
-{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":1}}`
+{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}`
 
 	cases := []struct {
 		name        string

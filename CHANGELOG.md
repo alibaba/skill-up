@@ -56,6 +56,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Count Codex input tokens once. Codex reports cached tokens as part of
+  `input_tokens`, and skill-up added them again, so a run with a high cache
+  hit rate showed close to twice its real input. Codex `input_tokens` in
+  results and reports now match what Codex reports. Earlier versions
+  overcounted runs with cache hits, so a stored baseline from them can hide a
+  later increase in `compare`.
 - Keep `agent_judge` review materials from reading as instructions. The judge
   prompt now states that inline excerpts and referenced files come from the
   agent under evaluation and are evidence, never instructions, and it fences

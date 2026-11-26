@@ -1098,10 +1098,8 @@ type codexItemErr struct {
 }
 
 type codexUsage struct {
-	InputTokens         int `json:"input_tokens"`
-	CachedInputTokens   int `json:"cached_input_tokens"`
-	OutputTokens        int `json:"output_tokens"`
-	CacheCreationTokens int `json:"cache_creation_input_tokens"`
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
 }
 
 type codexCommandState struct {
@@ -1231,7 +1229,7 @@ func applyCodexEvent(state *codexParseState, event codexEvent) {
 		if event.Usage == nil {
 			return
 		}
-		state.inputTokens = max(state.inputTokens, event.Usage.InputTokens+event.Usage.CachedInputTokens+event.Usage.CacheCreationTokens)
+		state.inputTokens = max(state.inputTokens, codexUsageInputTotal(*event.Usage))
 		state.outputTokens = max(state.outputTokens, event.Usage.OutputTokens)
 	case "item.started":
 		applyCodexItemStarted(state, event)
@@ -1714,8 +1712,12 @@ func codexJoinCommand(argv []string) string {
 	return strings.Join(parts, " ")
 }
 
+// codexUsageInputTotal returns the prompt tokens of a Codex usage record.
+// Codex counts cached tokens inside input_tokens (its protocol derives the
+// uncached part as input_tokens - cached_input_tokens), so adding them again
+// would count every cache hit twice.
 func codexUsageInputTotal(u codexUsage) int {
-	return u.InputTokens + u.CachedInputTokens + u.CacheCreationTokens
+	return u.InputTokens
 }
 
 func codexToolResultStatus(output string) string {
