@@ -911,6 +911,66 @@ input:
 	}
 }
 
+func TestLoader_RejectsCaseFilePathEscape(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	skillDir := filepath.Join(root, "skill")
+	if err := os.MkdirAll(filepath.Join(skillDir, "evals", "cases"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# skill\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loader := NewLoader(filepath.Join(skillDir, "evals", "eval.yaml"))
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "parent", path: "../outside.yaml"},
+		{name: "nested parent", path: "evals/cases/../../outside.yaml"},
+		{name: "absolute", path: filepath.Join(root, "outside.yaml")},
+		{name: "windows absolute", path: `C:\outside.yaml`},
+		{name: "windows drive relative", path: `C:outside.yaml`},
+		{name: "windows parent", path: `..\outside.yaml`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := loader.LoadCaseConfig(tt.path); err == nil || !strings.Contains(err.Error(), "invalid case file path") {
+				t.Fatalf("LoadCaseConfig(%q) error = %v, want path validation error", tt.path, err)
+			}
+		})
+	}
+}
+
+func TestLoader_AllowsCaseFileWithinSkillDir(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	skillDir := filepath.Join(root, "skill")
+	casePath := filepath.Join(skillDir, "evals", "cases", "inside.yaml")
+	if err := os.MkdirAll(filepath.Dir(casePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# skill\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(casePath, []byte("id: inside\ninput:\n  prompt: hello\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := NewLoader(filepath.Join(skillDir, "evals", "eval.yaml")).LoadCaseConfig("evals/cases/inside.yaml")
+	if err != nil {
+		t.Fatalf("LoadCaseConfig returned error: %v", err)
+	}
+	if cfg.ID != "inside" {
+		t.Fatalf("case ID = %q, want inside", cfg.ID)
+	}
+}
+
 func TestLoader_EvalDir(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()

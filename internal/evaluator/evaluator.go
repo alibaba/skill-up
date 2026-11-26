@@ -2026,6 +2026,10 @@ func (e *defaultEvaluator) downloadOutputs(ctx context.Context, configName, case
 		return
 	}
 	targetDir := filepath.Join(e.outputDir, caseID, configName, "outputs", targetSubpath)
+	if !e.outputPathAllowed(targetDir) {
+		logging.WarnContextf(ctx, "Evaluator: refusing output path outside outputDir: %s", targetDir)
+		return
+	}
 	if err := os.RemoveAll(targetDir); err != nil {
 		logging.WarnContextf(ctx, "Evaluator: failed to clear target dir %s: %v", targetDir, err)
 		return
@@ -2046,6 +2050,10 @@ func (e *defaultEvaluator) prepareOutputDir(ctx context.Context, configName, cas
 		return ""
 	}
 	targetDir := filepath.Join(e.outputDir, caseID, configName, "outputs", targetSubpath)
+	if !e.outputPathAllowed(targetDir) {
+		logging.WarnContextf(ctx, "Evaluator: refusing output path outside outputDir: %s", targetDir)
+		return ""
+	}
 	if _, err := os.Stat(targetDir); err == nil {
 		if err := os.RemoveAll(targetDir); err != nil {
 			logging.WarnContextf(ctx, "Evaluator: failed to clear target dir %s: %v", targetDir, err)
@@ -2107,6 +2115,10 @@ func (e *defaultEvaluator) ensureArtifactsInOutputDir(
 }
 
 func (e *defaultEvaluator) downloadArtifactsIntoDir(ctx context.Context, rt runtime.Runtime, targetSubpath, targetDir string, sessionResult *agent.SessionResult) {
+	if !e.outputPathAllowed(targetDir) {
+		logging.WarnContextf(ctx, "Evaluator: refusing output path outside outputDir: %s", targetDir)
+		return
+	}
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		logging.WarnContextf(ctx, "Evaluator: failed to create target dir %s: %v", targetDir, err)
 		return

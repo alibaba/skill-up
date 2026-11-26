@@ -81,6 +81,10 @@ func (e *defaultEvaluator) collectGlobArtifacts(ctx context.Context, rt runtime.
 	}
 
 	targetRoot := filepath.Join(e.outputDir, caseCfg.ID, configName, "outputs", collectArtifactsSubdir)
+	if !e.outputPathAllowed(targetRoot) {
+		logging.WarnContextf(ctx, "Evaluator: collect_artifacts: refusing output path outside outputDir: %s", targetRoot)
+		return
+	}
 	// Clear the subtree before downloading so a reused --output-dir or a retry
 	// attempt cannot leave stale artifacts from an earlier run that the current
 	// workspace no longer produces or matches (mirrors prepareOutputDir for

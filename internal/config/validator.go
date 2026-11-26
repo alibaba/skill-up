@@ -25,6 +25,8 @@ const (
 	maxRetryPolicyRetries = 10
 )
 
+var caseIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+
 // Runtime type constants.
 const (
 	runtimeTypeNone        = "none"
@@ -131,8 +133,12 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 	var errs []string
 
-	// id is optional - Loader auto-generates from filename if not specified
-	// See loader.go:LoadCaseConfig for the fallback logic
+	// id is optional here because Loader auto-generates it from the filename
+	// when it is not specified. Any non-empty effective ID must be safe to use
+	// as a path component before the evaluator creates or removes output dirs.
+	if cfg.ID != "" && !caseIDPattern.MatchString(cfg.ID) {
+		errs = append(errs, "id must start with an ASCII letter or digit and contain only ASCII letters, digits, '_' or '-' with a maximum length of 64")
+	}
 
 	// input.prompt or input.turns is required, but not both. Presence for
 	// mutual exclusion deliberately stays byte-based so a whitespace-only
