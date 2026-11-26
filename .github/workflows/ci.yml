@@ -218,16 +218,17 @@ jobs:
           diff --git a/internal/agent/codex.go b/internal/agent/codex.go
           --- a/internal/agent/codex.go
           +++ b/internal/agent/codex.go
-          @@ -1010,9 +1010,9 @@
-           func buildCodexResumeCmdWithLastMessage(sessionID, instruction, model string, provider codexProviderConfig, lastMessagePath, mcpFlags string) string {
-               // In 0.80.0 this is an exec-only option, not a global resume option.
+          @@ -1023,10 +1023,9 @@
+               // In 0.80.0 --output-last-message and --sandbox are exec-only options,
+               // not global ones, so they must come before the resume subcommand.
           -    cmd := "codex exec"
-          +    cmd := "codex exec resume"
+          +    cmd := "codex exec " + sandboxFlag + " resume"
                if lastMessagePath != "" {
                    cmd += " --output-last-message " + shellQuote(lastMessagePath)
                }
-          -    cmd += " resume --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox" + mcpFlags
-          +    cmd += " --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox" + mcpFlags
+          -    cmd += " " + sandboxFlag
+          -    cmd += " resume --json --skip-git-repo-check" + resumeFlags
+          +    cmd += " --json --skip-git-repo-check" + resumeFlags
                cmd += codexProviderFlags(provider)
                if model != "" {
           PATCH

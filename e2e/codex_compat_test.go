@@ -36,13 +36,17 @@ func TestCodexCLICompatibility(t *testing.T) {
 	}
 	wireAPI := codexCompatibilityWireAPI(t)
 	for _, homeMode := range []string{evalruntime.AgentHomeInherited, evalruntime.AgentHomeTemporary} {
-		t.Run(homeMode, func(t *testing.T) {
-			runCodexCLICompatibility(t, wireAPI, homeMode)
-		})
+		// The default policy on the none runtime passes --sandbox
+		// workspace-write on every turn, including the resumed one.
+		for _, bypassSandbox := range []string{"true", "false"} {
+			t.Run(homeMode+"/bypass_sandbox="+bypassSandbox, func(t *testing.T) {
+				runCodexCLICompatibility(t, wireAPI, homeMode, bypassSandbox)
+			})
+		}
 	}
 }
 
-func runCodexCLICompatibility(t *testing.T, wireAPI, homeMode string) {
+func runCodexCLICompatibility(t *testing.T, wireAPI, homeMode, bypassSandbox string) {
 	rt, ctx := codexCompatibilityRuntime(t, homeMode)
 	var mu sync.Mutex
 	var requests [][]codexCompatMessage
@@ -65,7 +69,7 @@ func runCodexCLICompatibility(t *testing.T, wireAPI, homeMode string) {
 	params := agent.ResolveAdapterConfig(credential.ResolvedAgentConfig{
 		Engine: "codex", Provider: "compat", Model: "gpt-5.4",
 		BaseURL: server.URL + "/v1", APIKey: "local-fixture-key",
-		Kwargs: map[string]string{"wire_api": wireAPI, "bypass_sandbox": "true"},
+		Kwargs: map[string]string{"wire_api": wireAPI, "bypass_sandbox": bypassSandbox},
 	}, nil)
 	ag := agent.NewCodexAgent(agent.Config{
 		ModelProvider: params.AppliedProvider, ModelName: params.AppliedModel,
