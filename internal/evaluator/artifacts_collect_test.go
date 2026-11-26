@@ -166,6 +166,29 @@ func TestCollectGlobArtifacts_NoPatternsIsNoop(t *testing.T) {
 	}
 }
 
+func TestCollectGlobArtifacts_RejectsOutputEscape(t *testing.T) {
+	rt := newNoneRuntimeWithFiles(t, map[string]string{"result.json": "{}"})
+	root := t.TempDir()
+	victimDir := filepath.Join(root, "victim")
+	victimFile := filepath.Join(victimDir, "keep.txt")
+	if err := os.MkdirAll(victimDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(victimFile, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e := newTestEvaluator(EvalOptions{
+		OutputDir: filepath.Join(root, "outputs"),
+		EvalCfg:   &config.EvalConfig{Cases: config.CasesConfig{Defaults: config.CaseDefaults{CollectArtifacts: []string{"**"}}}},
+	})
+
+	e.collectGlobArtifacts(context.Background(), rt, "with_skill", &config.CaseConfig{ID: "../../victim"})
+
+	if data, err := os.ReadFile(victimFile); err != nil || string(data) != "keep" {
+		t.Fatalf("victim file changed after rejected collect_artifacts path: data=%q err=%v", data, err)
+	}
+}
+
 func assertFileContent(t *testing.T, path, want string) {
 	t.Helper()
 	data, err := os.ReadFile(path) // #nosec G304 -- test reads controlled temp path
