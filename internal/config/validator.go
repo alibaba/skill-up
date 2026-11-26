@@ -272,15 +272,15 @@ func validateCaseMCP(mcpCfg MCPConfig) []string {
 }
 
 // validateEvalMCP checks the eval-level server list. Servers are installed
-// and merged with case overrides by name, so an empty or repeated name cannot
-// be resolved: the last duplicate silently wins for cases without their own
-// mcp block, and the merge fails for cases with one. The mode check matches
-// the one MCP provisioning applies when a run starts.
+// and merged with case overrides by name: without a case override, duplicate
+// entries reach the agent adapter, and with one, the merge rejects them and
+// blank names. The mode check matches the one MCP provisioning applies when a
+// run starts.
 func validateEvalMCP(mcpCfg MCPConfig) []string {
 	var errs []string
 	seen := make(map[string]struct{}, len(mcpCfg.Servers))
 	for i, server := range mcpCfg.Servers {
-		if server.Name == "" {
+		if strings.TrimSpace(server.Name) == "" {
 			errs = append(errs, fmt.Sprintf("mcp.servers[%d].name is required", i))
 		} else if _, dup := seen[server.Name]; dup {
 			errs = append(errs, fmt.Sprintf("mcp.servers[%d].name %q is duplicated", i, server.Name))

@@ -2631,6 +2631,7 @@ func TestValidateEvalMCP(t *testing.T) {
 		{name: "real and mocked servers", servers: []MCPServer{{Name: "docs", Mode: "real"}, {Name: "shop", Mode: "mocked"}}},
 		{name: "no servers"},
 		{name: "empty name", servers: []MCPServer{{Mode: "real"}}, want: []string{"mcp.servers[0].name is required"}},
+		{name: "blank name", servers: []MCPServer{{Name: "   ", Mode: "real"}}, want: []string{"mcp.servers[0].name is required"}},
 		{name: "duplicate name", servers: []MCPServer{{Name: "shop", Mode: "mocked"}, {Name: "shop", Mode: "real"}}, want: []string{`mcp.servers[1].name "shop" is duplicated`}},
 		{name: "misspelled mode", servers: []MCPServer{{Name: "shop", Mode: "mock"}}, want: []string{"mcp.servers[0].mode must be one of: mocked, real"}},
 		{name: "missing mode", servers: []MCPServer{{Name: "shop"}}, want: []string{"mcp.servers[0].mode must be one of: mocked, real"}},
@@ -2642,5 +2643,22 @@ func TestValidateEvalMCP(t *testing.T) {
 				t.Fatalf("validateEvalMCP() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// The check runs through the public entry point that validate and run use.
+func TestValidateEvalConfigRejectsInvalidMCPServers(t *testing.T) {
+	t.Parallel()
+
+	cfg := &EvalConfig{
+		SchemaVersion: "v1alpha1",
+		Environment:   Environment{Type: "none"},
+		Engine:        EngineConfig{Name: "claude_code"},
+		Cases:         CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+		MCP:           MCPConfig{Servers: []MCPServer{{Name: "   ", Mode: "mocked", ConfigRef: "evals/mcp.yaml"}}},
+	}
+	err := NewValidator().ValidateEvalConfig(cfg)
+	if err == nil || !strings.Contains(err.Error(), "mcp.servers[0].name is required") {
+		t.Fatalf("ValidateEvalConfig() error = %v, want a required-name error", err)
 	}
 }
