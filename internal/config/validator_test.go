@@ -2619,7 +2619,7 @@ func TestValidatorReservedVariant(t *testing.T) {
 	}
 }
 
-func TestValidateCasesParallelismAndRetryOn(t *testing.T) {
+func TestValidateRetryOn(t *testing.T) {
 	t.Parallel()
 
 	base := func() *EvalConfig {
@@ -2636,9 +2636,6 @@ func TestValidateCasesParallelismAndRetryOn(t *testing.T) {
 		wantErr string
 	}{
 		{name: "defaults", edit: func(*EvalConfig) {}},
-		{name: "parallelism at the limit", edit: func(c *EvalConfig) { c.Cases.Parallelism = 256 }},
-		{name: "parallelism above the limit", edit: func(c *EvalConfig) { c.Cases.Parallelism = 5000 }, wantErr: "cases.parallelism must be between 1 and 256, got 5000"},
-		{name: "negative parallelism", edit: func(c *EvalConfig) { c.Cases.Parallelism = -3 }, wantErr: "cases.parallelism must be between 1 and 256, got -3"},
 		{name: "known retry reasons in any case", edit: func(c *EvalConfig) {
 			c.Cases.RetryPolicy = RetryPolicy{MaxRetries: 1, RetryOn: []string{"timeout", "ERROR"}}
 		}},
@@ -2661,5 +2658,29 @@ func TestValidateCasesParallelismAndRetryOn(t *testing.T) {
 				t.Fatalf("ValidateEvalConfig() error = %v, want %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestValidateCasesParallelism(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		parallelism int
+		wantErr     bool
+	}{{0, false}, {1, false}, {256, false}, {257, true}, {-3, true}} {
+		err := ValidateCasesParallelism(tc.parallelism)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("ValidateCasesParallelism(%d) error = %v, wantErr %t", tc.parallelism, err, tc.wantErr)
+		}
+	}
+	// validate checks the file value through ValidateAll.
+	result := &EvalResult{Eval: &EvalConfig{
+		SchemaVersion: "v1alpha1",
+		Environment:   Environment{Type: "none"},
+		Engine:        EngineConfig{Name: "claude_code"},
+		Cases:         CasesConfig{Files: []string{"evals/cases/test.yaml"}, Parallelism: 5000},
+	}}
+	if err := NewValidator().ValidateAll(result); err == nil || !strings.Contains(err.Error(), "cases.parallelism must be between 1 and 256, got 5000") {
+		t.Fatalf("ValidateAll() error = %v, want a parallelism error", err)
 	}
 }

@@ -1591,6 +1591,46 @@ func TestApplyRunConfigOverrides_Workspace(t *testing.T) {
 	}
 }
 
+// run checks the parallelism it will use: a valid --parallelism replaces an
+// out-of-range file value, and without one the file value is rejected.
+func TestApplyRunConfigOverrides_ChecksEffectiveParallelism(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name      string
+		flag      string
+		wantError string
+	}{
+		{name: "override replaces the file value", flag: "4"},
+		{name: "file value without override", wantError: "cases.parallelism must be between 1 and 256, got 257"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cmd := &cobra.Command{}
+			cmd.SetContext(context.Background())
+			cmd.Flags().Int("parallelism", 0, "")
+			if tt.flag != "" {
+				if err := cmd.Flags().Set("parallelism", tt.flag); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg := config.DefaultEvalConfig()
+			cfg.Cases.Parallelism = 257
+
+			err := applyRunConfigOverrides(cfg, cmd)
+			if tt.wantError == "" {
+				if err != nil || cfg.Cases.Parallelism != 4 {
+					t.Fatalf("applyRunConfigOverrides: err=%v parallelism=%d", err, cfg.Cases.Parallelism)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("error = %v, want substring %q", err, tt.wantError)
+			}
+		})
+	}
+}
+
 func TestEvaluateOptionsFromFlags_RejectsNegativeIteration(t *testing.T) {
 	t.Parallel()
 

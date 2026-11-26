@@ -58,8 +58,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Validate `cases.parallelism` and `cases.retry_policy.retry_on`.
   `parallelism` outside the documented range of 1 to 256 passed `validate`,
-  and a misspelled retry reason such as `timeouts` passed too, so retries
-  silently never happened.
+  and so did a misspelled retry reason such as `timeouts`, which never
+  matched. `run --parallelism` still replaces an out-of-range file value.
 - Keep `agent_judge` review materials from reading as instructions. The judge
   prompt now states that inline excerpts and referenced files come from the
   agent under evaluation and are evidence, never instructions, and it fences

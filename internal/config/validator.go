@@ -22,7 +22,6 @@ const (
 	judgeTypeScript       = "script"
 	judgeTypeAgentJudge   = "agent_judge"
 	maxRetryPolicyRetries = 10
-	maxCasesParallelism   = 256
 )
 
 // Runtime type constants.
@@ -232,23 +231,34 @@ func validateExpect(prefix string, expect Expect) []string {
 	return errs
 }
 
-// validateCasesExecution checks the retry policy and parallelism of a suite.
+// validateCasesExecution checks the retry policy of a suite.
 func validateCasesExecution(cases CasesConfig) []string {
 	var errs []string
 	if cases.RetryPolicy.MaxRetries > maxRetryPolicyRetries {
 		errs = append(errs, fmt.Sprintf("cases.retry_policy.max_retries must be <= %d", maxRetryPolicyRetries))
 	}
 	errs = append(errs, validateRetryOn(cases.RetryPolicy.RetryOn)...)
-	// 0 means unset; the loader fills in the default.
-	if p := cases.Parallelism; p < 0 || p > maxCasesParallelism {
-		errs = append(errs, fmt.Sprintf("cases.parallelism must be between 1 and %d, got %d", maxCasesParallelism, p))
-	}
 	return errs
 }
 
+// MaxCasesParallelism is the highest cases.parallelism and run --parallelism
+// value.
+const MaxCasesParallelism = 256
+
+// ValidateCasesParallelism checks the parallelism a run will use. It is not
+// part of ValidateEvalConfig because run --parallelism replaces the file
+// value: run checks the effective value after its overrides, and validate
+// checks the file value. 0 means unset; the loader fills in the default.
+func ValidateCasesParallelism(parallelism int) error {
+	if parallelism < 0 || parallelism > MaxCasesParallelism {
+		return fmt.Errorf("cases.parallelism must be between 1 and %d, got %d", MaxCasesParallelism, parallelism)
+	}
+	return nil
+}
+
 // validateRetryOn rejects retry reasons the evaluator never produces. It
-// matches reasons without case, so a misspelled one ("timeouts") would
-// silently disable retries.
+// matches reasons without case, so a misspelled entry ("timeouts") never
+// matches anything.
 func validateRetryOn(reasons []string) []string {
 	var errs []string
 	for i, reason := range reasons {
@@ -664,6 +674,9 @@ func isValidJudgeContextMode(mode string) bool {
 // cli/validate.go both do this.
 func (v *Validator) ValidateAll(result *EvalResult) error {
 	if err := v.ValidateEvalConfig(result.Eval); err != nil {
+		return err
+	}
+	if err := ValidateCasesParallelism(result.Eval.Cases.Parallelism); err != nil {
 		return err
 	}
 	return v.ValidateCasesWithEvalDefaults(result.Eval, result.Cases)
