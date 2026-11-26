@@ -56,6 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reject a `rule_based` rule item that sets more than one matcher. The judge
+  evaluates one matcher per item and ignored the rest, so an item with
+  `output_contains`, `exit_code` and `files_exist` checked only the output and
+  could pass with a failed exit and a missing file. Put each matcher in its own
+  list item.
 - Keep `agent_judge` review materials from reading as instructions. The judge
   prompt now states that inline excerpts and referenced files come from the
   agent under evaluation and are evidence, never instructions, and it fences

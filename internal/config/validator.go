@@ -341,9 +341,20 @@ func validateJudgeEngine(judge JudgeConfig) []string {
 // values. Such an empty rule passes validation and then misbehaves at runtime:
 // in success position it fails late with "unknown_rule", and in failure
 // position it no-ops, letting the case pass with zero assertions evaluated.
+//
+// A rule that sets more than one matcher is rejected too. The runtime
+// dispatcher evaluates exactly one matcher per rule and ignores the rest, so
+// an item holding output_contains, exit_code and files_exist checks only the
+// output and can pass with a failed exit and a missing file.
 func validateRecognizableRules(field string, rules []Rule) []string {
 	var errs []string
 	for i, rule := range rules {
+		if matchers := ruleMatcherNames(rule); len(matchers) > 1 {
+			errs = append(errs, fmt.Sprintf(
+				"%s[%d]: assertion sets more than one matcher (%s), but only one is evaluated; put each matcher in its own list item",
+				field, i, strings.Join(matchers, ", ")))
+			continue
+		}
 		if ruleHasRecognizableField(rule) {
 			continue
 		}
@@ -352,6 +363,32 @@ func validateRecognizableRules(field string, rules []Rule) []string {
 			field, i))
 	}
 	return errs
+}
+
+// ruleMatcherNames lists the matcher fields a rule sets, in the order the
+// runtime dispatcher checks them.
+func ruleMatcherNames(rule Rule) []string {
+	var names []string
+	for _, matcher := range []struct {
+		name string
+		set  bool
+	}{
+		{"output_contains", rule.OutputContains != nil},
+		{"output_matches", rule.OutputMatches != nil},
+		{"exit_code", rule.ExitCode != nil},
+		{"tool_called", rule.ToolCalled != nil},
+		{"files_exist", len(rule.FilesExist) > 0},
+		{"files_not_exist", len(rule.FilesNotExist) > 0},
+		{"turn_response_contains", rule.TurnResponseContains != nil},
+		{"turn_response_not_contains", rule.TurnResponseNotContains != nil},
+		{"tool_called_in_turn", rule.ToolCalledInTurn != nil},
+		{"tool_not_called_in_turn", rule.ToolNotCalledInTurn != nil},
+	} {
+		if matcher.set {
+			names = append(names, matcher.name)
+		}
+	}
+	return names
 }
 
 // ruleHasRecognizableField reports whether the rule sets at least one matcher

@@ -133,6 +133,60 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 			errMsg:  "judge.success[0]: assertion has no recognizable matcher field",
 		},
 		{
+			name: "success rule with several matchers is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Success: []Rule{{
+						OutputContains: &OutputContainsRule{All: []string{"done"}},
+						ExitCode:       new(0),
+						FilesExist:     []string{"report.md"},
+					}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.success[0]: assertion sets more than one matcher (output_contains, exit_code, files_exist), but only one is evaluated; put each matcher in its own list item",
+		},
+		{
+			name: "failure rule with several matchers is rejected",
+			cfg: &EvalConfig{
+				SchemaVersion: "v1alpha1",
+				Environment:   Environment{Type: "none"},
+				Engine: EngineConfig{
+					Name: "claude_code",
+					Model: ModelConfig{
+						Provider: "anthropic",
+						Name:     "claude-sonnet-4-6",
+					},
+				},
+				Cases: CasesConfig{
+					Files: []string{"evals/cases/test.yaml"},
+				},
+				Judge: JudgeConfig{
+					Type: "rule_based",
+					Failure: []Rule{{
+						OutputContains: &OutputContainsRule{All: []string{"done"}},
+						ExitCode:       new(0),
+						FilesExist:     []string{"report.md"},
+					}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "judge.failure[0]: assertion sets more than one matcher (output_contains, exit_code, files_exist)",
+		},
+		{
 			name: "empty failure rule is rejected",
 			cfg: &EvalConfig{
 				SchemaVersion: "v1alpha1",
