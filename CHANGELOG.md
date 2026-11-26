@@ -56,6 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Validate the eval-level `mcp.servers` list the way case-level servers are
+  validated. An empty or duplicated server name and a missing or misspelled
+  `mode` (such as `mock`) passed `validate`. A duplicate silently replaced the
+  earlier server for cases without their own `mcp` block and failed the merge
+  for cases with one.
 - Keep `agent_judge` review materials from reading as instructions. The judge
   prompt now states that inline excerpts and referenced files come from the
   agent under evaluation and are evidence, never instructions, and it fences

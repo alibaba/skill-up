@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -2614,6 +2615,31 @@ func TestValidatorReservedVariant(t *testing.T) {
 			err := NewValidator().ValidateEvalConfig(cfg)
 			if err == nil || !strings.Contains(err.Error(), "environment.env.SKILL_UP_VARIANT is reserved") {
 				t.Fatalf("expected reserved-name error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateEvalMCP(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		servers []MCPServer
+		want    []string
+	}{
+		{name: "real and mocked servers", servers: []MCPServer{{Name: "docs", Mode: "real"}, {Name: "shop", Mode: "mocked"}}},
+		{name: "no servers"},
+		{name: "empty name", servers: []MCPServer{{Mode: "real"}}, want: []string{"mcp.servers[0].name is required"}},
+		{name: "duplicate name", servers: []MCPServer{{Name: "shop", Mode: "mocked"}, {Name: "shop", Mode: "real"}}, want: []string{`mcp.servers[1].name "shop" is duplicated`}},
+		{name: "misspelled mode", servers: []MCPServer{{Name: "shop", Mode: "mock"}}, want: []string{"mcp.servers[0].mode must be one of: mocked, real"}},
+		{name: "missing mode", servers: []MCPServer{{Name: "shop"}}, want: []string{"mcp.servers[0].mode must be one of: mocked, real"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := validateEvalMCP(MCPConfig{Servers: tc.servers})
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("validateEvalMCP() = %q, want %q", got, tc.want)
 			}
 		})
 	}
