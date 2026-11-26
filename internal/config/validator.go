@@ -22,6 +22,7 @@ const (
 	judgeTypeScript       = "script"
 	judgeTypeAgentJudge   = "agent_judge"
 	maxRetryPolicyRetries = 10
+	maxCasesParallelism   = 256
 )
 
 // Runtime type constants.
@@ -99,9 +100,7 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	if len(cfg.Cases.Files) == 0 {
 		errs = append(errs, "cases.files must contain at least one case file")
 	}
-	if cfg.Cases.RetryPolicy.MaxRetries > maxRetryPolicyRetries {
-		errs = append(errs, fmt.Sprintf("cases.retry_policy.max_retries must be <= %d", maxRetryPolicyRetries))
-	}
+	errs = append(errs, validateCasesExecution(cfg.Cases)...)
 
 	errs = append(errs, validateCollectArtifacts("cases.defaults.collect_artifacts", cfg.Cases.Defaults.CollectArtifacts)...)
 	errs = append(errs, validateExpect("cases.defaults.expect", cfg.Cases.Defaults.Expect)...)
@@ -230,6 +229,33 @@ func validateExpect(prefix string, expect Expect) []string {
 		}
 	}
 
+	return errs
+}
+
+// validateCasesExecution checks the retry policy and parallelism of a suite.
+func validateCasesExecution(cases CasesConfig) []string {
+	var errs []string
+	if cases.RetryPolicy.MaxRetries > maxRetryPolicyRetries {
+		errs = append(errs, fmt.Sprintf("cases.retry_policy.max_retries must be <= %d", maxRetryPolicyRetries))
+	}
+	errs = append(errs, validateRetryOn(cases.RetryPolicy.RetryOn)...)
+	// 0 means unset; the loader fills in the default.
+	if p := cases.Parallelism; p < 0 || p > maxCasesParallelism {
+		errs = append(errs, fmt.Sprintf("cases.parallelism must be between 1 and %d, got %d", maxCasesParallelism, p))
+	}
+	return errs
+}
+
+// validateRetryOn rejects retry reasons the evaluator never produces. It
+// matches reasons without case, so a misspelled one ("timeouts") would
+// silently disable retries.
+func validateRetryOn(reasons []string) []string {
+	var errs []string
+	for i, reason := range reasons {
+		if !strings.EqualFold(reason, "timeout") && !strings.EqualFold(reason, "error") {
+			errs = append(errs, fmt.Sprintf("cases.retry_policy.retry_on[%d] %q must be one of: timeout, error", i, reason))
+		}
+	}
 	return errs
 }
 

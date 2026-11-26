@@ -2618,3 +2618,48 @@ func TestValidatorReservedVariant(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateCasesParallelismAndRetryOn(t *testing.T) {
+	t.Parallel()
+
+	base := func() *EvalConfig {
+		return &EvalConfig{
+			SchemaVersion: "v1alpha1",
+			Environment:   Environment{Type: "none"},
+			Engine:        EngineConfig{Name: "claude_code"},
+			Cases:         CasesConfig{Files: []string{"evals/cases/test.yaml"}},
+		}
+	}
+	for _, tc := range []struct {
+		name    string
+		edit    func(*EvalConfig)
+		wantErr string
+	}{
+		{name: "defaults", edit: func(*EvalConfig) {}},
+		{name: "parallelism at the limit", edit: func(c *EvalConfig) { c.Cases.Parallelism = 256 }},
+		{name: "parallelism above the limit", edit: func(c *EvalConfig) { c.Cases.Parallelism = 5000 }, wantErr: "cases.parallelism must be between 1 and 256, got 5000"},
+		{name: "negative parallelism", edit: func(c *EvalConfig) { c.Cases.Parallelism = -3 }, wantErr: "cases.parallelism must be between 1 and 256, got -3"},
+		{name: "known retry reasons in any case", edit: func(c *EvalConfig) {
+			c.Cases.RetryPolicy = RetryPolicy{MaxRetries: 1, RetryOn: []string{"timeout", "ERROR"}}
+		}},
+		{name: "misspelled retry reason", edit: func(c *EvalConfig) {
+			c.Cases.RetryPolicy = RetryPolicy{MaxRetries: 1, RetryOn: []string{"timeout", "timeouts"}}
+		}, wantErr: `cases.retry_policy.retry_on[1] "timeouts" must be one of: timeout, error`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := base()
+			tc.edit(cfg)
+			err := NewValidator().ValidateEvalConfig(cfg)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ValidateEvalConfig() error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("ValidateEvalConfig() error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
