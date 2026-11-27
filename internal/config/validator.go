@@ -107,6 +107,7 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	errs = append(errs, validateCollectArtifacts("cases.defaults.collect_artifacts", cfg.Cases.Defaults.CollectArtifacts)...)
 	errs = append(errs, validateExpect("cases.defaults.expect", cfg.Cases.Defaults.Expect)...)
 	errs = append(errs, validateSkillRefs("skills", cfg.Skills)...)
+	errs = append(errs, validateEvalMCP(cfg.MCP)...)
 	errs = append(errs, validateConfiguredJudges(judgeFields{single: cfg.Judge, singleSet: cfg.JudgeSet, members: cfg.Judges, membersSet: cfg.JudgesSet})...)
 	if cfg.UserSimulator != (UserSimulatorModel{}) {
 		if strings.TrimSpace(cfg.UserSimulator.Provider) == "" || strings.TrimSpace(cfg.UserSimulator.Model) == "" {
@@ -266,6 +267,29 @@ func validateCaseMCP(mcpCfg MCPConfig) []string {
 		}
 		if server.Command != "" || len(server.Args) > 0 {
 			errs = append(errs, fmt.Sprintf("mcp.servers[%d] (%q) mocked mode does not support command/args", i, server.Name))
+		}
+	}
+	return errs
+}
+
+// validateEvalMCP checks the eval-level server list. Servers are installed
+// and merged with case overrides by name: without a case override, duplicate
+// entries reach the agent adapter, and with one, the merge rejects them and
+// blank names. The mode check matches the one MCP provisioning applies when a
+// run starts.
+func validateEvalMCP(mcpCfg MCPConfig) []string {
+	var errs []string
+	seen := make(map[string]struct{}, len(mcpCfg.Servers))
+	for i, server := range mcpCfg.Servers {
+		if strings.TrimSpace(server.Name) == "" {
+			errs = append(errs, fmt.Sprintf("mcp.servers[%d].name is required", i))
+		} else if _, dup := seen[server.Name]; dup {
+			errs = append(errs, fmt.Sprintf("mcp.servers[%d].name %q is duplicated", i, server.Name))
+		} else {
+			seen[server.Name] = struct{}{}
+		}
+		if server.Mode != mcpModeMocked && server.Mode != mcpModeReal {
+			errs = append(errs, fmt.Sprintf("mcp.servers[%d].mode must be one of: mocked, real", i))
 		}
 	}
 	return errs

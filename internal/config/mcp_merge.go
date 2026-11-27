@@ -8,6 +8,7 @@ import (
 
 const (
 	mcpModeMocked              = "mocked"
+	mcpModeReal                = "real"
 	builtinFilesystemMCPServer = "filesystem"
 )
 

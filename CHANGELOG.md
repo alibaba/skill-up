@@ -106,6 +106,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use prompt-file delivery for resumed Claude Code and Qoder turns when the
   prompt exceeds the inline limit or the target is Windows, preserving prompt
   delivery metadata and failing before execution if the file cannot be uploaded.
+- Validate the eval-level `mcp.servers` list the way case-level servers are
+  validated. An empty or duplicated server name and a missing or misspelled
+  `mode` (such as `mock`) passed `validate`. Without case overrides, duplicate
+  entries reached the agent adapter; with them, the merge rejected them and
+  blank names at run time.
 - Read workspace file expectations and rule-based checks through the runtime
   when it exposes `Exists` and `ReadFile` accessors. Docker and OpenSandbox
   cases now grade the actual sandbox workspace instead of host paths, while
