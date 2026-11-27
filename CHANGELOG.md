@@ -124,6 +124,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   later increase in `compare`.
 - Count primary cases consistently in Markdown and CLI summaries for benchmark
   runs, without counting baseline rows as extra cases or discarding their details.
+- Reject duplicate selected IDs in Anthropic `evals.json` before import writes
+  any files or auto mode runs the cases. Duplicate IDs mapped to the same case.
 - Reject malformed `--include-case-name` and `--exclude-case-name` glob patterns
   before loading cases, including in auto mode, instead of silently ignoring them.
 

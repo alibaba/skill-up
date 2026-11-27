@@ -342,6 +342,33 @@ func makeEvalsJSON(t *testing.T, skillName string, ids []int) string {
 	return string(data)
 }
 
+func TestImportCmdRejectsDuplicateIDsBeforeWriting(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeSkillFile(t, root, "SKILL.md", "# Example")
+	writeSkillFile(t, root, "evals/evals.json", makeEvalsJSON(t, "example", []int{1, 2, 1}))
+	writeSkillFile(t, root, "evals/cases/case-1.yaml", "existing content")
+	cmd := newImportCmd()
+	cmd.SetArgs([]string{filepath.Join(root, "evals", "evals.json")})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "duplicate eval ID 1") {
+		t.Fatalf("import error = %v, want duplicate eval ID 1", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "evals", "cases", "case-1.yaml"))
+	if err != nil || string(got) != "existing content" {
+		t.Fatalf("existing case after failed import = %q, %v", got, err)
+	}
+}
+
+func TestConvertAnthropicEvalsIgnoresDuplicatesOutsideSelection(t *testing.T) {
+	t.Parallel()
+	input := anthropicEvals{Evals: []anthropicEval{{ID: 1}, {ID: 2}, {ID: 2}}}
+	selectedID := importedCaseID(1)
+	selected := func(id string) bool { return id == selectedID }
+	if _, err := convertAnthropicEvals(input, t.TempDir(), selected); err != nil {
+		t.Fatalf("unselected duplicates should not block the selected case: %v", err)
+	}
+}
+
 func TestImportCmd_Success(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
