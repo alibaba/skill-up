@@ -199,11 +199,9 @@ var otlpLoopbackCases = []otlpLoopbackCase{
 	},
 }
 
-// TestExecuteArgsExpandedOTLPHeaderReachesOnlyTrustedRoutes runs the real
-// start-up path (config discovery, env defaults, exporter initialization and
-// shutdown flush) against two loopback collectors. The trusted collector is
-// named by the user config; the other by an automatically discovered project
-// config.
+// TestExecuteArgsExpandedOTLPHeaderReachesOnlyTrustedRoutes checks which
+// headers reach the trusted and project collectors. The fallback case also
+// checks the environment before starting the exporter.
 func TestExecuteArgsExpandedOTLPHeaderReachesOnlyTrustedRoutes(t *testing.T) {
 	previousTracer, previousMeter := otel.GetTracerProvider(), otel.GetMeterProvider()
 	t.Cleanup(func() {

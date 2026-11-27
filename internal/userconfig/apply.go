@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -180,8 +181,7 @@ func hasTrustedSignalOption(pending map[string]string, defaults map[string]envDe
 	}
 	switch option {
 	case "ENDPOINT":
-		u, err := url.Parse(value)
-		return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Hostname() != ""
+		return usableOTLPEndpoint(value)
 	case "PROTOCOL":
 		return value == "grpc" || value == "http/protobuf"
 	case "INSECURE":
@@ -191,6 +191,18 @@ func hasTrustedSignalOption(pending map[string]string, defaults map[string]envDe
 		// Checking a path here cannot guarantee that a later load succeeds.
 		return false
 	}
+}
+
+func usableOTLPEndpoint(value string) bool {
+	u, err := url.Parse(value)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || strings.Contains(u.Hostname(), "%") {
+		return false
+	}
+	if u.Port() == "" {
+		return true
+	}
+	port, err := strconv.ParseUint(u.Port(), 10, 16)
+	return err == nil && port != 0
 }
 
 // Resolve against the process environment before installing any defaults, so

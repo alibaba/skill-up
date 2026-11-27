@@ -75,9 +75,9 @@ Semantics:
 
 Automatically discovered project files still supply defaults. A newly expanded OTLP header is withheld when project defaults can control where the exporter that carries it sends data, or which peer that exporter accepts. The check is per signal: `OTEL_EXPORTER_OTLP_TRACES_HEADERS` follows the traces route, meaning the traces endpoint, protocol and TLS options, then the shared `OTEL_EXPORTER_OTLP_*` options that no trusted traces setting overrides. A project that only sets a metrics endpoint therefore does not withhold it. The shared `OTEL_EXPORTER_OTLP_HEADERS` can reach every signal, so any project route setting withholds it. Project proxy settings and TLS root settings (`SSL_CERT_FILE`, `SSL_CERT_DIR`) count for every signal. This protection applies only to headers produced by expansion; it does not change the treatment of literal headers, headers already in the process environment, or evaluation execution. Review any config before selecting it with `--config`, which trusts the file for expansion. For `init`, `--config` is only a copy source and is not used to supply defaults.
 
----
-
 A trusted per-signal HTTP(S) endpoint must parse as an absolute URL with a host before it can override a project-supplied shared endpoint for this check. A signal-specific certificate or key path cannot establish that a shared project TLS setting has been displaced. Exporters read those files at initialization, possibly in a child process, and can fall back to the shared setting if loading fails. In that combination the expanded header is withheld. These rules apply equally to trusted config and process environment overrides.
+
+---
 
 ## Bootstrapping with `skill-up init`
 

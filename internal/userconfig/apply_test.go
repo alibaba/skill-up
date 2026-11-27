@@ -4,6 +4,7 @@ import (
 	"context"
 	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 )
@@ -249,6 +250,10 @@ func TestApplyEnv_VerboseFalseExplicitDoesNotSetLogEnvs(t *testing.T) {
 func TestApplyEnv_SharedOptionFallback(t *testing.T) {
 	const header = "OTEL_EXPORTER_OTLP_TRACES_HEADERS"
 	const marker = "SKILL_UP_TEST_HEADER_MARKER"
+	badCA := filepath.Join(t.TempDir(), "invalid.pem")
+	if err := os.WriteFile(badCA, []byte("not a PEM certificate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	for _, tt := range []struct {
 		name, option, value string
 		wantHeader          bool
@@ -256,7 +261,10 @@ func TestApplyEnv_SharedOptionFallback(t *testing.T) {
 		{"absolute endpoint", "ENDPOINT", "https://trusted.invalid/v1/traces", true},
 		{"rejected endpoint", "ENDPOINT", "https://[invalid", false},
 		{"relative endpoint", "ENDPOINT", "/v1/traces", false},
+		{"out-of-range port", "ENDPOINT", "https://trusted.invalid:65536", false},
+		{"scoped IPv6 address", "ENDPOINT", "http://[fe80::1%25en0]", false},
 		{"missing CA", "CERTIFICATE", "missing.pem", false},
+		{"invalid CA", "CERTIFICATE", badCA, false},
 		{"client key", "CLIENT_KEY", "client.key", false},
 		{"valid protocol", "PROTOCOL", "http/protobuf", true},
 		{"unknown protocol", "PROTOCOL", "unknown", false},
