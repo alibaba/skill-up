@@ -4,7 +4,6 @@ import (
 	"context"
 	"maps"
 	"os"
-	"path/filepath"
 	"slices"
 	"testing"
 )
@@ -247,6 +246,48 @@ func TestApplyEnv_VerboseFalseExplicitDoesNotSetLogEnvs(t *testing.T) {
 	}
 }
 
+func TestApplyEnv_SharedOptionFallback(t *testing.T) {
+	const header = "OTEL_EXPORTER_OTLP_TRACES_HEADERS"
+	const marker = "SKILL_UP_TEST_HEADER_MARKER"
+	for _, tt := range []struct {
+		name, option, value string
+		wantHeader          bool
+	}{
+		{"absolute endpoint", "ENDPOINT", "https://trusted.invalid/v1/traces", true},
+		{"rejected endpoint", "ENDPOINT", "https://[invalid", false},
+		{"relative endpoint", "ENDPOINT", "/v1/traces", false},
+		{"missing CA", "CERTIFICATE", "missing.pem", false},
+		{"client key", "CLIENT_KEY", "client.key", false},
+		{"valid protocol", "PROTOCOL", "http/protobuf", true},
+		{"unknown protocol", "PROTOCOL", "unknown", false},
+		{"valid insecure flag", "INSECURE", "false", true},
+		{"unknown insecure flag", "INSECURE", "unknown", false},
+	} {
+		for _, source := range []string{"user", "process"} {
+			t.Run(tt.name+"/"+source, func(t *testing.T) {
+				shared, signal := otlpEnvPrefix+tt.option, otlpEnvPrefix+"TRACES_"+tt.option
+				unsetForTest(t, header, shared, signal)
+				t.Setenv(marker, "fixture")
+				user := Config{Env: map[string]string{header: "x-test-marker=${" + marker + "}"}}
+				if source == "process" {
+					t.Setenv(signal, tt.value)
+				} else {
+					user.Env[signal] = tt.value
+				}
+				var cfg Config
+				cfg.overlay(user, sourceUser)
+				cfg.overlay(Config{Env: map[string]string{shared: "project-default"}}, sourceProject)
+				if _, err := ApplyEnv(cfg); err != nil {
+					t.Fatal(err)
+				}
+				if _, ok := os.LookupEnv(header); ok != tt.wantHeader {
+					t.Errorf("expanded header present = %t, want %t", ok, tt.wantHeader)
+				}
+			})
+		}
+	}
+}
+
 func TestApplyEnv_ExpandedOTLPHeaderRouting(t *testing.T) {
 	const (
 		generic    = "OTEL_EXPORTER_OTLP_HEADERS"
@@ -256,8 +297,6 @@ func TestApplyEnv_ExpandedOTLPHeaderRouting(t *testing.T) {
 		endpoint   = "OTEL_EXPORTER_OTLP_ENDPOINT"
 		metricDest = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"
 		protocol   = "OTEL_EXPORTER_OTLP_PROTOCOL"
-		sharedCA   = "OTEL_EXPORTER_OTLP_CERTIFICATE"
-		tracesCA   = "OTEL_EXPORTER_OTLP_TRACES_CERTIFICATE"
 		logsCert   = "OTEL_EXPORTER_OTLP_LOGS_CERTIFICATE"
 		proxy      = "https_proxy"
 		certFile   = "SSL_CERT_FILE"
@@ -267,10 +306,6 @@ func TestApplyEnv_ExpandedOTLPHeaderRouting(t *testing.T) {
 		kept       = "authorization=fixture"
 		tracesDest = envOtelExporterOTLPTracesEndpt
 	)
-	badCA := filepath.Join(t.TempDir(), "invalid.pem")
-	if err := os.WriteFile(badCA, []byte("not a PEM certificate"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	for _, tt := range []struct {
 		name       string
 		project    Config
@@ -281,13 +316,6 @@ func TestApplyEnv_ExpandedOTLPHeaderRouting(t *testing.T) {
 		wantSet    bool
 	}{
 		{name: "ordinary project config", project: Config{Env: map[string]string{"SKILL_UP_TEST_OTHER": "literal"}}, header: generic, wantHeader: "authorization=fixture", wantSet: true},
-		{name: "rejected process endpoint", project: Config{Env: map[string]string{endpoint: "https://project.invalid"}}, inherited: map[string]string{tracesDest: "https://[invalid"}, header: traces},
-		{name: "relative signal endpoint", project: Config{Env: map[string]string{endpoint: "https://project.invalid"}}, explicit: Config{Env: map[string]string{tracesDest: "/v1/traces"}}, header: traces},
-		{name: "unreadable signal CA", project: Config{Env: map[string]string{sharedCA: "project.pem"}}, explicit: Config{Env: map[string]string{tracesCA: badCA + ".missing"}}, header: traces},
-		{name: "invalid process CA", project: Config{Env: map[string]string{sharedCA: "project.pem"}}, inherited: map[string]string{tracesCA: badCA}, header: traces},
-		{name: "project client key", project: Config{Env: map[string]string{"OTEL_EXPORTER_OTLP_CLIENT_KEY": "project.key"}}, header: traces},
-		{name: "valid process protocol", project: Config{Env: map[string]string{protocol: "grpc"}}, inherited: map[string]string{envOtelExporterOTLPTracesProto: "http/protobuf"}, header: traces, wantHeader: kept, wantSet: true},
-		{name: "unknown process protocol", project: Config{Env: map[string]string{protocol: "grpc"}}, inherited: map[string]string{envOtelExporterOTLPTracesProto: "unknown"}, header: traces},
 		{name: "generic endpoint", project: Config{Env: map[string]string{endpoint: "https://project.invalid"}}, header: traces},
 		{name: "metrics endpoint", project: Config{Env: map[string]string{metricDest: "https://project.invalid"}}, header: metrics},
 		{name: "structured endpoint", project: Config{Telemetry: Telemetry{Traces: TracesConfig{Endpoint: "https://project.invalid"}}}, header: generic},
@@ -319,7 +347,7 @@ func TestApplyEnv_ExpandedOTLPHeaderRouting(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			unsetForTest(t,
 				generic, traces, metrics, logs, endpoint, metricDest, protocol, logsCert, proxy,
-				certFile, certDir, sharedCA, tracesCA, tracesDest, empty, "SKILL_UP_TEST_OTHER", envOtelExporterOTLPTracesProto, "OTEL_EXPORTER_OTLP_CLIENT_KEY",
+				certFile, certDir, tracesDest, empty, "SKILL_UP_TEST_OTHER", envOtelExporterOTLPTracesProto,
 			)
 			t.Setenv(fixture, "fixture")
 			for key, value := range tt.inherited {

@@ -269,28 +269,33 @@ func runOTLPLoopbackCase(t *testing.T, tc otlpLoopbackCase, collectors map[strin
 		t.Fatal(err)
 	}
 	if tc.verifyBeforeExport {
-		cfg, _, err := loadUserConfig(nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := userconfig.ApplyEnv(cfg); err != nil {
-			t.Fatal(err)
-		}
-		if _, present := os.LookupEnv("OTEL_EXPORTER_OTLP_TRACES_HEADERS"); present {
-			t.Fatal("expanded trace headers present before exporter initialization")
-		}
-		ctx, shutdown, err := observability.Init(context.Background(), "test-version")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := shutdown(ctx); err != nil {
-			t.Fatal(err)
-		}
+		exportAfterHeaderCheck(t)
 		return
 	}
 	if _, err := captureStdout(t, func() error {
 		return ExecuteArgs("test-version", []string{"--version"})
 	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func exportAfterHeaderCheck(t *testing.T) {
+	t.Helper()
+	cfg, _, err := loadUserConfig(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := userconfig.ApplyEnv(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := os.LookupEnv("OTEL_EXPORTER_OTLP_TRACES_HEADERS"); present {
+		t.Fatal("expanded trace headers present before exporter initialization")
+	}
+	ctx, shutdown, err := observability.Init(context.Background(), "test-version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := shutdown(ctx); err != nil {
 		t.Fatal(err)
 	}
 }
