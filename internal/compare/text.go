@@ -47,7 +47,11 @@ func RenderText(result Result) string {
 func writeTransitions(b *strings.Builder, label string, transitions []CaseTransition) {
 	fmt.Fprintf(b, "%s (%d):", label, len(transitions))
 	for _, transition := range transitions {
-		fmt.Fprintf(b, " %s (%s)", transition.CaseID, transitionStatus(transition))
+		status := transitionStatus(transition)
+		if transition.PromptChanged != nil && *transition.PromptChanged {
+			status += ", prompt changed"
+		}
+		fmt.Fprintf(b, " %s (%s)", transition.CaseID, status)
 	}
 	b.WriteByte('\n')
 }
