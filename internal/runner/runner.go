@@ -168,11 +168,6 @@ func (r *Runner) BuildExecutionPlan(cases []*config.CaseConfig, opts EvaluateOpt
 		runCount = 1
 		startIteration = nextIterationNumber(workspaceDir)
 	}
-	configurations := []string{evaluator.ConfigurationWithSkill}
-	if r.evalCfg.Benchmark.Enabled {
-		configurations = append(configurations, evaluator.ConfigurationWithoutSkill)
-	}
-
 	return ExecutionPlan{
 		SkillDir:     skillDir,
 		SkillName:    skillName,
@@ -183,9 +178,19 @@ func (r *Runner) BuildExecutionPlan(cases []*config.CaseConfig, opts EvaluateOpt
 			cases,
 			startIteration,
 			runCount,
-			configurations,
+			PlanConfigurations(r.evalCfg),
 		),
 	}
+}
+
+// PlanConfigurations lists the configurations each case runs under. A
+// benchmark adds the run without the evaluated skill.
+func PlanConfigurations(evalCfg *config.EvalConfig) []string {
+	configurations := []string{evaluator.ConfigurationWithSkill}
+	if evalCfg.Benchmark.Enabled {
+		configurations = append(configurations, evaluator.ConfigurationWithoutSkill)
+	}
+	return configurations
 }
 
 // Evaluate runs all cases through evaluator and agent, returns results.
@@ -608,7 +613,7 @@ func (r *Runner) writeCaseArtifacts(ws *report.IterationWorkspace, res *evaluato
 			return err
 		}
 	}
-	if len(res.JudgeResults) > 0 {
+	if len(res.JudgeResults) > 0 || res.Execution != nil || res.Metrics != nil {
 		strategy := res.AggregationStrategy
 		if strategy == "" {
 			strategy = judge.DefaultOutcomeAggregator().Strategy()
@@ -617,7 +622,14 @@ func (r *Runner) writeCaseArtifacts(ws *report.IterationWorkspace, res *evaluato
 			Version:      1,
 			Gates:        res.ExpectResult,
 			JudgeResults: res.JudgeResults,
-			Aggregation:  report.GroupAggregation{Strategy: strategy, Status: res.Status},
+			Execution:    res.Execution,
+			Metrics:      res.Metrics,
+			Aggregation: report.GroupAggregation{
+				Strategy:   strategy,
+				Status:     res.Status,
+				Completion: res.GroupCompletion,
+				Cause:      res.GroupCause,
+			},
 		}
 		if err := ws.WriteEvaluation(res.CaseID, cfgName, grouped); err != nil {
 			return err
@@ -809,6 +821,8 @@ func evalResultToCaseResult(res *evaluator.EvalResult) report.CaseResult {
 		Grading:         res.Grading,
 		Gates:           res.ExpectResult,
 		JudgeResults:    res.JudgeResults,
+		Execution:       res.Execution,
+		Metrics:         res.Metrics,
 		JudgeSkills:     res.JudgeSkills,
 		Configuration:   res.Configuration,
 		Prompt:          res.Prompt,

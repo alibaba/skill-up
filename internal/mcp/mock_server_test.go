@@ -346,6 +346,70 @@ func TestMockedGenericServer_ToolsFormat(t *testing.T) {
 	}
 }
 
+// TestMockedGenericServer_ToolError returns the response of a tool marked
+// is_error as a tool execution error: a normal JSON-RPC result whose isError
+// is true. Other tools, an explicit is_error: false and is_error: null omit
+// the field.
+func TestMockedGenericServer_ToolError(t *testing.T) {
+	proc := startGenericMockServer(t, parseMockFixture(t, `tools:
+  get_project:
+    is_error: true
+    response:
+      default: "project {{params.id}} not found"
+  list_projects:
+    is_error: false
+    response: []
+  null_flag:
+    is_error: null
+    response: fine
+tool_responses:
+  legacy: fine
+`))
+
+	// Discovery lists every tool and must not reveal which are set up to fail.
+	listed := listTools(t, proc)
+	if len(listed) != 4 {
+		t.Fatalf("tools/list returned %d tools, want 4: %v", len(listed), listed)
+	}
+	for _, tool := range listed {
+		if _, shown := tool.(map[string]any)["isError"]; shown {
+			t.Errorf("tools/list entry %v shows isError", tool)
+		}
+	}
+
+	for id, tc := range []struct {
+		tool      string
+		args      map[string]any
+		wantText  string
+		wantError bool
+	}{
+		{tool: "get_project", args: map[string]any{"id": "42"}, wantText: "project 42 not found", wantError: true},
+		{tool: "list_projects", wantText: "[]"},
+		{tool: "null_flag", wantText: "fine"},
+		{tool: "legacy", wantText: "fine"},
+	} {
+		proc.writeFramed(t, map[string]any{
+			"jsonrpc": "2.0", "id": id + 3, "method": "tools/call",
+			"params": map[string]any{"name": tc.tool, "arguments": tc.args},
+		})
+		resp := proc.readFramed(t)
+		if _, failed := resp["error"]; failed {
+			t.Fatalf("%s returned a protocol error, want a tool result: %v", tc.tool, resp)
+		}
+		if got := toolCallText(t, resp); got != tc.wantText {
+			t.Errorf("%s text = %q, want %q", tc.tool, got, tc.wantText)
+		}
+		result, _ := resp["result"].(map[string]any)
+		isError, present := result["isError"]
+		if failed, _ := isError.(bool); tc.wantError && !failed {
+			t.Errorf("%s isError = %v, want true", tc.tool, isError)
+		}
+		if !tc.wantError && present {
+			t.Errorf("%s isError = %v, want the field omitted", tc.tool, isError)
+		}
+	}
+}
+
 // TestMockedGenericServer_MixedFormats lets the two formats declare different
 // tools in one fixture; omitted metadata keeps the defaults, and an explicit
 // null response is returned as null.
@@ -407,6 +471,9 @@ func TestMockedToolDefinitions_Normalizes(t *testing.T) {
   with_default:
     input_schema: {type: object}
     response: {default: ok}
+  failing:
+    is_error: true
+    response: project not found
 tool_responses:
   legacy: {default: old}
 `))
@@ -414,6 +481,7 @@ tool_responses:
 		t.Fatalf("mockedToolDefinitions: %v", err)
 	}
 	want := map[string]mockedToolDefinition{
+		"failing":       {Response: "project not found", IsError: true},
 		"null_response": {Description: "Returns null.", Response: nil},
 		"with_default":  {InputSchema: map[string]any{"type": "object"}, Response: map[string]any{"default": "ok"}},
 		"legacy":        {Response: map[string]any{"default": "old"}},
@@ -452,7 +520,12 @@ func TestBuildMockedServerScript_RejectsInvalidTools(t *testing.T) {
 		{
 			name:    "unknown field",
 			fixture: "tools:\n  get_project:\n    inputSchema: {type: object}\n    response: ok\n",
-			wantErr: `tool "get_project" has unknown field "inputSchema"; supported fields are description, input_schema and response`,
+			wantErr: `tool "get_project" has unknown field "inputSchema"; supported fields are description, input_schema, response and is_error`,
+		},
+		{
+			name:    "is_error is not a boolean",
+			fixture: "tools:\n  get_project:\n    is_error: \"yes\"\n    response: ok\n",
+			wantErr: `tool "get_project" is_error must be true or false`,
 		},
 		{
 			name:    "schema is not a mapping",

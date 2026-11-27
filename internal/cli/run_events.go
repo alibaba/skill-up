@@ -167,11 +167,33 @@ func runEvalWithEventLog(
 
 func installEvaluationSignalContext(cmd *cobra.Command) func() {
 	parent := cmd.Context()
-	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	ctx, stop := evaluationSignalContext(parent, signals)
 	cmd.SetContext(ctx)
 	return func() {
+		signal.Stop(signals)
 		stop()
 		cmd.SetContext(parent)
+	}
+}
+
+func evaluationSignalContext(parent context.Context, signals <-chan os.Signal) (context.Context, func()) {
+	observer := &evaluator.SignalObserver{}
+	ctx, cancel := context.WithCancel(parent)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		select {
+		case <-signals:
+			observer.MarkSignalObserved()
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return evaluator.ContextWithSignalObserver(ctx, observer), func() {
+		cancel()
+		<-done
 	}
 }
 

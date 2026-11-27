@@ -378,7 +378,7 @@ func TestProvisioner_MockedServerRejectsInvalidToolMetadata(t *testing.T) {
 		{
 			name: "unknown field",
 			tool: "    description: Look up a project.\n    inputSchema:\n      type: object\n    response: {status: OPEN}\n",
-			want: `has unknown field "inputSchema"; supported fields are description, input_schema and response`,
+			want: `has unknown field "inputSchema"; supported fields are description, input_schema, response and is_error`,
 		},
 		{
 			name: "scalar input schema",

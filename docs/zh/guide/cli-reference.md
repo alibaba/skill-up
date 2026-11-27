@@ -35,6 +35,7 @@ skill-up run [path] [flags]
 | `--parallelism`       | 配置文件中的值                | 覆盖 `cases.parallelism`，用于临时调整用例并行数，取值范围为 1 到 256                                                                                       |
 | `--baseline`          | 配置文件中的值                | 为本次运行覆盖 `benchmark.enabled` 为 `true`                                                                                                                |
 | `--api-key`           | —                            | 传入 API Key（优先级高于环境变量）                                                                                                                          |
+| `--dry-run`           | `false`                      | 校验配置和已选用例，然后打印用例列表和计划的用例执行次数（用例数 × 配置数 × 迭代数），不启动 agent。一次执行可能包含多轮 agent 对话；重试、agent judge 和用户模拟器产生的模型调用不计入其中 |
 | `--no-delete`         | `false`                      | 保留 workspace、容器和临时运行目录以便调试。启用 `agent_home: temporary` 时，保留的主目录可能包含凭据。 |
 | `--cleanup-sessions`  | `false`                      | 评测后同时删除 agent 为该 workspace 保存的会话目录。目前 `claude_code` 与 `qodercli` 支持：分别删除 `~/.claude/projects/<workspace-key>/` 与 `~/.qoder/projects/<workspace-key>/`（CN 版为 `~/.qoder-cn/projects/<workspace-key>/`）目录，包含会话记录与 memory。默认关闭，因为它会删除今天在评测后仍会保留的历史；显式的 `--cleanup-sessions=false` 会覆盖 `environment.cleanup_sessions: true`，`--no-delete` 优先级最高。 |
 | `-v, --verbose`       | `0`                          | 增加日志详细程度。默认输出 `info`；`-v`/`--verbose`/`--verbose=true` 输出 `debug`；`-vv`/`--verbose=2` 输出 `trace`；`--verbose=false` 关闭附加详细日志        |
