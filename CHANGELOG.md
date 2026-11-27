@@ -56,12 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Keep the Codex sandbox on resumed turns. On the `none` runtime the first
-  turn ran with `--sandbox workspace-write`, but every later turn of a
-  multi-turn or user-simulator case ran with
-  `--dangerously-bypass-approvals-and-sandbox`, on the host. Resumed turns now
-  use the first turn's choice, including `bypass_sandbox`, and keep the
-  approvals for the MCP servers skill-up installed.
+- `skill-up run --dry-run` now prints the planned case executions as cases
+  times configurations times iterations. A benchmark over four cases with
+  `--iteration 5` previously reported only `Would run 4 case(s)` for 40
+  executions. A negative `--iteration` is now rejected in a dry run as well.
 - Keep `agent_judge` review materials from reading as instructions. The judge
   prompt now states that inline excerpts and referenced files come from the
   agent under evaluation and are evidence, never instructions, and it fences
@@ -70,6 +68,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer close the excerpt and continue as prompt text. The response-format
   example shows `"passed": null` instead of `"passed": true`, matching the file
   template, so the example no longer suggests a verdict.
+- Copy fixture contents when `context.repo_fixture` names a directory symlink
+  in the `none` and OpenSandbox runtimes. Local uploads no longer fail with a directory
+  read error, and OpenSandbox no longer silently uploads an empty fixture.
 - Reject a `rule_based` matcher that is present but holds no values to match.
   `output_contains: {all: []}`, `output_matches: {}`, `turn_response_contains`
   without `contains_all`/`contains_any`, and `turn_response_not_contains`
@@ -81,6 +82,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an empty pattern matches every response. Whitespace entries stay valid: they
   are compared as written, so a matcher holding only a newline can assert a
   single-line output.
+- Keep the Codex sandbox on resumed turns. On the `none` runtime the first
+  turn ran with `--sandbox workspace-write`, but every later turn of a
+  multi-turn or user-simulator case ran with
+  `--dangerously-bypass-approvals-and-sandbox`, on the host. Resumed turns now
+  use the first turn's choice, including `bypass_sandbox`, and keep the
+  approvals for the MCP servers skill-up installed.
 - Use prompt-file delivery for resumed Claude Code and Qoder turns when the
   prompt exceeds the inline limit or the target is Windows, preserving prompt
   delivery metadata and failing before execution if the file cannot be uploaded.

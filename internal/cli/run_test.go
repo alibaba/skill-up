@@ -132,6 +132,86 @@ func TestRunEvalDryRunLoadsFiltersAndSkipsAgentSetup(t *testing.T) {
 		!strings.Contains(stdout, "  - analyze-directory") {
 		t.Fatalf("stdout = %q, want dry-run case list", stdout)
 	}
+	// The example enables benchmark mode, so each case also runs without the skill.
+	if want := "Planned case executions: 2 (1 case(s) x 2 configuration(s) [with_skill, without_skill] x 1 iteration(s))"; !strings.Contains(stdout, want) {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
+func TestRunEvalDryRunCountsPlannedCaseExecutions(t *testing.T) {
+	root := t.TempDir()
+	writeAutoModeSkill(t, root)
+	casesDir := filepath.Join(root, "evals", "cases")
+	if err := os.MkdirAll(casesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	evalYAML := `schema_version: v1alpha1
+environment:
+  type: none
+engine:
+  name: codex
+  model:
+    provider: openai
+    name: gpt-5
+cases:
+  files:
+    - evals/cases/one.yaml
+    - evals/cases/two.yaml
+    - evals/cases/three.yaml
+`
+	if err := os.WriteFile(filepath.Join(root, "evals", "eval.yaml"), []byte(evalYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"one", "two", "three"} {
+		if err := os.WriteFile(filepath.Join(casesDir, id+".yaml"), []byte("id: "+id+"\ninput:\n  prompt: hello\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	origUIOutput := ui.Output
+	ui.Output = io.Discard
+	t.Cleanup(func() { ui.Output = origUIOutput })
+
+	for _, tc := range []struct {
+		name    string
+		flags   map[string]string
+		want    string
+		wantErr string
+	}{
+		{name: "default", want: "Planned case executions: 3 (3 case(s) x 1 configuration(s) [with_skill] x 1 iteration(s))"},
+		{name: "baseline", flags: map[string]string{"baseline": testFlagBoolTrue}, want: "Planned case executions: 6 (3 case(s) x 2 configuration(s) [with_skill, without_skill] x 1 iteration(s))"},
+		{name: "iterations", flags: map[string]string{"iteration": "5"}, want: "Planned case executions: 15 (3 case(s) x 1 configuration(s) [with_skill] x 5 iteration(s))"},
+		{name: "baseline and iterations", flags: map[string]string{"baseline": testFlagBoolTrue, "iteration": "5"}, want: "Planned case executions: 30 (3 case(s) x 2 configuration(s) [with_skill, without_skill] x 5 iteration(s))"},
+		{name: "filtered cases", flags: map[string]string{"include-case-name": "t*", "iteration": "2"}, want: "Planned case executions: 4 (2 case(s) x 1 configuration(s) [with_skill] x 2 iteration(s))"},
+		{name: "negative iteration", flags: map[string]string{"iteration": "-1"}, wantErr: "invalid --iteration -1: must be >= 0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newRunPhaseTestCommand(t)
+			if err := cmd.Flags().Set("dry-run", testFlagBoolTrue); err != nil {
+				t.Fatal(err)
+			}
+			for name, value := range tc.flags {
+				if err := cmd.Flags().Set(name, value); err != nil {
+					t.Fatal(err)
+				}
+			}
+			stdout, err := captureStdout(t, func() error { return runEval(cmd, []string{root}) })
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("runEval error = %v, want %q", err, tc.wantErr)
+				}
+				if strings.Contains(stdout, "Would run") {
+					t.Fatalf("stdout = %q, want no plan for an invalid flag", stdout)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("runEval dry-run returned error: %v", err)
+			}
+			if !strings.Contains(stdout, tc.want) {
+				t.Fatalf("stdout = %q, want %q", stdout, tc.want)
+			}
+		})
+	}
 }
 
 func TestRunEvalKeepsNonExactVersionCompatibleAfterEngineOverride(t *testing.T) {
