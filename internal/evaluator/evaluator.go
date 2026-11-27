@@ -6,6 +6,8 @@ package evaluator
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,6 +42,10 @@ var (
 )
 
 const judgeTypeAgentJudge = "agent_judge"
+
+// caseTimeoutDeadlineSource names the configuration key that arms a case-level
+// deadline, so an interrupted run can point users at the knob to raise.
+const caseTimeoutDeadlineSource = "case.constraints.timeout_seconds"
 
 // ProgressObserver receives progress notifications during evaluation.
 // Implementations must be safe for concurrent use.
@@ -112,6 +118,16 @@ type EvalResult struct {
 	// AggregationStrategy identifies the multi-judge policy, including gate failures.
 	AggregationStrategy string
 
+	// GroupCompletion folds the member completion states and GroupCause records why
+	// the plan ended. Both are derived metadata, never another verdict. (#317)
+	GroupCompletion judge.Completion
+	GroupCause      judge.Cause
+
+	// Execution and Metrics preserve the named-metric contract on single-judge
+	// paths, including outcomes that have no grading result.
+	Execution *judge.ExecutionMetadata `json:"execution,omitempty"`
+	Metrics   *judge.MetricsEnvelope   `json:"metrics,omitempty"`
+
 	// JudgeSession is the separate agent session used by agent_judge. It is
 	// preserved even when the judge fails to produce a valid grading result.
 	JudgeSession *agent.SessionResult
@@ -124,6 +140,10 @@ type EvalResult struct {
 
 	// Error holds any execution error.
 	Error error
+
+	// judgeInvoked records whether this case reached Judge.Evaluate. It is used
+	// only while deriving execution metadata for configured metric slots.
+	judgeStage judge.Stage
 
 	// Configuration is "with_skill" or "without_skill".
 	Configuration string
@@ -361,16 +381,7 @@ func (e *defaultEvaluator) executeCase(ctx context.Context, caseCfg *config.Case
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		attemptCtx, cancel, timeoutSource, timeoutSec := withCaseTimeout(ctx, e.evalCfg.Cases.Defaults.TimeoutSeconds, caseCfg.Constraints.TimeoutSeconds)
 		result = e.executeCaseOnce(attemptCtx, caseCfg, configName, overrideRT, overrideAgent)
-		// Decide whether to annotate *before* cancel() so (a) cancel doesn't
-		// overwrite Err with Canceled and erase the signal, and (b) a
-		// parent-supplied deadline (e.g. a caller wrapping EvaluateAll in
-		// context.WithTimeout) firing through attemptCtx isn't relabelled as a
-		// case timeout — that would point users at the wrong YAML knob. A
-		// tighter child deadline (e.g. judge.timeout_seconds) gets the same
-		// protection because attemptCtx.Err() stays nil when the case-level
-		// deadline never fires. The decision lives at the caller so the
-		// annotate helper stays free of a control-flag parameter.
-		if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+		if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) && timeoutSource != "" {
 			annotateCaseTimeoutError(&result, timeoutSource, timeoutSec)
 		}
 		cancel()
@@ -496,6 +507,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 			result.Status = judge.StatusError
 			result.Error = fmt.Errorf("agent %s preflight failed: %w", runAgent.Name(), err)
 			result.Configuration = configName
+			e.recordSkippedJudgesForCase(ctx, err, &result, caseCfg, "agent_execution_failed")
 			return result
 		}
 	} else {
@@ -505,6 +517,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 			result.Status = judge.StatusError
 			result.Error = err
 			result.Configuration = configName
+			e.recordSkippedJudgesForCase(ctx, err, &result, caseCfg, "agent_execution_failed")
 			return result
 		}
 		defer func() {
@@ -522,7 +535,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 		result.Status, result.Error = judge.StatusError, planErr
 		return result
 	}
-	if err := e.validateJudgePlan(judgePlan, &result); err != nil {
+	if err := e.validateJudgePlan(ctx, judgePlan, &result); err != nil {
 		result.Status, result.Error = judge.StatusError, err
 		return result
 	}
@@ -533,21 +546,17 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	// path (all messages in one Run call), with an explicit warning.
 	if len(caseCfg.Input.Turns) > 0 || caseCfg.UserSimulator != nil {
 		if _, ok := runAgent.(agent.SessionResumer); ok {
-			agentExecOpts := agent.ExecOptions{
-				ArtifactDir: e.prepareOutputDir(ctx, configName, caseCfg.ID, "agent/run"),
-				TimeoutSec:  caseTimeoutSeconds(e.evalCfg, caseCfg),
-				AgentMetadata: &runtime.AgentMetadata{
-					CaseID:   caseCfg.ID,
-					Variant:  configName,
-					MaxTurns: caseMaxTurns(e.evalCfg, caseCfg),
-				},
-			}
+			artifactDir := e.prepareOutputDir(ctx, configName, caseCfg.ID, "agent/run")
+			agentExecOpts := e.caseAgentExecOptions(caseCfg, configName, artifactDir)
 			multiTurnResult := e.executeMultiTurnCase(ctx, rt, caseCfg, configName, runAgent, agentExecOpts, startTime, judgeCfg, &result)
 			multiTurnResult.Version = observation.Version
-			return multiTurnResult
+			// Same rule as the single-shot path: the deferred telemetry reads this
+			// record, so the multi-turn verdict has to land on it.
+			result = multiTurnResult
+			return result
 		}
 		if caseCfg.UserSimulator != nil {
-			recordSkippedJudges(&result, judgePlan, "session_resumption_unsupported")
+			recordSkippedJudges(ctx, nil, &result, judgePlan, "session_resumption_unsupported")
 			result.Status = judge.StatusError
 			result.Error = fmt.Errorf("agent %s does not support session resumption required by user simulation", runAgent.Name())
 			result.Configuration = configName
@@ -579,15 +588,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	if observability.LinkedTraceTopologyEnabled() {
 		logging.DebugContextf(agentCtx, "Evaluator: linked agent trace started for case %s (%s)", caseCfg.ID, configName)
 	}
-	agentExecOpts := agent.ExecOptions{
-		ArtifactDir: agentArtifactDir,
-		TimeoutSec:  caseTimeoutSeconds(e.evalCfg, caseCfg),
-		AgentMetadata: &runtime.AgentMetadata{
-			CaseID:   caseCfg.ID,
-			Variant:  configName,
-			MaxTurns: caseMaxTurns(e.evalCfg, caseCfg),
-		},
-	}
+	agentExecOpts := e.caseAgentExecOptions(caseCfg, configName, agentArtifactDir)
 	sessionResult, execErr := runAgent.Run(agentCtx, rt, agentExecOpts, messages)
 	agentSpan.End()
 	finalizeArtifacts(sessionResult)
@@ -601,7 +602,7 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 	// they are captured even when the agent failed or timed out.
 	e.collectGlobArtifacts(ctx, rt, configName, caseCfg)
 	if shouldReturn := e.handleExecutionResult(ctx, caseCfg, configName, startTime, &result, execErr); shouldReturn {
-		recordSkippedJudges(&result, judgePlan, "agent_execution_failed")
+		recordSkippedJudges(ctx, execErr, &result, judgePlan, "agent_execution_failed")
 		return result
 	}
 	// A genuine non-zero exit may still be handled by expect.exit_code or a
@@ -626,7 +627,24 @@ func (e *defaultEvaluator) executeCaseOnce(ctx context.Context, caseCfg *config.
 		logging.DebugContextf(ctx, "Evaluator: case %s agent exited with code %d, proceeding to evaluation", caseCfg.ID, sessionResult.ExitCode)
 	}
 
-	return e.evaluateCaseSession(ctx, rt, caseCfg, configName, judgeCfg, turnsTotal, runAgent, sessionResult, &result)
+	finalResult := e.evaluateCaseSession(ctx, rt, caseCfg, configName, judgeCfg, turnsTotal, runAgent, sessionResult, &result)
+	// The judge phase and the metric finalizer work on a copy of the case record.
+	// Write the final verdict back before the deferred telemetry reads it, or the
+	// case span and skill_up.case.run.count keep reporting the pre-judge status.
+	result = finalResult
+	return result
+}
+
+func (e *defaultEvaluator) caseAgentExecOptions(caseCfg *config.CaseConfig, configName, artifactDir string) agent.ExecOptions {
+	return agent.ExecOptions{
+		ArtifactDir: artifactDir,
+		TimeoutSec:  caseTimeoutSeconds(e.evalCfg, caseCfg),
+		AgentMetadata: &runtime.AgentMetadata{
+			CaseID:   caseCfg.ID,
+			Variant:  configName,
+			MaxTurns: caseMaxTurns(e.evalCfg, caseCfg),
+		},
+	}
 }
 
 //nolint:spancheck // caller owns the returned span and must end it.
@@ -671,7 +689,7 @@ func (e *defaultEvaluator) evaluateCaseSession(
 	}
 
 	if failed := e.runExpectPreCheck(ctx, caseCfg, configName, judgeCfg, judgeInput, result); failed {
-		recordSkippedJudges(result, plan, "gate_failed")
+		recordSkippedJudges(ctx, nil, result, plan, "gate_failed")
 		if plan.Multi {
 			result.Grading, _ = judge.DefaultOutcomeAggregator().Aggregate(result.JudgeResults, result.Turns, turnsTotal)
 			if result.Status == judge.StatusError {
@@ -679,6 +697,7 @@ func (e *defaultEvaluator) evaluateCaseSession(
 			} else {
 				result.Grading.Status = judge.StatusFail
 			}
+			result.GroupCompletion, result.GroupCause = foldGroupState(result.JudgeResults)
 		}
 		return *result
 	}
@@ -708,6 +727,9 @@ func (e *defaultEvaluator) runConfiguredJudges(
 		finalResult = e.runMultipleJudges(ctx, rt, caseCfg, configName, plan, turnsTotal, runAgent, judgeInput, result)
 	} else {
 		finalResult = e.runJudgePhase(ctx, rt, caseCfg, configName, judgeCfg, turnsTotal, runAgent, judgeInput, result, "judge/run", false)
+		if len(plan.Judges) > 0 {
+			finalizeJudgeMetrics(ctx, &finalResult, plan.Judges[0])
+		}
 	}
 	if !plan.Multi && len(expectAssertions) > 0 && finalResult.Grading != nil {
 		finalResult.Grading.AssertionResults = append(expectAssertions, finalResult.Grading.AssertionResults...)
@@ -829,7 +851,9 @@ func (e *defaultEvaluator) runJudgePhaseWithSpan(
 
 	cleanupScript := configureScriptJudge(ctx, j, judgeInput.Transcript, strictTimeout)
 	defer cleanupScript()
+	e.configureMetricsChannel(ctx, j, configName, caseCfg, artifactRoot)
 
+	result.judgeStage = judge.StageStarted
 	grading, err := j.Evaluate(ctx, judgeInput)
 	if err != nil {
 		result.Grading = grading
@@ -858,6 +882,60 @@ func (e *defaultEvaluator) runJudgePhaseWithSpan(
 	}
 
 	return *result
+}
+
+// configureMetricsChannel assigns one private, invocation-bound result path for a
+// script judge that declares named metrics. The path is created fresh per
+// invocation and carries a random id, so a leftover file from an earlier attempt
+// can never be accepted as this run's result. Local (none) environments only in
+// this slice: a sandboxed script cannot see a host path, and channel work for
+// those runtimes is a separate bounded change.
+func (e *defaultEvaluator) configureMetricsChannel(
+	ctx context.Context,
+	j judge.Judge,
+	configName string,
+	caseCfg *config.CaseConfig,
+	artifactRoot string,
+) {
+	sj, ok := j.(*judge.ScriptJudge)
+	if !ok || len(sj.MetricSlots) == 0 {
+		return
+	}
+	if e.evalCfg.Environment.Type != "none" {
+		logging.DebugContextf(ctx, "Evaluator: named metrics are not collected for case %s in the %s environment", caseCfg.ID, e.evalCfg.Environment.Type)
+		return
+	}
+	if configName == "" || caseCfg.ID == "" || e.outputDir == "" {
+		return
+	}
+	dir := filepath.Join(e.outputDir, caseCfg.ID, configName, "outputs", artifactRoot)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		logging.WarnContextf(ctx, "Evaluator: cannot create metrics dir for case %s: %v", caseCfg.ID, err)
+		return
+	}
+	invocation, err := metricsInvocationID()
+	if err != nil {
+		logging.WarnContextf(ctx, "Evaluator: cannot generate metrics invocation id for case %s: %v", caseCfg.ID, err)
+		return
+	}
+	// The path is handed to a child process whose working directory is the case
+	// workspace, while the collector reads it from this process: only an absolute
+	// path means the same file for both.
+	absDir, err := filepath.Abs(filepath.Clean(dir))
+	if err != nil {
+		logging.WarnContextf(ctx, "Evaluator: cannot resolve metrics dir for case %s: %v", caseCfg.ID, err)
+		return
+	}
+	sj.MetricsResultPath = filepath.Join(absDir, "metrics-"+invocation+".json")
+	sj.MetricsInvocationID = invocation
+}
+
+func metricsInvocationID() (string, error) {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 func configureScriptJudge(ctx context.Context, j judge.Judge, transcriptData transcript.Transcript, strictTimeout bool) func() {
@@ -1080,12 +1158,12 @@ func (e *defaultEvaluator) resolveJudgeAgentConfig(judgeCfg config.JudgeConfig) 
 	return resolved, agent.ValidateJudgeAdapterConfig(resolved, e.resolver)
 }
 
-func (e *defaultEvaluator) validateJudgePlan(plan config.JudgePlan, result *EvalResult) error {
+func (e *defaultEvaluator) validateJudgePlan(ctx context.Context, plan config.JudgePlan, result *EvalResult) error {
 	if plan.Multi {
 		result.AggregationStrategy = judge.DefaultOutcomeAggregator().Strategy()
 	}
 	if err := e.validateJudgeAgents(plan); err != nil {
-		recordSkippedJudges(result, plan, "invalid_judge_config")
+		recordSkippedJudges(ctx, nil, result, plan, "invalid_judge_config")
 		return err
 	}
 	return nil
@@ -1140,23 +1218,35 @@ func annotateCaseTimeoutError(result *EvalResult, source string, seconds int) {
 	if !errors.Is(result.Error, context.DeadlineExceeded) {
 		return
 	}
+	if len(result.JudgeResults) != 0 {
+		first := slices.IndexFunc(result.JudgeResults, func(outcome JudgeOutcome) bool {
+			return (outcome.Status == judge.StatusError || outcome.Status == judge.StatusSkip) &&
+				outcome.Execution != nil && outcome.Execution.Cause == judge.CauseDeadlineExpiry
+		})
+		// Judge outcomes are ordered by invocation. A later case deadline can
+		// stop pending judges, but cannot rename the first recorded timeout.
+		if first < 0 || result.JudgeResults[first].Execution.DeadlineSource != source {
+			return
+		}
+	}
 	result.Error = fmt.Errorf("%w (case timeout %ds via %s)", result.Error, seconds, source)
 }
 
-// withCaseTimeout returns a derived context bounded by the case-level
-// timeout, along with the resolved value and the config key that supplied it
-// (so timeout errors can name the knob users need to adjust). source/seconds
-// are empty/zero when no timeout is configured.
+// withCaseTimeout returns the effective case context. The source and seconds
+// are populated when the case's own budget supplies the effective deadline.
 func withCaseTimeout(ctx context.Context, defaultTimeoutSec, caseTimeoutSec int) (context.Context, context.CancelFunc, string, int) {
+	source, seconds := "cases.defaults.timeout_seconds", defaultTimeoutSec
 	if caseTimeoutSec > 0 {
-		c, cancel := context.WithTimeout(ctx, time.Duration(caseTimeoutSec)*time.Second)
-		return c, cancel, "case.constraints.timeout_seconds", caseTimeoutSec
+		source, seconds = caseTimeoutDeadlineSource, caseTimeoutSec
 	}
-	if defaultTimeoutSec > 0 {
-		c, cancel := context.WithTimeout(ctx, time.Duration(defaultTimeoutSec)*time.Second)
-		return c, cancel, "cases.defaults.timeout_seconds", defaultTimeoutSec
+	if seconds <= 0 {
+		return ctx, func() {}, "", 0
 	}
-	return ctx, func() {}, "", 0
+	child, cancel, ownsDeadline := judge.WithTimeoutSource(ctx, time.Duration(seconds)*time.Second, source)
+	if !ownsDeadline {
+		return child, cancel, "", 0
+	}
+	return child, cancel, source, seconds
 }
 
 func retryAllowed(policy config.RetryPolicy, reason string) bool {
@@ -1171,12 +1261,17 @@ func retryAllowed(policy config.RetryPolicy, reason string) bool {
 	return false
 }
 
+// retryReasonTimeout is the retry_policy reason a case fails with when a
+// deadline expired; it must survive a metric policy decision so the case stays
+// retryable for the right reason.
+const retryReasonTimeout = "timeout"
+
 func retryReasonForResult(result EvalResult) (string, bool) {
 	if result.Status != judge.StatusError || result.Error == nil {
 		return "", false
 	}
 	if isTimeoutError(result.Error) {
-		return "timeout", true
+		return retryReasonTimeout, true
 	}
 	return "error", true
 }
