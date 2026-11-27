@@ -3,7 +3,23 @@ package config
 import (
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
+
+func TestValidateEvalConfigRejectsNaNPassThreshold(t *testing.T) {
+	t.Parallel()
+	cfg := DefaultEvalConfig()
+	cfg.Cases.Files = []string{"case.yaml"}
+	cfg.Judge = JudgeConfig{Type: judgeTypeAgentJudge, Model: "test-model", Criteria: []string{"check"}}
+	if err := yaml.Unmarshal([]byte("pass_threshold: .nan"), &cfg.Judge); err != nil {
+		t.Fatal(err)
+	}
+	err := NewValidator().ValidateEvalConfig(cfg)
+	if err == nil || !strings.Contains(err.Error(), "judge.pass_threshold") {
+		t.Fatalf("ValidateEvalConfig() error = %v, want invalid pass_threshold", err)
+	}
+}
 
 func TestEnvironmentAgentHome(t *testing.T) {
 	for _, kind := range []string{runtimeTypeNone, runtimeTypeDocker, runtimeTypeOpenSandbox} {
