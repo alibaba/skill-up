@@ -25,8 +25,9 @@ Prerequisites:
 - `skill-up` available on `PATH`
 - `pnpm` available on `PATH` for `dsh plugin`
 
-Plugin tests pin the DSH host peer set to `0.1.5-rc.2`. Verify compatibility
-separately when using a newer host. Release archive versions follow the
+The declared peer ranges start at `0.1.5-rc.2`; development tests pin the DSH
+host packages to `0.1.5-rc.3` and cordis to `4.0.2`. Verify compatibility
+separately for other host versions. Release archive versions follow the
 skill-up CLI version; this plugin remains experimental regardless of the
 archive version.
 

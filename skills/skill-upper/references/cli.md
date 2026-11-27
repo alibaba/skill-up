@@ -58,6 +58,10 @@ Validate `eval.yaml` and its referenced case files:
 skill-up validate [path to eval.yaml]
 ```
 
+Unknown eval/case YAML keys, including nested and merged keys, are errors.
+`validate` checks every referenced case; `run` applies case-name filters before
+strictly decoding selected cases. Validate existing suites when upgrading.
+
 Example success message:
 
 ```plain
@@ -89,6 +93,31 @@ skill-up report <path to result.json> [flags]
 skill-up report result.json --format html
 skill-up report result.json --format json --format junit --format html --output-dir ./reports
 ```
+
+## skill-up compare
+
+Compare two or more preserved result files offline, without rerunning agents:
+
+```bash
+skill-up compare before/iteration-1/result.json after/iteration-1/result.json \
+  --baseline-label original --candidate-label candidate \
+  --format html --output compare.html
+skill-up compare old.json new.json --format markdown --output compare.md
+skill-up compare old.json new.json --format json --fail-on-regression
+```
+
+The first input is the reference for all candidate deltas and gates. Input paths
+are the default labels; repeat `--candidate-label` once per later input, or omit
+it entirely. `--format` accepts `text` (default), `json`, `html`, or `markdown`;
+`--output` writes to a file instead of stdout. `--fail-on-regression` fails on
+case regressions; `--max-token-increase-percent N` optionally gates total token
+growth. These gates do not prove that engine, model, suite, or runtime settings
+were equivalent: check those conditions before interpreting the comparison.
+The HTML run selectors change the displayed pair, not the gate reference.
+
+`run --baseline` evaluates with and without a Skill. To compare Skill revisions,
+run each revision into a separate output directory and pass their result files
+to `compare`. An existing result file is not rerun or overwritten.
 
 ## skill-up import
 
