@@ -300,3 +300,49 @@ func testApplyDiffCleanup(t *testing.T, mode string) {
 		t.Errorf("source patch was removed: %v", err)
 	}
 }
+
+// TestRepoFixtureUploader_RejectsNonDirectory covers a repo_fixture that names
+// a file. A runtime copies a fixture's contents into the workspace root, so a
+// file has nothing to copy and must not look like a successful upload.
+func TestRepoFixtureUploader_RejectsNonDirectory(t *testing.T) {
+	skillDir := t.TempDir()
+	fixturesDir := filepath.Join(skillDir, "evals", "fixtures")
+	if err := os.MkdirAll(fixturesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fixturesDir, "notes.txt"), []byte("not a repo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rt, err := runtime.NewRuntime(runtime.Config{Type: "none", Delete: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	caseCfg := &config.CaseConfig{ID: "file-fixture", Context: config.Context{RepoFixture: "evals/fixtures/notes.txt"}}
+	counting := &uploadDirCountingRuntime{Runtime: rt}
+	err = (&repoFixtureUploader{}).Upload(context.Background(), counting, caseCfg, skillDir, skillDir)
+	want := fmt.Sprintf("repo_fixture %q is not a directory", filepath.Join(skillDir, "evals", "fixtures", "notes.txt"))
+	if err == nil || err.Error() != want {
+		t.Fatalf("Upload error = %v, want %q", err, want)
+	}
+	if counting.uploadDirCalls != 0 {
+		t.Fatalf("UploadDir called %d times for a rejected fixture, want none", counting.uploadDirCalls)
+	}
+}
+
+// uploadDirCountingRuntime counts UploadDir calls and delegates the rest.
+type uploadDirCountingRuntime struct {
+	runtime.Runtime
+
+	uploadDirCalls int
+}
+
+func (r *uploadDirCountingRuntime) UploadDir(ctx context.Context, sourceDir, targetDir string) error {
+	r.uploadDirCalls++
+	return r.Runtime.UploadDir(ctx, sourceDir, targetDir)
+}

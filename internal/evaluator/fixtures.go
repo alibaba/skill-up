@@ -31,8 +31,15 @@ func (r *repoFixtureUploader) Upload(ctx context.Context, rt runtime.Runtime, ca
 	}
 
 	fixtureSource := filepath.Join(fixtureBaseDir, caseCfg.Context.RepoFixture)
-	if _, err := os.Stat(fixtureSource); err != nil {
+	info, err := os.Stat(fixtureSource)
+	if err != nil {
 		return fmt.Errorf("repo_fixture %q not found: %w", fixtureSource, err)
+	}
+	// A runtime copies the fixture's contents into the workspace root, so a
+	// file has nothing to copy. OpenSandbox would report an empty upload as
+	// a success.
+	if !info.IsDir() {
+		return fmt.Errorf("repo_fixture %q is not a directory", fixtureSource)
 	}
 
 	if err := rt.UploadDir(ctx, fixtureSource, "."); err != nil {

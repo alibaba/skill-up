@@ -78,6 +78,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer close the excerpt and continue as prompt text. The response-format
   example shows `"passed": null` instead of `"passed": true`, matching the file
   template, so the example no longer suggests a verdict.
+- Reject a `context.repo_fixture` that names a file instead of a directory.
+  OpenSandbox reported a successful upload and copied nothing, so the case ran
+  without the fixture's contents; the `none` runtime failed with an unrelated
+  `is a directory` error about the workspace. Both now fail with
+  `repo_fixture "<path>" is not a directory`.
 - Copy fixture contents when `context.repo_fixture` names a directory symlink
   in the `none` and OpenSandbox runtimes. Local uploads no longer fail with a directory
   read error, and OpenSandbox no longer silently uploads an empty fixture.
