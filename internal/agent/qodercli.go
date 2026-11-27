@@ -170,7 +170,7 @@ func (a *QoderCLIAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result)
 	resultErr := qoderResultError(result.Stdout, result.Stderr, a.appliedModelName(ctx))
 	if sessionResult != nil {
-		sessionResult.PromptDelivery = promptDelivery
+		sessionResult.recordPromptDelivery(promptDelivery)
 	}
 	if err != nil {
 		if sessionResult == nil {
@@ -415,7 +415,7 @@ func (a *QoderCLIAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOption
 	resultErr := qoderResultError(result.Stdout, result.Stderr, a.appliedModelName(ctx))
 	if sessionResult != nil {
 		sessionResult.SessionID = sessionID
-		sessionResult.PromptDelivery = promptDelivery
+		sessionResult.recordPromptDelivery(promptDelivery)
 	}
 	if err != nil {
 		if sessionResult == nil {

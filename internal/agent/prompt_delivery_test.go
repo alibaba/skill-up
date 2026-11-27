@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -246,10 +247,16 @@ func assertResumedPromptDelivery(t *testing.T, rt *resumedPromptRuntime, result 
 		t.Fatalf("resume identity lost: %s", rt.command)
 	}
 	if mode == "inline" {
+		if result.Artifacts != nil && slices.Contains(result.Artifacts.GeneratedFileSources, filepath.Join(rt.Workspace(), ".skill-up", "prompts", "prompt.txt")) {
+			t.Fatal("inline delivery excluded a file it did not write")
+		}
 		if !strings.Contains(rt.command, shellQuote(prompt)) || rt.uploadedTarget != "" {
 			t.Fatalf("incorrect inline delivery: %s", rt.command)
 		}
 		return
+	}
+	if result.Artifacts == nil || !slices.Contains(result.Artifacts.GeneratedFileSources, rt.uploadedTarget) {
+		t.Fatalf("workspace diff exclusions omit the delivered prompt %q", rt.uploadedTarget)
 	}
 	assertResumedPromptFile(t, rt, engine, prompt, artifactDir)
 }

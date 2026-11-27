@@ -197,7 +197,7 @@ func (a *QwenCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, m
 	result, err := rt.Exec(ctx, cmd, opts)
 	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result)
 	if sessionResult != nil {
-		sessionResult.PromptDelivery = promptDelivery
+		sessionResult.recordPromptDelivery(promptDelivery)
 	}
 	if err != nil {
 		return sessionResult, fmt.Errorf("qwen_code run failed: %w", err)
