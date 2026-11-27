@@ -327,6 +327,14 @@ func (a *CodexAgent) mcpDefinitionFlags(ctx context.Context, rt Runtime, runArti
 	return flags.String(), nil
 }
 
+// usesProcessSandbox reports whether codex runs under its own sandbox: on a
+// runtime that does not isolate the process, unless the bypass_sandbox kwarg
+// overrides it (for hosts without Landlock support, such as some CI
+// containers). Every turn of a session uses the same choice.
+func (a *CodexAgent) usesProcessSandbox(rt Runtime) bool {
+	return rt.RequiresProcessSandbox() && !EngineKwargBool(a.Cfg.Kwargs, KwargBypassSandbox)
+}
+
 // mcpApprovalFlags approves tool calls to the MCP servers skill-up installed.
 // codex exec runs with approval policy "never", so under --sandbox
 // workspace-write Codex rejects every MCP call that needs approval. Only these
@@ -517,7 +525,11 @@ func (a *CodexAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOptions, 
 		cleanupCodexRunArtifacts(ctx, rt, runArtifactDir)
 		return nil, err
 	}
-	cmd := buildCodexResumeCmdWithLastMessage(sessionID, instruction, a.appliedModelName(ctx), a.runProviderConfig(ctx), lastMessagePath, mcpFlags) +
+	sandboxFlag, approvalFlags := codexBypassSandbox, ""
+	if a.usesProcessSandbox(rt) {
+		sandboxFlag, approvalFlags = codexProcessSandbox, a.mcpApprovalFlags(rt)
+	}
+	cmd := buildCodexResumeCmdWithLastMessage(sessionID, instruction, a.appliedModelName(ctx), a.runProviderConfig(ctx), lastMessagePath, sandboxFlag, approvalFlags+mcpFlags) +
 		" >" + shellQuote(stdoutPath)
 
 	result, err := rt.Exec(ctx, cmd, opts)
@@ -560,11 +572,8 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 	start := time.Now()
 
 	instruction := BuildInstructionFromMessages(messages)
-	// bypass_sandbox kwarg overrides the runtime-derived choice; useful when
-	// the host kernel does not support codex's Landlock-based linux-sandbox
-	// (e.g. CI containers that block Landlock syscalls).
 	sandboxFlag := codexBypassSandbox
-	if rt.RequiresProcessSandbox() && !EngineKwargBool(a.Cfg.Kwargs, KwargBypassSandbox) {
+	if a.usesProcessSandbox(rt) {
 		sandboxFlag = codexProcessSandbox + a.mcpApprovalFlags(rt)
 	}
 	envVars := a.credentialEnvVars(credential.EnvOpenAIAPIKey, credential.EnvOpenAIBaseURL)
@@ -1008,16 +1017,17 @@ func buildCodexRunStdinCmdWithLastMessage(promptPath, model string, provider cod
 
 // buildCodexResumeCmdWithLastMessage constructs a codex CLI command that resumes
 // an existing session identified by sessionID and sends a new user message.
-// Note: `codex exec resume` does not support --sandbox; the session inherits
-// sandbox mode from its initial creation. We use --dangerously-bypass-approvals-and-sandbox
-// to ensure non-interactive execution (approvals are skipped).
-func buildCodexResumeCmdWithLastMessage(sessionID, instruction, model string, provider codexProviderConfig, lastMessagePath, mcpFlags string) string {
-	// In 0.80.0 this is an exec-only option, not a global resume option.
+// sandboxFlag is the turn's sandbox choice, the same one the first turn uses.
+// resumeFlags carries -c overrides, which resume accepts after the subcommand.
+func buildCodexResumeCmdWithLastMessage(sessionID, instruction, model string, provider codexProviderConfig, lastMessagePath, sandboxFlag, resumeFlags string) string {
+	// In 0.80.0 --output-last-message and --sandbox are exec-only options,
+	// not global ones, so they must come before the resume subcommand.
 	cmd := "codex exec"
 	if lastMessagePath != "" {
 		cmd += " --output-last-message " + shellQuote(lastMessagePath)
 	}
-	cmd += " resume --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox" + mcpFlags
+	cmd += " " + sandboxFlag
+	cmd += " resume --json --skip-git-repo-check" + resumeFlags
 	cmd += codexProviderFlags(provider)
 	if model != "" {
 		cmd += " -m " + shellQuote(model)
