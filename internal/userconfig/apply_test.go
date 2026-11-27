@@ -375,6 +375,23 @@ func TestApplyEnv_ExpandedOTLPHeaderRouting(t *testing.T) {
 	}
 }
 
+func TestApplyEnvDefersExpandedHeadersUntilDefaultsSucceed(t *testing.T) {
+	const header = "OTEL_EXPORTER_OTLP_HEADERS"
+	const marker = "SKILL_UP_TEST_HEADER"
+	unsetForTest(t, header)
+	t.Setenv(marker, "fixture")
+	cfg := Config{
+		Env:        map[string]string{header: "${SKILL_UP_TEST_HEADER}", "ZZ=INVALID": "value"},
+		envSources: map[string]string{header: sourceUser},
+	}
+	if _, err := ApplyEnv(cfg); err == nil {
+		t.Fatal("expected an error setting an invalid environment key")
+	}
+	if _, ok := os.LookupEnv(header); ok {
+		t.Fatal("expanded header was installed before all ordinary defaults succeeded")
+	}
+}
+
 // unsetForTest removes keys for the test and restores them afterwards.
 func unsetForTest(t *testing.T, keys ...string) {
 	t.Helper()

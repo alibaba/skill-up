@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -50,21 +51,33 @@ func ApplyEnv(c Config) ([]string, error) {
 	}
 
 	routes := projectOTLPRouting(c, pending)
+	headers := make(map[string]string)
 	for key, resolved := range defaults {
 		// Keep project routing and pre-existing headers intact, but do
 		// not add credentials derived by this new expansion to it.
-		if resolved.expanded && routes.withholds(pending, defaults, key) {
-			continue
+		if _, option, ok := parseOTLPOption(strings.ToUpper(key)); resolved.expanded && ok && option == otlpOptionHeaders {
+			if routes.withholds(pending, defaults, key) {
+				continue
+			}
+			headers[key] = resolved.value
+		} else {
+			pending[key] = resolved.value
 		}
-		pending[key] = resolved.value
 	}
 
-	keys := make([]string, 0, len(pending))
-	for k := range pending {
-		keys = append(keys, k)
+	// Install expanded headers only after all transport defaults succeed.
+	applied, err := applyDefaults(pending)
+	if err != nil {
+		return applied, err
 	}
-	sort.Strings(keys)
+	appliedHeaders, err := applyDefaults(headers)
+	applied = append(applied, appliedHeaders...)
+	sort.Strings(applied)
+	return applied, err
+}
 
+func applyDefaults(pending map[string]string) ([]string, error) {
+	keys := slices.Sorted(maps.Keys(pending))
 	applied := make([]string, 0, len(keys))
 	for _, k := range keys {
 		if _, ok := os.LookupEnv(k); ok {
