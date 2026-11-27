@@ -7,6 +7,13 @@ import (
 	"github.com/alibaba/skill-up/internal/config"
 )
 
+func TestPromptPreviewLabelsSimulatedOpeningTurn(t *testing.T) {
+	input := config.Input{Turns: []config.Turn{{Respond: "Ask about the result"}}}
+	if got := promptPreview(input); got != "[simulated] Ask about the result" {
+		t.Fatalf("promptPreview = %q", got)
+	}
+}
+
 func TestListCasesCommand_ValidConfig(t *testing.T) {
 	if _, err := os.Stat(testEvalPath); os.IsNotExist(err) {
 		t.Skip("examples/code-stats/evals/eval.yaml not found")
