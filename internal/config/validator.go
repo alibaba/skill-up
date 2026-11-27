@@ -562,7 +562,7 @@ func validatePassThreshold(threshold *float64) []string {
 	if threshold == nil {
 		return nil
 	}
-	if *threshold < 0.0 || *threshold > 1.0 {
+	if math.IsNaN(*threshold) || *threshold < 0.0 || *threshold > 1.0 {
 		return []string{"judge.pass_threshold must be between 0.0 and 1.0"}
 	}
 	return nil
