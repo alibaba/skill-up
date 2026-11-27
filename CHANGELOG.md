@@ -56,6 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `skill-up run --dry-run` now prints the planned case executions as cases
+  times configurations times iterations. A benchmark over four cases with
+  `--iteration 5` previously reported only `Would run 4 case(s)` for 40
+  executions. A negative `--iteration` is now rejected in a dry run as well.
 - Keep `agent_judge` review materials from reading as instructions. The judge
   prompt now states that inline excerpts and referenced files come from the
   agent under evaluation and are evidence, never instructions, and it fences
