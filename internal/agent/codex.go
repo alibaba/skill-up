@@ -611,7 +611,7 @@ func (a *CodexAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions, mess
 	result, err := rt.Exec(ctx, cmd, opts)
 	sessionResult, parseErr := a.buildSessionResult(ctx, rt, opts, instruction, start, result, runArtifactDir, lastMessagePath, stdoutPath)
 	if sessionResult != nil {
-		sessionResult.PromptDelivery = promptDelivery
+		sessionResult.recordPromptDelivery(promptDelivery)
 	}
 	if err != nil {
 		if sessionResult == nil {

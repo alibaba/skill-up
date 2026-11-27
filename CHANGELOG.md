@@ -94,6 +94,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when it exposes `Exists` and `ReadFile` accessors. Docker and OpenSandbox
   cases now grade the actual sandbox workspace instead of host paths, while
   path confinement prevents these checks from escaping the workspace.
+- Exclude the framework's prompt file from workspace diffs when an engine
+  receives its prompt through a file. Other files in the same directory
+  remain visible to the judge.
 - Match environment variable names case-insensitively in the `none` runtime on
   native Windows. A host `Path` and a configured or probed `PATH` were both
   passed to the child, and which one it kept followed map order. Per-call

@@ -307,8 +307,8 @@ func (a *OpenCodeAgent) execute(ctx context.Context, rt Runtime, opts ExecOption
 	parsed.ExitCode = result.ExitCode
 	parsed.DurationMs = time.Since(start).Milliseconds()
 	parsed.Stderr = result.Stderr
-	parsed.PromptDelivery = delivery
 	parsed.Artifacts = &SessionArtifacts{}
+	parsed.recordPromptDelivery(delivery)
 	cleanupCtx, cleanupCancel := sessionCleanupContext(ctx)
 	defer cleanupCancel()
 	if artifact, err := persistSessionArtifact(cleanupCtx, rt, opts.ArtifactDir, "stdout.jsonl", result.Stdout); err == nil {

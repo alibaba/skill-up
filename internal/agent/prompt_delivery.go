@@ -32,6 +32,17 @@ type promptCommandBuilder struct {
 	StdinFile func(string) string
 }
 
+func (r *SessionResult) recordPromptDelivery(delivery *PromptDeliveryMetadata) {
+	r.PromptDelivery = delivery
+	if delivery == nil || delivery.RuntimePath == "" {
+		return
+	}
+	if r.Artifacts == nil {
+		r.Artifacts = &SessionArtifacts{}
+	}
+	r.Artifacts.GeneratedFileSources = append(r.Artifacts.GeneratedFileSources, delivery.RuntimePath)
+}
+
 func deliverPrompt(ctx context.Context, rt Runtime, opts ExecOptions, instruction string, builder promptCommandBuilder) (string, *PromptDeliveryMetadata, error) {
 	threshold := promptInlineMaxBytes()
 	// MSYS2 bash can truncate quoted argv near 8 KiB when launched by a

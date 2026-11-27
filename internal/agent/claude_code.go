@@ -178,7 +178,7 @@ func (a *ClaudeCodeAgent) Run(ctx context.Context, rt Runtime, opts ExecOptions,
 	result, err := rt.Exec(ctx, cmd, opts)
 	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result)
 	if sessionResult != nil {
-		sessionResult.PromptDelivery = promptDelivery
+		sessionResult.recordPromptDelivery(promptDelivery)
 		sessionResult.SessionID = sessionID
 	}
 	if providerErr := claudeProviderRunError(result, sessionResult); providerErr != nil {
@@ -588,7 +588,7 @@ func (a *ClaudeCodeAgent) RunTurn(ctx context.Context, rt Runtime, opts ExecOpti
 	result, err := rt.Exec(ctx, cmd, opts)
 	sessionResult := a.buildSessionResult(ctx, rt, opts, instruction, start, result)
 	if sessionResult != nil {
-		sessionResult.PromptDelivery = promptDelivery
+		sessionResult.recordPromptDelivery(promptDelivery)
 		sessionResult.SessionID = sessionID
 	}
 	return a.handleClaudeRunResult(sessionResult, result, err, sessionID, start)
