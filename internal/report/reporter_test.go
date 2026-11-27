@@ -275,6 +275,26 @@ func TestJUnitReporter_Write(t *testing.T) {
 	}
 }
 
+func TestJUnitFailureEvidence(t *testing.T) {
+	cr := CaseResult{CaseID: "example", Status: judge.StatusFail, Gates: &judge.ExpectResult{
+		Failures: []judge.ExpectFailure{{Rule: "exit_code", Detail: "expected 0"}},
+	}}
+	cr.TurnResults = []CaseTurnResult{{TurnNumber: 2, Status: "failed", Reason: "post-condition failed"}}
+	reporter := JUnitReporter{}
+	body := reporter.buildTestSuite(Input{CaseResults: []CaseResult{cr}}).Suites[0].TestCases[0].Failure.Body
+	if !strings.Contains(body, "expected 0") || !strings.Contains(body, "post-condition failed") {
+		t.Errorf("missing gate or turn failure in %q", body)
+	}
+	cr.Grading = judge.NewResult([]judge.AssertionResult{
+		{Text: "independent failure", Evidence: "missing output"},
+		{Text: "not evaluated", Skipped: true},
+	}, 1, 1)
+	body = reporter.buildTestSuite(Input{CaseResults: []CaseResult{cr}}).Suites[0].TestCases[0].Failure.Body
+	if !strings.Contains(body, "independent failure") || strings.Contains(body, "not evaluated") {
+		t.Errorf("unexpected failed assertions in %q", body)
+	}
+}
+
 func TestJUnitReporter_FailureDetails(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "result.xml")

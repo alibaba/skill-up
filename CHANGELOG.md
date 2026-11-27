@@ -106,6 +106,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use prompt-file delivery for resumed Claude Code and Qoder turns when the
   prompt exceeds the inline limit or the target is Windows, preserving prompt
   delivery metadata and failing before execution if the file cannot be uploaded.
+- Include gate and turn failure details in JUnit output when grading data is
+  absent. Omit skipped assertions from the list of failed assertions.
 - Read workspace file expectations and rule-based checks through the runtime
   when it exposes `Exists` and `ReadFile` accessors. Docker and OpenSandbox
   cases now grade the actual sandbox workspace instead of host paths, while
