@@ -127,6 +127,11 @@ func TestRecordedConfigurationAndPromptDifferences(t *testing.T) {
 	if len(result.Cases.Unchanged) != 1 || result.Cases.Unchanged[0].PromptChanged == nil || !*result.Cases.Unchanged[0].PromptChanged {
 		t.Fatal("same outcome hid prompt difference")
 	}
+	tc := result.Cases.Unchanged[0]
+	want := tc.CaseID + " (" + transitionStatus(tc) + ", prompt changed)"
+	if text := RenderText(result); !strings.Contains(text, want) || strings.Count(text, ", prompt changed)") != 1 {
+		t.Fatalf("text comparison should flag only the changed prompt, want %q in:\n%s", want, text)
+	}
 	for _, format := range []string{"html", "markdown", "text"} {
 		data, err := Render(result, format)
 		if err != nil {

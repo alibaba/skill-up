@@ -61,6 +61,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Show `prompt changed` in text comparisons when a shared case's recorded
+  prompts differ, even if its pass/fail status stayed the same.
+
 - `skill-up run --dry-run` now prints the planned case executions as cases
   times configurations times iterations. A benchmark over four cases with
   `--iteration 5` previously reported only `Would run 4 case(s)` for 40
