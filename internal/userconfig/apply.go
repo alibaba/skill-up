@@ -3,6 +3,7 @@ package userconfig
 import (
 	"context"
 	"maps"
+	"net/url"
 	"os"
 	"regexp"
 	"sort"
@@ -166,20 +167,30 @@ func (r *projectOTLPRoutes) withholds(pending map[string]string, defaults map[st
 	return false
 }
 
-// hasTrustedSignalOption reports whether the signal's own option has a value,
-// so the shared project value does not apply to it. Project values for the
-// signal's own option are recorded in projectOTLPRoutes and never reach here.
-// An exporter treats an empty or blank variable as unset and falls back to
-// the shared one, so only the resolved value counts.
+// hasTrustedSignalOption checks whether a trusted override displaces the
+// shared project option. Exporters ignore options they cannot parse or load.
 func hasTrustedSignalOption(pending map[string]string, defaults map[string]envDefault, signal, option string) bool {
 	key := otlpEnvPrefix + signal + "_" + option
-	if value, exists := os.LookupEnv(key); exists {
-		return strings.TrimSpace(value) != ""
+	value, exists := os.LookupEnv(key)
+	if !exists {
+		value, exists = pending[key]
+		if !exists {
+			value = defaults[key].value
+		}
 	}
-	if value, exists := pending[key]; exists {
-		return strings.TrimSpace(value) != ""
+	switch option {
+	case "ENDPOINT":
+		u, err := url.Parse(value)
+		return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Hostname() != ""
+	case "PROTOCOL":
+		return value == "grpc" || value == "http/protobuf"
+	case "INSECURE":
+		return value == "true" || value == "false"
+	default:
+		// Exporters, including child processes, load TLS files themselves.
+		// Checking a path here cannot guarantee that a later load succeeds.
+		return false
 	}
-	return strings.TrimSpace(defaults[key].value) != ""
 }
 
 // Resolve against the process environment before installing any defaults, so
@@ -204,7 +215,7 @@ const (
 // otlpRouteOptions lists the option suffixes this guard reads. A longer
 // suffix precedes the suffix it ends with.
 var otlpRouteOptions = []string{
-	"CLIENT_CERTIFICATE", "CERTIFICATE", "ENDPOINT", "PROTOCOL", "INSECURE", otlpOptionHeaders,
+	"CLIENT_CERTIFICATE", "CLIENT_KEY", "CERTIFICATE", "ENDPOINT", "PROTOCOL", "INSECURE", otlpOptionHeaders,
 }
 
 // parseOTLPOption splits an upper-case OTEL_EXPORTER_OTLP_[<SIGNAL>_]<OPTION>

@@ -77,6 +77,8 @@ Automatically discovered project files still supply defaults. A newly expanded O
 
 ---
 
+A trusted per-signal HTTP(S) endpoint must parse as an absolute URL with a host before it can override a project-supplied shared endpoint for this check. A signal-specific certificate or key path cannot establish that a shared project TLS setting has been displaced. Exporters read those files at initialization, possibly in a child process, and can fall back to the shared setting if loading fails. In that combination the expanded header is withheld. These rules apply equally to trusted config and process environment overrides.
+
 ## Bootstrapping with `skill-up init`
 
 `skill-up init` writes a config file to one of two well-known locations:

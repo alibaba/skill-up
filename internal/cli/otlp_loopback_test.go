@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel"
 
 	"github.com/alibaba/skill-up/internal/observability"
+	"github.com/alibaba/skill-up/internal/userconfig"
 )
 
 const (
@@ -38,6 +39,9 @@ func newOTLPCollector(t *testing.T) *otlpCollector {
 	t.Helper()
 	c := &otlpCollector{authorizations: map[string][]string{}}
 	c.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Test-Marker") != "" {
+			t.Error("collector received a withheld test marker")
+		}
 		c.mu.Lock()
 		c.authorizations[r.URL.Path] = append(c.authorizations[r.URL.Path], r.Header.Get("Authorization"))
 		c.mu.Unlock()
@@ -66,9 +70,10 @@ type otlpExport struct {
 }
 
 type otlpLoopbackCase struct {
-	name    string
-	user    string
-	project string
+	name               string
+	user               string
+	project            string
+	verifyBeforeExport bool
 	// want lists every expected export. Any other export fails the test.
 	want []otlpExport
 }
@@ -76,6 +81,19 @@ type otlpLoopbackCase struct {
 // otlpLoopbackCases name the trusted collector in the user config and the
 // other one in an automatically discovered project config.
 var otlpLoopbackCases = []otlpLoopbackCase{
+	{
+		name: "rejected traces endpoint uses shared route without expanded header",
+		user: `env:
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "https://[invalid"
+  OTEL_EXPORTER_OTLP_TRACES_HEADERS: x-test-marker=${SKILL_UP_TEST_OTLP_HEADER}
+`,
+		project: `env:
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{project}}
+`,
+		verifyBeforeExport: true,
+		want:               []otlpExport{{otlpProjectCollector, otlpTracesPath, ""}},
+	},
 	{
 		name: "project traces endpoint gets no expanded header",
 		user: `env:
@@ -249,6 +267,26 @@ func runOTLPLoopbackCase(t *testing.T, tc otlpLoopbackCase, collectors map[strin
 	}
 	if err := os.WriteFile(".skill-up.yaml", []byte(placeholders.Replace(tc.project)), 0o600); err != nil {
 		t.Fatal(err)
+	}
+	if tc.verifyBeforeExport {
+		cfg, _, err := loadUserConfig(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := userconfig.ApplyEnv(cfg); err != nil {
+			t.Fatal(err)
+		}
+		if _, present := os.LookupEnv("OTEL_EXPORTER_OTLP_TRACES_HEADERS"); present {
+			t.Fatal("expanded trace headers present before exporter initialization")
+		}
+		ctx, shutdown, err := observability.Init(context.Background(), "test-version")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := shutdown(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return
 	}
 	if _, err := captureStdout(t, func() error {
 		return ExecuteArgs("test-version", []string{"--version"})
