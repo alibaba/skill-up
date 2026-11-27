@@ -26,8 +26,9 @@ embed (空)
 | `project`  | `$PWD/.skill-up.yaml`                                                                           | 跳过     |
 | `explicit` | 任意子命令的 `--config <path>`                                                                  | 报错     |
 
-`user` / `project` 层文件不存在或解析失败会降级为 stderr 上的 `warning:`，命令
-继续执行。`--config` 显式路径如果缺失或不合法则直接报错。
+`user` / `project` 层文件不存在时会跳过；无法读取或解析时会输出警告。
+`--config` 显式路径如果缺失或不合法则直接报错，且只能指定一次。只有绝对路径的
+`XDG_CONFIG_HOME` 才会生效；否则配置发现和 `init` 的默认写入位置都回退到用户主目录。
 
 高优先级层只**覆盖非零字段**；map 类字段（`telemetry.resource_attributes`、
 `env`、`runtime_kwargs`）按 key 逐项合并，而不是整体替换。
@@ -62,10 +63,26 @@ runtime_kwargs:                                       # 按 environment.type 提
 
 - **`telemetry` 与 `env`**：每个 key 对应一个 `OTEL_*` 或自定义环境变量，**仅在
   对应环境变量未被设置时才会注入**——命令行或 shell 中已有的值优先。
-- **`env` 中的 `${VAR}`** 在加载时从当前进程环境展开，密钥不会被写进文件本身。
+- **`env` 中的 `${VAR}`** 只在值来自用户层或显式配置层时展开。在应用任何默认值前，
+  使用进程环境展开一次。未设置的引用保留原样；自动发现的项目配置值不展开。
 - **`runtime_kwargs`**：`run` 命令按 `environment.type`（如 `opensandbox`）查找
   默认值。`eval.yaml` 中显式给的值优先；未提供的字段在这里兜底。Key 的形态与
   对应 environment provider 的 kwargs 一致。
+
+### 凭据信任边界
+
+自动发现的项目配置仍然提供默认值。如果项目默认值可以控制某个导出器的发送目标或
+它所信任的对端，由该导出器携带的、通过变量展开生成的 OTLP 请求头不会被应用。检查按
+信号进行：`OTEL_EXPORTER_OTLP_TRACES_HEADERS` 只取决于 traces 的生效路由，即 traces
+自身的端点、协议和 TLS 选项，以及未被可信的 traces 设置覆盖的通用
+`OTEL_EXPORTER_OTLP_*` 选项，因此只设置 metrics 端点的项目不会影响它。通用的
+`OTEL_EXPORTER_OTLP_HEADERS` 可能被每个信号使用，只要项目提供了任一路由设置就不会被
+应用。项目提供的代理设置和 TLS 根证书设置（`SSL_CERT_FILE`、`SSL_CERT_DIR`）对所有
+信号生效。这仅约束新展开的请求头，不改变字面量
+请求头、进程环境中已有的请求头或评测执行的处理方式。通过 `--config` 选择文件会
+信任其变量展开，请先审阅文件。对于 `init`，`--config` 仅指定拷贝来源，不提供默认值。
+
+要在此检查中覆盖项目提供的通用端点，可信的信号级 HTTP(S) 端点必须能解析为包含主机名的绝对 URL。信号级证书或密钥路径不能证明项目提供的通用 TLS 设置已被覆盖。导出器会在初始化时读取文件，有时会在子进程中读取。如果加载失败，导出器可能会回退到通用设置，因此这种组合不会应用展开后的请求头。可信配置和进程环境变量遵循相同的规则。
 
 ---
 

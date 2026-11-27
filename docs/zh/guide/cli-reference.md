@@ -291,7 +291,7 @@ skill-up init [flags]
 | `--print`  | `false`      | 输出到 stdout，而不是写盘                                                                        |
 | `--force`  | `false`      | 覆盖已存在的目标文件                                                                             |
 
-> 注意：对 `init` 子命令，`--config` 是**读取源**；对其他子命令（`run`、`validate` …），`--config` 是加载链最顶层的覆盖路径。
+> `--config` 只能指定一次。对 `init`，它仅指定拷贝来源；对其他子命令，它选择可信任变量展开的显式配置层。见[凭据信任边界](./user-config.md#凭据信任边界)。相对路径的 `XDG_CONFIG_HOME` 不影响默认写入位置。
 
 ### 示例
 

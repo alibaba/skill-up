@@ -61,6 +61,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Expand environment placeholders only in trusted user or explicit config
+  defaults. Keep automatic project defaults, but withhold a newly expanded OTLP
+  header when project defaults can control the route, proxy or TLS roots of a
+  signal that would carry it. Withhold the header when an exporter can fall
+  back to a shared project option, including when loading TLS files.
+  Reject repeated `--config` and ignore relative `XDG_CONFIG_HOME` in
+  discovery and initialization.
 - `skill-up run --dry-run` now prints the planned case executions as cases
   times configurations times iterations. A benchmark over four cases with
   `--iteration 5` previously reported only `Would run 4 case(s)` for 40

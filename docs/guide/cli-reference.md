@@ -469,7 +469,7 @@ skill-up init [flags]
 | `--print`  | `false`                                            | Print to stdout instead of writing to disk                                                   |
 | `--force`  | `false`                                            | Overwrite an existing target                                                                 |
 
-> Note: for `init`, `--config` names the *source* to read. For every other subcommand (`run`, `validate`, …) it is the *load-path override* sitting at the top of the discovery chain.
+> Specify `--config` at most once. For `init`, it names the copy source only. For other subcommands it selects an explicit layer trusted for variable expansion. See the [credential boundary](./user-config#credential-boundary). A relative `XDG_CONFIG_HOME` does not change the default write target.
 
 ### Examples
 

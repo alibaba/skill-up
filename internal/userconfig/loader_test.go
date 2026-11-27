@@ -1,6 +1,7 @@
 package userconfig
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,18 +56,40 @@ func TestLoadEffective_UserLayer(t *testing.T) {
 	}
 }
 
-func TestLoadEffective_ProjectOverridesUser(t *testing.T) {
+func TestLoadEffective_ProjectOverridesUserDefaults(t *testing.T) {
 	home := t.TempDir()
 	wd := t.TempDir()
-	writeFile(t, filepath.Join(home, ".config", UserConfigDir, UserConfigFile), "telemetry:\n  service_name: user\n")
-	writeFile(t, filepath.Join(wd, ProjectConfigFile), "telemetry:\n  service_name: project\n")
+	writeFile(t, filepath.Join(home, ".config", UserConfigDir, UserConfigFile), `telemetry:
+  service_name: trusted-service
+runtime_kwargs:
+  opensandbox:
+    base_url: https://trusted.example.invalid
+    request_timeout_seconds: "20"
+`)
+	writeFile(t, filepath.Join(wd, ProjectConfigFile), `telemetry:
+  service_name: project
+runtime_kwargs:
+  opensandbox:
+    request_timeout_seconds: "42"
+`)
 
-	cfg, _, err := LoadEffective(LoadOptions{HomeDir: home, WorkingDir: wd, Env: emptyEnv})
+	var warnings bytes.Buffer
+	cfg, sources, err := LoadEffective(LoadOptions{HomeDir: home, WorkingDir: wd, Env: emptyEnv, Warnings: &warnings})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.Telemetry.ServiceName != "project" {
-		t.Fatalf("project should win: %q", cfg.Telemetry.ServiceName)
+		t.Fatalf("project must override user defaults: %q", cfg.Telemetry.ServiceName)
+	}
+	if len(sources) != 3 || sources[1].Kind != sourceUser || sources[2].Kind != "project" {
+		t.Fatalf("want user then project sources: %+v", sources)
+	}
+	if warnings.Len() != 0 {
+		t.Fatalf("valid automatic project should not warn: %q", warnings.String())
+	}
+	kwargs := MergeKwargs(cfg, "opensandbox", nil)
+	if kwargs["base_url"] != "https://trusted.example.invalid" || kwargs["request_timeout_seconds"] != "42" {
+		t.Fatalf("project runtime defaults did not overlay user defaults: %v", kwargs)
 	}
 }
 
@@ -121,6 +144,185 @@ func TestLoadEffective_EnvVarPath(t *testing.T) {
 	}
 	if cfg.Telemetry.ServiceName != "env" {
 		t.Fatalf("got %q", cfg.Telemetry.ServiceName)
+	}
+}
+
+func TestLoadEffective_OTLPHeaderDefaultsFollowRoutingTrust(t *testing.T) {
+	const headerKey = "OTEL_EXPORTER_OTLP_HEADERS"
+	const expanded = "authorization=synthetic-value"
+	const staticHeader = "x-source=literal"
+	const processHeader = "x-source=process"
+	const projectURL = "https://project.example.invalid"
+	const trustedURL = "https://trusted.example.invalid"
+	const generic = "OTEL_EXPORTER_OTLP_ENDPOINT"
+	const traces = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
+	t.Setenv("SKILL_UP_TEST_HEADER_VALUE", "synthetic-value")
+	for _, tc := range []struct {
+		name, header, projectConfig, endpointKey, endpoint, wantHeader string
+		explicit, processEndpoint, processHeader                       bool
+	}{
+		{"trusted route", "authorization=${SKILL_UP_TEST_HEADER_VALUE}", "", generic, trustedURL, expanded, false, false, false},
+		{"project generic", "authorization=${SKILL_UP_TEST_HEADER_VALUE}", "env:\n  " + generic + ": " + projectURL + "\n", generic, projectURL, "", false, false, false},
+		{"project traces env", "authorization=${SKILL_UP_TEST_HEADER_VALUE}", "env:\n  " + traces + ": " + projectURL + "\n", traces, projectURL, "", false, false, false},
+		{"project structured traces", "authorization=${SKILL_UP_TEST_HEADER_VALUE}", "telemetry:\n  traces:\n    endpoint: " + projectURL + "\n", traces, projectURL, "", false, false, false},
+		{"explicit project traces", "authorization=${SKILL_UP_TEST_HEADER_VALUE}", "telemetry:\n  traces:\n    endpoint: " + projectURL + "\n", traces, projectURL, expanded, true, false, false},
+		{"process endpoint takes precedence", "authorization=${SKILL_UP_TEST_HEADER_VALUE}", "env:\n  " + generic + ": " + projectURL + "\n", generic, trustedURL, expanded, false, true, false},
+		{"literal header preserved", staticHeader, "env:\n  " + generic + ": " + projectURL + "\n", generic, projectURL, staticHeader, false, false, false},
+		{"process header preserved", "authorization=${SKILL_UP_TEST_HEADER_VALUE}", "env:\n  " + generic + ": " + projectURL + "\n", generic, projectURL, processHeader, false, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, key := range []string{headerKey, generic, traces} {
+				t.Setenv(key, "")
+				if err := os.Unsetenv(key); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.processEndpoint {
+				t.Setenv(tc.endpointKey, tc.endpoint)
+			}
+			if tc.processHeader {
+				t.Setenv(headerKey, processHeader)
+			}
+			home, wd := t.TempDir(), t.TempDir()
+			userPath := filepath.Join(home, ".config", UserConfigDir, UserConfigFile)
+			writeFile(t, userPath, "env:\n  "+generic+": "+trustedURL+"\n  "+headerKey+": "+tc.header+"\n")
+			projectPath := filepath.Join(wd, ProjectConfigFile)
+			writeFile(t, projectPath, tc.projectConfig)
+			opts := LoadOptions{HomeDir: home, WorkingDir: wd, Env: emptyEnv}
+			if tc.explicit {
+				opts.ExplicitPath = projectPath
+			}
+			cfg, _, err := LoadEffective(opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ApplyEnv(cfg); err != nil {
+				t.Fatal(err)
+			}
+			if got := os.Getenv(tc.endpointKey); got != tc.endpoint {
+				t.Errorf("route default = %q, want %q", got, tc.endpoint)
+			}
+			if got, exists := os.LookupEnv(headerKey); got != tc.wantHeader || exists != (tc.wantHeader != "") {
+				t.Errorf("header default = (%q, %t), want (%q, %t)", got, exists, tc.wantHeader, tc.wantHeader != "")
+			}
+		})
+	}
+}
+
+type envExpansionCase struct {
+	name            string
+	user            string
+	project         string
+	explicit        string
+	explicitProject bool
+	userEnvPath     bool
+	userIsProject   bool
+	want            map[string]string
+}
+
+func TestLoadEffective_EnvExpansionTrust(t *testing.T) {
+	const secret = "test-token"
+	const expanded = "source=" + secret
+	const literal = "source=${SKILL_UP_TEST_SECRET}"
+	const userOnly = "SKILL_UP_TEST_USER_ONLY"
+	const explicitOnly = "SKILL_UP_TEST_EXPLICIT_ONLY"
+	const project = `env:
+  OTEL_EXPORTER_OTLP_ENDPOINT: https://collector.example.invalid
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  OTEL_RESOURCE_ATTRIBUTES: source=${SKILL_UP_TEST_SECRET}
+`
+	const user = `env:
+  OTEL_RESOURCE_ATTRIBUTES: source=${SKILL_UP_TEST_SECRET}
+  SKILL_UP_TEST_USER_ONLY: source=${SKILL_UP_TEST_SECRET}
+`
+	const explicit = `env:
+  SKILL_UP_TEST_EXPLICIT_ONLY: source=${SKILL_UP_TEST_SECRET}
+`
+	t.Setenv("SKILL_UP_TEST_SECRET", secret)
+	for _, tc := range []envExpansionCase{
+		{
+			name: "automatic project values stay literal", project: project,
+			want: map[string]string{envOtelResourceAttributes: literal},
+		},
+		{
+			name: "user defaults expand", user: user,
+			want: map[string]string{envOtelResourceAttributes: expanded, userOnly: expanded},
+		},
+		{
+			name: "project overrides the user value without expanding", user: user, project: project,
+			want: map[string]string{envOtelResourceAttributes: literal, userOnly: expanded},
+		},
+		{
+			name: "explicit config does not trust unrelated project keys", user: user, project: project, explicit: explicit,
+			want: map[string]string{envOtelResourceAttributes: literal, userOnly: expanded, explicitOnly: expanded},
+		},
+		{
+			name: "explicitly selected project expands", project: project, explicitProject: true,
+			want: map[string]string{envOtelResourceAttributes: expanded},
+		},
+		{
+			name: "explicit key overrides project trust", project: project, explicit: user,
+			want: map[string]string{envOtelResourceAttributes: expanded, userOnly: expanded},
+		},
+		{
+			name: "user environment path expands", user: user, userEnvPath: true,
+			want: map[string]string{envOtelResourceAttributes: expanded, userOnly: expanded},
+		},
+		{
+			name: "user selected project path is trusted", project: project, userEnvPath: true, userIsProject: true,
+			want: map[string]string{envOtelResourceAttributes: expanded},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testEnvExpansionTrust(t, tc)
+		})
+	}
+}
+
+func testEnvExpansionTrust(t *testing.T, tc envExpansionCase) {
+	t.Helper()
+	for _, key := range []string{envOtelResourceAttributes, "OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_PROTOCOL", "SKILL_UP_TEST_USER_ONLY", "SKILL_UP_TEST_EXPLICIT_ONLY"} {
+		t.Setenv(key, "")
+		_ = os.Unsetenv(key)
+	}
+	home, wd := t.TempDir(), t.TempDir()
+	userPath := filepath.Join(home, ".config", UserConfigDir, UserConfigFile)
+	if tc.userEnvPath {
+		userPath = filepath.Join(t.TempDir(), "user.yaml")
+	}
+	projectPath := filepath.Join(wd, ProjectConfigFile)
+	if tc.userIsProject {
+		userPath = projectPath
+	}
+	writeFile(t, userPath, tc.user)
+	writeFile(t, projectPath, tc.project)
+	opts := LoadOptions{HomeDir: home, WorkingDir: wd, Env: emptyEnv}
+	if tc.userEnvPath {
+		opts.Env = func(key string) string {
+			if key == ConfigEnvVar {
+				return userPath
+			}
+			return ""
+		}
+	}
+	if tc.explicit != "" {
+		opts.ExplicitPath = filepath.Join(t.TempDir(), "explicit.yaml")
+		writeFile(t, opts.ExplicitPath, tc.explicit)
+	}
+	if tc.explicitProject {
+		opts.ExplicitPath = projectPath
+	}
+	cfg, _, err := LoadEffective(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApplyEnv(cfg); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range tc.want {
+		if got := os.Getenv(key); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
 	}
 }
 
@@ -188,7 +390,7 @@ func TestLoadEffective_ValidateErrorIncludesSources(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, ".skill-up.yaml")
 	writeFile(t, path, "telemetry:\n  traces:\n    protocol: tcp\n")
-	_, _, err := LoadEffective(LoadOptions{HomeDir: tmp, WorkingDir: tmp, Env: emptyEnv})
+	_, _, err := LoadEffective(LoadOptions{ExplicitPath: path, HomeDir: tmp, WorkingDir: tmp, Env: emptyEnv})
 	if err == nil {
 		t.Fatal("expected validate error")
 	}
@@ -236,6 +438,15 @@ func TestResolveConfigPaths(t *testing.T) {
 	}
 	if got := resolveUserConfigPath(LoadOptions{HomeDir: "/home/test"}, emptyEnv); got != filepath.Join("/home/test", ".config", UserConfigDir, UserConfigFile) {
 		t.Fatalf("resolveUserConfigPath home = %q", got)
+	}
+	relativeEnv := func(key string) string {
+		if key == "XDG_CONFIG_HOME" {
+			return "relative-config"
+		}
+		return ""
+	}
+	if got := resolveUserConfigPath(LoadOptions{HomeDir: "/home/test"}, relativeEnv); got != filepath.Join("/home/test", ".config", UserConfigDir, UserConfigFile) {
+		t.Fatalf("resolveUserConfigPath relative XDG = %q", got)
 	}
 	if got := resolveProjectConfigPath(LoadOptions{WorkingDir: "/repo"}); got != filepath.Join("/repo", ProjectConfigFile) {
 		t.Fatalf("resolveProjectConfigPath = %q", got)

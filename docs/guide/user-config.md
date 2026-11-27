@@ -28,9 +28,7 @@ embed (empty)
 | `project`  | `$PWD/.skill-up.yaml`                                                                                   | skipped |
 | `explicit` | `--config <path>` passed to any command                                                                 | error   |
 
-A missing or corrupt `user`/`project` file is downgraded to a `warning:` on
-stderr — the command keeps running with whatever layers loaded. A missing or
-invalid `--config` path is a hard error.
+Missing `user` and `project` files are skipped. Optional files that cannot be read or parsed produce a warning. A missing or invalid `--config` path is a hard error. Specify `--config` at most once. The XDG path is used only when `XDG_CONFIG_HOME` is absolute; otherwise discovery and the default `init` write target fall back to the home directory.
 
 Higher-precedence layers overlay non-zero fields onto lower layers; map fields
 (`telemetry.resource_attributes`, `env`, `runtime_kwargs`) are merged key-wise
@@ -68,11 +66,16 @@ Semantics:
   environment variable. Values are only applied **if the corresponding env var
   is not already set**, so a value on the command line or in your shell
   always wins.
-- **`${VAR}` placeholders** in `env` values are expanded from the process
-  environment at load time, so secrets stay out of the file.
+- **`${VAR}` placeholders** expand only in `env` values supplied by the user or explicit layer, in one pass against the process environment before any defaults are applied. Unset references remain literal, and automatically discovered project values are never expanded.
 - **`runtime_kwargs`** — defaults for `run` keyed by `environment.type` (e.g.
   `opensandbox`). `eval.yaml` values take precedence; missing keys fall back
   here. Keys mirror the environment provider's kwargs schema.
+
+### Credential boundary
+
+Automatically discovered project files still supply defaults. A newly expanded OTLP header is withheld when project defaults can control where the exporter that carries it sends data, or which peer that exporter accepts. The check is per signal: `OTEL_EXPORTER_OTLP_TRACES_HEADERS` follows the traces route, meaning the traces endpoint, protocol and TLS options, then the shared `OTEL_EXPORTER_OTLP_*` options that no trusted traces setting overrides. A project that only sets a metrics endpoint therefore does not withhold it. The shared `OTEL_EXPORTER_OTLP_HEADERS` can reach every signal, so any project route setting withholds it. Project proxy settings and TLS root settings (`SSL_CERT_FILE`, `SSL_CERT_DIR`) count for every signal. This protection applies only to headers produced by expansion; it does not change the treatment of literal headers, headers already in the process environment, or evaluation execution. Review any config before selecting it with `--config`, which trusts the file for expansion. For `init`, `--config` is only a copy source and is not used to supply defaults.
+
+A trusted per-signal HTTP(S) endpoint must parse as an absolute URL with a host before it can override a project-supplied shared endpoint for this check. A signal-specific certificate or key path cannot establish that a shared project TLS setting has been displaced. Exporters read those files at initialization, possibly in a child process, and can fall back to the shared setting if loading fails. In that combination the expanded header is withheld. These rules apply equally to trusted config and process environment overrides.
 
 ---
 

@@ -186,7 +186,7 @@ skill-up init --print
 skill-up init --force
 ```
 
-Precedence (low → high): embedded empty defaults < user config < project `.skill-up.yaml` < `--config`. `SKILL_UP_CONFIG` can point at the user config file (env var name is historical). See the upstream README "User config".
+Precedence (low → high): embedded empty defaults < user config < project `.skill-up.yaml` < `--config`. `SKILL_UP_CONFIG` can select the user config file. Only trusted user or explicitly selected `env` values expand `${VAR}`; automatically discovered project defaults still apply literally. See the upstream README “User config”.
 
 ### Step 1: Locate the target Skill
 

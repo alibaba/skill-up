@@ -341,7 +341,7 @@ embed (empty) < user (~/.config/skill-up/config.yaml) < project ($PWD/.skill-up.
 | `project`  | `$PWD/.skill-up.yaml`                                                                                   |
 | `explicit` | `--config <path>` (must exist)                                                                          |
 
-Missing files at the `user` and `project` layers are silently skipped; a missing `--config` path is a hard error. A corrupt config at any layer also fails the run.
+Missing files at the `user` and `project` layers are silently skipped; a missing `--config` path is a hard error. Specify `--config` at most once. Relative `XDG_CONFIG_HOME` values are ignored for discovery and the default `init` write target.
 
 ### Quickstart
 
@@ -391,7 +391,7 @@ For `runtime_kwargs`: explicit `--runtime-kwarg` on `run` > `eval.yaml` `environ
 
 ### Secrets
 
-Prefer `${ENV_VAR}` references inside the config file rather than baking secret literals. The redaction mechanism (`userconfig.Redact`) masks fields tagged `secret:"true"` when printing; currently no Config field carries the tag, but the mechanism is in place for future fields.
+Use `${ENV_VAR}` in `env` values from user-level or explicitly selected config files instead of storing secret literals. Automatically discovered project defaults still apply, but their values remain literal. Newly expanded OTLP headers are withheld when project defaults control telemetry routing. See [User Configuration](docs/guide/user-config.md#credential-boundary) for the scope of this protection.
 
 ## Importing `evals.json`
 

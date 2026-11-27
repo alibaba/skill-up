@@ -3,10 +3,16 @@ package userconfig
 import (
 	"context"
 	"maps"
+	"net/url"
 	"os"
+	"regexp"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 )
+
+var envPlaceholderPattern = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*\}`)
 
 const (
 	envOtelServiceName             = "OTEL_SERVICE_NAME"
@@ -22,23 +28,56 @@ const (
 // ApplyEnv writes telemetry and arbitrary env defaults from c into the process
 // environment, only setting keys that are currently unset. It returns the list
 // of keys that were actually applied (sorted) for logging and debugging.
+// Only env values from the user or explicit discovery layer expand ${VAR}.
+// A newly expanded OTLP header is withheld when project defaults supply
+// routing or transport settings for an exporter that would carry it.
 func ApplyEnv(c Config) ([]string, error) {
 	pending := telemetryEnv(c.Telemetry)
-	for k, v := range c.Env {
-		if v == "" {
+	// Resolve every default first, so the guard reads the values an exporter
+	// will see rather than their templates.
+	defaults := make(map[string]envDefault, len(c.Env))
+	for key, value := range c.Env {
+		if _, exists := os.LookupEnv(key); exists || value == "" {
 			continue
 		}
-		if _, exists := pending[k]; !exists {
-			pending[k] = v
+		if _, exists := pending[key]; exists {
+			continue
+		}
+		resolved := envDefault{value: value}
+		if source := c.envSources[key]; source == sourceUser || source == sourceExplicit {
+			resolved.value, resolved.expanded = expandEnvDefault(value)
+		}
+		defaults[key] = resolved
+	}
+
+	routes := projectOTLPRouting(c, pending)
+	headers := make(map[string]string)
+	for key, resolved := range defaults {
+		// Keep project routing and pre-existing headers intact, but do
+		// not add credentials derived by this new expansion to it.
+		if _, option, ok := parseOTLPOption(strings.ToUpper(key)); resolved.expanded && ok && option == otlpOptionHeaders {
+			if routes.withholds(pending, defaults, key) {
+				continue
+			}
+			headers[key] = resolved.value
+		} else {
+			pending[key] = resolved.value
 		}
 	}
 
-	keys := make([]string, 0, len(pending))
-	for k := range pending {
-		keys = append(keys, k)
+	// Install expanded headers only after all transport defaults succeed.
+	applied, err := applyDefaults(pending)
+	if err != nil {
+		return applied, err
 	}
-	sort.Strings(keys)
+	appliedHeaders, err := applyDefaults(headers)
+	applied = append(applied, appliedHeaders...)
+	sort.Strings(applied)
+	return applied, err
+}
 
+func applyDefaults(pending map[string]string) ([]string, error) {
+	keys := slices.Sorted(maps.Keys(pending))
 	applied := make([]string, 0, len(keys))
 	for _, k := range keys {
 		if _, ok := os.LookupEnv(k); ok {
@@ -50,6 +89,189 @@ func ApplyEnv(c Config) ([]string, error) {
 		applied = append(applied, k)
 	}
 	return applied, nil
+}
+
+// envDefault is an env default after ${VAR} expansion.
+type envDefault struct {
+	value    string
+	expanded bool
+}
+
+// projectOTLPRoutes records the project defaults that will reach the process
+// environment and decide where an OTLP exporter sends data or which peer it
+// accepts.
+type projectOTLPRoutes struct {
+	// transport is set by proxy and TLS root settings, which every exporter
+	// in this process and in child agents can pick up.
+	transport bool
+	// options maps a signal ("" for the settings shared by all signals) to
+	// the endpoint, protocol and TLS options the project supplies for it.
+	options map[string]map[string]bool
+}
+
+// projectOTLPRouting checks structured and arbitrary defaults before any
+// environment writes. Existing process variables and structured fields retain
+// their usual precedence over defaults for the same key.
+func projectOTLPRouting(c Config, pending map[string]string) projectOTLPRoutes {
+	routes := projectOTLPRoutes{options: map[string]map[string]bool{}}
+	for key, source := range map[string]string{
+		envOtelExporterOTLPTracesEndpt: c.tracesEndpointSource,
+		envOtelExporterOTLPTracesProto: c.tracesProtocolSource,
+	} {
+		if _, exists := os.LookupEnv(key); !exists && source == sourceProject && pending[key] != "" {
+			routes.add(key)
+		}
+	}
+	// An empty or blank project value counts too. It is not applied, or is
+	// read as unset, but in the merged config it has already replaced a
+	// trusted value for the same key, so the exporter falls back to another
+	// route.
+	for key := range c.Env {
+		if _, exists := os.LookupEnv(key); exists {
+			continue
+		}
+		if _, exists := pending[key]; !exists && c.envSources[key] == sourceProject {
+			routes.add(key)
+		}
+	}
+	return routes
+}
+
+func (r *projectOTLPRoutes) add(key string) {
+	key = strings.ToUpper(key)
+	if isTransportDefault(key) {
+		r.transport = true
+		return
+	}
+	signal, option, ok := parseOTLPOption(key)
+	if !ok || option == otlpOptionHeaders {
+		return
+	}
+	if r.options[signal] == nil {
+		r.options[signal] = map[string]bool{}
+	}
+	r.options[signal][option] = true
+}
+
+// withholds reports whether a newly expanded header default must not be
+// applied. A signal's own header follows that signal's effective route: its
+// own options, then the shared ones it does not override from a trusted
+// source. The shared header can reach more than one signal's exporter, so any
+// project route withholds it rather than depending on every exporter or child
+// agent to resolve precedence identically.
+func (r *projectOTLPRoutes) withholds(pending map[string]string, defaults map[string]envDefault, key string) bool {
+	signal, option, ok := parseOTLPOption(strings.ToUpper(key))
+	if !ok || option != otlpOptionHeaders {
+		return false
+	}
+	if r.transport {
+		return true
+	}
+	if signal == "" {
+		return len(r.options) > 0
+	}
+	if len(r.options[signal]) > 0 {
+		return true
+	}
+	for shared := range r.options[""] {
+		if !hasTrustedSignalOption(pending, defaults, signal, shared) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasTrustedSignalOption checks whether a trusted override displaces the
+// shared project option. Exporters ignore options they cannot parse or load.
+func hasTrustedSignalOption(pending map[string]string, defaults map[string]envDefault, signal, option string) bool {
+	key := otlpEnvPrefix + signal + "_" + option
+	value, exists := os.LookupEnv(key)
+	if !exists {
+		value, exists = pending[key]
+		if !exists {
+			value = defaults[key].value
+		}
+	}
+	switch option {
+	case "ENDPOINT":
+		return usableOTLPEndpoint(value)
+	case "PROTOCOL":
+		return value == "grpc" || value == "http/protobuf"
+	case "INSECURE":
+		return value == "true" || value == "false"
+	default:
+		// Exporters, including child processes, load TLS files themselves.
+		// Checking a path here cannot guarantee that a later load succeeds.
+		return false
+	}
+}
+
+func usableOTLPEndpoint(value string) bool {
+	u, err := url.Parse(value)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || strings.Contains(u.Hostname(), "%") {
+		return false
+	}
+	if u.Port() == "" {
+		return true
+	}
+	port, err := strconv.ParseUint(u.Port(), 10, 16)
+	return err == nil && port != 0
+}
+
+// Resolve against the process environment before installing any defaults, so
+// config entries cannot become expansion sources based on map or key ordering.
+func expandEnvDefault(value string) (string, bool) {
+	expanded := false
+	result := envPlaceholderPattern.ReplaceAllStringFunc(value, func(ref string) string {
+		if replacement, exists := os.LookupEnv(ref[2 : len(ref)-1]); exists {
+			expanded = true
+			return replacement
+		}
+		return ref
+	})
+	return result, expanded
+}
+
+const (
+	otlpEnvPrefix     = "OTEL_EXPORTER_OTLP_"
+	otlpOptionHeaders = "HEADERS"
+)
+
+// otlpRouteOptions lists the option suffixes this guard reads. A longer
+// suffix precedes the suffix it ends with.
+var otlpRouteOptions = []string{
+	"CLIENT_CERTIFICATE", "CLIENT_KEY", "CERTIFICATE", "ENDPOINT", "PROTOCOL", "INSECURE", otlpOptionHeaders,
+}
+
+// parseOTLPOption splits an upper-case OTEL_EXPORTER_OTLP_[<SIGNAL>_]<OPTION>
+// key. The signal is empty for the options shared by all signals.
+func parseOTLPOption(key string) (signal, option string, ok bool) {
+	rest, found := strings.CutPrefix(key, otlpEnvPrefix)
+	if !found {
+		return "", "", false
+	}
+	for _, candidate := range otlpRouteOptions {
+		if rest == candidate {
+			return "", candidate, true
+		}
+		if prefix, matched := strings.CutSuffix(rest, "_"+candidate); matched && prefix != "" {
+			return prefix, candidate, true
+		}
+	}
+	return "", "", false
+}
+
+// isTransportDefault reports whether an upper-case key changes how any HTTPS
+// or gRPC client reaches or verifies its peer. Go reads SSL_CERT_FILE and
+// SSL_CERT_DIR for system roots on Linux and other Unix systems.
+func isTransportDefault(key string) bool {
+	switch key {
+	case "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "GRPC_PROXY", "NO_GRPC_PROXY", "REQUEST_METHOD",
+		"SSL_CERT_FILE", "SSL_CERT_DIR":
+		return true
+	default:
+		return false
+	}
 }
 
 func telemetryEnv(t Telemetry) map[string]string {

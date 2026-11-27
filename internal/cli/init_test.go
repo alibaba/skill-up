@@ -56,10 +56,14 @@ func TestInit_LocalWritesTemplate(t *testing.T) {
 	t.Chdir(tmp)
 
 	cmd := newInitCmdForTest()
-	cmd.SetOut(&bytes.Buffer{})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
 	cmd.SetArgs([]string{"--local"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("init --local: %v", err)
+	}
+	if !strings.Contains(out.String(), "--config ./.skill-up.yaml") {
+		t.Fatalf("missing local config opt-in hint: %q", out.String())
 	}
 	target := filepath.Join(tmp, ".skill-up.yaml")
 	got, err := os.ReadFile(target)
@@ -167,5 +171,27 @@ func TestInit_ConfigSourceInvalid(t *testing.T) {
 	cmd.SetArgs([]string{"--config", source, "--print"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error for invalid source")
+	}
+}
+
+func TestInit_DefaultTargetIgnoresRelativeXDG(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", "relative-xdg")
+	t.Chdir(t.TempDir())
+
+	cmd := newInitCmdForTest()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	want := filepath.Join(home, ".config", "skill-up", "config.yaml")
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("init did not write %s: %v", want, err)
+	}
+	if _, err := os.Stat("relative-xdg"); !os.IsNotExist(err) {
+		t.Fatalf("init unexpectedly used relative XDG (stat error: %v)", err)
 	}
 }
