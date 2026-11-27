@@ -1146,7 +1146,6 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 	}
 }
 
-// nolint:funlen,maintidx // table-driven test cases drive the line count; splitting hurts readability.
 func TestValidateEvalMCP(t *testing.T) {
 	t.Parallel()
 
@@ -1190,6 +1189,7 @@ func TestValidateEvalConfigRejectsInvalidMCPServers(t *testing.T) {
 	}
 }
 
+// nolint:funlen,maintidx // table-driven test cases drive the line count; splitting hurts readability.
 func TestValidator_ValidateCaseConfig(t *testing.T) {
 	t.Parallel()
 	validator := NewValidator()
