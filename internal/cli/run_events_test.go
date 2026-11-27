@@ -545,3 +545,30 @@ func TestEventRunStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestEvaluationSignalContextPublishesSignalBeforeCancellation(t *testing.T) {
+	signals := make(chan os.Signal, 1)
+	ctx, stop := evaluationSignalContext(context.Background(), signals)
+	t.Cleanup(stop)
+
+	signals <- os.Interrupt
+	select {
+	case <-ctx.Done():
+		if !evaluator.SignalObserved(ctx) {
+			t.Fatal("interrupt provenance must be visible as soon as the context is canceled")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("interrupt did not cancel the evaluation")
+	}
+}
+
+func TestEvaluationSignalContextKeepsParentCancellationUnattributed(t *testing.T) {
+	parent, cancel := context.WithCancel(context.Background())
+	ctx, stop := evaluationSignalContext(parent, make(chan os.Signal, 1))
+	t.Cleanup(stop)
+	cancel()
+	<-ctx.Done()
+	if evaluator.SignalObserved(ctx) {
+		t.Fatal("parent cancellation has no process signal")
+	}
+}

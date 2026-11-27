@@ -163,8 +163,8 @@ func runEval(cmd *cobra.Command, args []string) error {
 		return runEvalWithEventLog(cmd, cases, evalCfg, loader, eventOptions)
 	}
 
-	if maybeRunDryRun(cmd, cases, evalCfg) {
-		return nil
+	if dryRun, err := maybeRunDryRun(cmd, cases, evalCfg); dryRun || err != nil {
+		return err
 	}
 
 	// --- Phase 2: Credentials & agent ---
@@ -247,18 +247,43 @@ func loadAndPrepareConfig(ctx context.Context, cmd *cobra.Command, args []string
 	return cases, evalCfg, loader, nil
 }
 
-// maybeRunDryRun handles --dry-run by printing the planned cases and reporting
-// whether the caller should exit early. The flag itself is the only failure
-// surface and Cobra has already validated it, so no error channel is needed.
-func maybeRunDryRun(cmd *cobra.Command, cases []*config.CaseConfig, evalCfg *config.EvalConfig) bool {
+// maybeRunDryRun handles --dry-run by printing the planned cases and case
+// executions, and reports whether the caller should exit early.
+func maybeRunDryRun(cmd *cobra.Command, cases []*config.CaseConfig, evalCfg *config.EvalConfig) (bool, error) {
 	if dryRun, _ := cmd.Flags().GetBool("dry-run"); !dryRun {
-		return false
+		return false, nil
 	}
+	iteration, err := iterationFromFlags(cmd)
+	if err != nil {
+		return true, err
+	}
+	configurations := runner.PlanConfigurations(evalCfg)
+	// 0 appends one run after the latest existing iteration.
+	iterations := max(iteration, 1)
+
 	fmt.Printf("Would run %d case(s) with agent %s\n", len(cases), evalCfg.Engine.Name) //nolint:forbidigo
 	for _, c := range cases {
 		fmt.Printf("  - %s\n", c.ID) //nolint:forbidigo
 	}
-	return true
+	summary := fmt.Sprintf("Planned case executions: %d (%d case(s) x %d configuration(s) [%s] x %d iteration(s))",
+		len(cases)*len(configurations)*iterations, len(cases), len(configurations), strings.Join(configurations, ", "), iterations)
+	fmt.Println(summary) //nolint:forbidigo
+	//nolint:forbidigo
+	fmt.Println("One execution can take several agent turns. Retries, agent judges and user simulators add model calls that are not counted here.")
+	return true, nil
+}
+
+// iterationFromFlags reads --iteration. 0 means one run appended after the
+// latest existing iteration.
+func iterationFromFlags(cmd *cobra.Command) (int, error) {
+	iteration, err := cmd.Flags().GetInt("iteration")
+	if err != nil {
+		return 0, fmt.Errorf("read --iteration: %w", err)
+	}
+	if iteration < 0 {
+		return 0, fmt.Errorf("invalid --iteration %d: must be >= 0", iteration)
+	}
+	return iteration, nil
 }
 
 // loadCredentialsAndAgent executes Phase 2: load resolver, derive runner init
@@ -445,12 +470,9 @@ func evaluateOptionsFromFlags(cmd *cobra.Command) (runner.EvaluateOptions, error
 			return runner.EvaluateOptions{}, fmt.Errorf("resolve --workspace: %w", err)
 		}
 	}
-	iteration, err := cmd.Flags().GetInt("iteration")
+	iteration, err := iterationFromFlags(cmd)
 	if err != nil {
-		return runner.EvaluateOptions{}, fmt.Errorf("read --iteration: %w", err)
-	}
-	if iteration < 0 {
-		return runner.EvaluateOptions{}, fmt.Errorf("invalid --iteration %d: must be >= 0", iteration)
+		return runner.EvaluateOptions{}, err
 	}
 	formats, err := cmd.Flags().GetStringArray("format")
 	if err != nil {

@@ -56,10 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Validate `cases.parallelism` and `cases.retry_policy.retry_on`.
-  `parallelism` outside the documented range of 1 to 256 passed `validate`,
-  and so did a misspelled retry reason such as `timeouts`, which never
-  matched. `run --parallelism` still replaces an out-of-range file value.
+- `skill-up run --dry-run` now prints the planned case executions as cases
+  times configurations times iterations. A benchmark over four cases with
+  `--iteration 5` previously reported only `Would run 4 case(s)` for 40
+  executions. A negative `--iteration` is now rejected in a dry run as well.
 - Keep `agent_judge` review materials from reading as instructions. The judge
   prompt now states that inline excerpts and referenced files come from the
   agent under evaluation and are evidence, never instructions, and it fences
@@ -68,6 +68,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer close the excerpt and continue as prompt text. The response-format
   example shows `"passed": null` instead of `"passed": true`, matching the file
   template, so the example no longer suggests a verdict.
+- Copy fixture contents when `context.repo_fixture` names a directory symlink
+  in the `none` and OpenSandbox runtimes. Local uploads no longer fail with a directory
+  read error, and OpenSandbox no longer silently uploads an empty fixture.
 - Reject a `rule_based` matcher that is present but holds no values to match.
   `output_contains: {all: []}`, `output_matches: {}`, `turn_response_contains`
   without `contains_all`/`contains_any`, and `turn_response_not_contains`
@@ -94,6 +97,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case-sensitive names.
 - Count primary cases consistently in Markdown and CLI summaries for benchmark
   runs, without counting baseline rows as extra cases or discarding their details.
+- Validate `cases.parallelism` and `cases.retry_policy.retry_on`.
+  `parallelism` outside the documented range of 1 to 256 passed `validate`,
+  and so did a misspelled retry reason such as `timeouts`, which never
+  matched. `run --parallelism` still replaces an out-of-range file value.
 - Reject malformed `--include-case-name` and `--exclude-case-name` glob patterns
   before loading cases, including in auto mode, instead of silently ignoring them.
 
