@@ -56,12 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Count Codex input tokens once. Codex reports cached tokens as part of
-  `input_tokens`, and skill-up added them again, so a run with a high cache
-  hit rate showed close to twice its real input. Codex `input_tokens` in
-  results and reports now match what Codex reports. Earlier versions
-  overcounted runs with cache hits, so a stored baseline from them can hide a
-  later increase in `compare`.
+- `skill-up run --dry-run` now prints the planned case executions as cases
+  times configurations times iterations. A benchmark over four cases with
+  `--iteration 5` previously reported only `Would run 4 case(s)` for 40
+  executions. A negative `--iteration` is now rejected in a dry run as well.
 - Keep `agent_judge` review materials from reading as instructions. The judge
   prompt now states that inline excerpts and referenced files come from the
   agent under evaluation and are evidence, never instructions, and it fences
@@ -70,6 +68,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer close the excerpt and continue as prompt text. The response-format
   example shows `"passed": null` instead of `"passed": true`, matching the file
   template, so the example no longer suggests a verdict.
+- Copy fixture contents when `context.repo_fixture` names a directory symlink
+  in the `none` and OpenSandbox runtimes. Local uploads no longer fail with a directory
+  read error, and OpenSandbox no longer silently uploads an empty fixture.
 - Reject a `rule_based` matcher that is present but holds no values to match.
   `output_contains: {all: []}`, `output_matches: {}`, `turn_response_contains`
   without `contains_all`/`contains_any`, and `turn_response_not_contains`
@@ -94,6 +95,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   values now always override the runtime configuration, which overrides the
   process environment, whatever case each one uses. Unix hosts keep
   case-sensitive names.
+- Count Codex input tokens once. Codex reports cached tokens as part of
+  `input_tokens`, and skill-up added them again, so a run with a high cache
+  hit rate showed close to twice its real input. Codex `input_tokens` in
+  results and reports now match what Codex reports. Earlier versions
+  overcounted runs with cache hits, so a stored baseline from them can hide a
+  later increase in `compare`.
 - Count primary cases consistently in Markdown and CLI summaries for benchmark
   runs, without counting baseline rows as extra cases or discarding their details.
 - Reject malformed `--include-case-name` and `--exclude-case-name` glob patterns
