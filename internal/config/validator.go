@@ -693,10 +693,12 @@ func (v *Validator) ValidateCasesWithEvalDefaults(eval *EvalConfig, cases []*Cas
 			if errs := validateJudgeTurnRules(plan.Judges, len(c.Input.Turns)); len(errs) > 0 {
 				return fmt.Errorf("case %s: validation errors:\n  - %s", c.ID, strings.Join(errs, "\n  - "))
 			}
+			warnUncheckedCase(eval, c, plan.Judges)
 			continue
 		}
 		effectiveJudge := mergeJudgeConfigForValidation(eval.Judge, c.Judge)
 		warnIgnoredCaseJudge(c)
+		warnUncheckedCase(eval, c, plan.Judges)
 		if errs := validateJudgeTypeAndRequiredFields(effectiveJudge); len(errs) > 0 {
 			return fmt.Errorf("case %s: validation errors:\n  - %s", c.ID, strings.Join(errs, "\n  - "))
 		}
@@ -712,6 +714,42 @@ func warnIgnoredCaseJudge(c *CaseConfig) {
 	if c.Judge.Type == "" && (c.judgeHasFields || !reflect.ValueOf(c.Judge).IsZero()) {
 		logging.Warnf("case %s: judge.type is missing; case judge fields are ignored and the eval judge is used. Set judge.type to apply a case override", c.ID)
 	}
+}
+
+// warnUncheckedCase reports a case that nothing grades. With no judge rule,
+// expect check or turn post_condition, the case can pass without anything
+// checking the agent's output, and the report reads like a case that passed
+// its checks. Such a case is still a supported way to collect transcripts or
+// usage.
+func warnUncheckedCase(eval *EvalConfig, c *CaseConfig, judges []JudgeConfig) {
+	if expectHasChecks(eval.Cases.Defaults.Expect) || expectHasChecks(c.Expect) || slices.ContainsFunc(judges, judgeHasChecks) {
+		return
+	}
+	// Validation has already rejected a post_condition without a matcher.
+	if slices.ContainsFunc(c.Input.Turns, func(turn Turn) bool { return turn.PostCondition != nil }) {
+		return
+	}
+	logging.Warnf("case %s: no grading checks are configured (judge rules, expect checks or turn post_conditions); the case can pass without checking the agent's output", c.ID)
+}
+
+// judgeHasChecks reports whether a judge can produce an assertion. A script
+// or agent judge always grades; a rule_based judge needs at least one rule.
+func judgeHasChecks(judge JudgeConfig) bool {
+	switch judge.Type {
+	case "":
+		return false
+	case judgeTypeRuleBased:
+		return len(judge.Success)+len(judge.Failure) > 0
+	default:
+		return true
+	}
+}
+
+// expectHasChecks counts values, not keys: an empty list runs no check.
+func expectHasChecks(expect Expect) bool {
+	lists := len(expect.MustContain) + len(expect.MustNotContain) + len(expect.FilesExist) +
+		len(expect.FilesNotExist) + len(expect.FileContains)
+	return lists > 0 || expect.ExitCode != nil || expect.GoldenFile != ""
 }
 
 func validateJudgeTurnRules(members []JudgeConfig, turnsTotal int) []string {

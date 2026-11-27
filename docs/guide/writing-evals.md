@@ -960,6 +960,8 @@ Failure behavior:
 
 Grading happens in two layers: **expect** (gating checks) and **judge** (quality assessment).
 
+Both are optional. A case with no judge rule, no `expect` check and no turn `post_condition` has nothing to grade it: it can pass without anything checking the Agent's output. `validate` and `run` print a warning that names such a case. An empty list, or a `rule_based` judge without rules, counts as no check.
+
 ### expect — fast gating
 
 `expect` is a zero-cost local check. If `expect` fails, `judge` is skipped.

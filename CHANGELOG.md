@@ -65,6 +65,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   times configurations times iterations. A benchmark over four cases with
   `--iteration 5` previously reported only `Would run 4 case(s)` for 40
   executions. A negative `--iteration` is now rejected in a dry run as well.
+- Warn when a selected case has no judge rule, no `expect` check and no turn
+  `post_condition`. Such a case can pass without anything checking the
+  agent's output, and its report read the same as a case that passed its
+  checks. `validate` and `run` now name it. An empty list or a `rule_based`
+  judge without rules counts as no check (#365).
 - Keep `agent_judge` review materials from reading as instructions. The judge
   prompt now states that inline excerpts and referenced files come from the
   agent under evaluation and are evidence, never instructions, and it fences
