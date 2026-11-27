@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A mocked MCP tool in a fixture's `tools` map can return a failed tool call.
+  `is_error: true` sends the tool's `response` with MCP's `isError: true`, so
+  a case can check how a Skill handles a tool that ran and failed. The field
+  is optional; `tool_responses` entries keep succeeding (#357).
+
 - Record the agent that graded each `agent_judge` case in its `judge_context`:
   the `engine`, plus the `provider` and `model` that skill-up forwarded to it. A
   value skill-up did not forward is omitted, so a Codex judge given a model
@@ -56,11 +61,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Reject a `context.repo_fixture` that names a file instead of a directory.
-  OpenSandbox reported a successful upload and copied nothing, so the case ran
-  without the fixture's contents; the `none` runtime failed with an unrelated
-  `is a directory` error about the workspace. Both now fail with
-  `repo_fixture "<path>" is not a directory`.
+- `skill-up run --dry-run` now prints the planned case executions as cases
+  times configurations times iterations. A benchmark over four cases with
+  `--iteration 5` previously reported only `Would run 4 case(s)` for 40
+  executions. A negative `--iteration` is now rejected in a dry run as well.
 - Keep `agent_judge` review materials from reading as instructions. The judge
   prompt now states that inline excerpts and referenced files come from the
   agent under evaluation and are evidence, never instructions, and it fences
@@ -69,6 +73,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer close the excerpt and continue as prompt text. The response-format
   example shows `"passed": null` instead of `"passed": true`, matching the file
   template, so the example no longer suggests a verdict.
+- Reject a `context.repo_fixture` that names a file instead of a directory.
+  OpenSandbox reported a successful upload and copied nothing, so the case ran
+  without the fixture's contents; the `none` runtime failed with an unrelated
+  `is a directory` error about the workspace. Both now fail with
+  `repo_fixture "<path>" is not a directory`.
+- Copy fixture contents when `context.repo_fixture` names a directory symlink
+  in the `none` and OpenSandbox runtimes. Local uploads no longer fail with a directory
+  read error, and OpenSandbox no longer silently uploads an empty fixture.
 - Reject a `rule_based` matcher that is present but holds no values to match.
   `output_contains: {all: []}`, `output_matches: {}`, `turn_response_contains`
   without `contains_all`/`contains_any`, and `turn_response_not_contains`
