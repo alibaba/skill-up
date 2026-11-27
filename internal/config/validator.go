@@ -303,6 +303,12 @@ func validateJudgeTypeAndLocalFields(judge JudgeConfig) []string {
 	errs = append(errs, validateOutputMatchesRules("judge.failure", judge.Failure)...)
 	errs = append(errs, validateRecognizableRules("judge.success", judge.Success)...)
 	errs = append(errs, validateRecognizableRules("judge.failure", judge.Failure)...)
+	// Only the rule_based judge evaluates these rules; other judge types
+	// ignore them, so their matcher count does not matter.
+	if judge.Type == judgeTypeRuleBased {
+		errs = append(errs, validateSingleMatcherRules("judge.success", judge.Success)...)
+		errs = append(errs, validateSingleMatcherRules("judge.failure", judge.Failure)...)
+	}
 	errs = append(errs, validateNonVacuousRules("judge.success", judge.Success)...)
 	errs = append(errs, validateNonVacuousRules("judge.failure", judge.Failure)...)
 
@@ -356,21 +362,54 @@ func validateRecognizableRules(field string, rules []Rule) []string {
 	return errs
 }
 
+// validateSingleMatcherRules rejects a rule that sets more than one matcher.
+// The rule_based judge evaluates exactly one matcher per rule and ignores the
+// rest, so an item holding output_contains, exit_code and files_exist checks
+// only the output and can pass with a failed exit and a missing file.
+func validateSingleMatcherRules(field string, rules []Rule) []string {
+	var errs []string
+	for i, rule := range rules {
+		if matchers := ruleMatcherNames(rule); len(matchers) > 1 {
+			errs = append(errs, fmt.Sprintf(
+				"%s[%d]: assertion sets more than one matcher (%s); use one matcher per rule item",
+				field, i, strings.Join(matchers, ", ")))
+		}
+	}
+	return errs
+}
+
+// ruleMatcherNames lists the matcher fields a rule sets, in the order the
+// runtime dispatcher checks them.
+func ruleMatcherNames(rule Rule) []string {
+	var names []string
+	for _, matcher := range []struct {
+		name string
+		set  bool
+	}{
+		{"output_contains", rule.OutputContains != nil},
+		{"output_matches", rule.OutputMatches != nil},
+		{"exit_code", rule.ExitCode != nil},
+		{"tool_called", rule.ToolCalled != nil},
+		{"files_exist", len(rule.FilesExist) > 0},
+		{"files_not_exist", len(rule.FilesNotExist) > 0},
+		{"turn_response_contains", rule.TurnResponseContains != nil},
+		{"turn_response_not_contains", rule.TurnResponseNotContains != nil},
+		{"tool_called_in_turn", rule.ToolCalledInTurn != nil},
+		{"tool_not_called_in_turn", rule.ToolNotCalledInTurn != nil},
+	} {
+		if matcher.set {
+			names = append(names, matcher.name)
+		}
+	}
+	return names
+}
+
 // ruleHasRecognizableField reports whether the rule sets at least one matcher
 // field that the runtime dispatcher in internal/judge can evaluate. The empty
 // collections (for example files_exist: []) mirror the runtime dispatch, which
 // treats them the same as absent fields.
 func ruleHasRecognizableField(rule Rule) bool {
-	return rule.OutputContains != nil ||
-		rule.OutputMatches != nil ||
-		rule.ExitCode != nil ||
-		rule.ToolCalled != nil ||
-		len(rule.FilesExist) > 0 ||
-		len(rule.FilesNotExist) > 0 ||
-		rule.TurnResponseContains != nil ||
-		rule.TurnResponseNotContains != nil ||
-		rule.ToolCalledInTurn != nil ||
-		rule.ToolNotCalledInTurn != nil
+	return len(ruleMatcherNames(rule)) > 0
 }
 
 // validateNonVacuousRules rejects matchers that are present but hold no values

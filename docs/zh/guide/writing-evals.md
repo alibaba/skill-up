@@ -910,6 +910,10 @@ judge:
 
 > **评估逻辑**：`failure` 优先于 `success`。任何一条 `failure` 规则匹配即立即失败；否则所有 `success` 规则必须全部满足才算通过。
 
+每个规则项只能包含一个匹配条件。旧版本只检查同一项中第一个可识别的条件。现在，包含多个匹配条件的规则项无法通过校验。
+
+如果多个成功条件必须同时成立，请将每个条件写成单独的 `success` 项。只有在任一条件成立都应判定失败时，才把条件拆成多个 `failure` 项。如果两个条件同时成立才算失败，请在一次检查中组合判断，例如使用脚本裁判。
+
 > **MCP 工具名**：`tool_called`、`tool_called_in_turn` 和 `tool_not_called_in_turn` 会把 `name` 与 Agent Engine 记录的工具名做精确匹配。Claude Code、Codex 和 Qoder CLI 记录的 MCP 工具名格式为 `mcp__<server>__<tool>`，其中 `<server>` 是 `mcp.servers` 中的 `name`。
 
 `output_contains` 执行字面 substring 检查。需要正则表达式时使用 `output_matches`；pattern 使用 Go `regexp` 语法，非法 pattern 会在配置校验阶段失败。 matcher 存在但没有任何值时会被配置校验拒绝：空的 `output_contains`、`output_matches`、`turn_response_contains` 或 `turn_response_not_contains` 否则会以零检查被报告为通过。空条目（`""`）同样会被拒绝：空字面量是任何响应的子串，空 pattern 匹配任何响应，因此 `all: [""]` 无法继续制造假通过。空白本身不算空——`["\n"]` 可以断言输出只有一行，`["  "]` 可以拒绝双空格，两者都按原样比较。
