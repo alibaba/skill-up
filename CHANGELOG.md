@@ -102,6 +102,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case-sensitive names.
 - Count primary cases consistently in Markdown and CLI summaries for benchmark
   runs, without counting baseline rows as extra cases or discarding their details.
+- Validate `cases.parallelism` and `cases.retry_policy.retry_on`.
+  `parallelism` outside the documented range of 1 to 256 passed `validate`,
+  and so did a misspelled retry reason such as `timeouts`, which never
+  matched. `run --parallelism` still replaces an out-of-range file value.
 - Reject malformed `--include-case-name` and `--exclude-case-name` glob patterns
   before loading cases, including in auto mode, instead of silently ignoring them.
 

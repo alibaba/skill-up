@@ -31,7 +31,6 @@ import (
 )
 
 const (
-	maxParallelismOverride = 256
 	runtimeKwargFlagName   = "runtime-kwarg"
 	runtimeKwargAlias      = "rk"
 	runtimeFlagName        = "runtime"
@@ -550,11 +549,14 @@ func applyRunConfigOverrides(evalCfg *config.EvalConfig, cmd *cobra.Command) err
 		if parallelism < 1 {
 			return fmt.Errorf("invalid --parallelism %d: must be >= 1", parallelism)
 		}
-		if parallelism > maxParallelismOverride {
-			return fmt.Errorf("invalid --parallelism %d: must be <= %d", parallelism, maxParallelismOverride)
+		if parallelism > config.MaxCasesParallelism {
+			return fmt.Errorf("invalid --parallelism %d: must be <= %d", parallelism, config.MaxCasesParallelism)
 		}
 
 		evalCfg.Cases.Parallelism = parallelism
+	}
+	if err := config.ValidateCasesParallelism(evalCfg.Cases.Parallelism); err != nil {
+		return fmt.Errorf("validation failed: %w", err)
 	}
 	return validateWorkspaceOverride(evalCfg, cmd)
 }
