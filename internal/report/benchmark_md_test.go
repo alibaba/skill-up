@@ -8,6 +8,20 @@ import (
 	"testing"
 )
 
+func TestBenchmarkMarkdownKeepsEvidenceInOneCell(t *testing.T) {
+	t.Parallel()
+	bm := &AnthropicBenchmark{Runs: []BenchmarkRun{{Expectations: []AnthropicExpectation{
+		{Text: "read | write", Passed: true, Evidence: "first line\nsecond | part"},
+	}}}}
+	var output bytes.Buffer
+	if err := WriteBenchmarkMarkdown(&output, bm); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "| read \\| write | ✅ | first line second \\| part |") {
+		t.Fatalf("malformed expectation row in:\n%s", output.String())
+	}
+}
+
 func TestWriteBenchmarkMarkdown_WithBaseline(t *testing.T) {
 	bm := &AnthropicBenchmark{
 		Metadata: BenchmarkMetadata{
