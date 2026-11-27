@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -40,16 +41,28 @@ var listCasesCmd = &cobra.Command{
 			if tag == "" {
 				tag = "functional_test"
 			}
-			const promptPreviewLen = 50
-			promptPreview := c.Input.Prompt
-			if previewRunes := []rune(promptPreview); len(previewRunes) > promptPreviewLen {
-				promptPreview = string(previewRunes[:promptPreviewLen-3]) + "..."
-			}
-			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", c.ID, title, tag, promptPreview)
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", c.ID, title, tag, promptPreview(c.Input))
 		}
 
 		_ = w.Flush()
 
 		return nil
 	},
+}
+
+func promptPreview(input config.Input) string {
+	const maxRunes = 50
+	text := input.Prompt
+	if text == "" && len(input.Turns) > 0 {
+		first := input.Turns[0]
+		text = first.Content
+		if first.Respond != "" {
+			text = "[simulated] " + first.Respond
+		}
+	}
+	text = strings.Join(strings.Fields(text), " ")
+	if runes := []rune(text); len(runes) > maxRunes {
+		return string(runes[:maxRunes-3]) + "..."
+	}
+	return text
 }

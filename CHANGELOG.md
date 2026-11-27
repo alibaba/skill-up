@@ -61,6 +61,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Show the opening turn in `list-cases` for multi-turn cases and keep multiline
+  prompt previews on a single row. A simulated opening turn is labelled.
 - `skill-up run --dry-run` now prints the planned case executions as cases
   times configurations times iterations. A benchmark over four cases with
   `--iteration 5` previously reported only `Would run 4 case(s)` for 40

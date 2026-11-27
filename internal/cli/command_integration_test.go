@@ -459,6 +459,21 @@ func TestListCasesCommandRunEPrintsDefaultsAndTruncatesPrompt(t *testing.T) {
 	}
 }
 
+func TestListCasesShowsMultilineOpeningTurnOnOneRow(t *testing.T) {
+	root := t.TempDir()
+	writeAutoModeSkill(t, root)
+	writeAutoModeEvalYAML(t, root, "conversation")
+	writeSkillFile(t, root, "evals/cases/conversation.yaml", "id: conversation\ninput:\n  turns:\n    - role: user\n      content: |\n        Read this file.\n        Summarize it.\n")
+	cmd := &cobra.Command{}
+	cmd.SetContext(t.Context())
+	output, err := captureStdout(t, func() error {
+		return listCasesCmd.RunE(cmd, []string{filepath.Join(root, "evals", "eval.yaml")})
+	})
+	if err != nil || !strings.Contains(output, "Read this file. Summarize it.") || strings.Count(strings.TrimSpace(output), "\n") != 1 {
+		t.Fatalf("list-cases output = %q, err = %v", output, err)
+	}
+}
+
 func TestListCasesCommandRunEPreservesUnicodePrompt(t *testing.T) {
 	root := t.TempDir()
 	writeAutoModeSkill(t, root)
