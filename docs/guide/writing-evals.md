@@ -1045,6 +1045,10 @@ judge:
 
 > **Evaluation order:** `failure` outranks `success`. If any `failure` rule matches, the case fails immediately. Otherwise every `success` rule must pass.
 
+Each rule item accepts one matcher. Older versions evaluated only the first recognized matcher in an item. An item with multiple matchers now fails validation.
+
+To require several success conditions, put each matcher in its own `success` item. Split a `failure` item only if each condition should independently fail the case. If failure requires both conditions, express them together in a single check, such as a script judge.
+
 > **MCP tool names:** `tool_called`, `tool_called_in_turn`, and `tool_not_called_in_turn` compare `name` exactly with the tool name the Agent Engine recorded. Claude Code, Codex, and Qoder CLI record MCP tools as `mcp__<server>__<tool>`, where `<server>` is the server `name` from `mcp.servers`.
 
 `output_contains` performs literal substring checks. Use `output_matches` when you need regular expressions; patterns use Go `regexp` syntax and invalid patterns fail config validation. A matcher that is present but lists no values is rejected by config validation: an empty `output_contains`, `output_matches`, `turn_response_contains`, or `turn_response_not_contains` would otherwise be reported as passing with zero checks. The same applies to the empty entry: an empty literal is a substring of every response and an empty pattern matches every response, so `all: [""]` cannot keep the false-positive pass. Whitespace is not empty — `["\n"]` checks that the output is a single line and `["  "]` rejects a double space, and both are compared as written.

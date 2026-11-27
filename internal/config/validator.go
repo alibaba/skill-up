@@ -371,7 +371,7 @@ func validateSingleMatcherRules(field string, rules []Rule) []string {
 	for i, rule := range rules {
 		if matchers := ruleMatcherNames(rule); len(matchers) > 1 {
 			errs = append(errs, fmt.Sprintf(
-				"%s[%d]: assertion sets more than one matcher (%s), but only one is evaluated; put each matcher in its own list item",
+				"%s[%d]: assertion sets more than one matcher (%s); use one matcher per rule item",
 				field, i, strings.Join(matchers, ", ")))
 		}
 	}

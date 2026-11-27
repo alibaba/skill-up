@@ -74,8 +74,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reject a `rule_based` rule item that sets more than one matcher. The judge
   evaluates one matcher per item and ignored the rest, so an item with
   `output_contains`, `exit_code` and `files_exist` checked only the output and
-  could pass with a failed exit and a missing file. Put each matcher in its own
-  list item.
+  could pass with a failed exit and a missing file. Separate success items
+  must all pass. Each matching failure item independently fails the case.
 - Reject a `rule_based` matcher that is present but holds no values to match.
   `output_contains: {all: []}`, `output_matches: {}`, `turn_response_contains`
   without `contains_all`/`contains_any`, and `turn_response_not_contains`

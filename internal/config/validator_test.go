@@ -157,7 +157,7 @@ func TestValidator_ValidateEvalConfig(t *testing.T) {
 				},
 			},
 			wantErr: true,
-			errMsg:  "judge.success[0]: assertion sets more than one matcher (output_contains, exit_code, files_exist), but only one is evaluated; put each matcher in its own list item",
+			errMsg:  "judge.success[0]: assertion sets more than one matcher (output_contains, exit_code, files_exist); use one matcher per rule item",
 		},
 		{
 			name: "failure rule with several matchers is rejected",
