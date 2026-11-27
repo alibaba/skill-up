@@ -1187,6 +1187,11 @@ func TestValidateEvalConfigRejectsInvalidMCPServers(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "mcp.servers[0].name is required") {
 		t.Fatalf("ValidateEvalConfig() error = %v, want a required-name error", err)
 	}
+	cfg.MCP.Servers[0] = MCPServer{Name: "shop", Mode: "mock", ConfigRef: "evals/mcp.yaml"}
+	err = NewValidator().ValidateEvalConfig(cfg)
+	if err == nil || !strings.Contains(err.Error(), "mcp.servers[0].mode must be one of: mocked, real") {
+		t.Fatalf("ValidateEvalConfig() error = %v, want an invalid-mode error", err)
+	}
 }
 
 // nolint:funlen,maintidx // table-driven test cases drive the line count; splitting hurts readability.
