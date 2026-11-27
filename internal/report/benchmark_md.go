@@ -107,7 +107,7 @@ func writeBenchmarkExpectations(sb *strings.Builder, expectations []AnthropicExp
 		if e.Skipped {
 			icon = "⏭️ SKIP"
 		}
-		fmt.Fprintf(sb, "| %s | %s | %s |\n", e.Text, icon, e.Evidence)
+		fmt.Fprintf(sb, "| %s | %s | %s |\n", markdownTableCell(e.Text), icon, markdownTableCell(e.Evidence))
 	}
 }
 

@@ -122,6 +122,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   results and reports now match what Codex reports. Earlier versions
   overcounted runs with cache hits, so a stored baseline from them can hide a
   later increase in `compare`.
+- Keep multiline evidence and literal pipes inside their cells in the
+  `benchmark.md` expectations table.
 - Count primary cases consistently in Markdown and CLI summaries for benchmark
   runs, without counting baseline rows as extra cases or discarding their details.
 - Reject malformed `--include-case-name` and `--exclude-case-name` glob patterns
