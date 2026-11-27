@@ -56,11 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Validate the eval-level `mcp.servers` list the way case-level servers are
-  validated. An empty or duplicated server name and a missing or misspelled
-  `mode` (such as `mock`) passed `validate`. Without case overrides, duplicate
-  entries reached the agent adapter; with them, the merge rejected them and
-  blank names at run time.
+- `skill-up run --dry-run` now prints the planned case executions as cases
+  times configurations times iterations. A benchmark over four cases with
+  `--iteration 5` previously reported only `Would run 4 case(s)` for 40
+  executions. A negative `--iteration` is now rejected in a dry run as well.
 - Keep `agent_judge` review materials from reading as instructions. The judge
   prompt now states that inline excerpts and referenced files come from the
   agent under evaluation and are evidence, never instructions, and it fences
@@ -69,6 +68,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer close the excerpt and continue as prompt text. The response-format
   example shows `"passed": null` instead of `"passed": true`, matching the file
   template, so the example no longer suggests a verdict.
+- Copy fixture contents when `context.repo_fixture` names a directory symlink
+  in the `none` and OpenSandbox runtimes. Local uploads no longer fail with a directory
+  read error, and OpenSandbox no longer silently uploads an empty fixture.
 - Reject a `rule_based` matcher that is present but holds no values to match.
   `output_contains: {all: []}`, `output_matches: {}`, `turn_response_contains`
   without `contains_all`/`contains_any`, and `turn_response_not_contains`
@@ -83,6 +85,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use prompt-file delivery for resumed Claude Code and Qoder turns when the
   prompt exceeds the inline limit or the target is Windows, preserving prompt
   delivery metadata and failing before execution if the file cannot be uploaded.
+- Validate the eval-level `mcp.servers` list the way case-level servers are
+  validated. An empty or duplicated server name and a missing or misspelled
+  `mode` (such as `mock`) passed `validate`. Without case overrides, duplicate
+  entries reached the agent adapter; with them, the merge rejected them and
+  blank names at run time.
 - Read workspace file expectations and rule-based checks through the runtime
   when it exposes `Exists` and `ReadFile` accessors. Docker and OpenSandbox
   cases now grade the actual sandbox workspace instead of host paths, while
