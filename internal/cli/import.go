@@ -141,12 +141,17 @@ func convertAnthropicEvals(evalsData anthropicEvals, skillDir string, selected f
 	defer root.Close() //nolint:errcheck
 
 	cases := make([]*config.CaseConfig, 0, len(evalsData.Evals))
+	seen := make(map[int]bool, len(evalsData.Evals))
 	for _, eval := range evalsData.Evals {
 		caseCfg := convertEvalToCase(eval, evalsData.SkillName)
 		cases = append(cases, caseCfg)
 		if selected != nil && !selected(caseCfg.ID) {
 			continue
 		}
+		if seen[eval.ID] {
+			return nil, fmt.Errorf("duplicate eval ID %d: both entries map to %s", eval.ID, caseCfg.ID)
+		}
+		seen[eval.ID] = true
 		files, err := readEvalFiles(eval, root)
 		if err != nil {
 			return nil, err
