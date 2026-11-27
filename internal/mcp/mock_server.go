@@ -70,6 +70,7 @@ type mockedToolDefinition struct {
 	Description string `json:"description,omitempty"`
 	InputSchema any    `json:"inputSchema,omitempty"`
 	Response    any    `json:"response"`
+	IsError     bool   `json:"isError,omitempty"`
 }
 
 // mockedToolDefinitions normalizes a fixture's tools map and its legacy
@@ -77,7 +78,7 @@ type mockedToolDefinition struct {
 // response semantics and the default metadata. A tool may be declared in only
 // one of the two maps. MCP requires an object input schema, so only the
 // top-level type is checked; the schema is advertised to the agent, never
-// enforced on tools/call.
+// enforced on tools/call. is_error is only available in the tools map.
 func mockedToolDefinitions(serverName string, fileCfg mcpServerFile) (map[string]mockedToolDefinition, error) {
 	defs := make(map[string]mockedToolDefinition, len(fileCfg.Tools)+len(fileCfg.ToolResponses))
 	for name, response := range fileCfg.ToolResponses {
@@ -89,7 +90,7 @@ func mockedToolDefinitions(serverName string, fileCfg mcpServerFile) (map[string
 			return nil, fmt.Errorf("mcp server %q mock fixture tool %q is declared under both tools and tool_responses; keep one", serverName, name)
 		}
 		if unknown := slices.Sorted(maps.Keys(tool.Unknown)); len(unknown) > 0 {
-			return nil, fmt.Errorf("mcp server %q mock fixture tool %q has unknown field %q; supported fields are description, input_schema and response", serverName, name, unknown[0])
+			return nil, fmt.Errorf("mcp server %q mock fixture tool %q has unknown field %q; supported fields are description, input_schema, response and is_error", serverName, name, unknown[0])
 		}
 		if tool.Response.Kind == 0 {
 			return nil, fmt.Errorf("mcp server %q mock fixture tool %q has no response; set response (null is allowed)", serverName, name)
@@ -103,7 +104,11 @@ func mockedToolDefinitions(serverName string, fileCfg mcpServerFile) (map[string
 				return nil, fmt.Errorf("mcp server %q mock fixture tool %q input_schema must be a mapping with type: object", serverName, name)
 			}
 		}
-		defs[name] = mockedToolDefinition{Description: tool.Description, InputSchema: tool.InputSchema, Response: response}
+		isError, ok := tool.IsError.(bool)
+		if !ok && tool.IsError != nil {
+			return nil, fmt.Errorf("mcp server %q mock fixture tool %q is_error must be true or false", serverName, name)
+		}
+		defs[name] = mockedToolDefinition{Description: tool.Description, InputSchema: tool.InputSchema, Response: response, IsError: isError}
 	}
 	return defs, nil
 }
@@ -191,7 +196,9 @@ function handleMessage(message, framed) {
     const args = (message.params && message.params.arguments) || {};
     const response = render(selectResponse(toolDefs[name].response), args);
     const text = typeof response === "string" ? response : JSON.stringify(response);
-    send(message.id, { content: [{ type: "text", text }] }, framed);
+    const result = { content: [{ type: "text", text }] };
+    if (toolDefs[name].isError === true) result.isError = true;
+    send(message.id, result, framed);
     return;
   }
   send(message.id, {}, framed);
