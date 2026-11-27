@@ -277,3 +277,153 @@ go test ./internal/judge/ -run TestAgentJudge -v
 | `agent_judge_test.go` | 11 | Mock LLM client + threshold edge cases + JSON parsing |
 | `factory_test.go` | 8 | Factory construction + configuration merge |
 | `e2e_test.go` | 12 | End-to-end pipeline integration tests |
+| `metrics_test.go` | 8 tables | Group folding, quality derivation, availability states, payload-vs-slot validation, stop classification, definition compatibility |
+
+## Named metrics (#317, first slice: validated scoring and persistence)
+
+A local script judge can declare a named metric registry:
+
+```yaml
+judge:
+  type: script
+  script_path: scripts/score.sh
+  metrics:
+    - id: correctness
+      required: true
+      evidence_required: true
+    - id: completeness
+      min_score: 0.7
+```
+
+For a runnable example, save this as `scripts/score.sh`:
+
+```sh
+#!/bin/sh
+cat > "$EVAL_METRICS_RESULT_PATH" <<EOF
+{"schema_version":1,"invocation_id":"$EVAL_METRICS_INVOCATION_ID","metrics":[{"metric_id":"correctness","availability":"AVAILABLE","value":0.8,"evidence":["example evidence"]},{"metric_id":"completeness","availability":"AVAILABLE","value":0.75}]}
+EOF
+```
+
+A case-level `judge.metrics` registry requires an explicit `judge.type`.
+
+Four independent questions, four fields, disjoint value sets:
+
+| Field | Values | Question |
+|---|---|---|
+| `execution_stage` | `NOT_INVOKED` / `STARTED` / `COMPLETED` | did the member actually run |
+| `completion_state` | `COMPLETED` / `INCOMPLETE` / `FAILED` / `INTERRUPTED` | how far evaluation got |
+| `termination_cause` | `none` / `cancellation` / `deadline_expiry` / `expect_gate` / `process_exit` / `execution_error` / `contract_error` / `judge_declined` | why it stopped |
+| `availability` | `AVAILABLE` / `MISSING` / `ERROR` / `SKIP` / `NOT_PRODUCED` | did this slot produce a usable score |
+| `metric_quality_state` | `MET` / `NOT_MET` / `UNKNOWN` / `NOT_CONFIGURED` / `NOT_ASSESSED` | does a quality decision exist |
+
+Rules that the implementation enforces:
+
+- There is no `NOT_RUN` state. A judge that never started and one interrupted
+  mid-flight are both `INTERRUPTED`; `execution_stage` is what distinguishes them,
+  and no start timestamp is invented when none was recorded.
+- Group completion is derived, never assigned: `FAILED > INCOMPLETE > INTERRUPTED >
+  COMPLETED`, so `failed + pending-cancelled` stays `FAILED` while the cancellation
+  and the unfinished members remain visible on their own members.
+- `metric_quality_state` is always derived from slots by `DeriveQuality` and never
+  from `completion_state`. Thresholds configured and all thresholded values present
+  give `MET`/`NOT_MET`; thresholds with any thresholded value missing give
+  `UNKNOWN`; valid scores with no thresholds give `NOT_CONFIGURED`; no valid scores
+  give `NOT_ASSESSED`.
+- For a judge that opts into a metric registry, a threshold miss changes its
+  verdict to `FAIL`; an errored slot or an unavailable required/thresholded slot
+  changes it to `ERROR`. Optional unavailable slots without thresholds do not
+  change the verdict and do not make completion `INCOMPLETE`. Script timeouts
+  keep their legacy verdict even when slots report contract errors. With no
+  registry, legacy verdict behavior is unchanged.
+- A timeout does not invalidate a trustworthy score. An accepted score stays
+  `AVAILABLE`, and the timeout, its source and any recovery stay recorded.
+  A score is never fabricated as zero, and an accepted result is never rewritten
+  by a cancellation that arrives later.
+- A recovered timeout result is a final scoring outcome. When the collector obtains
+  a complete, invocation-bound, schema-valid payload after the deadline, completion
+  is derived from the validated slots (`COMPLETED` / `INCOMPLETE` / `FAILED`) and
+  `timeout.recovered` records why. This applies at both judge and case deadlines,
+  and the execution metadata keeps `deadline_expiry` and the source that fired.
+  A stop that collected nothing, or a payload rejected as a whole, stays
+  `INTERRUPTED`. The legacy
+  script-timeout verdicts are unchanged either way.
+- Whole-payload defects (unparseable, top-level shape, duplicate JSON keys, unknown
+  top-level field, schema version, unbound or stale result, size limit) make every
+  slot `ERROR`. Slot-level defects poison only their own slot and independently
+  valid siblings stay usable in storage, reports and comparisons alike.
+- Unknown ids are output diagnostics and never new planned slots; a duplicated id
+  invalidates its planned slot once. The coverage denominator is the registry count
+  and never moves.
+- Execution metadata and planned slots live on `Outcome` and the case result, not
+  only inside `judge.Result`, so single-judge early returns, gate short-circuits,
+  and cancellations with no judge result still report them.
+- Legacy verdicts, the #309 assertion and member denominators with zero-credit
+  skipped members, the existing script-timeout mapping, and the JSONL event schema
+  remain unchanged when metrics are not configured. The metric registry is opt-in.
+
+### Script judge structured metrics result (slice 1 input channel)
+
+A script judge with a `metrics:` registry is given one private, invocation-bound
+result path per attempt. The runner injects:
+
+| Variable | Meaning |
+|---|---|
+| `EVAL_METRICS_RESULT_PATH` | the only path the collector reads; written by the script, atomically if possible |
+| `EVAL_METRICS_INVOCATION_ID` | random per invocation; must be echoed back inside the payload |
+| `EVAL_METRICS_TEMPLATE` | a minimal valid payload the script can copy |
+
+Accepted grammar (`schema_version` must be `1`):
+
+```json
+{
+  "schema_version": 1,
+  "invocation_id": "<EVAL_METRICS_INVOCATION_ID>",
+  "metrics": [
+    {"metric_id": "correctness", "availability": "AVAILABLE", "value": 0.0, "evidence": ["..."]},
+    {"metric_id": "completeness", "availability": "SKIP", "reason": "insufficient evidence"}
+  ]
+}
+```
+
+`availability` is one of `AVAILABLE`, `MISSING`, `SKIP`, or `ERROR`.
+An explicit `0` is a valid `AVAILABLE` score.
+
+- **Envelope errors** mark every planned slot `ERROR`. These include malformed
+  JSON, a non-object top level, trailing content, unknown field names,
+  duplicate JSON keys, an unsupported schema version, or a mismatched invocation
+  ID. A wrong type for `metric_id`, `availability`, `reason`, or `evidence`
+  also fails the envelope. An `evidence` array may contain strings or `null`.
+- **Slot errors** affect the named metric and preserve sibling scores. Examples
+  include an unknown availability value, a missing, nonnumeric or out-of-range
+  `AVAILABLE` score, a duplicate metric ID, and a `null` evidence element
+  (`invalid_evidence`). If evidence is required, at least one string must be
+  nonblank.
+- An explicit `SKIP` on a required or thresholded slot preserves its reason,
+  makes scoring `INCOMPLETE`, and records `judge_declined` when the decline is
+  the only contract issue.
+- Collection validates the opened file and enforces a 1 MiB read limit. Only
+  regular files are accepted, with symlinks rejected at open time.
+- A file that never appeared because evaluation was interrupted ⇒ `NOT_PRODUCED`.
+- A file that never appeared after the script exited `0` ⇒ rejected payload, not a
+  fabricated zero.
+- A nonzero exit never collects scores even if a valid file exists; the file stays
+  an on-disk diagnostic.
+
+Persistence: the envelope rides on `judge.Result.Metrics`, the single case result,
+and each grouped `judge.Outcome` (`metrics` plus `execution`). It lands in
+`report.json` and in `evaluation.json`; single-judge evaluation records use the
+top-level `metrics` and `execution` fields, while grouped records use
+`judge_results[]` plus `aggregation.completion_state` / `termination_cause`.
+`grading.json` keeps the Anthropic shape untouched.
+
+Not implemented in this slice:
+
+- `agent_judge` numeric metric output (its strict result contract is separate).
+- Collection for sandboxed runtimes: only the local `none` environment assigns a
+  path, so a script judge with metrics elsewhere reports `metrics_channel_unsupported`
+  rather than pretending a stale file was found.
+- Report/HTML/Markdown rendering of metrics, benchmark statistics, per-metric
+  comparisons, and any addition to the JSONL evaluation-event stream (which needs
+  its own schema and consumer review).
+- Cancel-source attribution beyond an observed process interrupt: anything not
+  provably signalled is reported as `unknown`, never inferred from error text.

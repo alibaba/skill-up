@@ -398,9 +398,20 @@ tools:
 - `response` 必填。每次调用该工具都返回其 `default` 键下的值；若没有 `default` 键，则整个值即为响应。字符串值可以像示例中的 `name` 字段那样用 `params` 模板引用调用参数，并可用 `| default:'<value>'` 指定缺省值。`response: null` 返回 null。
 - `description` 和 `input_schema` 可选，决定 Agent 在 `tools/list` 中看到的内容。不填写时，Agent 看到的描述为 `Mocked MCP tool <name>`，输入 schema 接受任意对象，而不是真实 Server 的描述和参数，因此选择工具的方式可能与面对真实 Server 时不同。空的 `description` 同样沿用占位描述。
 - `input_schema` 一旦填写，就必须是 `type: object` 的映射，因为 MCP 要求输入 schema 是对象类型；空映射（`{}`）会报错，而 `input_schema: null` 沿用默认值。更深层的 JSON Schema 不做校验。schema 只用于声明：Mock Server 不会按它校验调用参数，参数缺失或多余的调用仍然返回该响应。
-- 工具条目只接受 `description`、`input_schema` 和 `response`；出现其他键（例如 MCP 协议里的 `inputSchema`）会报错。
+- `is_error: true` 会把 `response` 作为一次失败的工具调用返回：结果带有 MCP 的 `isError: true`，真实 Server 就是这样表示工具已执行但失败（例如记录不存在、请求被拒绝）。可用它测试 Skill 如何处理失败的工具。该字段可选，默认为 `false`；`is_error: null` 沿用默认值，其他不是 `true` 或 `false` 的值会报错。`tools/list` 不会显示该字段，Agent 只有在调用工具时才会得知失败。
+- 工具条目只接受 `description`、`input_schema`、`response` 和 `is_error`；出现其他键（例如 MCP 协议里的 `inputSchema`）会报错。
 
-使用 `tool_responses` 映射的 fixture 无需修改，行为不变。其中每个条目即为该工具的 `response`，工具使用默认元数据：
+例如，一次失败的查询：
+
+```yaml
+tools:
+  get_project:
+    is_error: true
+    response:
+      default: "Project {{params.id}} not found"
+```
+
+使用 `tool_responses` 映射的 fixture 无需修改，行为不变。其中每个条目即为该工具的 `response`，工具使用默认元数据，并且总是调用成功：
 
 ```yaml
 tool_responses:
@@ -417,7 +428,7 @@ tool_responses:
 
 - 仅支持 stdio。`mode: mocked` 时，skill-up 会拒绝 `transport: http`、`endpoint`、`command` 和 `args`。
 - skill-up 使用 `node` 启动 Mock Server，因此运行环境的 `PATH` 中必须有 `node`。只有当 skill-up 自行安装 Claude Code、Codex、Qwen Code 或 OpenCode 时才会准备 Node.js；预先安装的引擎 CLI 或 Qoder CLI 不会附带 Node.js。
-- 调用 fixture 中未声明的工具会返回 MCP 错误。
+- 调用 fixture 中未声明的工具会返回 MCP 协议错误。这与声明了 `is_error: true` 的工具不同，后者返回的是标记为失败的正常结果。
 
 环境变量引用支持 `${VAR}` 和完整值 `$VAR` 两种形式，变量名必须匹配 `[A-Za-z_][A-Za-z0-9_]*`。`required_env` 会把变量注入 Agent 运行环境；`headers` 中完整的环境变量引用会额外记录变量名，供 Agent 安装 MCP 时选择合适的传递方式。
 
