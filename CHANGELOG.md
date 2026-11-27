@@ -110,6 +110,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   values now always override the runtime configuration, which overrides the
   process environment, whatever case each one uses. Unix hosts keep
   case-sensitive names.
+- Count Codex input tokens once. Codex reports cached tokens as part of
+  `input_tokens`, and skill-up added them again, so a run with a high cache
+  hit rate showed close to twice its real input. Codex `input_tokens` in
+  results and reports now match what Codex reports. Earlier versions
+  overcounted runs with cache hits, so a stored baseline from them can hide a
+  later increase in `compare`.
 - Count primary cases consistently in Markdown and CLI summaries for benchmark
   runs, without counting baseline rows as extra cases or discarding their details.
 - Reject malformed `--include-case-name` and `--exclude-case-name` glob patterns
