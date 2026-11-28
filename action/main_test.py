@@ -16,6 +16,26 @@ SPEC.loader.exec_module(ACTION)
 
 
 class ActionConfigurationContractTest(unittest.TestCase):
+    def test_main_reports_shell_status_after_signal(self):
+        inputs = ACTION.parse_inputs([])
+        with tempfile.TemporaryDirectory() as workspace:
+            output = pathlib.Path(workspace) / "outputs"
+            with (
+                mock.patch.object(ACTION, "parse_inputs", return_value=inputs),
+                mock.patch.object(ACTION.shutil, "which", return_value="/bin/skill-up"),
+                mock.patch.object(ACTION, "_run"),
+                mock.patch.object(ACTION, "get_skill_up_version", return_value=None),
+                mock.patch.object(ACTION, "command_supports_explicit_provider", return_value=False),
+                mock.patch.object(ACTION.subprocess, "run", return_value=SimpleNamespace(returncode=-15)),
+                mock.patch.dict(ACTION.os.environ, {"GITHUB_WORKSPACE": workspace, "GITHUB_OUTPUT": str(output)}, clear=True),
+                self.assertRaises(SystemExit) as exit_context,
+            ):
+                ACTION.main()
+            self.assertEqual(exit_context.exception.code, 143)
+            self.assertIn("exit-code=143", output.read_text().splitlines())
+            marker = pathlib.Path(workspace) / "skill-up-workspace" / "skill-up-exit-code"
+            self.assertEqual(marker.read_text(), "143")
+
     def test_main_composes_opencode_argv_and_environment(self):
         inputs = SimpleNamespace(
             engine="opencode",

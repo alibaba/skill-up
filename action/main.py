@@ -503,6 +503,9 @@ def main():
           flush=True)
     result = subprocess.run(argv, env=run_env, cwd=target_dir)
     exit_code = result.returncode
+    if exit_code < 0:
+        # Python represents signal termination as -N; shells report 128 + N.
+        exit_code = 128 - exit_code
     try:
         with open(os.path.join(output_dir, "skill-up-exit-code"), "w") as f:
             f.write(str(exit_code))
