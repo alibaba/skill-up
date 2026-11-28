@@ -65,6 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   times configurations times iterations. A benchmark over four cases with
   `--iteration 5` previously reported only `Would run 4 case(s)` for 40
   executions. A negative `--iteration` is now rejected in a dry run as well.
+- Reject negative case timeouts and turn limits in defaults and per-case overrides.
 - Warn when a selected case has no judge rule, no `expect` check and no turn
   `post_condition`. Such a case can pass without anything checking the
   agent's output, and its report read the same as a case that passed its

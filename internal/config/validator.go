@@ -105,6 +105,7 @@ func (v *Validator) ValidateEvalConfig(cfg *EvalConfig) error {
 	}
 
 	errs = append(errs, validateCollectArtifacts("cases.defaults.collect_artifacts", cfg.Cases.Defaults.CollectArtifacts)...)
+	errs = append(errs, validateCaseLimits("cases.defaults", cfg.Cases.Defaults.MaxTurns, cfg.Cases.Defaults.TimeoutSeconds)...)
 	errs = append(errs, validateExpect("cases.defaults.expect", cfg.Cases.Defaults.Expect)...)
 	errs = append(errs, validateSkillRefs("skills", cfg.Skills)...)
 	errs = append(errs, validateConfiguredJudges(judgeFields{single: cfg.Judge, singleSet: cfg.JudgeSet, members: cfg.Judges, membersSet: cfg.JudgesSet})...)
@@ -173,6 +174,7 @@ func (v *Validator) ValidateCaseConfig(cfg *CaseConfig) error {
 	errs = append(errs, validateExpect("expect", cfg.Expect)...)
 
 	errs = append(errs, validateCaseMCP(cfg.MCP)...)
+	errs = append(errs, validateCaseLimits("constraints", cfg.Constraints.MaxTurns, cfg.Constraints.TimeoutSeconds)...)
 
 	if len(errs) > 0 {
 		return fmt.Errorf("validation errors:\n  - %s", strings.Join(errs, "\n  - "))
@@ -554,6 +556,17 @@ func validateCollectArtifacts(field string, patterns []string) []string {
 		if !doublestar.ValidatePattern(p) {
 			errs = append(errs, fmt.Sprintf("%s[%d] is not a valid glob pattern: %q", field, i, p))
 		}
+	}
+	return errs
+}
+
+func validateCaseLimits(field string, maxTurns, timeoutSeconds int) []string {
+	var errs []string
+	if maxTurns < 0 {
+		errs = append(errs, field+".max_turns must be non-negative")
+	}
+	if timeoutSeconds < 0 {
+		errs = append(errs, field+".timeout_seconds must be non-negative")
 	}
 	return errs
 }
