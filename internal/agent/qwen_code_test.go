@@ -325,6 +325,22 @@ func TestParseQwenSessionFile(t *testing.T) {
 	}
 }
 
+func TestQwenSessionPreservesTextAroundToolCalls(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	line := `{"type":"assistant","message":{"parts":[{"text":"Checking."},{"functionCall":{"id":"tool1","name":"lookup"}},{"text":"Done."}]}}`
+	if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	messages, final, _, _ := parseQwenSessionFile(path)
+	if len(messages) != 3 || messages[0].Content != "Checking." || messages[1].Role != transcript.RoleToolCall || messages[2].Content != "Done." {
+		t.Fatalf("unexpected transcript order: %#v", messages)
+	}
+	if final != "Checking.\n\nDone." {
+		t.Fatalf("final assistant text = %q", final)
+	}
+}
+
 func TestParseQwenSessionFile_SkipsThoughtText(t *testing.T) {
 	t.Parallel()
 
