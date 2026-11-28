@@ -5,6 +5,26 @@ import (
 	"testing"
 )
 
+func TestNegativeCaseExecutionLimits(t *testing.T) {
+	t.Parallel()
+	for _, value := range []int{-1, 0, 1} {
+		cfg := DefaultEvalConfig()
+		cfg.Cases.Files = []string{"case.yaml"}
+		cfg.Cases.Defaults.MaxTurns, cfg.Cases.Defaults.TimeoutSeconds = value, value
+		c := &CaseConfig{Input: Input{Prompt: "read"}, Constraints: Constraints{MaxTurns: value, TimeoutSeconds: value}}
+		v := NewValidator()
+		for prefix, err := range map[string]error{"cases.defaults": v.ValidateEvalConfig(cfg), "constraints": v.ValidateCaseConfig(c)} {
+			if value < 0 {
+				if err == nil || !strings.Contains(err.Error(), prefix+".max_turns") || !strings.Contains(err.Error(), prefix+".timeout_seconds") {
+					t.Errorf("%s accepted a negative limit or missed its field: %v", prefix, err)
+				}
+			} else if err != nil {
+				t.Errorf("%s rejected limit %d: %v", prefix, value, err)
+			}
+		}
+	}
+}
+
 func TestEnvironmentAgentHome(t *testing.T) {
 	for _, kind := range []string{runtimeTypeNone, runtimeTypeDocker, runtimeTypeOpenSandbox} {
 		for _, mode := range []string{"", "inherited", "temporary", "unknown"} {
