@@ -433,6 +433,14 @@ func appendQwenMessageParts(messages *[]transcript.Message, ev qwenSessionEvent,
 	}
 
 	var textParts []string
+	emitted := 0
+	flushText := func() {
+		if emitted < len(textParts) {
+			content := strings.Join(textParts[emitted:], "\n\n")
+			*messages = append(*messages, transcript.Message{Role: role, Content: content, Turn: turn})
+			emitted = len(textParts)
+		}
+	}
 	for _, p := range ev.Message.Parts {
 		switch {
 		case p.Thought:
@@ -441,6 +449,7 @@ func appendQwenMessageParts(messages *[]transcript.Message, ev qwenSessionEvent,
 			// FinalMessage while preserving tool calls and the final answer.
 			continue
 		case p.FunctionCall != nil:
+			flushText()
 			*messages = append(*messages, transcript.Message{
 				Role: transcript.RoleToolCall,
 				ToolCall: &transcript.ToolCallInfo{
@@ -451,6 +460,7 @@ func appendQwenMessageParts(messages *[]transcript.Message, ev qwenSessionEvent,
 				Turn: turn,
 			})
 		case p.FunctionResponse != nil:
+			flushText()
 			*messages = append(*messages, transcript.Message{
 				Role: transcript.RoleToolResult,
 				ToolResult: &transcript.ToolResultInfo{
@@ -465,13 +475,9 @@ func appendQwenMessageParts(messages *[]transcript.Message, ev qwenSessionEvent,
 		}
 	}
 
-	if len(textParts) == 0 {
-		return ""
-	}
-	content := strings.Join(textParts, "\n\n")
-	*messages = append(*messages, transcript.Message{Role: role, Content: content, Turn: turn})
+	flushText()
 	if role == transcript.RoleAssistant {
-		return content
+		return strings.Join(textParts, "\n\n")
 	}
 	return ""
 }

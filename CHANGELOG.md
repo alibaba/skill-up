@@ -103,6 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--dangerously-bypass-approvals-and-sandbox`, on the host. Resumed turns now
   use the first turn's choice, including `bypass_sandbox`, and keep the
   approvals for the MCP servers skill-up installed.
+- Preserve text and tool event order within a Qwen session message.
 - Use prompt-file delivery for resumed Claude Code and Qoder turns when the
   prompt exceeds the inline limit or the target is Windows, preserving prompt
   delivery metadata and failing before execution if the file cannot be uploaded.
