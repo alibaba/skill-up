@@ -393,6 +393,25 @@ func TestRunReport_UnsupportedFormat(t *testing.T) {
 	}
 }
 
+func TestReportInvalidFormatLeavesEarlierReportIntact(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	input := writeResultJSON(t, dir, makeReportInput(judge.StatusPass))
+	path := filepath.Join(dir, "report.xml")
+	if err := os.WriteFile(path, []byte("previous report"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newReportCmd()
+	cmd.SetArgs([]string{input, "--format", "junit", "--format", "csv"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "csv") {
+		t.Fatalf("report error = %v, want unsupported csv format", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "previous report" {
+		t.Fatalf("invalid format list replaced the existing report (read error %v)", err)
+	}
+}
+
 func TestRunReport_SummaryOutput(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
