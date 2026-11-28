@@ -61,6 +61,19 @@ func runReport(cmd *cobra.Command, args []string) error {
 		outputDir = filepath.Dir(resultPath)
 	}
 
+	type output struct {
+		format, path string
+		reporter     report.Reporter
+	}
+	outputs := make([]output, 0, len(formats))
+	for _, format := range formats {
+		reporter, path, err := buildReportCommandReporter(format, outputDir)
+		if err != nil {
+			return err
+		}
+		outputs = append(outputs, output{format: format, path: path, reporter: reporter})
+	}
+
 	// Ensure the output directory exists.
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return fmt.Errorf("create output directory %s: %w", outputDir, err)
@@ -69,17 +82,12 @@ func runReport(cmd *cobra.Command, args []string) error {
 	// 3. Generate reports
 	ctx := context.Background()
 
-	for _, format := range formats {
-		reporter, outputPath, err := buildReportCommandReporter(format, outputDir)
-		if err != nil {
-			return err
+	for _, out := range outputs {
+		if err := out.reporter.Write(ctx, input); err != nil {
+			return fmt.Errorf("write %s report: %w", out.format, err)
 		}
 
-		if err := reporter.Write(ctx, input); err != nil {
-			return fmt.Errorf("write %s report: %w", format, err)
-		}
-
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Generated %s report: %s\n", format, outputPath)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Generated %s report: %s\n", out.format, out.path)
 	}
 
 	// 4. Print summary
